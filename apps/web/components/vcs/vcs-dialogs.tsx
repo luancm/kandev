@@ -1,7 +1,13 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { IconGitCommit, IconGitPullRequest, IconLoader2, IconCheck } from "@tabler/icons-react";
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import {
+  IconGitCommit,
+  IconGitPullRequest,
+  IconLoader2,
+  IconCheck,
+  IconSparkles,
+} from "@tabler/icons-react";
 import {
   Dialog,
   DialogContent,
@@ -13,10 +19,13 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
+import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
+import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useToast } from "@/components/toast-provider";
 import type { FileInfo } from "@/lib/state/slices";
 
@@ -41,7 +50,9 @@ type VcsDialogsProviderProps = {
   children: ReactNode;
 };
 
-function computeFileSummary(files: Record<string, FileInfo> | undefined) {
+type FileSummary = { count: number; additions: number; deletions: number };
+
+function computeFileSummary(files: Record<string, FileInfo> | undefined): FileSummary {
   const count = files ? Object.keys(files).length : 0;
   let additions = 0;
   let deletions = 0;
@@ -54,16 +65,78 @@ function computeFileSummary(files: Record<string, FileInfo> | undefined) {
   return { count, additions, deletions };
 }
 
+function FileSummaryText({ count, additions, deletions }: FileSummary) {
+  if (count === 0) return <span>No changes to commit</span>;
+  return (
+    <span>
+      <span className="font-medium text-foreground">{count}</span> file{count !== 1 ? "s" : ""}{" "}
+      changed
+      {(additions > 0 || deletions > 0) && (
+        <span className="ml-2">
+          (<span className="text-green-600">+{additions}</span>
+          {" / "}
+          <span className="text-red-600">-{deletions}</span>)
+        </span>
+      )}
+    </span>
+  );
+}
+
+type GenerateButtonProps = {
+  onClick: () => void;
+  isGenerating: boolean;
+  disabled?: boolean;
+  tooltip: string;
+  size?: "icon" | "sm";
+  showLabel?: boolean;
+};
+
+function GenerateButton({
+  onClick,
+  isGenerating,
+  disabled,
+  tooltip,
+  size = "icon",
+  showLabel,
+}: GenerateButtonProps) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          size={size}
+          variant="ghost"
+          className={
+            size === "icon" ? "h-7 w-7 cursor-pointer" : "h-6 px-2 cursor-pointer gap-1.5 text-xs"
+          }
+          onClick={onClick}
+          disabled={disabled || isGenerating}
+        >
+          {isGenerating ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <IconSparkles className="h-4 w-4" />
+          )}
+          {showLabel && "Generate"}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 type CommitDialogProps = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  fileSummary: { count: number; additions: number; deletions: number };
+  fileSummary: FileSummary;
   commitMessage: string;
   onCommitMessageChange: (v: string) => void;
   stageAll: boolean;
   onStageAllChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCommit: () => void;
+  onGenerateMessage?: () => void;
+  isGenerating?: boolean;
 };
 
 function CommitDialog({
@@ -76,8 +149,9 @@ function CommitDialog({
   onStageAllChange,
   isGitLoading,
   onCommit,
+  onGenerateMessage,
+  isGenerating,
 }: CommitDialogProps) {
-  const { count, additions, deletions } = fileSummary;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
@@ -89,30 +163,27 @@ function CommitDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="text-sm text-muted-foreground">
-            {count > 0 ? (
-              <span>
-                <span className="font-medium text-foreground">{count}</span> file
-                {count !== 1 ? "s" : ""} changed
-                {(additions > 0 || deletions > 0) && (
-                  <span className="ml-2">
-                    (<span className="text-green-600">+{additions}</span>
-                    {" / "}
-                    <span className="text-red-600">-{deletions}</span>)
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span>No changes to commit</span>
+            <FileSummaryText {...fileSummary} />
+          </div>
+          <div className="relative">
+            <Input
+              placeholder="Enter commit message..."
+              value={commitMessage}
+              onChange={(e) => onCommitMessageChange(e.target.value)}
+              className="pr-10"
+              autoFocus
+            />
+            {onGenerateMessage && (
+              <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                <GenerateButton
+                  onClick={onGenerateMessage}
+                  isGenerating={isGenerating ?? false}
+                  disabled={fileSummary.count === 0}
+                  tooltip="Generate commit message with AI"
+                />
+              </div>
             )}
           </div>
-          <Textarea
-            placeholder="Enter commit message..."
-            value={commitMessage}
-            onChange={(e) => onCommitMessageChange(e.target.value)}
-            rows={4}
-            className="resize-none"
-            autoFocus
-          />
           <div className="flex items-center gap-2">
             <Checkbox
               id="vcs-stage-all"
@@ -162,6 +233,8 @@ type PRDialogProps = {
   onPrDraftChange: (v: boolean) => void;
   isGitLoading: boolean;
   onCreatePR: () => void;
+  onGenerateDescription?: () => void;
+  isGenerating?: boolean;
 };
 
 function PRBranchSummary({
@@ -202,6 +275,8 @@ function PRDialog({
   onPrDraftChange,
   isGitLoading,
   onCreatePR,
+  onGenerateDescription,
+  isGenerating,
 }: PRDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -218,27 +293,36 @@ function PRDialog({
             <Label htmlFor="vcs-pr-title" className="text-sm">
               Title
             </Label>
-            <input
+            <Input
               id="vcs-pr-title"
-              type="text"
               placeholder="Pull request title..."
               value={prTitle}
               onChange={(e) => onPrTitleChange(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
               autoFocus
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="vcs-pr-body" className="text-sm">
-              Description
-            </Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="vcs-pr-body" className="text-sm">
+                Description
+              </Label>
+              {onGenerateDescription && (
+                <GenerateButton
+                  onClick={onGenerateDescription}
+                  isGenerating={isGenerating ?? false}
+                  tooltip="Generate PR description with AI"
+                  size="sm"
+                  showLabel
+                />
+              )}
+            </div>
             <Textarea
               id="vcs-pr-body"
               placeholder="Describe your changes..."
               value={prBody}
               onChange={(e) => onPrBodyChange(e.target.value)}
               rows={6}
-              className="resize-none"
+              className="resize-none max-h-[200px] overflow-y-auto"
             />
           </div>
           <div className="flex items-center space-x-2">
@@ -277,6 +361,53 @@ function PRDialog({
   );
 }
 
+type UseCommitDialogReturn = {
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  message: string;
+  setMessage: (v: string) => void;
+  stageAll: boolean;
+  setStageAll: (v: boolean) => void;
+  openDialog: () => void;
+};
+
+function useCommitDialogState(): UseCommitDialogReturn {
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [stageAll, setStageAll] = useState(true);
+  const openDialog = useCallback(() => {
+    setMessage("");
+    setStageAll(true);
+    setOpen(true);
+  }, []);
+  return { open, setOpen, message, setMessage, stageAll, setStageAll, openDialog };
+}
+
+type UsePRDialogReturn = {
+  open: boolean;
+  setOpen: (v: boolean) => void;
+  title: string;
+  setTitle: (v: string) => void;
+  body: string;
+  setBody: (v: string) => void;
+  draft: boolean;
+  setDraft: (v: boolean) => void;
+  openDialog: (taskTitle?: string) => void;
+};
+
+function usePRDialogState(): UsePRDialogReturn {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [draft, setDraft] = useState(true);
+  const openDialog = useCallback((taskTitle?: string) => {
+    setTitle(taskTitle || "");
+    setBody("");
+    setOpen(true);
+  }, []);
+  return { open, setOpen, title, setTitle, body, setBody, draft, setDraft, openDialog };
+}
+
 export function VcsDialogsProvider({
   sessionId,
   baseBranch,
@@ -284,48 +415,36 @@ export function VcsDialogsProvider({
   displayBranch,
   children,
 }: VcsDialogsProviderProps) {
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
-  const [stageAll, setStageAll] = useState(true);
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
-  const [prTitle, setPrTitle] = useState("");
-  const [prBody, setPrBody] = useState("");
-  const [prDraft, setPrDraft] = useState(true);
-
+  const cs = useCommitDialogState();
+  const ps = usePRDialogState();
   const { toast } = useToast();
   const gitWithFeedback = useGitWithFeedback();
   const gitStatus = useSessionGitStatus(sessionId);
   const { commit, createPR, isLoading: isGitLoading } = useGitOperations(sessionId);
-
+  const {
+    isGeneratingCommitMessage,
+    isGeneratingPRDescription,
+    generateCommitMessage,
+    generatePRDescription,
+  } = useUtilityAgentGenerator({ sessionId, taskTitle });
   const fileSummary = computeFileSummary(gitStatus?.files);
 
-  const openCommitDialog = useCallback(() => {
-    setCommitMessage("");
-    setStageAll(true);
-    setCommitDialogOpen(true);
-  }, []);
-
   const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
-    setCommitDialogOpen(false);
-    await gitWithFeedback(() => commit(commitMessage.trim(), stageAll), "Commit");
-    setCommitMessage("");
-  }, [commitMessage, stageAll, gitWithFeedback, commit]);
-
-  const openPRDialog = useCallback(() => {
-    setPrTitle(taskTitle || "");
-    setPrBody("");
-    setPrDialogOpen(true);
-  }, [taskTitle]);
+    if (!cs.message.trim()) return;
+    cs.setOpen(false);
+    await gitWithFeedback(() => commit(cs.message.trim(), cs.stageAll), "Commit");
+    cs.setMessage("");
+  }, [cs, gitWithFeedback, commit]);
 
   const handleCreatePR = useCallback(async () => {
-    if (!prTitle.trim()) return;
-    setPrDialogOpen(false);
+    if (!ps.title.trim()) return;
+    ps.setOpen(false);
     try {
-      const result = await createPR(prTitle.trim(), prBody.trim(), baseBranch, prDraft);
+      const result = await createPR(ps.title.trim(), ps.body.trim(), baseBranch, ps.draft);
       if (result.success) {
+        const title = ps.draft ? "Draft PR created" : "PR created";
         toast({
-          title: prDraft ? "Draft PR created" : "PR created",
+          title,
           description: result.pr_url || "PR created successfully",
           variant: "success",
         });
@@ -344,37 +463,49 @@ export function VcsDialogsProvider({
         variant: "error",
       });
     }
-    setPrTitle("");
-    setPrBody("");
-  }, [prTitle, prBody, baseBranch, prDraft, createPR, toast]);
+    ps.setTitle("");
+    ps.setBody("");
+  }, [ps, baseBranch, createPR, toast]);
+
+  const contextValue = useMemo(
+    () => ({
+      openCommitDialog: cs.openDialog,
+      openPRDialog: () => ps.openDialog(taskTitle),
+    }),
+    [cs.openDialog, ps, taskTitle],
+  );
 
   return (
-    <VcsDialogsContext.Provider value={{ openCommitDialog, openPRDialog }}>
+    <VcsDialogsContext.Provider value={contextValue}>
       {children}
       <CommitDialog
-        open={commitDialogOpen}
-        onOpenChange={setCommitDialogOpen}
+        open={cs.open}
+        onOpenChange={cs.setOpen}
         fileSummary={fileSummary}
-        commitMessage={commitMessage}
-        onCommitMessageChange={setCommitMessage}
-        stageAll={stageAll}
-        onStageAllChange={setStageAll}
+        commitMessage={cs.message}
+        onCommitMessageChange={cs.setMessage}
+        stageAll={cs.stageAll}
+        onStageAllChange={cs.setStageAll}
         isGitLoading={isGitLoading}
         onCommit={handleCommit}
+        onGenerateMessage={() => generateCommitMessage(cs.setMessage)}
+        isGenerating={isGeneratingCommitMessage}
       />
       <PRDialog
-        open={prDialogOpen}
-        onOpenChange={setPrDialogOpen}
+        open={ps.open}
+        onOpenChange={ps.setOpen}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
-        prTitle={prTitle}
-        onPrTitleChange={setPrTitle}
-        prBody={prBody}
-        onPrBodyChange={setPrBody}
-        prDraft={prDraft}
-        onPrDraftChange={setPrDraft}
+        prTitle={ps.title}
+        onPrTitleChange={ps.setTitle}
+        prBody={ps.body}
+        onPrBodyChange={ps.setBody}
+        prDraft={ps.draft}
+        onPrDraftChange={ps.setDraft}
         isGitLoading={isGitLoading}
         onCreatePR={handleCreatePR}
+        onGenerateDescription={() => generatePRDescription(ps.setBody)}
+        isGenerating={isGeneratingPRDescription}
       />
     </VcsDialogsContext.Provider>
   );
