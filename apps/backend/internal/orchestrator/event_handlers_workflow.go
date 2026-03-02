@@ -134,7 +134,7 @@ func (s *Service) processOnTurnStart(ctx context.Context, taskID string, session
 
 	// Get the current workflow step
 	currentStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
-	if err != nil {
+	if err != nil || currentStep == nil {
 		s.logger.Warn("failed to get workflow step for on_turn_start",
 			zap.String("workflow_step_id", workflowStepID),
 			zap.Error(err))
@@ -240,20 +240,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 
 	// Publish task updated event
 	if s.eventBus != nil {
-		taskEventData := map[string]interface{}{
-			"task_id":          task.ID,
-			"workflow_id":      task.WorkflowID,
-			"workflow_step_id": task.WorkflowStepID,
-			"title":            task.Title,
-			"description":      task.Description,
-			"state":            string(task.State),
-			"priority":         task.Priority,
-			"position":         task.Position,
-		}
 		_ = s.eventBus.Publish(ctx, events.TaskUpdated, bus.NewEvent(
 			events.TaskUpdated,
 			"orchestrator",
-			taskEventData,
+			buildTaskEventPayload(task),
 		))
 	}
 
@@ -492,6 +482,7 @@ func (s *Service) autoStartStepPrompt(
 	shouldQueueIfBusy bool,
 ) error {
 	sessionID := session.ID
+
 	if shouldQueueIfBusy {
 		queued, err := s.queueAutoStartPromptIfRunning(ctx, taskID, session, prompt, planMode)
 		if err != nil {
@@ -579,7 +570,7 @@ func (s *Service) queueAutoStartPromptIfRunning(
 	taskID string, session *models.TaskSession, prompt string,
 	planMode bool,
 ) (bool, error) {
-	if session.State != models.TaskSessionStateRunning {
+	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
 		return false, nil
 	}
 	if err := s.queueAutoStartPrompt(ctx, taskID, session.ID, prompt, planMode); err != nil {
@@ -744,6 +735,10 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		"workflow_step_id": stepID,
 		"new_state":        string(models.TaskSessionStateWaitingForInput),
 	}
+	// Include session metadata (e.g. plan_mode) so the frontend can react.
+	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && len(session.Metadata) > 0 {
+		eventData["session_metadata"] = session.Metadata
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
 		"orchestrator",
@@ -877,6 +872,31 @@ func (s *Service) applyEngineTransition(
 	result engine.HandleResult, trigger engine.Trigger, taskDescription string,
 	triggerOnEnter bool,
 ) bool {
+	// Validate the target step exists BEFORE persisting the transition.
+	// This prevents the task from being moved to an invalid step_id
+	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
+	var targetStep *wfmodels.WorkflowStep
+	if triggerOnEnter {
+		var err error
+		targetStep, err = s.workflowStepGetter.GetStep(ctx, result.ToStepID)
+		if err != nil {
+			s.logger.Warn("target step not found, skipping transition",
+				zap.String("step_id", result.ToStepID),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			return false
+		}
+	} else {
+		// Even without on_enter, verify the target step exists to avoid orphaning the task.
+		if _, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID); err != nil {
+			s.logger.Warn("target step not found, skipping transition",
+				zap.String("step_id", result.ToStepID),
+				zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			return false
+		}
+	}
+
 	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
 	if err != nil {
 		s.logger.Warn("failed to load from-step for on_exit",
@@ -895,6 +915,10 @@ func (s *Service) applyEngineTransition(
 		return false
 	}
 
+	// Update in-memory session so subsequent calls (e.g. setSessionWaitingForInput)
+	// include the new workflow_step_id in the session.state_changed WS event.
+	session.WorkflowStepID = &result.ToStepID
+
 	if len(result.DataPatch) > 0 {
 		if err := s.workflowStore.PersistData(ctx, session.ID, result.DataPatch); err != nil {
 			s.logger.Warn("failed to persist workflow data patch",
@@ -904,15 +928,6 @@ func (s *Service) applyEngineTransition(
 	}
 
 	if !triggerOnEnter {
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return true
-	}
-
-	targetStep, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID)
-	if err != nil {
-		s.logger.Warn("failed to load target step for on_enter",
-			zap.String("step_id", result.ToStepID),
-			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return true
 	}
