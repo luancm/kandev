@@ -2,6 +2,39 @@
 
 All notable changes to Kandev.
 
+## 0.10 - 2026-03-02
+
+### Bug Fixes
+
+- passthrough PTY process survives page refresh ([#353](https://github.com/kdlbs/kandev/pull/353))
+- sidebar task delete/archive redirects to next task or home ([#351](https://github.com/kdlbs/kandev/pull/351))
+- sidebar task switcher shows outdated session state ([#349](https://github.com/kdlbs/kandev/pull/349))
+- copy markdown to clipboard and codex error handling ([#348](https://github.com/kdlbs/kandev/pull/348))
+- improve process termination and cleanup ([#347](https://github.com/kdlbs/kandev/pull/347))
+- improve claude plan mode reliability and cleanup ([#346](https://github.com/kdlbs/kandev/pull/346))
+- sidebar task switcher shows outdated session state and custom maximize layout ([#345](https://github.com/kdlbs/kandev/pull/345))
+- prevent commit pruning when HEAD is not in database ([#343](https://github.com/kdlbs/kandev/pull/343))
+- render markdown in user messages ([#338](https://github.com/kdlbs/kandev/pull/338))
+- agentctl cleanup after shutdown ([#339](https://github.com/kdlbs/kandev/pull/339))
+- resolve black terminal on background tab init and reduce resize storm ([#334](https://github.com/kdlbs/kandev/pull/334))
+- include untracked files in workspace file search ([#330](https://github.com/kdlbs/kandev/pull/330))
+- consolidate markdown styles into shared .markdown-body class ([#332](https://github.com/kdlbs/kandev/pull/332))
+- standardize branding to KanDev across UI ([#328](https://github.com/kdlbs/kandev/pull/328))
+- align MCP tool parameters and JSON tags with backend ([#329](https://github.com/kdlbs/kandev/pull/329))
+- auto-update profile name when model changes ([#325](https://github.com/kdlbs/kandev/pull/325))
+- lazy Docker client initialization to avoid startup errors ([#300](https://github.com/kdlbs/kandev/pull/300))
+- strip terminal query responses from buffer replay on reconnect ([#301](https://github.com/kdlbs/kandev/pull/301))
+
+### Features
+
+- install agents on env preparation remote executors ([#352](https://github.com/kdlbs/kandev/pull/352))
+- improve chat input ux ([#350](https://github.com/kdlbs/kandev/pull/350))
+- startup health status ([#344](https://github.com/kdlbs/kandev/pull/344))
+- web e2e tests ([#304](https://github.com/kdlbs/kandev/pull/304))
+- add utility agents for one-shot AI tasks ([#341](https://github.com/kdlbs/kandev/pull/341))
+- add Dockerfile, K8s manifests, and deployment docs ([#303](https://github.com/kdlbs/kandev/pull/303))
+- improve session restoration for complete/failed/cancelled ([#302](https://github.com/kdlbs/kandev/pull/302))
+
 ## 0.9 - 2026-02-27
 
 ### Bug Fixes
