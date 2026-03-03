@@ -14,7 +14,12 @@ import (
 
 // RequestFileTree requests a file tree via HTTP GET
 func (c *Client) RequestFileTree(ctx context.Context, path string, depth int) (*FileTreeResponse, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/workspace/tree?path=%s&depth=%d", c.baseURL, path, depth)
+	reqURL := fmt.Sprintf(
+		"%s/api/v1/workspace/tree?path=%s&depth=%d",
+		c.baseURL,
+		url.QueryEscape(path),
+		depth,
+	)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -76,7 +81,7 @@ func (c *Client) SearchFiles(ctx context.Context, query string, limit int) (*Fil
 
 // RequestFileContent requests file content via HTTP GET
 func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, path)
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, url.QueryEscape(path))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -195,7 +200,7 @@ func (c *Client) CreateFile(ctx context.Context, path string) (*streams.FileCrea
 
 // DeleteFile deletes a file via HTTP DELETE
 func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDeleteResponse, error) {
-	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, path)
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, url.QueryEscape(path))
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", reqURL, nil)
 	if err != nil {
@@ -223,6 +228,48 @@ func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDele
 
 	if !response.Success {
 		return nil, fmt.Errorf("file delete failed")
+	}
+
+	return &response, nil
+}
+
+// RenameFile renames/moves a file or directory via HTTP POST
+func (c *Client) RenameFile(ctx context.Context, oldPath, newPath string) (*streams.FileRenameResponse, error) {
+	reqBody := streams.FileRenameRequest{OldPath: oldPath, NewPath: newPath}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/rename", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rename file: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close file rename response body", zap.Error(err))
+		}
+	}()
+
+	var response streams.FileRenameResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if response.Error != "" {
+		return nil, fmt.Errorf("file rename error: %s", response.Error)
+	}
+
+	if !response.Success {
+		return nil, fmt.Errorf("file rename failed")
 	}
 
 	return &response, nil

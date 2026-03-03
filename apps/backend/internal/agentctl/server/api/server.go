@@ -87,6 +87,7 @@ func (s *Server) setupRoutes() {
 		api.GET("/workspace/file/content", s.handleFileContent)
 		api.POST("/workspace/file/content", s.handleFileUpdate)
 		api.POST("/workspace/file/create", s.handleFileCreate)
+		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
 
@@ -121,6 +122,8 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/discard", s.handleGitDiscard)
 		api.POST("/git/create-pr", s.handleGitCreatePR)
 		api.POST("/git/revert-commit", s.handleGitRevertCommit)
+		api.POST("/git/rename-branch", s.handleGitRenameBranch)
+		api.POST("/git/reset", s.handleGitReset)
 		api.GET("/git/commit/:sha", s.handleGitShowCommit)
 	}
 

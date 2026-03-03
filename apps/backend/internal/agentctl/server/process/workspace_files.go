@@ -68,20 +68,20 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 // GetFileTree returns the file tree for a given path and depth
 func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileTreeNode, error) {
 	// Resolve the full path with path traversal protection
-	fullPath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
+	safePath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
 	cleanWorkDir := filepath.Clean(wt.workDir)
-	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
+	if !strings.HasPrefix(safePath, cleanWorkDir+string(os.PathSeparator)) && safePath != cleanWorkDir {
 		return nil, fmt.Errorf("path traversal detected")
 	}
 
 	// Check if path exists
-	info, err := os.Stat(fullPath)
+	info, err := os.Stat(safePath)
 	if err != nil {
 		return nil, fmt.Errorf("path not found: %w", err)
 	}
 
 	// Build the tree
-	node, err := wt.buildFileTreeNode(fullPath, reqPath, info, depth, 0)
+	node, err := wt.buildFileTreeNode(safePath, reqPath, info, depth, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileT
 }
 
 // buildFileTreeNode recursively builds a file tree node
-func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.FileInfo, maxDepth, currentDepth int) (*types.FileTreeNode, error) {
+func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.FileInfo, maxDepth, currentDepth int) (*types.FileTreeNode, error) {
 	node := &types.FileTreeNode{
 		Name:  info.Name(),
 		Path:  relPath,
@@ -104,7 +104,7 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	}
 
 	// Read directory contents
-	entries, err := os.ReadDir(fullPath)
+	entries, err := os.ReadDir(safePath)
 	if err != nil {
 		return node, nil // Return node without children on error
 	}
@@ -118,7 +118,7 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 			continue
 		}
 
-		childFullPath := filepath.Join(fullPath, name)
+		childFullPath := filepath.Join(safePath, name)
 		childRelPath := filepath.Join(relPath, name)
 
 		childInfo, err := entry.Info()
@@ -137,36 +137,78 @@ func (wt *WorkspaceTracker) buildFileTreeNode(fullPath, relPath string, info os.
 	return node, nil
 }
 
+// resolvedWorkDir returns the workspace directory with symlinks resolved.
+func (wt *WorkspaceTracker) resolvedWorkDir() string {
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(wt.workDir))
+	if err != nil {
+		return filepath.Clean(wt.workDir)
+	}
+	return resolved
+}
+
 // resolveSafePath resolves reqPath to an absolute path within workDir,
-// rejecting any path traversal attempts.
+// rejecting any path traversal attempts. The returned path is always
+// constructed as filepath.Join(resolvedWorkDir, validatedRelPath) so that
+// static analysis tools (CodeQL) can verify it stays within the workspace.
 func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 	cleanWorkDir := filepath.Clean(wt.workDir)
 	cleanReqPath := filepath.Clean(reqPath)
 
-	var fullPath string
-	if filepath.IsAbs(cleanReqPath) && strings.HasPrefix(cleanReqPath, cleanWorkDir+string(os.PathSeparator)) {
-		fullPath = cleanReqPath
+	var safePath string
+	if filepath.IsAbs(cleanReqPath) {
+		safePath = cleanReqPath
 	} else {
-		fullPath = filepath.Join(wt.workDir, cleanReqPath)
+		safePath = filepath.Join(wt.workDir, cleanReqPath)
 	}
 
-	if !strings.HasPrefix(fullPath, cleanWorkDir+string(os.PathSeparator)) && fullPath != cleanWorkDir {
-		return "", fmt.Errorf("path traversal detected")
+	// Resolve symlinks to prevent bypassing validation
+	realPath, err := filepath.EvalSymlinks(safePath)
+	if err != nil {
+		// If EvalSymlinks fails, the path might not exist yet (e.g., creating new file)
+		// In that case, resolve the parent directory
+		parentDir := filepath.Dir(safePath)
+		realParent, parentErr := filepath.EvalSymlinks(parentDir)
+		if parentErr != nil {
+			// Parent doesn't exist either, use the cleaned full path
+			realPath = safePath
+		} else {
+			realPath = filepath.Join(realParent, filepath.Base(safePath))
+		}
 	}
 
-	return fullPath, nil
+	// Resolve workspace directory symlinks for consistent comparison
+	realWorkDir, err := filepath.EvalSymlinks(cleanWorkDir)
+	if err != nil {
+		realWorkDir = cleanWorkDir
+	}
+
+	// Check that the real path is within the workspace
+	relPath, err := filepath.Rel(realWorkDir, realPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Ensure the relative path doesn't escape the workspace
+	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
+		return "", fmt.Errorf("path traversal detected: %s", reqPath)
+	}
+
+	// Reconstruct the absolute path from the trusted workspace root and the
+	// validated relative path. This ensures the returned path is provably
+	// inside the workspace, satisfying static-analysis taint checks.
+	return filepath.Join(realWorkDir, relPath), nil
 }
 
 // GetFileContent returns the content of a file.
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
 func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool, error) {
-	fullPath, err := wt.resolveSafePath(reqPath)
+	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return "", 0, false, err
 	}
 
 	// Check if file exists and is a regular file
-	info, err := os.Stat(fullPath)
+	info, err := os.Stat(safePath)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("file not found: %w", err)
 	}
@@ -182,7 +224,7 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 	}
 
 	// Read file content
-	file, err := os.Open(fullPath)
+	file, err := os.Open(safePath)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("failed to open file: %w", err)
 	}
@@ -209,7 +251,7 @@ func (wt *WorkspaceTracker) GetFileContent(reqPath string) (string, int64, bool,
 // For symlinked files, resolves to the real path and rewrites the diff header
 // so that git apply operates on the actual file.
 func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, originalHash string) (string, error) {
-	fullPath, err := wt.resolveSafePath(reqPath)
+	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return "", err
 	}
@@ -230,11 +272,22 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 
 	// If the file is a symlink, resolve to the real path and rewrite the diff header.
 	// git apply cannot patch through symlinks — it needs the real file path.
+	// Note: safePath is already resolved by resolveSafePath, so we check the
+	// unresolved path to detect whether the original request targets a symlink.
 	applyPath := reqPath
-	realPath, evalErr := filepath.EvalSymlinks(fullPath)
-	if evalErr == nil && realPath != fullPath {
-		// File is a symlink. Compute the real path relative to workDir.
-		realRel, relErr := filepath.Rel(cleanWorkDir, realPath)
+	cleanReqPath := filepath.Clean(reqPath)
+	// Validate path doesn't attempt traversal before constructing filesystem path
+	if strings.Contains(cleanReqPath, "..") || filepath.IsAbs(cleanReqPath) {
+		return "", fmt.Errorf("invalid path: %s", reqPath)
+	}
+	unresolvedPath := filepath.Join(wt.workDir, cleanReqPath)
+	if info, lErr := os.Lstat(unresolvedPath); lErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		// File is a symlink. safePath already points to the real target.
+		realWorkDir, _ := filepath.EvalSymlinks(cleanWorkDir)
+		if realWorkDir == "" {
+			realWorkDir = cleanWorkDir
+		}
+		realRel, relErr := filepath.Rel(realWorkDir, safePath)
 		if relErr == nil {
 			unifiedDiff = rewriteDiffPaths(unifiedDiff, reqPath, realRel)
 			applyPath = realRel
@@ -271,7 +324,7 @@ func (wt *WorkspaceTracker) ApplyFileDiff(reqPath string, unifiedDiff string, or
 	newHash := calculateSHA256(string(updatedContent))
 
 	// Notify with the original relative path (not the resolved symlink target)
-	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
+	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
 	wt.addPendingChange(relPath, types.FileOpWrite)
 
 	wt.logger.Debug("applied file diff using git apply",
@@ -312,19 +365,19 @@ func replaceDiffPath(line, prefix, oldPath, newPath string) string {
 
 // CreateFile creates a new file in the workspace
 func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
-	fullPath, err := wt.resolveSafePath(reqPath)
+	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return err
 	}
 
 	// Create intermediate directories
-	dir := filepath.Dir(fullPath)
+	dir := filepath.Dir(safePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directories: %w", err)
 	}
 
 	// Atomically create the file, failing if it already exists
-	f, err := os.OpenFile(fullPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(safePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("file already exists: %s", reqPath)
@@ -335,21 +388,29 @@ func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
 
 	// Notify with the relative path
 	cleanWorkDir := filepath.Clean(wt.workDir)
-	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
+	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
 	wt.addPendingChange(relPath, types.FileOpCreate)
 
 	return nil
 }
 
-// DeleteFile deletes a file from the workspace
+// DeleteFile deletes a file or directory from the workspace.
 func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
-	fullPath, err := wt.resolveSafePath(reqPath)
+	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return err
 	}
 
+	cleanWorkDir := wt.resolvedWorkDir()
+	if safePath == cleanWorkDir {
+		return fmt.Errorf("cannot delete workspace root")
+	}
+	if err := wt.validateWorkspacePaths(safePath); err != nil {
+		return err
+	}
+
 	// Check if file exists
-	info, err := os.Stat(fullPath)
+	info, err := os.Stat(safePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file does not exist: %s", reqPath)
@@ -357,22 +418,103 @@ func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	// Don't allow deleting directories
 	if info.IsDir() {
-		return fmt.Errorf("cannot delete directory: %s", reqPath)
+		if err := os.RemoveAll(safePath); err != nil {
+			return fmt.Errorf("failed to delete directory: %w", err)
+		}
+	} else {
+		if err := os.Remove(safePath); err != nil {
+			return fmt.Errorf("failed to delete file: %w", err)
+		}
 	}
 
-	// Delete the file
-	if err := os.Remove(fullPath); err != nil {
-		return fmt.Errorf("failed to delete file: %w", err)
-	}
-
-	// Notify with the relative path
-	cleanWorkDir := filepath.Clean(wt.workDir)
-	relPath := strings.TrimPrefix(fullPath, cleanWorkDir+string(os.PathSeparator))
+	relPath := strings.TrimPrefix(safePath, cleanWorkDir+string(os.PathSeparator))
 	wt.addPendingChange(relPath, types.FileOpRemove)
 
 	return nil
+}
+
+// RenameFile renames/moves a file or directory in the workspace.
+func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
+	if oldPath == "" || newPath == "" {
+		return fmt.Errorf("old_path and new_path are required")
+	}
+
+	oldSafePath, err := wt.resolveSafePath(oldPath)
+	if err != nil {
+		return err
+	}
+	newSafePath, err := wt.resolveSafePath(newPath)
+	if err != nil {
+		return err
+	}
+
+	if err := wt.validateWorkspacePaths(oldSafePath, newSafePath); err != nil {
+		return err
+	}
+	if oldSafePath == newSafePath {
+		return nil
+	}
+
+	if err := validateSourceExists(oldSafePath, oldPath); err != nil {
+		return err
+	}
+	if err := validateTargetAvailable(newSafePath, newPath); err != nil {
+		return err
+	}
+
+	parentDir := filepath.Dir(newSafePath)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create target parent directories: %w", err)
+	}
+
+	if err := os.Rename(oldSafePath, newSafePath); err != nil {
+		return fmt.Errorf("failed to rename path: %w", err)
+	}
+
+	cleanWorkDir := wt.resolvedWorkDir()
+	oldRelPath := strings.TrimPrefix(oldSafePath, cleanWorkDir+string(os.PathSeparator))
+	newRelPath := strings.TrimPrefix(newSafePath, cleanWorkDir+string(os.PathSeparator))
+	wt.addPendingChange(oldRelPath, types.FileOpRename)
+	if newRelPath != oldRelPath {
+		wt.addPendingChange(newRelPath, types.FileOpRename)
+	}
+
+	return nil
+}
+
+// validateWorkspacePaths checks that all provided paths are strictly inside the workspace.
+func (wt *WorkspaceTracker) validateWorkspacePaths(paths ...string) error {
+	cleanWorkDir := wt.resolvedWorkDir()
+	workDirPrefix := cleanWorkDir + string(os.PathSeparator)
+	for _, p := range paths {
+		if !strings.HasPrefix(p, workDirPrefix) {
+			return fmt.Errorf("path outside workspace")
+		}
+	}
+	return nil
+}
+
+func validateSourceExists(safePath, reqPath string) error {
+	_, err := os.Stat(safePath)
+	if err == nil {
+		return nil
+	}
+	if os.IsNotExist(err) {
+		return fmt.Errorf("path does not exist: %s", reqPath)
+	}
+	return fmt.Errorf("failed to stat path: %w", err)
+}
+
+func validateTargetAvailable(safePath, reqPath string) error {
+	_, err := os.Stat(safePath)
+	if err == nil {
+		return fmt.Errorf("target already exists: %s", reqPath)
+	}
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return fmt.Errorf("failed to stat target: %w", err)
 }
 
 // calculateSHA256 calculates the SHA256 hash of a string

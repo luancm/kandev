@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   IconBug,
@@ -9,8 +9,10 @@ import {
   IconCheck,
   IconHome,
   IconSettings,
+  IconPencil,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -32,6 +34,7 @@ import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { DEBUG_UI } from "@/lib/config";
+import { toast } from "sonner";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -85,7 +88,23 @@ const TaskTopBar = memo(function TaskTopBar({
   remoteStatusError,
 }: TaskTopBarProps) {
   const git = useSessionGit(activeSessionId);
-  const displayBranch = worktreeBranch || baseBranch;
+  // Prefer live git status branch (updates after rename), fallback to session worktree branch
+  const displayBranch = git.branch || worktreeBranch || baseBranch;
+
+  // Callback for renaming branch
+  const handleRenameBranch = useCallback(
+    async (newName: string) => {
+      const result = await git.renameBranch(newName);
+      if (result.success) {
+        toast.success(`Branch renamed to "${newName}"`);
+      } else {
+        const msg = result.error || "Failed to rename branch";
+        toast.error(msg);
+        throw new Error(msg);
+      }
+    },
+    [git],
+  );
 
   return (
     <header className="@container/topbar grid grid-cols-[1fr_auto_1fr] items-center px-3 py-1 border-b border-border">
@@ -104,6 +123,7 @@ const TaskTopBar = memo(function TaskTopBar({
         remoteCreatedAt={remoteCreatedAt}
         remoteCheckedAt={remoteCheckedAt}
         remoteStatusError={remoteStatusError}
+        onRenameBranch={activeSessionId ? handleRenameBranch : undefined}
       />
       {workflowSteps && workflowSteps.length > 0 && (
         <WorkflowStepper
@@ -181,18 +201,150 @@ function PathRow({ label, path }: { label: string; path: string }) {
   );
 }
 
+/** Inline branch rename input */
+function BranchRenameInput({
+  editValue,
+  onEditValueChange,
+  onConfirm,
+  onCancel,
+  isRenaming,
+}: {
+  editValue: string;
+  onEditValueChange: (v: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isRenaming: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onConfirm();
+      } else if (e.key === "Escape") {
+        onCancel();
+      }
+    },
+    [onConfirm, onCancel],
+  );
+
+  return (
+    <div className="flex items-center gap-1.5 rounded-md px-1 h-7 bg-muted/40 min-w-0 max-w-full">
+      <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <Input
+        ref={inputRef}
+        value={editValue}
+        onChange={(e) => onEditValueChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onBlur={onConfirm}
+        disabled={isRenaming}
+        className="h-5 text-xs px-1 py-0 w-32 bg-background border-primary/50"
+      />
+    </div>
+  );
+}
+
+/** Hook for branch rename editing state */
+function useBranchRenameEdit(
+  displayBranch: string | undefined,
+  onRenameBranch: ((newName: string) => Promise<void>) | undefined,
+) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(displayBranch ?? "");
+  const [isRenaming, setIsRenaming] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) setEditValue(displayBranch ?? "");
+  }, [displayBranch, isEditing]);
+
+  const handleStartEdit = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsEditing(true);
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setEditValue(displayBranch ?? "");
+  }, [displayBranch]);
+
+  const handleConfirmRename = useCallback(async () => {
+    const trimmed = editValue.trim();
+    if (!onRenameBranch || !trimmed || trimmed === displayBranch?.trim() || isRenaming) {
+      handleCancelEdit();
+      return;
+    }
+    setIsRenaming(true);
+    try {
+      await onRenameBranch(trimmed);
+      setIsEditing(false);
+    } catch {
+      // Error is handled by onRenameBranch (shows toast), keep edit mode open
+    } finally {
+      setIsRenaming(false);
+    }
+  }, [onRenameBranch, editValue, displayBranch, handleCancelEdit, isRenaming]);
+
+  return {
+    isEditing,
+    editValue,
+    setEditValue,
+    isRenaming,
+    handleStartEdit,
+    handleCancelEdit,
+    handleConfirmRename,
+  };
+}
+
 function BranchPathPopover({
   displayBranch,
   repositoryPath,
   worktreePath,
+  onRenameBranch,
 }: {
   displayBranch?: string;
   repositoryPath?: string | null;
   worktreePath?: string | null;
+  onRenameBranch?: (newName: string) => Promise<void>;
 }) {
   const [copiedBranch, handleCopyBranch] = useCopyToClipboard();
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const {
+    isEditing,
+    editValue,
+    setEditValue,
+    isRenaming,
+    handleStartEdit: startEdit,
+    handleCancelEdit,
+    handleConfirmRename,
+  } = useBranchRenameEdit(displayBranch, onRenameBranch);
+  const handleStartEdit = useCallback(
+    (e: React.MouseEvent) => {
+      startEdit(e);
+      setPopoverOpen(false);
+    },
+    [startEdit],
+  );
+
   if (!displayBranch) return null;
+
+  if (isEditing) {
+    return (
+      <BranchRenameInput
+        editValue={editValue}
+        onEditValueChange={setEditValue}
+        onConfirm={handleConfirmRename}
+        onCancel={handleCancelEdit}
+        isRenaming={isRenaming}
+      />
+    );
+  }
 
   return (
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
@@ -202,6 +354,17 @@ function BranchPathPopover({
             <div className="group flex items-center gap-1.5 rounded-md px-2 h-7 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors min-w-0 max-w-full">
               <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground truncate">{displayBranch}</span>
+              {onRenameBranch && (
+                <button
+                  type="button"
+                  onClick={handleStartEdit}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 hover:bg-muted rounded"
+                  aria-label="Rename branch"
+                  title="Rename branch"
+                >
+                  <IconPencil className="h-3 w-3 text-muted-foreground" />
+                </button>
+              )}
               <CopyIconButton
                 copied={copiedBranch}
                 onClick={(e) => {
@@ -213,7 +376,9 @@ function BranchPathPopover({
             </div>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent side="right">Current branch</TooltipContent>
+        <TooltipContent side="right">
+          {onRenameBranch ? "Click to see paths, or click pencil to rename" : "Click to see paths"}
+        </TooltipContent>
       </Tooltip>
       <PopoverContent side="bottom" sideOffset={5} className="p-0 w-auto max-w-[600px] gap-1">
         <div className="px-2 pt-1 pb-2 space-y-1.5">
@@ -241,6 +406,7 @@ function TopBarLeft({
   remoteCreatedAt,
   remoteCheckedAt,
   remoteStatusError,
+  onRenameBranch,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -256,6 +422,7 @@ function TopBarLeft({
   remoteCreatedAt?: string | null;
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
+  onRenameBranch?: (newName: string) => Promise<void>;
 }) {
   return (
     <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
@@ -303,6 +470,7 @@ function TopBarLeft({
           displayBranch={displayBranch}
           repositoryPath={repositoryPath}
           worktreePath={worktreePath}
+          onRenameBranch={onRenameBranch}
         />
       </div>
 

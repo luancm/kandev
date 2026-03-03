@@ -86,6 +86,59 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
 
+function buildTerminalShellProcessActions(set: ImmerSet) {
+  return {
+    setTerminalOutput: (terminalId: string, data: string) =>
+      set((draft) => {
+        const existing = draft.terminal.terminals.find((terminal) => terminal.id === terminalId);
+        if (existing) {
+          existing.output.push(data);
+        } else {
+          draft.terminal.terminals.push({ id: terminalId, output: [data] });
+        }
+      }),
+    appendShellOutput: (sessionId: string, data: string) =>
+      set((draft) => {
+        draft.shell.outputs[sessionId] = (draft.shell.outputs[sessionId] || "") + data;
+      }),
+    setShellStatus: (
+      sessionId: string,
+      status: { available: boolean; running?: boolean; shell?: string; cwd?: string },
+    ) =>
+      set((draft) => {
+        draft.shell.statuses[sessionId] = status;
+      }),
+    clearShellOutput: (sessionId: string) =>
+      set((draft) => {
+        draft.shell.outputs[sessionId] = "";
+      }),
+    appendProcessOutput: (processId: string, data: string) =>
+      set((draft) => {
+        const next = (draft.processes.outputsByProcessId[processId] || "") + data;
+        draft.processes.outputsByProcessId[processId] = trimProcessOutput(next);
+      }),
+    upsertProcessStatus: (status: Parameters<SessionRuntimeSlice["upsertProcessStatus"]>[0]) =>
+      set((draft) => {
+        draft.processes.processesById[status.processId] = status;
+        const list = draft.processes.processIdsBySessionId[status.sessionId] || [];
+        if (!list.includes(status.processId)) {
+          draft.processes.processIdsBySessionId[status.sessionId] = [...list, status.processId];
+        }
+        if (status.kind === "dev") {
+          draft.processes.devProcessBySessionId[status.sessionId] = status.processId;
+        }
+      }),
+    clearProcessOutput: (processId: string) =>
+      set((draft) => {
+        draft.processes.outputsByProcessId[processId] = "";
+      }),
+    setActiveProcess: (sessionId: string, processId: string) =>
+      set((draft) => {
+        draft.processes.activeProcessBySessionId[sessionId] = processId;
+      }),
+  };
+}
+
 function buildGitSnapshotActions(set: ImmerSet) {
   return {
     setGitSnapshots: (
@@ -152,51 +205,7 @@ export const createSessionRuntimeSlice: StateCreator<
   SessionRuntimeSlice
 > = (set) => ({
   ...defaultSessionRuntimeState,
-  setTerminalOutput: (terminalId, data) =>
-    set((draft) => {
-      const existing = draft.terminal.terminals.find((terminal) => terminal.id === terminalId);
-      if (existing) {
-        existing.output.push(data);
-      } else {
-        draft.terminal.terminals.push({ id: terminalId, output: [data] });
-      }
-    }),
-  appendShellOutput: (sessionId, data) =>
-    set((draft) => {
-      draft.shell.outputs[sessionId] = (draft.shell.outputs[sessionId] || "") + data;
-    }),
-  setShellStatus: (sessionId, status) =>
-    set((draft) => {
-      draft.shell.statuses[sessionId] = status;
-    }),
-  clearShellOutput: (sessionId) =>
-    set((draft) => {
-      draft.shell.outputs[sessionId] = "";
-    }),
-  appendProcessOutput: (processId, data) =>
-    set((draft) => {
-      const next = (draft.processes.outputsByProcessId[processId] || "") + data;
-      draft.processes.outputsByProcessId[processId] = trimProcessOutput(next);
-    }),
-  upsertProcessStatus: (status) =>
-    set((draft) => {
-      draft.processes.processesById[status.processId] = status;
-      const list = draft.processes.processIdsBySessionId[status.sessionId] || [];
-      if (!list.includes(status.processId)) {
-        draft.processes.processIdsBySessionId[status.sessionId] = [...list, status.processId];
-      }
-      if (status.kind === "dev") {
-        draft.processes.devProcessBySessionId[status.sessionId] = status.processId;
-      }
-    }),
-  clearProcessOutput: (processId) =>
-    set((draft) => {
-      draft.processes.outputsByProcessId[processId] = "";
-    }),
-  setActiveProcess: (sessionId, processId) =>
-    set((draft) => {
-      draft.processes.activeProcessBySessionId[sessionId] = processId;
-    }),
+  ...buildTerminalShellProcessActions(set),
   setGitStatus: (sessionId, gitStatus) =>
     set((draft) => {
       const existing = draft.gitStatus.bySessionId[sessionId];
@@ -223,7 +232,15 @@ export const createSessionRuntimeSlice: StateCreator<
   addSessionCommit: (sessionId, commit) =>
     set((draft) => {
       const existing = draft.sessionCommits.bySessionId[sessionId] || [];
-      draft.sessionCommits.bySessionId[sessionId] = [commit, ...existing];
+      // For amend: only replace HEAD (first entry) if it has the same parent
+      if (existing.length > 0 && existing[0].parent_sha === commit.parent_sha) {
+        // Replace HEAD commit (this is an amend)
+        existing[0] = commit;
+        draft.sessionCommits.bySessionId[sessionId] = existing;
+      } else {
+        // Normal commit: prepend to list
+        draft.sessionCommits.bySessionId[sessionId] = [commit, ...existing];
+      }
     }),
   clearSessionCommits: (sessionId) =>
     set((draft) => {
