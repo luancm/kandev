@@ -579,18 +579,19 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	gitRef := fmt.Sprintf("%s:%s", ref, cleanPath)
 
 	// Preflight: check blob size before materializing content to avoid memory spikes.
+	// Use CombinedOutput to capture stderr for error detection (git writes errors to stderr).
+	// Set LC_ALL=C to ensure English error messages for reliable parsing.
 	sizeCmd := exec.CommandContext(ctx, "git", "cat-file", "-s", gitRef)
 	sizeCmd.Dir = wt.workDir
-	sizeOut, err := sizeCmd.Output()
+	sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
+	sizeOut, err := sizeCmd.CombinedOutput()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			stderr := string(exitErr.Stderr)
-			if strings.Contains(stderr, "does not exist") ||
-				strings.Contains(stderr, "Not a valid object") ||
-				strings.Contains(stderr, "fatal: path") ||
-				strings.Contains(stderr, "fatal: not a valid") {
-				return "", 0, false, fmt.Errorf("file not found at ref %s: %s", ref, cleanPath)
-			}
+		output := string(sizeOut)
+		if strings.Contains(output, "does not exist") ||
+			strings.Contains(output, "Not a valid object") ||
+			strings.Contains(output, "fatal: path") ||
+			strings.Contains(output, "fatal: not a valid") {
+			return "", 0, false, fmt.Errorf("file not found at ref %s: %s", ref, cleanPath)
 		}
 		return "", 0, false, fmt.Errorf("failed to stat file at ref: %w", err)
 	}
