@@ -79,6 +79,7 @@ func provideGateway(
 	notificationRepo notificationstore.Repository,
 	taskRepo *sqliterepo.Repository,
 	githubSvc *github.Service,
+	dataDir string,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, error) {
 	gateway, err := gateways.Provide(log)
 	if err != nil {
@@ -89,7 +90,7 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
-		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspinstaller.NewRegistry(log))
+		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspinstaller.NewRegistry(dataDir, log))
 		gateway.SetVscodeProxy(lifecycleMgr)
 	}
 
