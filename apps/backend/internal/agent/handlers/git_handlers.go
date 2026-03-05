@@ -17,6 +17,15 @@ import (
 // Parameters: ctx, sessionID, taskID, prURL, branch.
 type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branch string)
 
+// GitOperationFailedCallback is called when a git operation fails.
+// Parameters: ctx, sessionID, taskID, operation name, error output.
+type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, operation, errorOutput string)
+
+// ExecutionLookup provides access to running agent executions by session ID.
+type ExecutionLookup interface {
+	GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool)
+}
+
 // SessionReader is a minimal interface for reading session metadata.
 // This is needed because git operations need to know the session's base commit SHA
 // to filter commits to only those made during the session.
@@ -29,15 +38,16 @@ type SessionReader interface {
 // GitHandlers provides WebSocket handlers for git worktree operations.
 // Operations are executed via agentctl which runs in the worktree context.
 type GitHandlers struct {
-	lifecycleMgr  *lifecycle.Manager
-	sessionReader SessionReader
-	logger        *logger.Logger
-	onPRCreated   PRCreatedCallback
+	lifecycleMgr         ExecutionLookup
+	sessionReader        SessionReader
+	logger               *logger.Logger
+	onPRCreated          PRCreatedCallback
+	onGitOperationFailed GitOperationFailedCallback
 }
 
 // NewGitHandlers creates a new GitHandlers instance.
 // sessionReader is required to look up session metadata (e.g., base commit SHA).
-func NewGitHandlers(lifecycleMgr *lifecycle.Manager, sessionReader SessionReader, log *logger.Logger) *GitHandlers {
+func NewGitHandlers(lifecycleMgr ExecutionLookup, sessionReader SessionReader, log *logger.Logger) *GitHandlers {
 	return &GitHandlers{
 		lifecycleMgr:  lifecycleMgr,
 		sessionReader: sessionReader,
@@ -48,6 +58,32 @@ func NewGitHandlers(lifecycleMgr *lifecycle.Manager, sessionReader SessionReader
 // SetOnPRCreated sets a callback invoked after a PR is successfully created.
 func (h *GitHandlers) SetOnPRCreated(cb PRCreatedCallback) {
 	h.onPRCreated = cb
+}
+
+// SetOnGitOperationFailed sets a callback invoked when a git operation fails.
+func (h *GitHandlers) SetOnGitOperationFailed(cb GitOperationFailedCallback) {
+	h.onGitOperationFailed = cb
+}
+
+// notifyGitOperationFailed fires the failure callback asynchronously if the result indicates failure.
+func (h *GitHandlers) notifyGitOperationFailed(sessionID, operation string, result *client.GitOperationResult) {
+	if result == nil || result.Success || h.onGitOperationFailed == nil {
+		return
+	}
+	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok || execution.TaskID == "" {
+		return
+	}
+	taskID := execution.TaskID
+	errorOutput := result.Error
+	if errorOutput == "" {
+		errorOutput = result.Output
+	}
+	go func() {
+		callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		h.onGitOperationFailed(callbackCtx, sessionID, taskID, operation, errorOutput)
+	}()
 }
 
 // RegisterHandlers registers git handlers with the WebSocket dispatcher
@@ -182,6 +218,7 @@ func (h *GitHandlers) wsPull(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, fmt.Errorf("pull failed: %w", err)
 	}
 
+	h.notifyGitOperationFailed(req.SessionID, "pull", result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
@@ -206,6 +243,7 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, fmt.Errorf("push failed: %w", err)
 	}
 
+	h.notifyGitOperationFailed(req.SessionID, "push", result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
@@ -233,6 +271,7 @@ func (h *GitHandlers) wsRebase(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, fmt.Errorf("rebase failed: %w", err)
 	}
 
+	h.notifyGitOperationFailed(req.SessionID, "rebase", result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
@@ -260,6 +299,7 @@ func (h *GitHandlers) wsMerge(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, fmt.Errorf("merge failed: %w", err)
 	}
 
+	h.notifyGitOperationFailed(req.SessionID, "merge", result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
@@ -314,6 +354,7 @@ func (h *GitHandlers) wsCommit(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, fmt.Errorf("commit failed: %w", err)
 	}
 
+	h.notifyGitOperationFailed(req.SessionID, "commit", result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
@@ -521,6 +562,7 @@ func (h *GitHandlers) wsRevertCommit(ctx context.Context, msg *ws.Message) (*ws.
 		return nil, fmt.Errorf("revert commit failed: %w", err)
 	}
 
+	h.notifyGitOperationFailed(req.SessionID, "revert", result)
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
