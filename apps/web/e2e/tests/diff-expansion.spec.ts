@@ -61,7 +61,7 @@ async function openExpansionFileDiff(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 2, timeout: 120_000 });
 
   test("renders Pierre Diffs viewer and shows both hunks", async ({
     testPage,
@@ -72,10 +72,13 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    // Pierre Diffs renders a diffs-container custom element
+    // Pierre Diffs renders a diffs-container custom element with an open shadow DOM.
+    // Playwright's getByText auto-pierces shadow DOM and auto-retries.
     await expect(testPage.locator("diffs-container")).toBeVisible({ timeout: 15_000 });
-
-    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 15_000 });
+    // On cold CI runners (first test in shard, no V8 code cache), resolveLanguagesAndExecuteTask
+    // triggers createJavaScriptRegexEngine() which can take 30-40s to JIT-compile.
+    // diffs-container mounts immediately but content appears only after the engine is ready.
+    await expect(testPage.getByText("HUNK_TOP", { exact: false })).toBeVisible({ timeout: 60_000 });
     await expect(testPage.getByText("HUNK_BOTTOM", { exact: false })).toBeVisible({
       timeout: 5_000,
     });

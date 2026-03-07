@@ -47,7 +47,7 @@ test.describe("Session resume (ACP mode)", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
 
     // 1. Create task and start agent with a simple scenario
     await apiClient.createTaskWithAgent(
@@ -88,8 +88,10 @@ test.describe("Session resume (ACP mode)", () => {
     await expect(session.chat.getByText("/e2e:simple-message")).toBeVisible({ timeout: 15_000 });
 
     // 7. Wait for auto-resume to complete — useSessionResumption hook detects
-    //    needs_resume=true and relaunches the agent via session.launch
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    //    needs_resume=true and relaunches the agent via session.launch.
+    //    The full cycle (backend restart → health check → page reload → SSR →
+    //    WS reconnect → auto-resume → agent turn) can be slow under CI load.
+    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
 
     // 8. Verify the "Resumed agent Mock" boot message appeared after resume
     await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
@@ -119,7 +121,7 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
 
     // 1. Create a TUI agent profile
     const tuiProfile = await createTUIProfile(apiClient, "TUI Resume");

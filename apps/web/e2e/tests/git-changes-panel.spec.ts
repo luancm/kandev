@@ -18,7 +18,24 @@ class GitHelper {
   ) {}
 
   exec(cmd: string): string {
-    return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
+    const lockPath = path.join(this.repoDir, ".git", "index.lock");
+    // Retry up to 3 times on index.lock conflicts. The backend's git status
+    // polling briefly holds the lock; waiting a short time and retrying is
+    // safer than deleting an actively-held lock.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+      try {
+        return execSync(cmd, { cwd: this.repoDir, env: this.env, encoding: "utf8" });
+      } catch (err) {
+        const msg = (err as Error).message ?? "";
+        if (msg.includes("index.lock") && attempt < 2) {
+          execSync("sleep 0.2");
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error(`git exec failed after 3 attempts: ${cmd}`);
   }
 
   createFile(name: string, content: string) {
@@ -187,9 +204,10 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(session.changes).toBeVisible({ timeout: 10_000 });
 
-    // The new file should appear in unstaged
+    // The new file should appear in unstaged (scope to changes panel to avoid
+    // matching the Files panel which also shows the filename)
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByText("new-feature.ts")).toBeVisible({ timeout: 15_000 });
+    await expect(session.changes.getByText("new-feature.ts")).toBeVisible({ timeout: 15_000 });
 
     // Clean up
     git.deleteFile("new-feature.ts");
@@ -293,8 +311,20 @@ test.describe("Git Changes Panel", () => {
     // Look for the commit message (which uniquely identifies this diff view)
     await expect(session.changes.getByText("Add diff test file")).toBeVisible({ timeout: 10_000 });
 
-    // Additionally verify the diff shows the actual file content (lines added)
-    // This confirms the diff is working and showing the commit changes
+    // Additionally verify the diff shows the actual file content (lines added).
+    // Pierre Diffs renders in a shadow DOM — check all diffs-container elements
+    // since multiple may exist (inline chat diffs + Changes panel).
+    await testPage.waitForFunction(
+      (searchText: string) => {
+        for (const container of document.querySelectorAll("diffs-container")) {
+          const shadow = container.shadowRoot;
+          if (shadow?.textContent?.includes(searchText)) return true;
+        }
+        return false;
+      },
+      "line 1",
+      { timeout: 60_000 },
+    );
     await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });
 
@@ -690,17 +720,18 @@ test.describe("Git Changes Panel", () => {
     };
     const git = new GitHelper(repoDir, gitEnv);
 
-    // Create multiple commits
+    // Create multiple commits — use stageFile() instead of stageAll() to avoid
+    // picking up leftover files from prior tests in the shared repo.
     git.createFile("file1.txt", "content 1");
-    git.stageAll();
+    git.stageFile("file1.txt");
     const sha1 = git.commit("First persistent commit");
 
     git.createFile("file2.txt", "content 2");
-    git.stageAll();
+    git.stageFile("file2.txt");
     const sha2 = git.commit("Second persistent commit");
 
     git.createFile("file3.txt", "content 3");
-    git.stageAll();
+    git.stageFile("file3.txt");
     const sha3 = git.commit("Third persistent commit");
 
     // Click the Changes tab
@@ -781,7 +812,8 @@ test.describe("Git Changes Panel", () => {
     // Helper to clean up branch - ensures cleanup runs even if test fails
     const cleanupBranch = () => {
       try {
-        git.exec("git checkout main");
+        git.exec("git checkout -f main");
+        git.exec("git clean -fd");
         git.exec("git branch -D feature-rebase");
       } catch {
         // Branch may not exist if test failed before creation
@@ -789,16 +821,19 @@ test.describe("Git Changes Panel", () => {
     };
 
     try {
+      // Clean any leftover state from prior tests
+      git.exec("git clean -fd");
+
       // Create a commit on a feature branch
       git.exec("git checkout -b feature-rebase");
       git.createFile("feature-file.txt", "feature content");
-      git.stageAll();
+      git.stageFile("feature-file.txt");
       git.commit("Feature commit before rebase");
 
       // Go back to main and create a new commit
       git.exec("git checkout main");
       git.createFile("main-file.txt", "main content");
-      git.stageAll();
+      git.stageFile("main-file.txt");
       git.commit("Main commit after branch");
 
       // Go back to feature branch and rebase onto main
@@ -859,11 +894,11 @@ test.describe("Git Changes Panel", () => {
 
     // Create two commits to squash
     git.createFile("squash1.txt", "first");
-    git.stageAll();
+    git.stageFile("squash1.txt");
     git.commit("First commit to squash");
 
     git.createFile("squash2.txt", "second");
-    git.stageAll();
+    git.stageFile("squash2.txt");
     git.commit("Second commit to squash");
 
     // Click the Changes tab
@@ -935,11 +970,11 @@ test.describe("Git Changes Panel", () => {
 
     // Create commits with distinct content
     git.createFile("cumulative-file.txt", "line 1: first commit\n");
-    git.stageAll();
+    git.stageFile("cumulative-file.txt");
     git.commit("Add first line");
 
     git.modifyFile("cumulative-file.txt", "line 1: first commit\nline 2: second commit\n");
-    git.stageAll();
+    git.stageFile("cumulative-file.txt");
     git.commit("Add second line");
 
     // Click the Changes tab

@@ -99,7 +99,9 @@ test.describe("Diff update on file change", () => {
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
 
-    // The Pierre Diffs viewer should show the initial modification
+    // The Pierre Diffs viewer should show the initial modification.
+    // Playwright's getByText auto-pierces shadow DOM and auto-retries, so we use it
+    // directly with a generous timeout to handle async web worker initialization.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
