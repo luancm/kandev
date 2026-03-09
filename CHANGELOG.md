@@ -2,6 +2,17 @@
 
 All notable changes to Kandev.
 
+## 0.19 - 2026-03-09
+
+### Features
+
+- suggest agent install commands and fix TUI agent startup ([#398](https://github.com/kdlbs/kandev/pull/398))
+- quick chat implementation ([#393](https://github.com/kdlbs/kandev/pull/393))
+
+### Bug Fixes
+
+- use gh repo clone for authenticated cloning and deduplicate PR reviews ([#397](https://github.com/kdlbs/kandev/pull/397))
+
 ## 0.18 - 2026-03-08
 
 ### Features
