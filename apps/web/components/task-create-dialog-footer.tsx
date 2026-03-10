@@ -1,7 +1,13 @@
 "use client";
 
 import { memo } from "react";
-import { IconLoader2, IconFileInvoice, IconSend, IconChevronDown } from "@tabler/icons-react";
+import {
+  IconLoader2,
+  IconFileInvoice,
+  IconSend,
+  IconChevronDown,
+  IconPlus,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { DialogClose } from "@kandev/ui/dialog";
 import {
@@ -43,6 +49,7 @@ function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps)
 type StartTaskSplitButtonProps = {
   isCreatingTask: boolean;
   disabled: boolean;
+  altDisabled: boolean;
   isEditMode: boolean;
   onAltAction: () => void;
   onPlanModeAction?: () => void;
@@ -51,57 +58,87 @@ type StartTaskSplitButtonProps = {
 function StartTaskSplitButton({
   isCreatingTask,
   disabled,
+  altDisabled,
   isEditMode,
   onAltAction,
   onPlanModeAction,
 }: StartTaskSplitButtonProps) {
+  const altLabel = isEditMode ? "Update task" : "Create only";
+
   return (
-    <div className="inline-flex rounded-md border border-border overflow-hidden sm:h-7 h-10">
-      <Button
-        type="submit"
-        variant="default"
-        className="rounded-none border-0 cursor-pointer gap-1.5 h-full"
-        disabled={disabled}
-        data-testid="submit-start-agent"
-      >
-        {isCreatingTask ? (
-          <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <IconSend className="h-3.5 w-3.5" />
-        )}
-        {isCreatingTask ? "Starting..." : "Start task"}
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="default"
-            className="rounded-none border-0 border-l border-primary-foreground/20 px-2 cursor-pointer h-full"
-            disabled={disabled}
-            data-testid="submit-start-agent-chevron"
-          >
-            <IconChevronDown className="h-3.5 w-3.5" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto min-w-max">
-          {onPlanModeAction && (
-            <DropdownMenuItem
-              onClick={onPlanModeAction}
-              className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
-              data-testid="submit-plan-mode"
-            >
-              <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
-              Start task in plan mode
-            </DropdownMenuItem>
+    <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
+      <div className="flex w-full sm:inline-flex sm:w-auto rounded-md border border-border overflow-hidden sm:h-7 h-10">
+        <Button
+          type="submit"
+          variant="default"
+          className="rounded-none border-0 cursor-pointer gap-1.5 h-full flex-1"
+          disabled={disabled}
+          data-testid="submit-start-agent"
+        >
+          {isCreatingTask ? (
+            <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <IconSend className="h-3.5 w-3.5" />
           )}
-          <DropdownMenuItem
-            onClick={onAltAction}
-            className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
-          >
-            {isEditMode ? "Update task" : "Create without starting agent"}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          {isCreatingTask ? "Starting..." : "Start task"}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="default"
+              className="rounded-none border-0 border-l border-primary-foreground/20 px-2 cursor-pointer h-full hidden sm:flex"
+              disabled={disabled}
+              data-testid="submit-start-agent-chevron"
+            >
+              <IconChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-auto min-w-max">
+            {onPlanModeAction && (
+              <DropdownMenuItem
+                onClick={onPlanModeAction}
+                className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+                data-testid="submit-plan-mode"
+              >
+                <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
+                Start task in plan mode
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onClick={onAltAction}
+              className="cursor-pointer whitespace-nowrap focus:bg-muted/80 hover:bg-muted/80"
+            >
+              <IconPlus className="h-3.5 w-3.5 mr-1.5" />
+              {isEditMode ? "Update task" : "Create without starting agent"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {/* Mobile-only: visible buttons for plan mode and creating without agent */}
+      {onPlanModeAction && (
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
+          disabled={altDisabled}
+          onClick={onPlanModeAction}
+          data-testid="mobile-plan-mode"
+        >
+          <IconFileInvoice className="h-3.5 w-3.5" />
+          Plan mode
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full h-10 cursor-pointer gap-1.5 sm:hidden"
+        disabled={altDisabled}
+        onClick={onAltAction}
+      >
+        <IconPlus className="h-3.5 w-3.5" />
+        {altLabel}
+      </Button>
     </div>
   );
 }
@@ -198,37 +235,30 @@ function isMissingWorkflowCtx(
   return isCreateMode && (!workspaceId || !effectiveWorkflowId);
 }
 
-function computeFooterState(props: TaskCreateDialogFooterProps) {
-  const {
-    isSessionMode,
-    isCreateMode,
-    isEditMode,
-    isPassthroughProfile,
-    isCreatingTask,
-    hasTitle,
-    hasDescription,
-    hasRepositorySelection,
-    branch,
-    agentProfileId,
-    workspaceId,
-    effectiveWorkflowId,
-  } = props;
-  const showStartTask =
-    (isCreateMode && (hasDescription || isPassthroughProfile)) ||
-    Boolean(isEditMode && agentProfileId);
-  const missingCtx = isMissingWorkflowCtx(isCreateMode, workspaceId, effectiveWorkflowId);
-  const splitDisabled =
-    isCreatingTask ||
-    !hasTitle ||
-    !hasRepositorySelection ||
-    !branch ||
-    !agentProfileId ||
-    missingCtx;
-  const defaultDisabled = isSessionMode
-    ? !agentProfileId
-    : !hasTitle || !hasRepositorySelection || !branch || missingCtx;
+function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
+  const missingCtx = isMissingWorkflowCtx(
+    props.isCreateMode,
+    props.workspaceId,
+    props.effectiveWorkflowId,
+  );
+  return (
+    props.isCreatingTask ||
+    !props.hasTitle ||
+    !props.hasRepositorySelection ||
+    !props.branch ||
+    missingCtx
+  );
+}
 
-  return { showStartTask, splitDisabled, defaultDisabled };
+function computeFooterState(props: TaskCreateDialogFooterProps) {
+  const showStartTask =
+    (props.isCreateMode && (props.hasDescription || props.isPassthroughProfile)) ||
+    Boolean(props.isEditMode && props.agentProfileId);
+  const altDisabled = computeBaseDisabled(props);
+  const splitDisabled = altDisabled || !props.agentProfileId;
+  const defaultDisabled = props.isSessionMode ? !props.agentProfileId : altDisabled;
+
+  return { showStartTask, splitDisabled, altDisabled, defaultDisabled };
 }
 
 export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
@@ -250,7 +280,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
     onCreateWithoutAgent,
     onCreateWithPlanMode,
   } = props;
-  const { showStartTask, splitDisabled, defaultDisabled } = computeFooterState(props);
+  const { showStartTask, splitDisabled, altDisabled, defaultDisabled } = computeFooterState(props);
 
   return (
     <>
@@ -286,6 +316,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
               <StartTaskSplitButton
                 isCreatingTask={isCreatingTask}
                 disabled={splitDisabled}
+                altDisabled={altDisabled}
                 isEditMode={isEditMode}
                 onAltAction={isEditMode ? onUpdateWithoutAgent : onCreateWithoutAgent}
                 onPlanModeAction={onCreateWithPlanMode}

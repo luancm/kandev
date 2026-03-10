@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task } from "../kanban-card";
@@ -32,11 +32,19 @@ export function SwipeableColumns({
   showMaximizeButton,
   deletingTaskId,
 }: SwipeableColumnsProps) {
-  const [emblaRef, emblaApi] = useEmblaCarousel({
-    align: "start",
-    containScroll: "trimSnaps",
-    watchDrag: true,
-  });
+  // Stable options to avoid Embla reinitializing on every activeIndex change
+  const [initialIndex] = useState(activeIndex);
+  const options = useMemo(
+    () => ({
+      align: "start" as const,
+      containScroll: "trimSnaps" as const,
+      watchDrag: true,
+      startIndex: initialIndex,
+    }),
+    [initialIndex],
+  );
+  const [emblaRef, emblaApi] = useEmblaCarousel(options);
+  const userInteracting = useRef(false);
 
   const getTasksForStep = useCallback(
     (stepId: string) => {
@@ -48,26 +56,33 @@ export function SwipeableColumns({
     [tasks],
   );
 
-  // Sync carousel position with external activeIndex
+  // Sync carousel position with external activeIndex (tab clicks)
   useEffect(() => {
     if (emblaApi && emblaApi.selectedScrollSnap() !== activeIndex) {
-      emblaApi.scrollTo(activeIndex);
+      emblaApi.scrollTo(activeIndex, true);
     }
   }, [emblaApi, activeIndex]);
 
-  // Update external activeIndex when user swipes
+  // Sync tab state when user swipes (only on user-initiated interactions)
   useEffect(() => {
     if (!emblaApi) return;
 
+    const onPointerDown = () => {
+      userInteracting.current = true;
+    };
     const onSelect = () => {
+      if (!userInteracting.current) return;
+      userInteracting.current = false;
       const selectedIndex = emblaApi.selectedScrollSnap();
       if (selectedIndex !== activeIndex) {
         onIndexChange(selectedIndex);
       }
     };
 
+    emblaApi.on("pointerDown", onPointerDown);
     emblaApi.on("select", onSelect);
     return () => {
+      emblaApi.off("pointerDown", onPointerDown);
       emblaApi.off("select", onSelect);
     };
   }, [emblaApi, activeIndex, onIndexChange]);
