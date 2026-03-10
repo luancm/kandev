@@ -132,7 +132,6 @@ function computeCommentCounts(
 
 type ReviewDialogHandlerOptions = {
   allFiles: ReviewFile[];
-  fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
   markReviewed: (path: string, hash: string) => void;
   markUnreviewed: (path: string) => void;
   onSendComments: ReviewDialogProps["onSendComments"];
@@ -141,15 +140,7 @@ type ReviewDialogHandlerOptions = {
 };
 
 function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
-  const {
-    allFiles,
-    fileRefs,
-    markReviewed,
-    markUnreviewed,
-    onSendComments,
-    onOpenChange,
-    sessionId,
-  } = opts;
+  const { allFiles, markReviewed, markUnreviewed, onSendComments, onOpenChange, sessionId } = opts;
   const { discard } = useGitOperations(sessionId);
   const { toast } = useToast();
 
@@ -159,14 +150,11 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
     window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
   }, []);
 
-  const handleSelectFile = useCallback(
-    (path: string, setSelectedFile: (p: string) => void) => {
-      setSelectedFile(path);
-      const ref = fileRefs.get(path);
-      if (ref?.current) ref.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    },
-    [fileRefs],
-  );
+  const handleSelectFile = useCallback((path: string, setSelectedFile: (p: string) => void) => {
+    setSelectedFile(path);
+    // Note: scrolling is now handled by FileDiffSection when isSelected changes
+    // This ensures proper timing after the section expands
+  }, []);
 
   const handleToggleReviewed = useCallback(
     (path: string, reviewed: boolean) => {
@@ -280,7 +268,6 @@ function useReviewDialogState(props: ReviewDialogProps) {
 
   const handlers = useReviewDialogHandlers({
     allFiles,
-    fileRefs,
     markReviewed,
     markUnreviewed,
     onSendComments,
