@@ -9,6 +9,8 @@ import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import { useToast } from "@/components/toast-provider";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
+import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
+import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import {
   DiscardDialog,
   CommitDialog,
@@ -66,33 +68,25 @@ type CumulativeDiffFiles = Record<
   { diff?: string; status?: string; additions?: number; deletions?: number }
 >;
 
-function addUncommittedPaths(paths: Set<string>, files: FileInfo[]) {
-  for (const file of files) {
-    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
-  }
-}
-
-function addCumulativePaths(paths: Set<string>, files: CumulativeDiffFiles) {
-  for (const [path, file] of Object.entries(files)) {
-    if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
-  }
-}
-
-function addPRPaths(paths: Set<string>, files: PRDiffFile[]) {
-  for (const file of files) {
-    if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
-  }
-}
-
 function collectReviewPaths(
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
   prFiles?: PRDiffFile[],
 ): Set<string> {
   const paths = new Set<string>();
-  addUncommittedPaths(paths, uncommittedFiles);
-  if (cumulativeDiffFiles) addCumulativePaths(paths, cumulativeDiffFiles);
-  if (prFiles) addPRPaths(paths, prFiles);
+  for (const file of uncommittedFiles) {
+    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
+  }
+  if (cumulativeDiffFiles) {
+    for (const [path, file] of Object.entries(cumulativeDiffFiles)) {
+      if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+    }
+  }
+  if (prFiles) {
+    for (const file of prFiles) {
+      if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
+    }
+  }
   return paths;
 }
 
@@ -133,17 +127,9 @@ function computeReviewProgress(
 }
 
 function computeStagedStats(stagedFiles: FileInfo[]) {
-  let additions = 0;
-  let deletions = 0;
-  for (const file of stagedFiles) {
-    additions += file.additions || 0;
-    deletions += file.deletions || 0;
-  }
-  return {
-    stagedFileCount: stagedFiles.length,
-    stagedAdditions: additions,
-    stagedDeletions: deletions,
-  };
+  const adds = stagedFiles.reduce((sum, f) => sum + (f.additions || 0), 0);
+  const dels = stagedFiles.reduce((sum, f) => sum + (f.deletions || 0), 0);
+  return { stagedFileCount: stagedFiles.length, stagedAdditions: adds, stagedDeletions: dels };
 }
 
 function mapPRFilesToChangedFiles(files: PRDiffFile[]): PRChangedFile[] {
@@ -232,6 +218,8 @@ type ChangesPanelBodyProps = {
   stagedDeletions: number;
   displayBranch: string | null;
   baseBranch: string | undefined;
+  utilityGen?: ReturnType<typeof useUtilityAgentGenerator>;
+  isUtilityConfigured?: boolean;
 };
 
 function ChangesPanelDialogsSection({
@@ -243,6 +231,8 @@ function ChangesPanelDialogsSection({
   displayBranch,
   baseBranch,
   lastCommitMessage,
+  utilityGen,
+  isUtilityConfigured,
 }: Pick<
   ChangesPanelBodyProps,
   | "dialogs"
@@ -252,6 +242,8 @@ function ChangesPanelDialogsSection({
   | "stagedDeletions"
   | "displayBranch"
   | "baseBranch"
+  | "utilityGen"
+  | "isUtilityConfigured"
 > & { lastCommitMessage?: string | null }) {
   return (
     <>
@@ -274,6 +266,12 @@ function ChangesPanelDialogsSection({
         isAmend={dialogs.isAmendCommit}
         onAmendChange={dialogs.setIsAmendCommit}
         lastCommitMessage={lastCommitMessage}
+        onGenerateMessage={
+          isUtilityConfigured && utilityGen
+            ? () => utilityGen.generateCommitMessage(dialogs.setCommitMessage)
+            : undefined
+        }
+        isGenerating={utilityGen?.isGeneratingCommitMessage}
       />
       <PRDialog
         open={dialogs.prDialogOpen}
@@ -288,6 +286,12 @@ function ChangesPanelDialogsSection({
         isLoading={isLoading}
         displayBranch={displayBranch}
         baseBranch={baseBranch}
+        onGenerateDescription={
+          isUtilityConfigured && utilityGen
+            ? () => utilityGen.generatePRDescription(dialogs.setPrBody)
+            : undefined
+        }
+        isGenerating={utilityGen?.isGeneratingPRDescription}
       />
       <AmendDialog
         open={dialogs.amendDialogOpen}
@@ -471,6 +475,8 @@ function ChangesPanelBody(props: ChangesPanelBodyProps) {
         displayBranch={props.displayBranch}
         baseBranch={props.baseBranch}
         lastCommitMessage={lastCommitMessage}
+        utilityGen={props.utilityGen}
+        isUtilityConfigured={props.isUtilityConfigured}
       />
     </PanelBody>
   );
@@ -534,6 +540,8 @@ const ChangesPanel = memo(function ChangesPanel({
     baseBranch,
     firstCommitMessage,
   });
+  const isUtilityConfigured = useIsUtilityConfigured();
+  const utilityGen = useUtilityAgentGenerator({ sessionId: activeSessionId ?? null, taskTitle });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
 
@@ -591,6 +599,8 @@ const ChangesPanel = memo(function ChangesPanel({
         stagedDeletions={staged.stagedDeletions}
         displayBranch={git.branch}
         baseBranch={baseBranch}
+        utilityGen={utilityGen}
+        isUtilityConfigured={isUtilityConfigured}
       />
     </PanelRoot>
   );
