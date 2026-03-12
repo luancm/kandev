@@ -351,7 +351,7 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		m.handleErrorEvent(execution, event)
 		return
 
-	case "complete":
+	case toolStatusComplete:
 		m.handleCompleteEvent(execution, &event)
 
 	case "permission_request":
@@ -369,6 +369,11 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 	case "available_commands":
 		m.handleAvailableCommandsEvent(execution, event)
 		return
+
+	case "agent_capabilities":
+		if len(event.AuthMethods) > 0 {
+			execution.SetAuthMethods(event.AuthMethods)
+		}
 
 	case "session_mode":
 		execution.SetModeState(&CachedModeState{

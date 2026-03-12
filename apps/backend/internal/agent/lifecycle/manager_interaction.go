@@ -27,6 +27,57 @@ func (m *Manager) WasSessionInitialized(executionID string) bool {
 	return exec.sessionInitialized
 }
 
+// GetSessionAuthMethods returns auth methods for a session's execution.
+// It first checks cached methods from agent_capabilities events. When the agent
+// failed before reporting capabilities (e.g., immediate auth error), it falls
+// back to static auth methods derived from the agent type.
+func (m *Manager) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {
+	exec, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return nil
+	}
+	if methods := exec.GetAuthMethods(); len(methods) > 0 {
+		return methods
+	}
+	return fallbackAuthMethods(exec.AgentID)
+}
+
+// fallbackAuthMethods returns static auth methods for known agent types.
+// Used when the agent failed before sending agent_capabilities (e.g., auth error
+// on first prompt before the agent could report its own auth methods).
+func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
+	switch agentID {
+	case "claude-acp":
+		return []streams.AuthMethodInfo{
+			{
+				ID:          "claude-auth-login",
+				Name:        "Anthropic Authentication",
+				Description: "Log in to your Anthropic account",
+				TerminalAuth: &streams.TerminalAuth{
+					Command: "claude",
+					Args:    []string{"auth", "login"},
+					Label:   "Log in with Claude CLI",
+				},
+			},
+		}
+	case "auggie":
+		return []streams.AuthMethodInfo{
+			{
+				ID:          "auggie-login",
+				Name:        "Auggie Authentication",
+				Description: "Log in to your Auggie account",
+				TerminalAuth: &streams.TerminalAuth{
+					Command: "auggie",
+					Args:    []string{"login"},
+					Label:   "Log in with Auggie CLI",
+				},
+			},
+		}
+	default:
+		return nil
+	}
+}
+
 // PromptAgent sends a follow-up prompt to a running agent
 // Attachments (images) are passed to the agent if provided
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {

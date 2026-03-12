@@ -25,6 +25,7 @@ type AgentExecution struct {
 	TaskID          string
 	SessionID       string
 	AgentProfileID  string
+	AgentID         string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
 	ContainerID     string
 	ContainerIP     string // IP address of the container for agentctl communication
 	WorkspacePath   string // Path to the workspace (worktree or repository path)
@@ -91,6 +92,10 @@ type AgentExecution struct {
 	// Cached session model state (for re-sending on subscribe after page refresh)
 	modelState   *CachedModelState
 	modelStateMu sync.RWMutex
+
+	// Cached auth methods from agent_capabilities (for error recovery metadata)
+	authMethods   []streams.AuthMethodInfo
+	authMethodsMu sync.RWMutex
 
 	// Channel signaled by handleAgentEvent(complete) or stream disconnect to unblock SendPrompt.
 	// Buffered (size 1) so the sender never blocks.
@@ -192,6 +197,20 @@ func (ae *AgentExecution) GetModelState() *CachedModelState {
 	ae.modelStateMu.RLock()
 	defer ae.modelStateMu.RUnlock()
 	return ae.modelState
+}
+
+// SetAuthMethods caches the auth methods on this execution.
+func (ae *AgentExecution) SetAuthMethods(methods []streams.AuthMethodInfo) {
+	ae.authMethodsMu.Lock()
+	defer ae.authMethodsMu.Unlock()
+	ae.authMethods = methods
+}
+
+// GetAuthMethods returns the cached auth methods for this execution.
+func (ae *AgentExecution) GetAuthMethods() []streams.AuthMethodInfo {
+	ae.authMethodsMu.RLock()
+	defer ae.authMethodsMu.RUnlock()
+	return ae.authMethods
 }
 
 // SetSessionSpan stores the session-level trace span on the execution.

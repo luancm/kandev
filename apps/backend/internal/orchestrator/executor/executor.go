@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/client"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -112,6 +113,10 @@ type AgentManagerClient interface {
 	// WasSessionInitialized reports whether the given execution completed session initialization.
 	// Used to distinguish launch-phase failures from normal prompt failures.
 	WasSessionInitialized(executionID string) bool
+
+	// GetSessionAuthMethods returns cached auth methods for a session's execution.
+	// Used to include auth method hints in error recovery messages.
+	GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo
 
 	// IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 	IsPassthroughSession(ctx context.Context, sessionID string) bool
@@ -290,6 +295,12 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
+// AgentStartFailedFunc is called when the agent process fails to start.
+// It receives the task/session/execution IDs and the error. If the callback
+// returns true, it has handled the failure (e.g., as a recoverable auth error)
+// and the executor should skip its default FAILED state updates.
+type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error) (handled bool)
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -318,6 +329,11 @@ type Executor struct {
 	// Set by the orchestrator to route through updateTaskSessionState which
 	// updates the DB and publishes WebSocket events.
 	onSessionStateChange SessionStateChangeFunc
+
+	// Callback for agent process start failures. When set, the executor
+	// delegates failure handling to this callback, allowing the orchestrator
+	// to detect auth errors and treat them as recoverable.
+	onAgentStartFailed AgentStartFailedFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -383,6 +399,13 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 func (e *Executor) SetRepoCloner(cloner RepoCloner, updater RepoUpdater) {
 	e.repoCloner = cloner
 	e.repoUpdater = updater
+}
+
+// SetOnAgentStartFailed sets a callback for agent process start failures.
+// This allows the orchestrator to intercept auth errors and treat them as
+// recoverable instead of terminal failures.
+func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
+	e.onAgentStartFailed = fn
 }
 
 // SetCapabilities sets the executor type capabilities provider.
