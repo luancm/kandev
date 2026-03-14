@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -34,16 +35,19 @@ func (c *GHClient) IsAuthenticated(ctx context.Context) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	// Propagate context errors so callers can distinguish cancellation/timeout
-	// from a genuine "not authenticated" result.
-	if ctx.Err() != nil {
-		return false, ctx.Err()
+	// Propagate timeout/cancellation errors so callers can distinguish them
+	// from a genuine "not authenticated" result. Check the returned error
+	// (not ctx.Err()) because run() may apply its own child deadline.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false, err
 	}
 	return false, nil
 }
 
 // RunAuthDiagnostics executes gh auth status and captures the raw output for troubleshooting.
 func (c *GHClient) RunAuthDiagnostics(ctx context.Context) *AuthDiagnostics {
+	ctx, cancel := withDefaultGHTimeout(ctx)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", "auth", "status", "--hostname", "github.com")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -411,9 +415,22 @@ func (c *GHClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]
 	return branches, nil
 }
 
+const ghCLITimeout = 30 * time.Second
+
+// withDefaultGHTimeout applies a 30s timeout if the context has no deadline.
+func withDefaultGHTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, ghCLITimeout)
+}
+
 // run executes a gh CLI command and returns its stdout output.
 // Stderr is captured separately to avoid contaminating JSON output.
+// A default 30s timeout is applied if the context has no deadline.
 func (c *GHClient) run(ctx context.Context, args ...string) (string, error) {
+	ctx, cancel := withDefaultGHTimeout(ctx)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -15,6 +15,12 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+// Auth method constants.
+const (
+	AuthMethodNone = "none"
+	AuthMethodPAT  = "pat"
+)
+
 // Service coordinates GitHub integration operations.
 type Service struct {
 	mu         sync.Mutex
@@ -49,8 +55,11 @@ func (s *Service) TestStore() *Store {
 }
 
 // IsAuthenticated returns whether the service has a working GitHub client.
+// Returns false when using the NoopClient fallback (authMethod == "none").
 func (s *Service) IsAuthenticated() bool {
-	return s.client != nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.client != nil && s.authMethod != AuthMethodNone
 }
 
 // AuthMethod returns the authentication method ("gh_cli", "pat", or "none").
@@ -59,9 +68,10 @@ func (s *Service) AuthMethod() string {
 }
 
 // GetStatus returns the current GitHub connection status.
-// If no client exists, it retries client creation to pick up auth changes made after startup.
+// If not authenticated, it retries client creation to pick up auth changes
+// (e.g. GITHUB_TOKEN secret added after startup).
 func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
-	if s.client == nil {
+	if !s.IsAuthenticated() {
 		s.retryClientCreation(ctx)
 	}
 
@@ -93,12 +103,13 @@ func (s *Service) GetStatus(ctx context.Context) (*GitHubStatus, error) {
 	return status, nil
 }
 
-// retryClientCreation attempts to create a GitHub client when none exists.
+// retryClientCreation attempts to create a GitHub client when not authenticated.
+// This picks up auth changes made after startup (secrets added, env vars set).
 func (s *Service) retryClientCreation(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.client != nil {
-		return // another goroutine already recovered
+	if s.authMethod != AuthMethodNone {
+		return // already authenticated
 	}
 	client, authMethod, err := NewClient(ctx, s.secrets, s.logger)
 	if err != nil {
