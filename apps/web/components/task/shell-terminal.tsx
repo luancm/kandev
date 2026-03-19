@@ -11,6 +11,7 @@ import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { getTerminalTheme } from "@/lib/theme/terminal-theme";
 import { useTerminalLinkHandler } from "@/hooks/use-terminal-link-handler";
+import { exposeBufferReader } from "./terminal-buffer-reader";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -44,6 +45,7 @@ function useTerminalInit(
       convertEol: isReadOnlyMode,
       fontSize: isReadOnlyMode ? 12 : 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      macOptionIsMeta: true,
       theme: getTerminalTheme(terminalRef.current),
     });
     const fitAddon = new FitAddon();
@@ -51,6 +53,7 @@ function useTerminalInit(
     const webLinksAddon = new WebLinksAddon(linkHandler);
     terminal.loadAddon(webLinksAddon);
     terminal.open(terminalRef.current);
+    exposeBufferReader(terminalRef.current, terminal);
     fitAddon.fit();
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -238,6 +241,44 @@ function useTerminalOutputWrite(
   }, [xtermRef, shellOutput, processOutput, isReadOnlyMode, lastOutputLengthRef]);
 }
 
+/** Cmd+Arrow → Home/End on macOS for the shell terminal. */
+function useCmdArrowHandler(
+  xtermRef: React.RefObject<Terminal | null>,
+  isReadOnlyMode: boolean,
+  sessionId: string | null | undefined,
+  send: (action: string, payload: Record<string, unknown>) => void,
+) {
+  // Use a ref so the handler (attached once) always reads the latest values
+  // without needing cleanup (attachCustomKeyEventHandler has no dispose).
+  const stateRef = useRef({ sessionId, send });
+  useEffect(() => {
+    stateRef.current = { sessionId, send };
+  });
+
+  const attachedRef = useRef(false);
+  useEffect(() => {
+    if (!xtermRef.current || isReadOnlyMode || !sessionId || attachedRef.current) return;
+    attachedRef.current = true;
+    xtermRef.current.attachCustomKeyEventHandler((event) => {
+      const { sessionId: sid, send: sendFn } = stateRef.current;
+      if (
+        event.type === "keydown" &&
+        event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        sid &&
+        (event.key === "ArrowLeft" || event.key === "ArrowRight")
+      ) {
+        event.preventDefault();
+        const seq = event.key === "ArrowLeft" ? "\x01" : "\x05";
+        sendFn("shell.input", { session_id: sid, data: seq });
+        return false;
+      }
+      return true;
+    });
+  }, [xtermRef, sessionId, send, isReadOnlyMode, stateRef]);
+}
+
 export function ShellTerminal({
   sessionId: propSessionId,
   processOutput,
@@ -301,6 +342,8 @@ export function ShellTerminal({
       onDataDisposableRef.current = null;
     };
   }, [taskId, sessionId, send, isReadOnlyMode]);
+
+  useCmdArrowHandler(xtermRef, isReadOnlyMode, sessionId, send);
   useTerminalOutputWrite(xtermRef, isReadOnlyMode, processOutput, shellOutput, lastOutputLengthRef);
 
   useShellSubscription({
