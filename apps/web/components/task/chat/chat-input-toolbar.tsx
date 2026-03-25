@@ -1,8 +1,10 @@
 "use client";
 
-import { memo, useState, useCallback } from "react";
+import { memo, useRef, useState, useCallback, type ReactNode } from "react";
 import {
   IconArrowUp,
+  IconChevronsLeft,
+  IconDots,
   IconFileTextSpark,
   IconPlayerPauseFilled,
   IconAt,
@@ -27,6 +29,7 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
@@ -315,68 +318,73 @@ function ResetContextButton({ sessionId }: { sessionId: string }) {
   );
 }
 
-type ToolbarRightSectionProps = {
-  taskId: string | null;
-  sessionId: string | null;
-  taskTitle?: string;
-  taskDescription: string;
-  planModeEnabled: boolean;
-  isAgentBusy: boolean;
-  isDisabled: boolean;
-  isSending: boolean;
-  onCancel: () => void;
-  onSubmit: () => void;
-  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
-  onEnhancePrompt?: () => void;
-  isEnhancingPrompt?: boolean;
-  isUtilityConfigured?: boolean;
-  onImplementPlan?: () => void;
-  hideSessionsDropdown?: boolean;
+type ToolbarItemConfig = {
+  id: string;
+  collapsible: boolean;
+  section: "left" | "right";
+  render: () => ReactNode;
+  visible?: boolean;
 };
 
+function ToolbarExpandToggle({
+  isExpanded,
+  onToggle,
+}: {
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={isExpanded ? "Collapse toolbar" : "More toolbar actions"}
+          className="h-7 w-7 cursor-pointer hover:bg-muted/40"
+          data-testid="toolbar-overflow-menu"
+          onClick={onToggle}
+        >
+          {isExpanded ? <IconChevronsLeft className="h-4 w-4" /> : <IconDots className="h-4 w-4" />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{isExpanded ? "Collapse" : "More actions"}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ToolbarRightSection({
-  taskId,
+  showCollapsed,
+  rightItems,
   sessionId,
-  taskTitle,
-  taskDescription,
   planModeEnabled,
   isAgentBusy,
+  onImplementPlan,
   isDisabled,
   isSending,
   onCancel,
   onSubmit,
   submitShortcut,
-  onEnhancePrompt,
-  isEnhancingPrompt,
-  isUtilityConfigured,
-  onImplementPlan,
-  hideSessionsDropdown,
-}: ToolbarRightSectionProps) {
-  const showEnhance = !isAgentBusy;
-  const showImplement = planModeEnabled && !isAgentBusy && onImplementPlan;
-  const showResetContext = !!sessionId && !isAgentBusy;
+}: {
+  showCollapsed: boolean;
+  rightItems: ToolbarItemConfig[];
+  sessionId: string | null;
+  planModeEnabled: boolean;
+  isAgentBusy: boolean;
+  onImplementPlan?: () => void;
+  isDisabled: boolean;
+  isSending: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitShortcut: (typeof SHORTCUTS)[keyof typeof SHORTCUTS];
+}) {
   return (
     <div className="flex items-center gap-0.5 shrink-0">
-      {showResetContext && <ResetContextButton sessionId={sessionId} />}
-      {!hideSessionsDropdown && (
-        <SessionsDropdown
-          taskId={taskId}
-          activeSessionId={sessionId}
-          taskTitle={taskTitle}
-          taskDescription={taskDescription}
-        />
-      )}
+      {!showCollapsed && <CollapsibleItems items={rightItems} testIdPrefix="toolbar-item-" />}
       <TokenUsageDisplay sessionId={sessionId} />
-      <ModelSelector sessionId={sessionId} />
-      {/* AuthMethodsIndicator hidden — UX needs rethinking */}
-      {showEnhance && (
-        <EnhancePromptButton
-          onClick={onEnhancePrompt ?? (() => {})}
-          isLoading={isEnhancingPrompt ?? false}
-          isConfigured={isUtilityConfigured}
-        />
+      {planModeEnabled && !isAgentBusy && onImplementPlan && (
+        <ImplementPlanButton onClick={onImplementPlan} />
       )}
-      {showImplement && <ImplementPlanButton onClick={onImplementPlan} />}
       <div className="ml-1">
         <SubmitButton
           isAgentBusy={isAgentBusy}
@@ -390,6 +398,88 @@ function ToolbarRightSection({
       </div>
     </div>
   );
+}
+
+function buildCollapsibleItems(props: {
+  mcpServers: string[];
+  sessionId: string | null;
+  taskId: string | null;
+  taskTitle?: string;
+  taskDescription: string;
+  hideSessionsDropdown?: boolean;
+  isAgentBusy: boolean;
+  onEnhancePrompt?: () => void;
+  isEnhancingPrompt: boolean;
+  isUtilityConfigured: boolean;
+}): ToolbarItemConfig[] {
+  return [
+    {
+      id: "mcp",
+      section: "left",
+      collapsible: true,
+      render: () => <McpIndicator mcpServers={props.mcpServers} />,
+    },
+    {
+      id: "mode",
+      section: "left",
+      collapsible: true,
+      render: () => <ModeSelector sessionId={props.sessionId} />,
+    },
+    {
+      id: "reset-context",
+      section: "right",
+      collapsible: true,
+      visible: !!props.sessionId && !props.isAgentBusy,
+      render: () => <ResetContextButton sessionId={props.sessionId!} />,
+    },
+    {
+      id: "sessions",
+      section: "right",
+      collapsible: true,
+      visible: !props.hideSessionsDropdown,
+      render: () => (
+        <SessionsDropdown
+          taskId={props.taskId}
+          activeSessionId={props.sessionId}
+          taskTitle={props.taskTitle}
+          taskDescription={props.taskDescription}
+        />
+      ),
+    },
+    {
+      id: "model",
+      section: "right",
+      collapsible: true,
+      render: () => <ModelSelector sessionId={props.sessionId} />,
+    },
+    {
+      id: "enhance",
+      section: "right",
+      collapsible: true,
+      visible: !props.isAgentBusy,
+      render: () => (
+        <EnhancePromptButton
+          onClick={props.onEnhancePrompt ?? (() => {})}
+          isLoading={props.isEnhancingPrompt}
+          isConfigured={props.isUtilityConfigured}
+        />
+      ),
+    },
+  ];
+}
+
+function CollapsibleItems({
+  items,
+  testIdPrefix,
+}: {
+  items: ToolbarItemConfig[];
+  testIdPrefix: string;
+}) {
+  return items.map((i) => (
+    <div key={i.id} data-testid={`${testIdPrefix}${i.id}`}>
+      {i.render()}
+    </div>
+  ));
 }
 
 function AttachFilesButton({ onClick }: { onClick: () => void }) {
@@ -454,6 +544,10 @@ const toolbarDefaults = {
 export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInputToolbarProps) {
   const props = { ...toolbarDefaults, ...rawProps };
   const submitShortcut = props.submitKey === "enter" ? SHORTCUTS.SUBMIT_ENTER : SHORTCUTS.SUBMIT;
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const isCollapsed = useToolbarCollapsed(toolbarRef);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const showCollapsed = isCollapsed && !isExpanded;
 
   if (props.minimalToolbar) {
     return (
@@ -468,9 +562,20 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     );
   }
 
+  const items = buildCollapsibleItems(props);
+  const leftItems = items.filter((i) => i.section === "left" && i.visible !== false);
+  const rightItems = items.filter((i) => i.section === "right" && i.visible !== false);
+
   return (
-    <div className="flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border">
-      <div className="flex items-center gap-0.5">
+    <div
+      ref={toolbarRef}
+      data-testid="chat-input-toolbar"
+      className={cn(
+        "flex items-center gap-1 px-1 pt-0 pb-0.5 border-t border-border",
+        isCollapsed ? "overflow-x-auto scrollbar-hide" : "overflow-visible",
+      )}
+    >
+      <div className="flex items-center gap-0.5 shrink-0">
         {!props.hidePlanMode && (
           <PlanToggleButton
             planModeEnabled={props.planModeEnabled}
@@ -478,11 +583,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
             onPlanModeChange={props.onPlanModeChange}
           />
         )}
-
-        <McpIndicator mcpServers={props.mcpServers} />
-
+        {!showCollapsed && <CollapsibleItems items={leftItems} testIdPrefix="toolbar-item-" />}
         {props.onAttachFiles && <AttachFilesButton onClick={props.onAttachFiles} />}
-
         <ContextPopover
           open={props.contextPopoverOpen}
           onOpenChange={props.onContextPopoverOpenChange ?? (() => {})}
@@ -494,8 +596,8 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
               className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
             >
               <IconAt className="h-4 w-4" />
-              {props.contextCount > 0 && (
-                <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5">
+              {props.contextCount > 0 && !isCollapsed && (
+                <span className="absolute -top-1 -right-1 h-4 min-w-4 rounded-full bg-muted-foreground/80 text-[10px] text-background flex items-center justify-center px-0.5 pointer-events-none">
                   {props.contextCount}
                 </span>
               )}
@@ -506,27 +608,25 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
           contextFiles={props.contextFiles}
           onToggleFile={props.onToggleFile ?? (() => {})}
         />
-        <ModeSelector sessionId={props.sessionId} />
+        {isCollapsed && (
+          <ToolbarExpandToggle isExpanded={isExpanded} onToggle={() => setIsExpanded((v) => !v)} />
+        )}
       </div>
 
       <div className="flex-1" />
+
       <ToolbarRightSection
-        taskId={props.taskId}
+        showCollapsed={showCollapsed}
+        rightItems={rightItems}
         sessionId={props.sessionId}
-        taskTitle={props.taskTitle}
-        taskDescription={props.taskDescription}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
+        onImplementPlan={props.onImplementPlan}
         isDisabled={props.isDisabled}
         isSending={props.isSending}
         onCancel={props.onCancel}
         onSubmit={props.onSubmit}
         submitShortcut={submitShortcut}
-        onEnhancePrompt={props.onEnhancePrompt}
-        isEnhancingPrompt={props.isEnhancingPrompt}
-        isUtilityConfigured={props.isUtilityConfigured}
-        onImplementPlan={props.onImplementPlan}
-        hideSessionsDropdown={props.hideSessionsDropdown}
       />
     </div>
   );
