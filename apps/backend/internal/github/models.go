@@ -20,6 +20,7 @@ type PR struct {
 	Body               string              `json:"body"`
 	Draft              bool                `json:"draft"`
 	Mergeable          bool                `json:"mergeable"`
+	ReviewDecision     string              `json:"review_decision,omitempty"` // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
 	Additions          int                 `json:"additions"`
 	Deletions          int                 `json:"deletions"`
 	RequestedReviewers []RequestedReviewer `json:"requested_reviewers"`

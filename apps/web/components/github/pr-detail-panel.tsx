@@ -98,7 +98,27 @@ type PRPanelMetrics = {
   reviewState: TaskPR["review_state"];
 };
 
+function mapReviewDecision(decision: string): TaskPR["review_state"] | null {
+  switch (decision) {
+    case "APPROVED":
+      return "approved";
+    case "CHANGES_REQUESTED":
+      return "changes_requested";
+    case "REVIEW_REQUIRED":
+      return "pending";
+    default:
+      return null;
+  }
+}
+
 function computeLiveReviewState(feedback: PRFeedback, fallbackState: TaskPR["review_state"]) {
+  // Prefer GitHub's authoritative reviewDecision (respects branch protection rules).
+  if (feedback.pr.review_decision) {
+    const mapped = mapReviewDecision(feedback.pr.review_decision);
+    if (mapped) return mapped;
+  }
+
+  // Fallback: compute from individual reviews.
   const requestedReviewers = feedback.pr.requested_reviewers ?? [];
   if (feedback.reviews.length === 0) {
     return requestedReviewers.length > 0 ? "pending" : fallbackState || "";
@@ -112,13 +132,14 @@ function computeLiveReviewState(feedback: PRFeedback, fallbackState: TaskPR["rev
     }
   }
   let hasChangesRequested = false;
-  let allApproved = true;
+  let hasApproval = false;
   for (const review of latestByAuthor.values()) {
     if (review.state === "CHANGES_REQUESTED") hasChangesRequested = true;
-    if (review.state !== "APPROVED") allApproved = false;
+    if (review.state === "APPROVED") hasApproval = true;
+    // COMMENTED, PENDING, DISMISSED are neutral — ignored
   }
   if (hasChangesRequested) return "changes_requested";
-  if (allApproved) return "approved";
+  if (hasApproval) return "approved";
   return "pending";
 }
 
@@ -164,13 +185,19 @@ function ApproveButton({
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const currentUsername = useAppStore((s) => s.githubStatus.status?.username);
 
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return null;
 
-  const alreadyApproved = feedback?.reviews.some(
-    (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
-  );
+  // Hide approve button when the current user is the PR author (can't self-approve).
+  const prAuthor = feedback?.pr.author_login ?? taskPR.author_login;
+  if (currentUsername && currentUsername === prAuthor) return null;
+
+  // Hide if the current user has already approved.
+  const alreadyApproved =
+    currentUsername &&
+    feedback?.reviews.some((r) => r.state === "APPROVED" && r.author === currentUsername);
   if (alreadyApproved) return null;
 
   const handleApprove = async () => {

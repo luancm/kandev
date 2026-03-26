@@ -221,9 +221,17 @@ func TestComputeOverallReviewState(t *testing.T) {
 			"approved",
 		},
 		{
-			"pending when not all approved",
+			"approved when one approved and other only commented",
 			[]PRReview{
 				{Author: "alice", State: "APPROVED", CreatedAt: t1},
+				{Author: "bob", State: "COMMENTED", CreatedAt: t1},
+			},
+			"approved",
+		},
+		{
+			"pending when only comments no approvals",
+			[]PRReview{
+				{Author: "alice", State: "COMMENTED", CreatedAt: t1},
 				{Author: "bob", State: "COMMENTED", CreatedAt: t1},
 			},
 			"pending",

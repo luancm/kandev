@@ -875,20 +875,21 @@ func computeOverallReviewState(reviews []PRReview) string {
 		return ""
 	}
 	latest := latestReviewByAuthor(reviews)
-	changesReq := false
-	allApproved := true
+	approved := false
+	changesRequested := false
 	for _, r := range latest {
-		if r.State == reviewStateChangesRequested {
-			changesReq = true
+		switch r.State {
+		case reviewStateApproved:
+			approved = true
+		case reviewStateChangesRequested:
+			changesRequested = true
 		}
-		if r.State != reviewStateApproved {
-			allApproved = false
-		}
+		// COMMENTED, PENDING, DISMISSED are neutral — ignored
 	}
-	if changesReq {
+	if changesRequested {
 		return computedReviewStateChangesRequested
 	}
-	if allApproved {
+	if approved {
 		return computedReviewStateApproved
 	}
 	return computedReviewStatePending
@@ -912,11 +913,37 @@ func countPendingRequestedReviewers(pr *PR) int {
 	return len(pr.RequestedReviewers)
 }
 
+// mapReviewDecision converts GitHub's reviewDecision GraphQL field to our
+// internal computed review state. Returns empty string if the decision is
+// unknown or empty (fallback to heuristic).
+func mapReviewDecision(decision string) string {
+	switch decision {
+	case "APPROVED":
+		return computedReviewStateApproved
+	case "CHANGES_REQUESTED":
+		return computedReviewStateChangesRequested
+	case "REVIEW_REQUIRED":
+		return computedReviewStatePending
+	default:
+		return ""
+	}
+}
+
 func deriveReviewSyncState(pr *PR, reviews []PRReview) (string, int) {
 	pendingReviewCount := countPendingRequestedReviewers(pr)
 	if pendingReviewCount == 0 {
 		pendingReviewCount = countPendingReviews(reviews)
 	}
+
+	// Prefer GitHub's authoritative reviewDecision (available via gh CLI / GraphQL).
+	if pr != nil && pr.ReviewDecision != "" {
+		reviewState := mapReviewDecision(pr.ReviewDecision)
+		if reviewState != "" {
+			return reviewState, pendingReviewCount
+		}
+	}
+
+	// Fallback: compute from individual reviews (PAT client path).
 	reviewState := computeOverallReviewState(reviews)
 	if reviewState == "" && pendingReviewCount > 0 {
 		reviewState = computedReviewStatePending

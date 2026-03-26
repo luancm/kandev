@@ -99,6 +99,7 @@ type ghPR struct {
 	BaseRefName    string                `json:"baseRefName"`
 	IsDraft        bool                  `json:"isDraft"`
 	Mergeable      string                `json:"mergeable"`
+	ReviewDecision string                `json:"reviewDecision"`
 	Additions      int                   `json:"additions"`
 	Deletions      int                   `json:"deletions"`
 	CreatedAt      time.Time             `json:"createdAt"`
@@ -114,7 +115,7 @@ type ghPR struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,reviewDecision,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
 	if err != nil {
 		return nil, fmt.Errorf("get PR #%d: %w", number, err)
 	}
@@ -509,6 +510,7 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		Mergeable:          raw.Mergeable == "MERGEABLE",
 		Additions:          raw.Additions,
 		Deletions:          raw.Deletions,
+		ReviewDecision:     raw.ReviewDecision,
 		RequestedReviewers: convertGHRequestedReviewers(raw.ReviewRequests),
 		CreatedAt:          raw.CreatedAt,
 		UpdatedAt:          raw.UpdatedAt,

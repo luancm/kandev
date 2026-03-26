@@ -29,6 +29,7 @@ export type GitHubPR = {
   repo_name: string;
   draft: boolean;
   mergeable: boolean;
+  review_decision?: string; // APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, ""
   additions: number;
   deletions: number;
   requested_reviewers: RequestedReviewer[];
