@@ -153,6 +153,21 @@ function DescriptionSection({ body }: { body: string }) {
   );
 }
 
+/** Check whether the authenticated user's latest review on this PR is APPROVED. */
+function isCurrentUserApproved(reviews: PRReview[], username: string): boolean {
+  let latestTime = 0;
+  let latestState = "";
+  for (const r of reviews) {
+    if (r.author.toLowerCase() !== username.toLowerCase()) continue;
+    const t = new Date(r.created_at).getTime();
+    if (t > latestTime) {
+      latestTime = t;
+      latestState = r.state;
+    }
+  }
+  return latestState === "APPROVED";
+}
+
 function ApproveButton({
   taskPR,
   feedback,
@@ -164,19 +179,23 @@ function ApproveButton({
 }) {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const [localApproved, setLocalApproved] = useState(false);
+  const githubUsername = useAppStore((s) => s.githubStatus.status?.username);
 
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return null;
 
-  const alreadyApproved = feedback?.reviews.some(
-    (r) => r.state === "APPROVED" && r.author === feedback.pr.author_login,
-  );
-  if (alreadyApproved) return null;
+  // Don't show until feedback has loaded so we can check existing reviews.
+  if (!feedback) return null;
+
+  if (localApproved) return null;
+  if (githubUsername && isCurrentUserApproved(feedback.reviews, githubUsername)) return null;
 
   const handleApprove = async () => {
     setSubmitting(true);
     try {
       await submitPRReview(taskPR.owner, taskPR.repo, taskPR.pr_number, "APPROVE");
+      setLocalApproved(true);
       toast({ description: "PR approved", variant: "success" });
       onRefresh();
     } catch (e) {
