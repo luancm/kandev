@@ -152,6 +152,17 @@ function mapPRFilesToChangedFiles(files: PRDiffFile[]): PRChangedFile[] {
   });
 }
 
+export function filterUnpushedCommits<T extends { commit_sha: string }>(
+  localCommits: T[],
+  prCommits: { sha: string }[],
+): T[] {
+  if (prCommits.length === 0) return localCommits;
+  return localCommits.filter(
+    (c) =>
+      !prCommits.some((pr) => pr.sha.startsWith(c.commit_sha) || c.commit_sha.startsWith(pr.sha)),
+  );
+}
+
 function getBaseBranchDisplay(baseBranch: string | undefined): string {
   return baseBranch ? baseBranch.replace(/^origin\//, "") : "main";
 }
@@ -280,9 +291,11 @@ type TimelineProps = Pick<
   | "onForcePush"
 >;
 
-function TimelineLocalChanges(props: TimelineProps) {
+function TimelineLocalChanges(props: TimelineProps & { hasCommitsToShow?: boolean }) {
+  const hasCommitsToShow = props.hasCommitsToShow ?? props.hasCommits;
   const showStaged = props.hasUnstaged || props.hasStaged;
   const showCommits = props.hasStaged || props.hasCommits;
+  const showCommitsList = props.hasStaged || hasCommitsToShow;
   // Only show bulk-action spinners when no individual files are pending
   // (per-file ops set pendingStageFiles; bulk ops don't)
   const isBulkOp = props.pendingStageFiles.size === 0;
@@ -324,7 +337,7 @@ function TimelineLocalChanges(props: TimelineProps) {
           onDiscard={props.dialogs.handleDiscardClick}
         />
       )}
-      {showCommits && (
+      {showCommitsList && (
         <CommitsSection
           commits={props.commits}
           isLast={false}
@@ -360,7 +373,9 @@ function ChangesPanelTimeline(props: TimelineProps) {
     );
   }
 
-  const hasLocalChanges = props.hasUnstaged || props.hasStaged || props.hasCommits;
+  const unpushedCommits = filterUnpushedCommits(props.commits, props.prCommits);
+  const hasUnpushedCommits = unpushedCommits.length > 0;
+  const hasLocalChanges = props.hasUnstaged || props.hasStaged || hasUnpushedCommits;
 
   return (
     <div className="flex flex-col">
@@ -382,7 +397,11 @@ function ChangesPanelTimeline(props: TimelineProps) {
           />
         </div>
       )}
-      <TimelineLocalChanges {...props} />
+      <TimelineLocalChanges
+        {...props}
+        commits={unpushedCommits}
+        hasCommitsToShow={hasUnpushedCommits}
+      />
     </div>
   );
 }
