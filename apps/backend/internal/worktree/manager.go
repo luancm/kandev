@@ -278,7 +278,11 @@ func (m *Manager) createWorktree(ctx context.Context, req CreateRequest, baseRef
 		if err != nil {
 			return nil, err
 		}
-		startPoint = req.CheckoutBranch
+		if fetchResult.StartPoint != "" {
+			startPoint = fetchResult.StartPoint
+		} else {
+			startPoint = req.CheckoutBranch
+		}
 	}
 
 	worktreePath, err := m.config.WorktreePath(worktreeDirName)
@@ -372,6 +376,8 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 // addWorktreeForBranch creates the git worktree, trying the checkout branch directly first
 // and falling back to a suffixed branch if the checkout branch is already in use.
+// When a checkout branch is specified, it sets the upstream tracking branch to
+// origin/<checkout-branch> so ahead/behind counts are relative to the PR's remote branch.
 func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, worktreePath, fallbackBranch, startPoint, baseRef string) (string, string, error) {
 	if req.CheckoutBranch == "" {
 		id, err := m.gitAddWorktree(ctx, req.RepositoryPath, fallbackBranch, worktreePath, baseRef)
@@ -381,6 +387,7 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 	// Try checking out the PR branch directly (common case: single task per PR).
 	id, err := m.gitAddWorktreeExisting(ctx, req.RepositoryPath, req.CheckoutBranch, worktreePath)
 	if err == nil {
+		m.setUpstreamIfExists(ctx, worktreePath, req.CheckoutBranch, req.CheckoutBranch)
 		return id, req.CheckoutBranch, nil
 	}
 	if !errors.Is(err, ErrBranchCheckedOut) {
@@ -391,11 +398,36 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 	// using the original branch name with a random suffix.
 	suffixed := req.CheckoutBranch + "-" + SmallSuffix(3)
 	id, err = m.gitAddWorktree(ctx, req.RepositoryPath, suffixed, worktreePath, startPoint)
+	if err == nil {
+		m.setUpstreamIfExists(ctx, worktreePath, suffixed, req.CheckoutBranch)
+	}
 	return id, suffixed, err
+}
+
+// setUpstreamIfExists sets the upstream tracking branch for a worktree branch
+// to origin/<remoteBranch> if the remote-tracking ref exists. Non-fatal on failure.
+func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBranch, remoteBranch string) {
+	upstream := "origin/" + remoteBranch
+	// Verify the remote-tracking ref exists
+	verifyCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", upstream)
+	verifyCmd.Dir = worktreePath
+	if err := verifyCmd.Run(); err != nil {
+		return
+	}
+	cmd := exec.CommandContext(ctx, "git", "branch", "--set-upstream-to="+upstream, localBranch)
+	cmd.Dir = worktreePath
+	if out, err := cmd.CombinedOutput(); err != nil {
+		m.logger.Debug("failed to set upstream (non-fatal)",
+			zap.String("branch", localBranch),
+			zap.String("upstream", upstream),
+			zap.String("output", string(out)),
+			zap.Error(err))
+	}
 }
 
 // FetchBranchResult holds the outcome of a fetchBranchToLocal call.
 type FetchBranchResult struct {
+	StartPoint    string // Ref to use as worktree start point (e.g., "origin/branch"); empty = use local branch
 	Warning       string // User-friendly warning (non-empty when fell back to local)
 	WarningDetail string // Raw git command output for debugging
 }
@@ -417,6 +449,19 @@ func (m *Manager) fetchBranchToLocal(ctx context.Context, repoPath, branch strin
 	fetchCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch+":"+branch)
 	if output, err := fetchCmd.CombinedOutput(); err != nil {
 		outputStr := string(output)
+
+		// If the branch is checked out in another worktree, git refuses to update
+		// the local ref. Retry by fetching only the remote-tracking ref (origin/branch),
+		// which is always safe regardless of worktree state.
+		if isFetchRefusedCheckedOut(outputStr) {
+			retryCmd := m.newNonInteractiveGitCmd(fetchCtx, repoPath, "fetch", "origin", branch)
+			if _, retryErr := retryCmd.CombinedOutput(); retryErr == nil {
+				m.logger.Info("fetched via remote-tracking ref (branch checked out elsewhere)",
+					zap.String("branch", branch))
+				return &FetchBranchResult{StartPoint: "origin/" + branch}, nil
+			}
+		}
+
 		m.logger.Warn("fetch from origin failed, checking local branch",
 			zap.String("branch", branch),
 			zap.String("output", outputStr),

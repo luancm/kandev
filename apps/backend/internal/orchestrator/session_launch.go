@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -38,6 +39,7 @@ type LaunchSessionRequest struct {
 	Priority          int                    `json:"priority,omitempty"`
 	LaunchWorkspace   bool                   `json:"launch_workspace,omitempty"`
 	SkipMessageRecord bool                   `json:"skip_message_record,omitempty"`
+	AutoStart         bool                   `json:"auto_start,omitempty"`
 	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
@@ -118,7 +120,15 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 }
 
 // launchStart creates a new session and launches the agent.
+// If the request is an auto-start and the task's current workflow step does not
+// have auto_start_agent, the request is downgraded to a prepare (workspace-only,
+// no agent) to prevent unwanted auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	if req.AutoStart && s.shouldBlockAutoStart(ctx, req) {
+		req.LaunchWorkspace = true
+		return s.launchPrepare(ctx, req)
+	}
+
 	execution, err := s.StartTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
@@ -128,6 +138,36 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		return nil, err
 	}
 	return executionToLaunchResponse(req.TaskID, execution), nil
+}
+
+// shouldBlockAutoStart checks whether the task's workflow step allows auto-starting
+// the agent. Returns true when the step exists but does not have auto_start_agent
+// in its on_enter events. Tasks without a workflow step are never blocked.
+func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRequest) bool {
+	if s.workflowStepGetter == nil {
+		return false
+	}
+
+	task, err := s.repo.GetTask(ctx, req.TaskID)
+	if err != nil || task.WorkflowStepID == "" {
+		return false
+	}
+
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil {
+		return false
+	}
+
+	if step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+		return false
+	}
+
+	s.logger.Info("auto-start downgraded to prepare: step lacks auto_start_agent",
+		zap.String("task_id", req.TaskID),
+		zap.String("workflow_step_id", task.WorkflowStepID),
+		zap.String("step_name", step.Name))
+
+	return true
 }
 
 // launchStartCreated starts agent execution on an existing CREATED session.

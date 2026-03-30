@@ -1,6 +1,12 @@
 "use client";
 
-import { IconGitCommit, IconArrowBackUp, IconPencil, IconHistoryToggle } from "@tabler/icons-react";
+import {
+  IconGitCommit,
+  IconArrowBackUp,
+  IconPencil,
+  IconHistoryToggle,
+  IconArrowUp,
+} from "@tabler/icons-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -15,6 +21,7 @@ export type CommitItem = {
   commit_message: string;
   insertions: number;
   deletions: number;
+  pushed?: boolean;
 };
 
 /** Context menu for commit items */
@@ -179,7 +186,19 @@ export function CommitRow({
           }
         }}
       >
-        <IconGitCommit className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+        <span
+          className="shrink-0"
+          title={commit.pushed === true ? "Pushed to remote" : "Local commit (not yet pushed)"}
+        >
+          <span className="sr-only">
+            {commit.pushed === true ? "Pushed commit" : "Unpushed commit"}
+          </span>
+          {commit.pushed === true ? (
+            <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <IconArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-emerald-500" />
+          )}
+        </span>
         <code className="font-mono text-muted-foreground text-[11px]">
           {commit.commit_sha.slice(0, 7)}
         </code>
