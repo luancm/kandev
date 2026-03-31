@@ -2,6 +2,31 @@
 
 All notable changes to Kandev.
 
+## 0.26 - 2026-03-31
+
+### Features
+
+- move PR monitoring to backend with lightweight polling ([#502](https://github.com/kdlbs/kandev/pull/502))
+- unified commit list and dockview panel fix ([#500](https://github.com/kdlbs/kandev/pull/500))
+- fix bottom padding and add font family setting ([#489](https://github.com/kdlbs/kandev/pull/489))
+- add proceed button to advance task to next workflow step ([#486](https://github.com/kdlbs/kandev/pull/486))
+- add dedicated Utility Agents settings page ([#484](https://github.com/kdlbs/kandev/pull/484))
+- introduce subtasks, allow sessions to task reuse executor ([#419](https://github.com/kdlbs/kandev/pull/419))
+
+### Bug Fixes
+
+- break infinite PR sync loop and improve diff panel targeting ([#503](https://github.com/kdlbs/kandev/pull/503))
+- invalidate diff expansion cache when file changes ([#501](https://github.com/kdlbs/kandev/pull/501))
+- deduplicate agent and session tabs in task view ([#496](https://github.com/kdlbs/kandev/pull/496))
+- show both send and cancel buttons when agent is busy ([#487](https://github.com/kdlbs/kandev/pull/487))
+- hide duplicate local commits when PR commits exist ([#494](https://github.com/kdlbs/kandev/pull/494))
+- reliable PR-task association across all launch paths ([#485](https://github.com/kdlbs/kandev/pull/485))
+- complete all non-terminal tool calls when turn ends ([#488](https://github.com/kdlbs/kandev/pull/488))
+
+### Refactoring
+
+- reorganize E2E tests into feature-based subdirectories ([#499](https://github.com/kdlbs/kandev/pull/499))
+
 ## 0.25 - 2026-03-29
 
 ### Features
