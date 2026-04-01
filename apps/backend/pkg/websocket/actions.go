@@ -6,11 +6,12 @@ const (
 	ActionHealthCheck = "health.check"
 
 	// Workflow actions
-	ActionWorkflowList   = "workflow.list"
-	ActionWorkflowCreate = "workflow.create"
-	ActionWorkflowGet    = "workflow.get"
-	ActionWorkflowUpdate = "workflow.update"
-	ActionWorkflowDelete = "workflow.delete"
+	ActionWorkflowList    = "workflow.list"
+	ActionWorkflowCreate  = "workflow.create"
+	ActionWorkflowGet     = "workflow.get"
+	ActionWorkflowUpdate  = "workflow.update"
+	ActionWorkflowDelete  = "workflow.delete"
+	ActionWorkflowReorder = "workflow.reorder"
 
 	// Workspace actions
 	ActionWorkspaceList   = "workspace.list"

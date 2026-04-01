@@ -170,6 +170,15 @@ export class ApiClient {
     });
   }
 
+  async reorderWorkflows(
+    workspaceId: string,
+    workflowIds: string[],
+  ): Promise<{ success: boolean }> {
+    return this.request("PUT", `/api/v1/workspaces/${workspaceId}/workflows/reorder`, {
+      workflow_ids: workflowIds,
+    });
+  }
+
   async createTask(
     workspaceId: string,
     title: string,

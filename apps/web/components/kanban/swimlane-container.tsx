@@ -1,10 +1,26 @@
 "use client";
 
-import { type ComponentType, useMemo } from "react";
+import { type ComponentType, type HTMLAttributes, useCallback, useMemo } from "react";
+import {
+  DndContext,
+  closestCenter,
+  type DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/components/state-provider";
 import { useSwimlaneCollapse } from "@/hooks/domains/kanban/use-swimlane-collapse";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { filterTasksByRepositories, mapSelectedRepositoryIds } from "@/lib/kanban/filters";
+import { reorderWorkflows } from "@/lib/api";
 import { SwimlaneSection } from "./swimlane-section";
 import {
   getViewByStoredValue,
@@ -85,6 +101,7 @@ type WorkflowItemProps = {
   tasks: Task[];
   ViewComponent: ComponentType<ViewContentProps>;
   hideHeader: boolean;
+  isSortable: boolean;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
   onPreviewTask: (task: Task) => void;
@@ -98,7 +115,30 @@ type WorkflowItemProps = {
   showMaximizeButton?: boolean;
 };
 
-function WorkflowItem({
+function SortableWorkflowItem({ wf, hideHeader, isSortable, ...rest }: WorkflowItemProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: wf.id,
+    disabled: !isSortable,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  const dragHandleProps = isSortable && !hideHeader ? { ...attributes, ...listeners } : undefined;
+  return (
+    <div ref={setNodeRef} style={style}>
+      <WorkflowItemContent
+        wf={wf}
+        hideHeader={hideHeader}
+        dragHandleProps={dragHandleProps}
+        {...rest}
+      />
+    </div>
+  );
+}
+
+function WorkflowItemContent({
   wf,
   snapshot,
   tasks,
@@ -106,8 +146,9 @@ function WorkflowItem({
   hideHeader,
   isCollapsed,
   onToggleCollapse,
+  dragHandleProps,
   ...viewProps
-}: WorkflowItemProps) {
+}: Omit<WorkflowItemProps, "isSortable"> & { dragHandleProps?: HTMLAttributes<HTMLDivElement> }) {
   const steps = [...snapshot.steps].sort((a, b) => a.position - b.position);
   const content = <ViewComponent workflowId={wf.id} steps={steps} tasks={tasks} {...viewProps} />;
 
@@ -121,10 +162,43 @@ function WorkflowItem({
       taskCount={tasks.length}
       isCollapsed={isCollapsed}
       onToggleCollapse={onToggleCollapse}
+      dragHandleProps={dragHandleProps}
     >
       {content}
     </SwimlaneSection>
   );
+}
+
+function useWorkflowReorder(
+  orderedWorkflows: { id: string; name: string }[],
+  workflowFilter: string | null,
+) {
+  const reorderWorkflowItems = useAppStore((state) => state.reorderWorkflowItems);
+  const workflows = useAppStore((state) => state.workflows.items);
+  const workspaceId = workflows[0]?.workspaceId;
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const canSort = !workflowFilter && orderedWorkflows.length > 1;
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = orderedWorkflows.findIndex((wf) => wf.id === active.id);
+      const newIndex = orderedWorkflows.findIndex((wf) => wf.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const reordered = arrayMove(orderedWorkflows, oldIndex, newIndex);
+      reorderWorkflowItems(reordered.map((wf) => wf.id));
+      if (workspaceId) {
+        reorderWorkflows(
+          workspaceId,
+          reordered.map((wf) => wf.id),
+        ).catch(() => {});
+      }
+    },
+    [orderedWorkflows, reorderWorkflowItems, workspaceId],
+  );
+
+  return { sensors, canSort, handleDragEnd };
 }
 
 export function SwimlaneContainer({
@@ -168,6 +242,11 @@ export function SwimlaneContainer({
   }, [workflowFilter, workflows, snapshots]);
 
   const getFilteredTasks = (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery);
+  const {
+    sensors: workflowSensors,
+    canSort: canSortWorkflows,
+    handleDragEnd: handleWorkflowDragEnd,
+  } = useWorkflowReorder(orderedWorkflows, workflowFilter);
 
   const emptyMessage = getEmptyMessage(
     isLoading,
@@ -184,37 +263,47 @@ export function SwimlaneContainer({
 
   const ViewComponent = (getViewByStoredValue(viewMode) ?? getDefaultView()).component;
   const hideHeaders = isMobile && (workflowFilter !== null || orderedWorkflows.length === 1);
-  const containerClass = isMobile
-    ? "flex-1 min-h-0 overflow-y-auto pb-4 space-y-3"
-    : "flex-1 min-h-0 overflow-y-auto px-4 pb-4 space-y-3";
+  const cls = `flex-1 min-h-0 overflow-y-auto${isMobile ? "" : " px-4"} pb-4 space-y-3`;
 
   return (
-    <div className={containerClass} data-testid="swimlane-container">
-      {visibleWorkflows.map((wf) => {
-        const snapshot = snapshots[wf.id];
-        if (!snapshot) return null;
-        return (
-          <WorkflowItem
-            key={wf.id}
-            wf={wf}
-            snapshot={snapshot}
-            tasks={getFilteredTasks(wf.id)}
-            ViewComponent={ViewComponent}
-            hideHeader={hideHeaders}
-            isCollapsed={isCollapsed(wf.id)}
-            onToggleCollapse={() => toggleCollapse(wf.id)}
-            onPreviewTask={onPreviewTask}
-            onOpenTask={onOpenTask}
-            onEditTask={onEditTask}
-            onDeleteTask={onDeleteTask}
-            onArchiveTask={onArchiveTask}
-            onMoveError={onMoveError}
-            deletingTaskId={deletingTaskId}
-            archivingTaskId={archivingTaskId}
-            showMaximizeButton={showMaximizeButton}
-          />
-        );
-      })}
-    </div>
+    <DndContext
+      sensors={workflowSensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleWorkflowDragEnd}
+    >
+      <SortableContext
+        items={visibleWorkflows.map((wf) => wf.id)}
+        strategy={verticalListSortingStrategy}
+      >
+        <div className={cls} data-testid="swimlane-container">
+          {visibleWorkflows.map((wf) => {
+            const snapshot = snapshots[wf.id];
+            if (!snapshot) return null;
+            return (
+              <SortableWorkflowItem
+                key={wf.id}
+                wf={wf}
+                snapshot={snapshot}
+                tasks={getFilteredTasks(wf.id)}
+                ViewComponent={ViewComponent}
+                hideHeader={hideHeaders}
+                isSortable={canSortWorkflows}
+                isCollapsed={isCollapsed(wf.id)}
+                onToggleCollapse={() => toggleCollapse(wf.id)}
+                onPreviewTask={onPreviewTask}
+                onOpenTask={onOpenTask}
+                onEditTask={onEditTask}
+                onDeleteTask={onDeleteTask}
+                onArchiveTask={onArchiveTask}
+                onMoveError={onMoveError}
+                deletingTaskId={deletingTaskId}
+                archivingTaskId={archivingTaskId}
+                showMaximizeButton={showMaximizeButton}
+              />
+            );
+          })}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }
