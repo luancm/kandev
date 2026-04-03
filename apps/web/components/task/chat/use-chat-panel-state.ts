@@ -21,6 +21,7 @@ import {
   usePendingPRFeedback,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
+import { useAutoDisablePlanMode, usePlanLayoutHandlers } from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
@@ -60,18 +61,22 @@ type AutoApplyPlanLayoutOpts = {
   resolvedSessionId: string | null;
   taskId: string | null;
   sessionMetaPlanMode: boolean;
+  currentStepHasPlanMode: boolean;
   setActiveDocument: (sid: string, doc: ActiveDocument | null) => void;
   applyBuiltInPreset: (preset: BuiltInPreset) => void;
   setPlanMode: (sid: string, enabled: boolean) => void;
   addContextFile: (sid: string, file: { path: string; name: string }) => void;
 };
 
-/** Auto-apply plan layout when session metadata has plan_mode enabled. */
+/** Auto-apply plan layout when session metadata has plan_mode enabled AND the current
+ *  step actually configures enable_plan_mode. The step check guards against stale
+ *  sessionMetaPlanMode from deepMerge hydration preserving deleted metadata keys. */
 function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   const {
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
+    currentStepHasPlanMode,
     setActiveDocument,
     applyBuiltInPreset,
     setPlanMode,
@@ -80,8 +85,17 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
   const autoAppliedPlanSessionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!resolvedSessionId || !taskId) return;
+    // Reset the guard when plan mode is disabled so future plan-mode steps
+    // in the same session can be auto-applied (e.g. after proceeding away and back).
+    if (!sessionMetaPlanMode && autoAppliedPlanSessionRef.current === resolvedSessionId) {
+      autoAppliedPlanSessionRef.current = null;
+      return;
+    }
     if (autoAppliedPlanSessionRef.current === resolvedSessionId) return;
-    if (sessionMetaPlanMode) {
+    // Only auto-apply if both the session metadata AND the current step agree on plan mode.
+    // sessionMetaPlanMode can be stale (deepMerge hydration preserves deleted keys),
+    // so we cross-check with the step's actual configuration.
+    if (sessionMetaPlanMode && currentStepHasPlanMode) {
       autoAppliedPlanSessionRef.current = resolvedSessionId;
       setActiveDocument(resolvedSessionId, { type: "plan", taskId });
       applyBuiltInPreset("plan");
@@ -92,6 +106,7 @@ function useAutoApplyPlanLayout(opts: AutoApplyPlanLayoutOpts) {
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
+    currentStepHasPlanMode,
     setActiveDocument,
     applyBuiltInPreset,
     setPlanMode,
@@ -115,13 +130,19 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
   const planModeFromStore = useAppStore((state) =>
     resolvedSessionId ? (state.chatInput.planModeBySessionId[resolvedSessionId] ?? false) : false,
   );
-
   const sessionMetaPlanMode = useAppStore((state) =>
     resolvedSessionId
       ? state.taskSessions.items[resolvedSessionId]?.metadata?.plan_mode === true
       : false,
   );
-
+  const currentStepHasPlanMode = useAppStore((s) => {
+    if (!taskId) return false;
+    const task = s.kanban.tasks.find((t) => t.id === taskId);
+    const stepId = task?.workflowStepId;
+    if (!stepId) return false;
+    const step = s.kanban.steps.find((st) => st.id === stepId);
+    return step?.events?.on_enter?.some((a) => a.type === "enable_plan_mode") ?? false;
+  });
   const planModeEnabled = planModeFromStore;
   const planLayoutVisible = activeDocument?.type === "plan";
 
@@ -138,68 +159,37 @@ export function usePlanMode(resolvedSessionId: string | null, taskId: string | n
     resolvedSessionId,
     taskId,
     sessionMetaPlanMode,
+    currentStepHasPlanMode,
     setActiveDocument,
     applyBuiltInPreset,
     setPlanMode,
     addContextFile,
   });
 
+  useAutoDisablePlanMode({
+    resolvedSessionId,
+    taskId,
+    sessionMetaPlanMode,
+    planModeFromStore,
+    applyBuiltInPreset,
+    closeDocument,
+    setActiveDocument,
+    setPlanMode,
+    removeContextFile,
+  });
+
   const refocusChatAfterLayout = useRefocusChatAfterLayout();
-
-  // Toggle only the plan layout (plan panel + preset) without changing chat input plan mode state
-  const togglePlanLayout = useCallback(
-    (show: boolean) => {
-      if (!resolvedSessionId || !taskId) return;
-      if (show) {
-        setActiveDocument(resolvedSessionId, { type: "plan", taskId });
-        applyBuiltInPreset("plan");
-      } else {
-        applyBuiltInPreset("default");
-        closeDocument(resolvedSessionId);
-        setActiveDocument(resolvedSessionId, null);
-      }
-      refocusChatAfterLayout();
-    },
-    [
-      resolvedSessionId,
-      taskId,
-      setActiveDocument,
-      applyBuiltInPreset,
-      closeDocument,
-      refocusChatAfterLayout,
-    ],
-  );
-
-  // Full plan mode toggle: layout + chat input state (context file, border, submit style)
-  const handlePlanModeChange = useCallback(
-    (enabled: boolean) => {
-      if (!resolvedSessionId || !taskId) return;
-      if (enabled) {
-        setActiveDocument(resolvedSessionId, { type: "plan", taskId });
-        applyBuiltInPreset("plan");
-        setPlanMode(resolvedSessionId, true);
-        addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-      } else {
-        applyBuiltInPreset("default");
-        closeDocument(resolvedSessionId);
-        setActiveDocument(resolvedSessionId, null);
-        setPlanMode(resolvedSessionId, false);
-        removeContextFile(resolvedSessionId, PLAN_CONTEXT_PATH);
-      }
-      refocusChatAfterLayout();
-    },
-    [
-      resolvedSessionId,
-      taskId,
-      setActiveDocument,
-      applyBuiltInPreset,
-      closeDocument,
-      setPlanMode,
-      addContextFile,
-      removeContextFile,
-      refocusChatAfterLayout,
-    ],
-  );
+  const { togglePlanLayout, handlePlanModeChange } = usePlanLayoutHandlers({
+    resolvedSessionId,
+    taskId,
+    setActiveDocument,
+    applyBuiltInPreset,
+    closeDocument,
+    setPlanMode,
+    addContextFile,
+    removeContextFile,
+    refocusChatAfterLayout,
+  });
 
   return {
     planModeEnabled,
