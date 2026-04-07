@@ -2,6 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -10,7 +14,91 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// gitSnapshotPersistInterval is the minimum time between persisted live git
+// status snapshots for a single session when the underlying status hasn't
+// changed. Writes still happen immediately when the status hash changes.
+const gitSnapshotPersistInterval = 30 * time.Second
+
+// gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
+// backend with many sessions can't grow it without limit. When the cache is
+// full and a new session arrives, the oldest entry by lastWrite is evicted.
+const gitSnapshotCacheMaxEntries = 4096
+
+type gitSnapshotCacheEntry struct {
+	hash      string
+	lastWrite time.Time
+}
+
+// gitSnapshotCache throttles per-session writes to the live git snapshot cache
+// table. It is process-local — first event after a restart will rewrite the
+// row, which is fine because UpsertLatestLiveGitSnapshot is idempotent.
+type gitSnapshotCache struct {
+	mu      sync.Mutex
+	byID    map[string]gitSnapshotCacheEntry
+	maxSize int
+}
+
+func newGitSnapshotCache() *gitSnapshotCache {
+	return &gitSnapshotCache{
+		byID:    make(map[string]gitSnapshotCacheEntry),
+		maxSize: gitSnapshotCacheMaxEntries,
+	}
+}
+
+// shouldWrite returns true if the new hash should be persisted now. Writes
+// happen on hash change, or when the previous write is older than
+// gitSnapshotPersistInterval (defensive: makes the cache eventually consistent
+// even if hashing misses something).
+func (c *gitSnapshotCache) shouldWrite(sessionID, hash string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prev, ok := c.byID[sessionID]
+	if ok && prev.hash == hash && now.Sub(prev.lastWrite) < gitSnapshotPersistInterval {
+		return false
+	}
+	if !ok && c.maxSize > 0 && len(c.byID) >= c.maxSize {
+		c.evictOldestLocked()
+	}
+	c.byID[sessionID] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
+	return true
+}
+
+// evictOldestLocked drops the entry with the oldest lastWrite. Caller must
+// hold c.mu. O(n) over the cache; only invoked when the cache is full, which
+// is rare in practice.
+func (c *gitSnapshotCache) evictOldestLocked() {
+	var oldestID string
+	var oldestAt time.Time
+	for id, entry := range c.byID {
+		if oldestID == "" || entry.lastWrite.Before(oldestAt) {
+			oldestID = id
+			oldestAt = entry.lastWrite
+		}
+	}
+	if oldestID != "" {
+		delete(c.byID, oldestID)
+	}
+}
+
+// forget removes a session's cached entry. Called when a session is deleted
+// so the cache doesn't retain stale state for sessions that will never
+// receive another git event.
+func (c *gitSnapshotCache) forget(sessionID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.byID, sessionID)
+}
+
+func gitStatusHash(s *lifecycle.GitStatusData) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%d|%d|%d|%d",
+		s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
+		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 // handleGitEvent handles unified git events and dispatches to appropriate handler
 func (s *Service) handleGitEvent(ctx context.Context, data watcher.GitEventData) {
@@ -67,6 +155,54 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
 	s.trackPushAndAssociatePR(ctx, data)
+
+	// Persist a throttled cache of the live status so the sidebar diff badge
+	// works for tasks whose executor isn't currently running (and across
+	// backend restarts). Best-effort: errors are logged and swallowed.
+	s.persistGitStatusSnapshot(ctx, data)
+}
+
+// persistGitStatusSnapshot writes a single cached "live monitor" snapshot per
+// session, throttled by gitSnapshotCache. The cached row is read by
+// appendDBSnapshotGitStatus when no live execution is available.
+func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.GitEventData) {
+	if s.repo == nil || data.SessionID == "" || data.Status == nil {
+		return
+	}
+	if s.gitSnapshotCache == nil {
+		return
+	}
+	hash := gitStatusHash(data.Status)
+	if !s.gitSnapshotCache.shouldWrite(data.SessionID, hash, time.Now()) {
+		return
+	}
+
+	st := data.Status
+	snapshot := &models.GitSnapshot{
+		SessionID:    data.SessionID,
+		Branch:       st.Branch,
+		RemoteBranch: st.RemoteBranch,
+		HeadCommit:   st.HeadCommit,
+		BaseCommit:   st.BaseCommit,
+		Ahead:        st.Ahead,
+		Behind:       st.Behind,
+		Files:        nil, // intentional: badge only needs totals
+		Metadata: map[string]interface{}{
+			"branch_additions": st.BranchAdditions,
+			"branch_deletions": st.BranchDeletions,
+			"modified":         st.Modified,
+			"added":            st.Added,
+			"deleted":          st.Deleted,
+			"untracked":        st.Untracked,
+			"renamed":          st.Renamed,
+			"timestamp":        data.Timestamp,
+		},
+	}
+	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
+		s.logger.Debug("failed to persist live git snapshot",
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+	}
 }
 
 // trackPushAndAssociatePR detects git pushes by tracking the "ahead" count.
