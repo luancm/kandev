@@ -550,26 +550,14 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 	}
 }
 
-// startAgentProcessOnResume starts the agent process asynchronously after a session resume,
-// syncing the task state (REVIEW or unchanged) on success.
+// startAgentProcessOnResume starts the agent process asynchronously after a session resume.
+// Task state is managed by workflow triggers and stream handlers elsewhere; this callback
+// just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
-		// Agent resumed successfully - sync task state with session state.
-		if session.State == models.TaskSessionStateWaitingForInput {
-			if updateErr := e.updateTaskState(updCtx, taskID, v1.TaskStateReview); updateErr != nil {
-				e.logger.Warn("failed to update task state to REVIEW after resume",
-					zap.String("task_id", taskID),
-					zap.Error(updateErr))
-			} else {
-				e.logger.Debug("task state synced to REVIEW after resume (session waiting for input)",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID))
-			}
-		} else {
-			e.logger.Debug("agent resumed successfully, task state unchanged",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.String("session_state", string(session.State)))
-		}
+		e.logger.Debug("agent resumed successfully",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("session_state", string(session.State)))
 	})
 }

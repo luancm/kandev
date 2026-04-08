@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
+import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 
 type DiffStats = {
@@ -57,6 +58,15 @@ function formatRelativeTime(dateString: string): string {
   return date.toLocaleDateString();
 }
 
+// Delegates to the shared classifier in task-switcher so the sidebar bucket
+// and the per-task running spinner always agree. A task whose workflow state
+// is REVIEW or COMPLETED must not render as "running" when its session
+// transiently cycles through STARTING/RUNNING (e.g. during an agent auto-
+// resume after a backend restart).
+function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState): boolean {
+  return classifyTask(sessionState, state) === "in_progress";
+}
+
 function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
@@ -80,14 +90,7 @@ function TaskStateIcon({
       />
     );
   }
-  const isReview =
-    sessionState === "WAITING_FOR_INPUT" ||
-    sessionState === "COMPLETED" ||
-    sessionState === "FAILED" ||
-    sessionState === "CANCELLED" ||
-    state === "REVIEW" ||
-    state === "COMPLETED";
-  if (isReview) {
+  if (classifyTask(sessionState, state) === "review") {
     return (
       <IconCircleCheck
         data-testid="task-state-review"
@@ -234,11 +237,7 @@ export const TaskItem = memo(function TaskItem({
   prInfo,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const isInProgress =
-    state === "IN_PROGRESS" ||
-    state === "SCHEDULING" ||
-    sessionState === "STARTING" ||
-    sessionState === "RUNNING";
+  const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
 
   return (
