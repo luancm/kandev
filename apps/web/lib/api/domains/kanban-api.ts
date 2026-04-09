@@ -121,6 +121,13 @@ export async function archiveTask(taskId: string, options?: ApiRequestOptions) {
   });
 }
 
+export async function unarchiveTask(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<void>(`/api/v1/tasks/${taskId}/unarchive`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 export async function listTasksByWorkspace(
   workspaceId: string,
   params: { page?: number; pageSize?: number; query?: string; includeArchived?: boolean } = {},

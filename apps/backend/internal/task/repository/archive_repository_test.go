@@ -47,6 +47,138 @@ func TestSQLiteRepository_ArchiveTask(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_UnarchiveTask(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Test Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Task One"})
+
+	// Archive first
+	err := repo.ArchiveTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("failed to archive task: %v", err)
+	}
+
+	// Verify archived
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if task.ArchivedAt == nil {
+		t.Fatal("expected archived_at to be set")
+	}
+
+	// Unarchive
+	err = repo.UnarchiveTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("failed to unarchive task: %v", err)
+	}
+
+	// Verify unarchived
+	task, err = repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("failed to get task after unarchive: %v", err)
+	}
+	if task.ArchivedAt != nil {
+		t.Fatal("expected archived_at to be nil after unarchive")
+	}
+
+	// Unarchive non-archived task should fail
+	err = repo.UnarchiveTask(ctx, "task-1")
+	if err == nil {
+		t.Error("expected error when unarchiving non-archived task")
+	}
+
+	// Unarchive non-existent task should fail
+	err = repo.UnarchiveTask(ctx, "nonexistent")
+	if err == nil {
+		t.Error("expected error when unarchiving nonexistent task")
+	}
+}
+
+func TestSQLiteRepository_UnarchiveTask_ReappearsInLists(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Test Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Task One"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Task Two"})
+
+	// Archive task-1
+	_ = repo.ArchiveTask(ctx, "task-1")
+
+	// Verify only 1 task in list
+	tasks, err := repo.ListTasks(ctx, "wf-1")
+	if err != nil {
+		t.Fatalf("failed to list tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task after archive, got %d", len(tasks))
+	}
+
+	// Unarchive task-1
+	_ = repo.UnarchiveTask(ctx, "task-1")
+
+	// Verify both tasks appear again
+	tasks, err = repo.ListTasks(ctx, "wf-1")
+	if err != nil {
+		t.Fatalf("failed to list tasks after unarchive: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks after unarchive, got %d", len(tasks))
+	}
+
+	// CountTasksByWorkflow should include unarchived task
+	count, err := repo.CountTasksByWorkflow(ctx, "wf-1")
+	if err != nil {
+		t.Fatalf("failed to count tasks: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected count 2 after unarchive, got %d", count)
+	}
+}
+
+func TestSQLiteRepository_UnarchiveTask_ResetsUpdatedAt(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Test Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Task One"})
+
+	// Archive task
+	_ = repo.ArchiveTask(ctx, "task-1")
+
+	// Backdate updated_at to simulate old archive
+	oldTime := time.Now().Add(-48 * time.Hour)
+	_, _ = repo.DB().Exec(`UPDATE tasks SET updated_at = ? WHERE id = ?`, oldTime, "task-1")
+
+	beforeUnarchive := time.Now().UTC()
+	time.Sleep(time.Millisecond) // ensure time difference
+
+	// Unarchive
+	err := repo.UnarchiveTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("failed to unarchive task: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+
+	// updated_at should be recent (after beforeUnarchive), not the old backdated time
+	if task.UpdatedAt.Before(beforeUnarchive) {
+		t.Errorf("expected updated_at to be reset on unarchive, got %v (before %v)", task.UpdatedAt, beforeUnarchive)
+	}
+}
+
 func TestSQLiteRepository_ArchiveTask_ExcludesFromListTasks(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { archiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
+import { archiveTask, unarchiveTask, deleteTask, moveTask, updateTask } from "@/lib/api";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 
@@ -18,11 +18,15 @@ export function useTaskActions() {
     return archiveTask(taskId);
   }, []);
 
+  const unarchiveTaskById = useCallback(async (taskId: string) => {
+    return unarchiveTask(taskId);
+  }, []);
+
   const renameTaskById = useCallback(async (taskId: string, title: string) => {
     return updateTask(taskId, { title });
   }, []);
 
-  return { moveTaskById, deleteTaskById, archiveTaskById, renameTaskById };
+  return { moveTaskById, deleteTaskById, archiveTaskById, unarchiveTaskById, renameTaskById };
 }
 
 /**

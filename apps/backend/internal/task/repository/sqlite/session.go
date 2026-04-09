@@ -1056,3 +1056,13 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 	}
 	return nil
 }
+
+
+// ClearSessionPrimary clears the is_primary flag on a single session.
+func (r *Repository) ClearSessionPrimary(ctx context.Context, sessionID string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE id = ?
+	`), now, sessionID)
+	return err
+}

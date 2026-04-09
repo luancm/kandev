@@ -430,6 +430,101 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	return nil
 }
 
+// UnarchiveTask restores an archived task by clearing its archived_at timestamp.
+// The task reappears on the board in its original workflow step (or the start step
+// if the original step no longer exists). No worktrees or sessions are recreated —
+// the user must start a new session to resume work.
+func (s *Service) UnarchiveTask(ctx context.Context, id string) error {
+	// 1. Get task and verify it exists and is archived
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if task.ArchivedAt == nil {
+		return fmt.Errorf("task is not archived: %s", id)
+	}
+
+	// 2. Validate workflow_step_id still exists; fall back to start step if not
+	if s.workflowStepGetter != nil {
+		_, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if err != nil && s.startStepResolver != nil {
+			startStepID, resolveErr := s.startStepResolver.ResolveStartStep(ctx, task.WorkflowID)
+			if resolveErr != nil {
+				s.logger.Warn("failed to resolve start step for unarchive, keeping original step",
+					zap.String("task_id", id),
+					zap.String("workflow_id", task.WorkflowID),
+					zap.Error(resolveErr))
+			} else {
+				task.WorkflowStepID = startStepID
+				if updateErr := s.tasks.UpdateTask(ctx, task); updateErr != nil {
+					return fmt.Errorf("failed to update task workflow step: %w", updateErr)
+				}
+			}
+		}
+	}
+
+	// 3. Cancel any non-terminal sessions and clear is_primary on ALL sessions.
+	// Archive stops agents and deletes ExecutorRunning records, but sessions
+	// may remain in WAITING_FOR_INPUT/STARTING/RUNNING — making them look
+	// resumable when they aren't. Mark them CANCELLED so the UI treats them
+	// as finished and prompts the user to start a new session.
+	// Also clear is_primary so the task page doesn't auto-select a stale session
+	// whose environment/worktree was deleted during archive.
+	sessions, err := s.sessions.ListTaskSessions(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list sessions for unarchive cleanup",
+			zap.String("task_id", id), zap.Error(err))
+	} else {
+		for _, sess := range sessions {
+			if sess.State == models.TaskSessionStateWaitingForInput ||
+				sess.State == models.TaskSessionStateStarting ||
+				sess.State == models.TaskSessionStateRunning ||
+				sess.State == models.TaskSessionStateCreated {
+				if updateErr := s.sessions.UpdateTaskSessionState(ctx, sess.ID, models.TaskSessionStateCancelled, ""); updateErr != nil {
+					s.logger.Warn("failed to cancel stale session on unarchive",
+						zap.String("session_id", sess.ID), zap.Error(updateErr))
+				}
+			}
+			// Clear is_primary so SSR doesn't load a stale cancelled session
+			if sess.IsPrimary {
+				if updateErr := s.sessions.ClearSessionPrimary(ctx, sess.ID); updateErr != nil {
+					s.logger.Warn("failed to clear primary flag on unarchive",
+						zap.String("session_id", sess.ID), zap.Error(updateErr))
+				}
+			}
+		}
+	}
+
+	// 4. Delete stale TaskEnvironment records. Archive deletes worktree
+	// directories but leaves TaskEnvironment DB records pointing to deleted
+	// paths. If not cleaned, the executor reuses the stale worktree ID
+	// when starting new sessions, causing failures.
+	if s.taskEnvironments != nil {
+		if err := s.taskEnvironments.DeleteTaskEnvironmentsByTask(ctx, id); err != nil {
+			s.logger.Warn("failed to delete stale task environments on unarchive",
+				zap.String("task_id", id), zap.Error(err))
+		}
+	}
+
+	// 5. Clear archived_at in DB (also resets updated_at for auto-archive timer)
+	if err := s.tasks.UnarchiveTask(ctx, id); err != nil {
+		return err
+	}
+
+	// 6. Re-read task for updated fields
+	task, err = s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// 7. Publish task.updated event so frontend adds back to board
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	s.logger.Info("task unarchived", zap.String("task_id", id))
+
+	return nil
+}
+
 // DeleteTask deletes a task and publishes a task.deleted event.
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.

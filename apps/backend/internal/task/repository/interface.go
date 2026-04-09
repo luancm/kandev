@@ -28,6 +28,7 @@ type TaskRepository interface {
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
+	UnarchiveTask(ctx context.Context, id string) error
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error)
@@ -107,6 +108,7 @@ type SessionRepository interface {
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
 	GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
+	ClearSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 }

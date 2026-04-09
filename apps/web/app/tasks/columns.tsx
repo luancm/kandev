@@ -3,7 +3,7 @@
 import type { Row, ColumnDef } from "@tanstack/react-table";
 import type { Task, Workflow, WorkflowStep, Repository } from "@/lib/types/http";
 import Link from "next/link";
-import { IconTrash, IconLoader, IconArchive } from "@tabler/icons-react";
+import { IconTrash, IconLoader, IconArchive, IconArchiveOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -20,6 +20,7 @@ interface ColumnsConfig {
   steps: WorkflowStep[];
   repositories: Repository[];
   onArchive: (taskId: string) => void;
+  onUnarchive: (taskId: string) => void;
   onDelete: (taskId: string) => void;
   deletingTaskId: string | null;
 }
@@ -58,34 +59,52 @@ function TitleCell({
 
 type ActionsCtx = {
   onArchive: (id: string) => void;
+  onUnarchive: (id: string) => void;
   onDelete: (id: string) => void;
   deletingTaskId: string | null;
 };
 
+function ArchiveButton({
+  taskId,
+  isArchived,
+  ctx,
+}: {
+  taskId: string;
+  isArchived: boolean;
+  ctx: ActionsCtx;
+}) {
+  const icon = isArchived ? (
+    <IconArchiveOff className="h-3.5 w-3.5 text-muted-foreground" />
+  ) : (
+    <IconArchive className="h-3.5 w-3.5 text-muted-foreground" />
+  );
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="cursor-pointer h-7 w-7 p-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isArchived) ctx.onUnarchive(taskId);
+            else ctx.onArchive(taskId);
+          }}
+        >
+          {icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{isArchived ? "Unarchive" : "Archive"}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsCtx }) {
   const task = row.original;
   const isDeleting = ctx.deletingTaskId === task.id;
-  const isArchived = !!task.archived_at;
   return (
     <div className="flex items-center justify-end gap-0.5">
-      {!isArchived && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="cursor-pointer h-7 w-7 p-0"
-              onClick={(e) => {
-                e.stopPropagation();
-                ctx.onArchive(task.id);
-              }}
-            >
-              <IconArchive className="h-3.5 w-3.5 text-muted-foreground" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Archive</TooltipContent>
-        </Tooltip>
-      )}
+      <ArchiveButton taskId={task.id} isArchived={!!task.archived_at} ctx={ctx} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -116,13 +135,14 @@ export function getColumns({
   steps,
   repositories,
   onArchive,
+  onUnarchive,
   onDelete,
   deletingTaskId,
 }: ColumnsConfig): ColumnDef<TaskWithResolution>[] {
   const workflowMap = new Map(workflows.map((w) => [w.id, w.name]));
   const stepMap = new Map(steps.map((s) => [s.id, s.name]));
   const repoMap = new Map(repositories.map((r) => [r.id, r.name]));
-  const actionsCtx: ActionsCtx = { onArchive, onDelete, deletingTaskId };
+  const actionsCtx: ActionsCtx = { onArchive, onUnarchive, onDelete, deletingTaskId };
 
   return [
     {
