@@ -208,11 +208,6 @@ func (s *Service) DeletePRWatch(ctx context.Context, id string) error {
 	return s.store.DeletePRWatch(ctx, id)
 }
 
-// UpdatePRWatchBranch updates a PR watch's branch (e.g. after the agent switches branches).
-func (s *Service) UpdatePRWatchBranch(ctx context.Context, id, branch string) error {
-	return s.store.UpdatePRWatchBranch(ctx, id, branch)
-}
-
 // UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0.
 func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
 	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
@@ -221,6 +216,12 @@ func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
 func (s *Service) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
 	return s.store.UpdatePRWatchPRNumber(ctx, id, prNumber)
+}
+
+// ResetPRWatch atomically resets a watch's branch and clears its pr_number so
+// the poller re-searches for a PR on the new branch. See Store.ResetPRWatch.
+func (s *Service) ResetPRWatch(ctx context.Context, id, branch string) error {
+	return s.store.ResetPRWatch(ctx, id, branch)
 }
 
 // CheckPRWatch fetches lightweight PR status for a watch and determines if there are changes.
@@ -307,8 +308,18 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID string, pr *PR
 		MergedAt:    pr.MergedAt,
 		ClosedAt:    pr.ClosedAt,
 	}
-	if err := s.store.CreateTaskPR(ctx, tp); err != nil {
-		return nil, fmt.Errorf("create task PR: %w", err)
+	// ReplaceTaskPR atomically deletes any existing association for the task
+	// and inserts the new row inside a single transaction. This preserves the
+	// effective 1:1 task→PR mapping and prevents a window where the task has
+	// no associated PR or concurrent calls produce duplicate rows.
+	if err := s.store.ReplaceTaskPR(ctx, tp); err != nil {
+		return nil, fmt.Errorf("replace task PR: %w", err)
+	}
+	if existing != nil {
+		s.logger.Info("replaced stale task PR association",
+			zap.String("task_id", taskID),
+			zap.Int("old_pr_number", existing.PRNumber),
+			zap.Int("new_pr_number", pr.Number))
 	}
 
 	// Publish event for UI
