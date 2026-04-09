@@ -305,6 +305,16 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 		})
 }
 
+func (h *TaskHandlers) wsUnarchiveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return wsHandleIDRequest(ctx, msg, h.logger, "failed to unarchive task",
+		func(ctx context.Context, id string) (any, error) {
+			if err := h.service.UnarchiveTask(ctx, id); err != nil {
+				return nil, err
+			}
+			return dto.SuccessResponse{Success: true}, nil
+		})
+}
+
 type wsMoveTaskRequest struct {
 	ID             string `json:"id"`
 	WorkflowID     string `json:"workflow_id"`

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { PaginationState } from "@tanstack/react-table";
 import { DataTable } from "@/components/ui/data-table";
 import { getColumns } from "./columns";
-import { archiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api";
+import { archiveTask, unarchiveTask, deleteTask, listTasksByWorkspace } from "@/lib/api";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -14,6 +14,8 @@ import type { Task, Workspace, Workflow, WorkflowStep, Repository } from "@/lib/
 import { useToast } from "@/components/toast-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
+
+const UNKNOWN_ERROR = "Unknown error";
 
 interface TasksPageClientProps {
   workspaces: Workspace[];
@@ -61,7 +63,7 @@ function useTaskOperations({
     } catch (err) {
       toast({
         title: "Failed to load tasks",
-        description: err instanceof Error ? err.message : "Unknown error",
+        description: err instanceof Error ? err.message : UNKNOWN_ERROR,
         variant: "error",
       });
     } finally {
@@ -87,7 +89,27 @@ function useTaskOperations({
       } catch (err) {
         toast({
           title: "Failed to archive task",
-          description: err instanceof Error ? err.message : "Unknown error",
+          description: err instanceof Error ? err.message : UNKNOWN_ERROR,
+          variant: "error",
+        });
+      }
+    },
+    [fetchTasks, toast],
+  );
+
+  const handleUnarchive = useCallback(
+    async (taskId: string) => {
+      try {
+        await unarchiveTask(taskId);
+        toast({
+          title: "Task unarchived",
+          description: "The task has been restored to the board.",
+        });
+        fetchTasks();
+      } catch (err) {
+        toast({
+          title: "Failed to unarchive task",
+          description: err instanceof Error ? err.message : UNKNOWN_ERROR,
           variant: "error",
         });
       }
@@ -105,7 +127,7 @@ function useTaskOperations({
       } catch (err) {
         toast({
           title: "Failed to delete task",
-          description: err instanceof Error ? err.message : "Unknown error",
+          description: err instanceof Error ? err.message : UNKNOWN_ERROR,
           variant: "error",
         });
       } finally {
@@ -115,7 +137,7 @@ function useTaskOperations({
     [fetchTasks, toast],
   );
 
-  return { isLoading, deletingTaskId, fetchTasks, handleArchive, handleDelete };
+  return { isLoading, deletingTaskId, fetchTasks, handleArchive, handleUnarchive, handleDelete };
 }
 
 type TasksPageBodyProps = {
@@ -298,6 +320,7 @@ function useTasksPageComputed({
   steps,
   repositories,
   handleArchive,
+  handleUnarchive,
   handleDelete,
   deletingTaskId,
   router,
@@ -309,6 +332,7 @@ function useTasksPageComputed({
   steps: WorkflowStep[];
   repositories: Repository[];
   handleArchive: (taskId: string) => Promise<void>;
+  handleUnarchive: (taskId: string) => Promise<void>;
   handleDelete: (taskId: string) => Promise<void>;
   deletingTaskId: string | null;
   router: ReturnType<typeof useRouter>;
@@ -325,10 +349,11 @@ function useTasksPageComputed({
         steps,
         repositories,
         onArchive: handleArchive,
+        onUnarchive: handleUnarchive,
         onDelete: handleDelete,
         deletingTaskId,
       }),
-    [workflows, steps, repositories, handleArchive, handleDelete, deletingTaskId],
+    [workflows, steps, repositories, handleArchive, handleUnarchive, handleDelete, deletingTaskId],
   );
   const handleRowClick = useCallback(
     (task: Task) => {
@@ -383,6 +408,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     steps: viewState.steps,
     repositories: viewState.repositories,
     handleArchive: ops.handleArchive,
+    handleUnarchive: ops.handleUnarchive,
     handleDelete: ops.handleDelete,
     deletingTaskId: ops.deletingTaskId,
     router,

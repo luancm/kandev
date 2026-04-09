@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -98,18 +100,19 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
-		Workspaces:   repo,
-		Tasks:        repo,
-		TaskRepos:    repo,
-		Workflows:    repo,
-		Messages:     repo,
-		Turns:        repo,
-		Sessions:     repo,
-		GitSnapshots: repo,
-		RepoEntities: repo,
-		Executors:    repo,
-		Environments: repo,
-		Reviews:      repo,
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	return svc, eventBus, repo
 }
@@ -280,6 +283,166 @@ func TestService_UpdateTask(t *testing.T) {
 	}
 	if events[0].Type != "task.updated" {
 		t.Errorf("expected event type 'task.updated', got %s", events[0].Type)
+	}
+}
+
+// mockWorkflowStepGetter implements WorkflowStepGetter for testing.
+type mockWorkflowStepGetter struct {
+	steps map[string]*wfmodels.WorkflowStep
+}
+
+func (m *mockWorkflowStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	if s, ok := m.steps[stepID]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("step not found: %s", stepID)
+}
+
+func (m *mockWorkflowStepGetter) GetNextStepByPosition(_ context.Context, _ string, _ int) (*wfmodels.WorkflowStep, error) {
+	return nil, nil
+}
+
+// mockStartStepResolver implements StartStepResolver for testing.
+type mockStartStepResolver struct {
+	startSteps map[string]string // workflowID -> stepID
+}
+
+func (m *mockStartStepResolver) ResolveStartStep(_ context.Context, workflowID string) (string, error) {
+	if id, ok := m.startSteps[workflowID]; ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("no start step for workflow: %s", workflowID)
+}
+
+func (m *mockStartStepResolver) ResolveFirstStep(_ context.Context, workflowID string) (string, error) {
+	return m.ResolveStartStep(context.Background(), workflowID)
+}
+
+func TestService_UnarchiveTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+
+	task := &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test"}
+	_ = repo.CreateTask(ctx, task)
+	_ = repo.ArchiveTask(ctx, "task-123")
+	eventBus.ClearEvents()
+
+	err := svc.UnarchiveTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("failed to unarchive task: %v", err)
+	}
+
+	// Verify task is no longer archived
+	got, err := svc.GetTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if got.ArchivedAt != nil {
+		t.Error("expected archived_at to be nil after unarchive")
+	}
+
+	// Check task.updated event was published
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != "task.updated" {
+		t.Errorf("expected event type 'task.updated', got %s", events[0].Type)
+	}
+}
+
+func TestService_UnarchiveTask_CancelsStaleSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test"})
+
+	// Create sessions in various states
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-active", TaskID: "task-123", AgentProfileID: "p1",
+		State: models.TaskSessionStateWaitingForInput,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-completed", TaskID: "task-123", AgentProfileID: "p1",
+		State: models.TaskSessionStateCompleted,
+	})
+
+	_ = repo.ArchiveTask(ctx, "task-123")
+
+	err := svc.UnarchiveTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("failed to unarchive task: %v", err)
+	}
+
+	// WAITING_FOR_INPUT session should now be CANCELLED
+	sess, err := repo.GetTaskSession(ctx, "sess-active")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	if sess.State != models.TaskSessionStateCancelled {
+		t.Errorf("expected stale session to be CANCELLED, got %s", sess.State)
+	}
+
+	// COMPLETED session should remain unchanged
+	sess, err = repo.GetTaskSession(ctx, "sess-completed")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	if sess.State != models.TaskSessionStateCompleted {
+		t.Errorf("expected completed session to stay COMPLETED, got %s", sess.State)
+	}
+}
+
+func TestService_UnarchiveTask_NotArchived(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test"})
+
+	err := svc.UnarchiveTask(ctx, "task-123")
+	if err == nil {
+		t.Error("expected error when unarchiving a non-archived task")
+	}
+}
+
+func TestService_UnarchiveTask_FallsBackToStartStep(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	// Wire mock step getter that does NOT know "step-deleted"
+	svc.SetWorkflowStepGetter(&mockWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{}})
+	svc.SetStartStepResolver(&mockStartStepResolver{startSteps: map[string]string{"wf-123": "step-start"}})
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+
+	// Create task in a step that will be "deleted"
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-deleted", Title: "Test"})
+	_ = repo.ArchiveTask(ctx, "task-123")
+	eventBus.ClearEvents()
+
+	err := svc.UnarchiveTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("failed to unarchive task: %v", err)
+	}
+
+	// Verify task was moved to start step
+	got, err := svc.GetTask(ctx, "task-123")
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if got.WorkflowStepID != "step-start" {
+		t.Errorf("expected workflow_step_id 'step-start', got %s", got.WorkflowStepID)
+	}
+	if got.ArchivedAt != nil {
+		t.Error("expected archived_at to be nil")
 	}
 }
 

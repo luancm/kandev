@@ -689,6 +689,14 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 }
 
+func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
+	if err := h.service.UnarchiveTask(c.Request.Context(), c.Param("id")); err != nil {
+		handleNotFound(c, h.logger, err, "task not unarchived")
+		return
+	}
+	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
 // httpStartQuickChatRequest is the request body for starting a quick chat session.
 type httpStartQuickChatRequest struct {
 	Title             string `json:"title,omitempty"`

@@ -70,6 +70,9 @@ func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowSt
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error {
 	return nil
 }
+func (m *mockRepository) UnarchiveTask(ctx context.Context, id string) error {
+	return nil
+}
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
 }

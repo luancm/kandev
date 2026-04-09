@@ -145,10 +145,10 @@ export function validateCreateInputs(inputs: {
 }): boolean {
   return Boolean(
     inputs.trimmedTitle &&
-    inputs.workspaceId &&
-    inputs.effectiveWorkflowId &&
-    inputs.agentProfileId &&
-    (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
+      inputs.workspaceId &&
+      inputs.effectiveWorkflowId &&
+      inputs.agentProfileId &&
+      (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
   );
 }
 

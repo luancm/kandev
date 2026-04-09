@@ -352,6 +352,20 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	return nil
 }
 
+// UnarchiveTask clears the archived_at timestamp on an archived task.
+func (r *Repository) UnarchiveTask(ctx context.Context, id string) error {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = NULL, updated_at = ? WHERE id = ? AND archived_at IS NOT NULL`), now, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("task not found or not archived: %s", id)
+	}
+	return nil
+}
+
 // ListTasksForAutoArchive returns tasks eligible for auto-archiving based on workflow step settings
 func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	drv := r.ro.DriverName()
