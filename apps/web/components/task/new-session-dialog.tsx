@@ -230,7 +230,7 @@ function NewSessionForm({
       if (!prompt) return;
       setIsCreating(true);
       try {
-        const { request } = buildStartRequest(taskId, selectedProfileId || defaultProfileId, {
+        const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
           attachments: toMessageAttachments(attachments),
@@ -240,7 +240,7 @@ function NewSessionForm({
           throw new Error("Session created but no session ID returned");
         }
         const profile = agentProfiles.find(
-          (p: AgentProfileOption) => p.id === (selectedProfileId || defaultProfileId),
+          (p: AgentProfileOption) => p.id === selectedProfileId,
         );
         activateNewSession(
           response.session_id,
@@ -263,7 +263,6 @@ function NewSessionForm({
     [
       taskId,
       selectedProfileId,
-      defaultProfileId,
       executorId,
       contextValue,
       initialPrompt,
@@ -289,7 +288,7 @@ function NewSessionForm({
           <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
           <AgentSelector
             options={profileOptions}
-            value={selectedProfileId || defaultProfileId}
+            value={selectedProfileId}
             onValueChange={setSelectedProfileId}
             disabled={isCreating}
             placeholder="Select agent profile"
@@ -320,7 +319,7 @@ function NewSessionForm({
             onInput={(e) => setHasPrompt(!!e.currentTarget.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !isBusy && hasPrompt && hasProfiles) {
                 e.preventDefault();
                 handleSubmit(e);
               }
