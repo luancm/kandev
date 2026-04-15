@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -16,6 +17,8 @@ import (
 // mockExecutionLookup implements ExecutionLookup for testing.
 type mockExecutionLookup struct {
 	executions map[string]*lifecycle.AgentExecution
+	// ensureErr allows tests to inject specific errors from GetOrEnsureExecution
+	ensureErr error
 }
 
 func (m *mockExecutionLookup) GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool) {
@@ -26,9 +29,25 @@ func (m *mockExecutionLookup) GetExecutionBySessionID(sessionID string) (*lifecy
 	return exec, ok
 }
 
+func (m *mockExecutionLookup) GetOrEnsureExecution(_ context.Context, sessionID string) (*lifecycle.AgentExecution, error) {
+	// Return injected error if set
+	if m.ensureErr != nil {
+		return nil, m.ensureErr
+	}
+	if m.executions == nil {
+		return nil, fmt.Errorf("no execution for session %s", sessionID)
+	}
+	exec, ok := m.executions[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("no execution for session %s", sessionID)
+	}
+	return exec, nil
+}
+
 // mockSessionReader implements SessionReader for testing.
 type mockSessionReader struct {
-	baseCommits map[string]string
+	baseCommits  map[string]string
+	baseBranches map[string]string
 }
 
 func (m *mockSessionReader) GetSessionBaseCommit(_ context.Context, sessionID string) string {
@@ -36,6 +55,13 @@ func (m *mockSessionReader) GetSessionBaseCommit(_ context.Context, sessionID st
 		return ""
 	}
 	return m.baseCommits[sessionID]
+}
+
+func (m *mockSessionReader) GetSessionBaseBranch(_ context.Context, sessionID string) string {
+	if m.baseBranches == nil {
+		return ""
+	}
+	return m.baseBranches[sessionID]
 }
 
 func TestNewGitHandlers(t *testing.T) {
@@ -335,7 +361,10 @@ func TestWsPush_NoExecution(t *testing.T) {
 
 func TestWsGitCommits_NotReady(t *testing.T) {
 	log := newTestLogger()
-	lookup := &mockExecutionLookup{} // no executions → "no agent running" error
+	// Use "no agent running for session" error which matches isSessionNotReadyError
+	lookup := &mockExecutionLookup{
+		ensureErr: fmt.Errorf("no agent running for session session-1"),
+	}
 	h := NewGitHandlers(lookup, nil, log)
 
 	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
@@ -409,5 +438,78 @@ func TestIsSessionNotReadyError(t *testing.T) {
 				t.Errorf("isSessionNotReadyError() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWsGitCommits_WorkspaceNotReadyError(t *testing.T) {
+	// Test that ErrSessionWorkspaceNotReady returns ready:false gracefully
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: lifecycle.ErrSessionWorkspaceNotReady,
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
+
+	resp, err := h.wsGitCommits(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for workspace not ready, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+}
+
+func TestWsGitCommits_UnexpectedError(t *testing.T) {
+	// Test that unexpected errors (not workspace-not-ready) are returned as errors
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: errors.New("database connection failed"),
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
+
+	_, err := h.wsGitCommits(context.Background(), msg)
+	if err == nil {
+		t.Fatal("expected error for unexpected failure")
+	}
+	if !errors.Is(err, lookup.ensureErr) && err.Error() != "failed to get execution for session session-1: database connection failed" {
+		t.Errorf("expected wrapped database error, got: %v", err)
+	}
+}
+
+func TestWsGitCommits_WrappedWorkspaceNotReadyError(t *testing.T) {
+	// Test that wrapped ErrSessionWorkspaceNotReady is still detected
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: fmt.Errorf("some context: %w", lifecycle.ErrSessionWorkspaceNotReady),
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
+
+	resp, err := h.wsGitCommits(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for wrapped workspace not ready, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
 	}
 }
