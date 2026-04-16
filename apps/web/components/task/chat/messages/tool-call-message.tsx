@@ -142,6 +142,19 @@ function parseToolCallOutput(metadata: ToolCallMetadata | undefined) {
   return { output, isHttpError };
 }
 
+// Short, single-line tool output renders inline in the header (e.g. "Launching skill: e2e")
+// rather than behind an expand chevron.
+const INLINE_OUTPUT_MAX_LENGTH = 120;
+
+function getInlineOutput(output: unknown): string | null {
+  if (typeof output !== "string") return null;
+  const trimmed = output.trim();
+  // Reject both \n and \r — shell tool output can carry \r progress-bar overwrites
+  // that would render as multiple visual lines even without a \n.
+  if (!trimmed || /[\n\r]/.test(trimmed) || trimmed.length > INLINE_OUTPUT_MAX_LENGTH) return null;
+  return trimmed;
+}
+
 function parseToolCallMetadata(comment: Message, permissionMessage: Message | undefined) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
   const toolName = metadata?.tool_name ?? "";
@@ -150,7 +163,10 @@ function parseToolCallMetadata(comment: Message, permissionMessage: Message | un
   const { permissionMetadata, permissionStatus, isPermissionPending } =
     parsePermission(permissionMessage);
   const hasOutput = hasToolOutput(output);
-  const hasExpandableContent = hasOutput || isPermissionPending;
+  const inlineOutput = getInlineOutput(output);
+  // When output is shown inline, there's nothing more to expand — skip the expand affordance
+  // unless a permission prompt still needs to be rendered.
+  const hasExpandableContent = (hasOutput && !inlineOutput) || isPermissionPending;
   const isSuccess = status === "complete" && !permissionStatus;
   return {
     toolName,
@@ -162,6 +178,7 @@ function parseToolCallMetadata(comment: Message, permissionMessage: Message | un
     isPermissionPending,
     hasOutput,
     hasExpandableContent,
+    inlineOutput,
     isSuccess,
   };
 }
@@ -238,6 +255,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
     isPermissionPending,
     hasOutput,
     hasExpandableContent,
+    inlineOutput,
     isSuccess,
   } = parseToolCallMetadata(comment, permissionMessage);
   const { isResponding, handleApprove, handleReject } = usePermissionResponseHandlers({
@@ -251,7 +269,7 @@ export const ToolCallMessage = memo(function ToolCallMessage({
   const rawTitle = metadata?.title ?? comment.content ?? "Tool call";
   const title = transformPathsInText(rawTitle, worktreePath);
 
-  const formattedOutput = hasOutput ? formatToolOutput(output) : null;
+  const formattedOutput = hasOutput && !inlineOutput ? formatToolOutput(output) : null;
 
   return (
     <ExpandableRow
@@ -271,6 +289,16 @@ export const ToolCallMessage = memo(function ToolCallMessage({
             )}
           >
             <span className="font-mono text-xs text-muted-foreground">{title}</span>
+            {inlineOutput && (
+              <span
+                className={cn(
+                  "text-xs",
+                  isHttpError ? "text-red-600 dark:text-red-400" : "text-muted-foreground/80",
+                )}
+              >
+                {inlineOutput}
+              </span>
+            )}
             {!isSuccess && getToolCallStatusIcon(status, permissionStatus)}
           </span>
         </div>
