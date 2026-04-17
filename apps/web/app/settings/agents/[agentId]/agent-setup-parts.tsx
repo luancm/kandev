@@ -119,6 +119,7 @@ export function ProfileCardItem({
             model: profile.model,
             mode: profile.mode ?? "",
             allow_indexing: profile.allow_indexing ?? false,
+            auto_approve: profile.auto_approve ?? false,
             cli_passthrough: profile.cli_passthrough,
           }}
           onChange={(patch) => onProfileChange(profile.id, patch)}

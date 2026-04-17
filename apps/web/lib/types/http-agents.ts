@@ -11,6 +11,8 @@ export type AgentProfile = {
   mode?: string;
   /** Auggie-only CLI flag; ignored for all other agents. */
   allow_indexing: boolean;
+  /** Auto-approve all tool permissions (e.g. --allow-all for Copilot). Only shown when agent declares it supported. */
+  auto_approve: boolean;
   cli_passthrough: boolean;
   user_modified?: boolean;
   created_at: string;

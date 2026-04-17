@@ -139,6 +139,7 @@ function ProfileSettingsCard({
             model: draft.model,
             mode: draft.mode ?? "",
             allow_indexing: draft.allow_indexing,
+            auto_approve: draft.auto_approve ?? false,
             cli_passthrough: draft.cli_passthrough,
           }}
           onChange={onDraftChange}

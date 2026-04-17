@@ -11,7 +11,7 @@ import type { AgentProfile, PermissionSetting } from "@/lib/types/http";
  * simply have an empty permission_settings map from the backend, causing the
  * UI to render no toggles at all.
  */
-export const PERMISSION_KEYS = ["allow_indexing"] as const;
+export const PERMISSION_KEYS = ["allow_indexing", "auto_approve"] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 

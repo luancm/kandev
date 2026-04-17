@@ -32,7 +32,7 @@ type CopilotACP struct {
 func NewCopilotACP() *CopilotACP {
 	return &CopilotACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: copilotACPPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:         true,
 				Label:             "CLI Passthrough",
@@ -79,7 +79,11 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 }
 
 func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", copilotACPPkg, "--acp").Build()
+	b := Cmd("npx", "-y", copilotACPPkg, "--acp")
+	if opts.AutoApprove {
+		b = b.Flag("--allow-all")
+	}
+	return b.Build()
 }
 
 func (a *CopilotACP) Runtime() *RuntimeConfig {
@@ -105,7 +109,21 @@ func (a *CopilotACP) InstallScript() string {
 }
 
 func (a *CopilotACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return copilotACPPermSettings
+}
+
+// copilotACPPermSettings exposes the auto_approve (yolo) flag for Copilot.
+// When enabled, --allow-all is passed to the CLI so Copilot never sends
+// permission requests.
+var copilotACPPermSettings = map[string]PermissionSetting{
+	"auto_approve": {
+		Supported:   true,
+		Default:     false,
+		Label:       "Allow all (Yolo)",
+		Description: "Allow all tools to run without confirmation",
+		ApplyMethod: "cli_flag",
+		CLIFlag:     "--allow-all",
+	},
 }
 
 // InferenceConfig returns configuration for one-shot inference using ACP.
