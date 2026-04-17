@@ -2,6 +2,27 @@
 
 All notable changes to Kandev.
 
+## 0.34 - 2026-04-17
+
+### Features
+
+- render short tool-call output inline ([#604](https://github.com/kdlbs/kandev/pull/604))
+- associate agent profiles with workflows and steps ([#597](https://github.com/kdlbs/kandev/pull/597))
+
+### Bug Fixes
+
+- close file diff tab when uncommitted change is undone ([#618](https://github.com/kdlbs/kandev/pull/618))
+- stop killing live agents on resume race ([#619](https://github.com/kdlbs/kandev/pull/619))
+- treat skipped checks as passing and add ready-to-merge status ([#616](https://github.com/kdlbs/kandev/pull/616))
+- prevent agentctl OOM from unbounded diff generation in workspace tracker ([#598](https://github.com/kdlbs/kandev/pull/598))
+- prevent utility agents settings page crash on null models ([#602](https://github.com/kdlbs/kandev/pull/602))
+- unstick sessions when agent crashes mid-turn ([#609](https://github.com/kdlbs/kandev/pull/609))
+- validate activeSessionId belongs to activeTaskId before use ([#614](https://github.com/kdlbs/kandev/pull/614))
+- close clarification overlay when agent moves on ([#608](https://github.com/kdlbs/kandev/pull/608))
+- prevent duplicate review tasks via atomic PR reservation ([#605](https://github.com/kdlbs/kandev/pull/605))
+- stop panels from opening in the left sidebar group ([#603](https://github.com/kdlbs/kandev/pull/603))
+- align top-bar right button heights ([#601](https://github.com/kdlbs/kandev/pull/601))
+
 ## 0.33 - 2026-04-16
 
 ### Features
