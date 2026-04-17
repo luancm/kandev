@@ -85,12 +85,14 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 | Env Var | Default | Description |
 |---------|---------|-------------|
 | `KANDEV_SERVER_PORT` | `8080` | Server port (API + WebSocket + Web UI) |
-| `KANDEV_DATA_DIR` | `/data` | Kandev home directory — contains DB, worktrees, sessions, repos, and LSP servers |
+| `KANDEV_HOME_DIR` | `/data` | Kandev home directory — contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | `$KANDEV_DATA_DIR/kandev.db` | SQLite database file path (override) |
+| `KANDEV_DATABASE_PATH` | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
 | `KANDEV_DOCKER_ENABLED` | `false` | Enable Docker runtime for agents (requires DinD) |
 | `KANDEV_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `KANDEV_LOGGING_FORMAT` | auto | Log format: `json` (auto-detected in K8s) or `text` |
+
+> **Upgrading from a pre-`KANDEV_HOME_DIR` deployment?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`, and `KANDEV_DATA_DIR` is gone — point `KANDEV_HOME_DIR` at the same volume mount (`/data`) instead. (`KANDEV_WORKTREE_BASEPATH` still works as an explicit override if you want to keep worktrees outside the home dir.) The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the pod logs. If you'd rather pin the old path, set `KANDEV_DATABASE_PATH=/data/kandev.db` in the ConfigMap.
 
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
 
@@ -108,7 +110,7 @@ Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper).
 ### SQLite (default)
 
 - Zero-config, works out of the box
-- Database stored at `/data/kandev.db` on the PV
+- Database stored at `/data/data/kandev.db` on the PV (derived from `KANDEV_HOME_DIR=/data`)
 - **Single replica only** (SQLite is single-writer)
 - Deployment strategy is `Recreate` to prevent concurrent writes
 - Good for small teams / personal use
@@ -135,8 +137,8 @@ When using Postgres, the PVC is still needed for worktree storage but the databa
 
 The PVC at `/data` stores:
 
-- **SQLite database** (`/data/kandev.db`, `/data/kandev.db-wal`, `/data/kandev.db-shm`)
-- **Git worktrees** (`/data/worktrees/`) for workspace isolation
+- **SQLite database** (`/data/data/kandev.db`, `/data/data/kandev.db-wal`, `/data/data/kandev.db-shm`)
+- **Git worktrees** (`/data/worktrees/`), **tasks** (`/data/tasks/`), **repos** (`/data/repos/`), **sessions** (`/data/sessions/`), and **LSP servers** (`/data/lsp-servers/`)
 
 The PVC uses `ReadWriteOnce` access mode. If your cluster requires a specific StorageClass, add it to `k8s/pvc.yaml`:
 

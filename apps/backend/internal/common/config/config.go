@@ -13,9 +13,19 @@ import (
 	"github.com/spf13/viper"
 )
 
+// kandevHomeSubdir is the hidden directory name used for the Kandev root
+// under the user's home directory (e.g. ~/.kandev). This is the single
+// source of truth for the dotdir name; derived paths go through
+// ResolvedHomeDir / ResolvedDataDir rather than re-constructing it.
+const kandevHomeSubdir = ".kandev"
+
 // Config holds all configuration sections for Kandev.
 type Config struct {
-	DataDir             string                    `mapstructure:"dataDir"`
+	// HomeDir is the root Kandev directory (e.g. ~/.kandev in prod, or
+	// <repo>/.kandev-dev during local development). When empty, falls back
+	// to ~/.kandev. All workspace artifacts (data, tasks, worktrees, repos)
+	// live under this root.
+	HomeDir             string                    `mapstructure:"homeDir"`
 	Server              ServerConfig              `mapstructure:"server"`
 	Database            DatabaseConfig            `mapstructure:"database"`
 	NATS                NATSConfig                `mapstructure:"nats"`
@@ -30,43 +40,41 @@ type Config struct {
 	Debug               DebugConfig               `mapstructure:"debug"`
 }
 
-// ResolvedHomeDir returns the Kandev home directory (~/.kandev for local dev).
-// When KANDEV_DATA_DIR is explicitly set (e.g., /data in Docker), it returns that value
-// so containers keep a flat layout. When unset, returns ~/.kandev — the parent of the data dir.
-// Use this for workspace artifacts: worktrees, repos, sessions, quick-chat, lsp-servers.
-func (c *Config) ResolvedHomeDir() string {
-	if c.DataDir != "" {
-		if strings.HasPrefix(c.DataDir, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				return filepath.Join(home, c.DataDir[2:])
-			}
-		}
-		return c.DataDir
+// expandTilde expands a leading "~/" to the user's home directory.
+// Returns the input unchanged if expansion is unnecessary or fails.
+func expandTilde(p string) string {
+	if !strings.HasPrefix(p, "~/") {
+		return p
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".kandev"
+		return p
 	}
-	return filepath.Join(home, ".kandev")
+	return filepath.Join(home, p[2:])
 }
 
-// ResolvedDataDir returns the base data directory for Kandev.
-// Config.DataDir is populated by Viper from the config file or KANDEV_DATA_DIR env var.
-// If empty, falls back to ~/.kandev/data. Use this for the database only.
-func (c *Config) ResolvedDataDir() string {
-	if c.DataDir != "" {
-		if strings.HasPrefix(c.DataDir, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				return filepath.Join(home, c.DataDir[2:])
-			}
-		}
-		return c.DataDir
+// ResolvedHomeDir returns the Kandev root directory — the parent of data,
+// tasks, worktrees, repos, sessions, quick-chat and lsp-servers.
+//
+// Resolution order:
+//  1. KANDEV_HOME_DIR (explicit override — e.g. /data in Docker, /kandev in K8s,
+//     or <repo>/.kandev-dev during local development).
+//  2. ~/.kandev (default).
+func (c *Config) ResolvedHomeDir() string {
+	if c.HomeDir != "" {
+		return expandTilde(c.HomeDir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".kandev", "data")
+		return kandevHomeSubdir
 	}
-	return filepath.Join(home, ".kandev", "data")
+	return filepath.Join(home, kandevHomeSubdir)
+}
+
+// ResolvedDataDir returns the base data directory (where the SQLite DB lives).
+// Always <ResolvedHomeDir>/data — relocate via KANDEV_HOME_DIR, not a separate knob.
+func (c *Config) ResolvedDataDir() string {
+	return filepath.Join(c.ResolvedHomeDir(), "data")
 }
 
 // ServerConfig holds HTTP server configuration.
@@ -228,8 +236,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 30)
 	v.SetDefault("server.webInternalUrl", "")
 
-	// DataDir default — empty means resolve from KANDEV_DATA_DIR env or ~/.kandev/data
-	v.SetDefault("dataDir", "")
+	// HomeDir default — empty means resolve from KANDEV_HOME_DIR env or ~/.kandev
+	v.SetDefault("homeDir", "")
 
 	// Database defaults
 	v.SetDefault("database.driver", "sqlite")
@@ -346,7 +354,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("agent.mcpServerPort", "KANDEV_AGENT_MCP_SERVER_PORT")
 	_ = v.BindEnv("agent.mcpServerUrl", "KANDEV_AGENT_MCP_SERVER_URL")
 	_ = v.BindEnv("server.webInternalUrl", "KANDEV_WEB_INTERNAL_URL")
-	_ = v.BindEnv("dataDir", "KANDEV_DATA_DIR")
+	_ = v.BindEnv("homeDir", "KANDEV_HOME_DIR")
 	_ = v.BindEnv("logging.level", "KANDEV_LOG_LEVEL")
 	_ = v.BindEnv("events.namespace", "KANDEV_EVENTS_NAMESPACE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
