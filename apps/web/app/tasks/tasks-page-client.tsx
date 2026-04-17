@@ -27,6 +27,8 @@ interface TasksPageClientProps {
 
 type UseTaskOperationsParams = {
   activeWorkspaceId: string | null;
+  activeWorkflowId: string | null;
+  selectedRepositoryId: string | null;
   pagination: PaginationState;
   debouncedQuery: string;
   showArchived: boolean;
@@ -36,6 +38,8 @@ type UseTaskOperationsParams = {
 
 function useTaskOperations({
   activeWorkspaceId,
+  activeWorkflowId,
+  selectedRepositoryId,
   pagination,
   debouncedQuery,
   showArchived,
@@ -55,6 +59,8 @@ function useTaskOperations({
         pageSize: pagination.pageSize,
         query: debouncedQuery,
         includeArchived: showArchived,
+        workflowId: activeWorkflowId,
+        repositoryId: selectedRepositoryId,
       });
       setTasks(result.tasks);
       setTotal(result.total);
@@ -69,6 +75,8 @@ function useTaskOperations({
     }
   }, [
     activeWorkspaceId,
+    activeWorkflowId,
+    selectedRepositoryId,
     pagination.pageIndex,
     pagination.pageSize,
     debouncedQuery,
@@ -168,6 +176,7 @@ function TasksPageBody({
           columns={columns}
           data={tasks}
           pageCount={pageCount}
+          rowCount={total}
           pagination={pagination}
           onPaginationChange={setPagination}
           isLoading={isLoading}
@@ -267,6 +276,8 @@ function useTasksPageEffects({
   fetchTasks,
   pagination,
   showArchived,
+  activeWorkflowId,
+  selectedRepositoryId,
 }: {
   debouncedQuery: string;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
@@ -274,10 +285,12 @@ function useTasksPageEffects({
   fetchTasks: () => void;
   pagination: PaginationState;
   showArchived: boolean;
+  activeWorkflowId: string | null;
+  selectedRepositoryId: string | null;
 }) {
   useEffect(() => {
     void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 })));
-  }, [debouncedQuery, setPagination]);
+  }, [debouncedQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
 
   useEffect(() => {
     if (activeWorkspaceId) fetchTasks();
@@ -350,6 +363,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     activeWorkspaceId,
     activeWorkflowId,
     repositories: storeRepositories,
+    selectedRepositoryId,
   } = useKanbanDisplaySettings();
   const viewState = useTasksPageViewState({
     initialWorkflows: props.initialWorkflows,
@@ -362,6 +376,8 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   const debouncedQuery = useDebounce(viewState.searchQuery, 300);
   const ops = useTaskOperations({
     activeWorkspaceId,
+    activeWorkflowId,
+    selectedRepositoryId,
     pagination: viewState.pagination,
     debouncedQuery,
     showArchived: viewState.showArchived,
@@ -375,6 +391,8 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     fetchTasks: ops.fetchTasks,
     pagination: viewState.pagination,
     showArchived: viewState.showArchived,
+    activeWorkflowId,
+    selectedRepositoryId,
   });
   const computed = useTasksPageComputed({
     total: viewState.total,
@@ -404,11 +422,11 @@ export function TasksPageClient(props: TasksPageClientProps) {
         isSearchLoading={s.isLoading && !!s.debouncedQuery}
       />
       <TasksPageBody
-        total={s.total}
         showArchived={s.showArchived}
         setShowArchived={s.setShowArchived}
         columns={s.columns}
         tasks={s.tasks}
+        total={s.total}
         pageCount={s.pageCount}
         pagination={s.pagination}
         setPagination={s.setPagination}

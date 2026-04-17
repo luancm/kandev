@@ -196,7 +196,7 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-4", WorkspaceID: "ws-2", WorkflowID: "wf-456", WorkflowStepID: "step-2", Title: "Task Four"})
 
 	// Test basic listing without search
-	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 10, false, false, false, false)
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 1, 10, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks by workspace: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	}
 
 	// Test pagination
-	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", 1, 2, false, false, false, false)
+	tasks, total, err = repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 1, 2, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks with pagination: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestSQLiteRepository_ListTasksByWorkspace(t *testing.T) {
 	}
 
 	// Test page 2
-	tasksPage2, _, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", 2, 2, false, false, false, false)
+	tasksPage2, _, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "", 2, 2, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to list tasks page 2: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main"})
 
 	// Test search by title
-	_, totalAuth, err := repo.ListTasksByWorkspace(ctx, "ws-1", "authentication", 1, 10, false, false, false, false)
+	_, totalAuth, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "authentication", 1, 10, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by title: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search by description
-	tasksDarkMode, totalDarkMode, err := repo.ListTasksByWorkspace(ctx, "ws-1", "dark mode", 1, 10, false, false, false, false)
+	tasksDarkMode, totalDarkMode, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "dark mode", 1, 10, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by description: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search by repository name
-	tasksRepo, totalRepo, err := repo.ListTasksByWorkspace(ctx, "ws-1", "MyProject", 1, 10, false, false, false, false)
+	tasksRepo, totalRepo, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "MyProject", 1, 10, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by repository name: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search by repository local_path
-	_, totalPath, err := repo.ListTasksByWorkspace(ctx, "ws-1", "myproject", 1, 10, false, false, false, false)
+	_, totalPath, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "myproject", 1, 10, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks by repository path: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 
 	// Test search with no results
-	tasksNone, totalNone, err := repo.ListTasksByWorkspace(ctx, "ws-1", "nonexistent", 1, 10, false, false, false, false)
+	tasksNone, totalNone, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "nonexistent", 1, 10, false, false, false, false)
 	if err != nil {
 		t.Fatalf("failed to search tasks with no results: %v", err)
 	}
@@ -301,6 +301,178 @@ func TestSQLiteRepository_ListTasksByWorkspaceWithSearch(t *testing.T) {
 	}
 	if len(tasksNone) != 0 {
 		t.Errorf("expected empty tasks slice, got %d tasks", len(tasksNone))
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_WorkflowFilter(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-a", WorkspaceID: "ws-1", Name: "Workflow A"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-b", WorkspaceID: "ws-1", Name: "Workflow B"})
+
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-1", WorkspaceID: "ws-1", WorkflowID: "wf-a", WorkflowStepID: "s-1", Title: "Alpha task"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-2", WorkspaceID: "ws-1", WorkflowID: "wf-a", WorkflowStepID: "s-1", Title: "Beta task"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-3", WorkspaceID: "ws-1", WorkflowID: "wf-b", WorkflowStepID: "s-1", Title: "Gamma task"})
+
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "wf-a", "", "", 1, 10, false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace failed: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected total 2 for wf-a, got %d", total)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.WorkflowID != "wf-a" {
+			t.Errorf("expected workflow wf-a, got %s", task.WorkflowID)
+		}
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_RepositoryFilter(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "Repo One", LocalPath: "/repo/one"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "Repo Two", LocalPath: "/repo/two"})
+
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Task One"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-2", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Task Two"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-3", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Task Three"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "t-1", RepositoryID: "repo-1"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-2", TaskID: "t-2", RepositoryID: "repo-2"})
+
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "repo-1", "", 1, 10, false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected total 1 for repo-1, got %d", total)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "t-1" {
+		t.Errorf("expected only t-1, got %v", tasks)
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_WorkflowAndRepositoryFilter(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-a", WorkspaceID: "ws-1", Name: "Workflow A"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-b", WorkspaceID: "ws-1", Name: "Workflow B"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "Repo One", LocalPath: "/repo/one"})
+
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-1", WorkspaceID: "ws-1", WorkflowID: "wf-a", WorkflowStepID: "s-1", Title: "Match task"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-2", WorkspaceID: "ws-1", WorkflowID: "wf-a", WorkflowStepID: "s-1", Title: "No repo task"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-3", WorkspaceID: "ws-1", WorkflowID: "wf-b", WorkflowStepID: "s-1", Title: "Wrong workflow"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "t-1", RepositoryID: "repo-1"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-3", TaskID: "t-3", RepositoryID: "repo-1"})
+
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "wf-a", "repo-1", "", 1, 10, false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected total 1 (wf-a + repo-1), got %d", total)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "t-1" {
+		t.Errorf("expected only t-1, got %v", tasks)
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_WorkflowFilterWithQuery(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-a", WorkspaceID: "ws-1", Name: "Workflow A"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-b", WorkspaceID: "ws-1", Name: "Workflow B"})
+
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-1", WorkspaceID: "ws-1", WorkflowID: "wf-a", WorkflowStepID: "s-1", Title: "Fix login bug"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-2", WorkspaceID: "ws-1", WorkflowID: "wf-a", WorkflowStepID: "s-1", Title: "Fix payment bug"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-3", WorkspaceID: "ws-1", WorkflowID: "wf-b", WorkflowStepID: "s-1", Title: "Fix login bug"})
+
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "wf-a", "", "login", 1, 10, false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 result (wf-a + 'login'), got %d", total)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "t-1" {
+		t.Errorf("expected only t-1, got %v", tasks)
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_RepositoryFilterWithQuery(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "Repo One", LocalPath: "/repo/one"})
+
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Fix auth bug"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-2", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Fix auth elsewhere"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "t-1", RepositoryID: "repo-1"})
+
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "repo-1", "auth", 1, 10, false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 result (repo-1 + 'auth'), got %d", total)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "t-1" {
+		t.Errorf("expected only t-1, got %v", tasks)
+	}
+}
+
+func TestSQLiteRepository_ListTasksByWorkspace_DistinctWithMultipleRepos(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "Repo One", LocalPath: "/repo/one"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "Repo Two", LocalPath: "/repo/two"})
+
+	// t-1 is linked to two repositories — must not appear twice in results
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Multi-repo task"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "t-2", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Title: "Single-repo task"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-1", TaskID: "t-1", RepositoryID: "repo-1"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-2", TaskID: "t-1", RepositoryID: "repo-2"})
+	_ = repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-3", TaskID: "t-2", RepositoryID: "repo-1"})
+
+	tasks, total, err := repo.ListTasksByWorkspace(ctx, "ws-1", "", "", "task", 1, 10, false, false, false, false)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace failed: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected total 2 distinct tasks, got %d", total)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 rows (no duplicates), got %d", len(tasks))
+	}
+	seen := make(map[string]int)
+	for _, task := range tasks {
+		seen[task.ID]++
+	}
+	if seen["t-1"] != 1 {
+		t.Errorf("expected t-1 exactly once, appeared %d times", seen["t-1"])
 	}
 }
 
