@@ -206,6 +206,34 @@ test.describe("Diff update on file change", () => {
       timeout: 15_000,
     });
   });
+
+  test("diff panel closes when uncommitted change is undone via hunk Undo", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Regression: Undo must close the diff tab even when PR/cumulative diffs keep the file visible.
+    await seedDiffUpdateTask(testPage, apiClient, seedData);
+    await openChangesTab(testPage);
+    await openFileDiff(testPage, "diff_update_test.txt");
+
+    const diffTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
+    await expect(diffTab).toBeVisible({ timeout: 10_000 });
+
+    const diffsContainer = getDiffsContainer(testPage);
+    await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
+    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Button is CSS-hidden until hover; dispatchEvent bypasses pointer-events:none.
+    const undoBtn = diffsContainer.locator("[data-undo-btn] button").first();
+    await expect(undoBtn).toHaveCount(1, { timeout: 10_000 });
+    await undoBtn.dispatchEvent("click");
+
+    // The Diff tab should close automatically.
+    await expect(diffTab).toHaveCount(0, { timeout: 15_000 });
+  });
 });
 
 test.describe("Untracked file diff update", () => {
