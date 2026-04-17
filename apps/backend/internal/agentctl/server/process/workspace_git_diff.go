@@ -1,13 +1,39 @@
 package process
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"go.uber.org/zap"
+)
+
+const (
+	// maxDiffFileSize is the maximum file size for which we generate diffs.
+	// Files larger than this are skipped with DiffSkipReason "too_large".
+	maxDiffFileSize = 10 * 1024 * 1024 // 10 MB
+
+	// maxDiffOutputSize is the maximum diff output size per file.
+	// Diffs exceeding this are truncated with DiffSkipReason "truncated".
+	maxDiffOutputSize = 256 * 1024 // 256 KB
+
+	// maxTotalDiffBytes is the cumulative diff budget per GitStatusUpdate.
+	// Once exceeded, remaining files are skipped with DiffSkipReason "budget_exceeded".
+	maxTotalDiffBytes = 2 * 1024 * 1024 // 2 MB
+
+	// binaryCheckSize is how many bytes to inspect for null bytes to detect binary files.
+	binaryCheckSize = 8 * 1024 // 8 KB
+
+	diffSkipReasonTooLarge        = "too_large"
+	diffSkipReasonBinary          = "binary"
+	diffSkipReasonTruncated       = "truncated"
+	diffSkipReasonBudgetExceeded  = "budget_exceeded"
 )
 
 // enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
@@ -65,6 +91,44 @@ func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *ty
 	update.BranchDeletions = deletions
 }
 
+// totalDiffBytes returns the cumulative size of all diff content in the update.
+func totalDiffBytes(update *types.GitStatusUpdate) int64 {
+	var total int64
+	for _, fi := range update.Files {
+		total += int64(len(fi.Diff))
+	}
+	return total
+}
+
+// capDiffOutput runs a git diff command and returns at most maxDiffOutputSize bytes.
+// Returns the output string and whether it was truncated.
+func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = workDir
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", false
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		return "", false
+	}
+
+	limited := io.LimitReader(stdout, maxDiffOutputSize+1)
+	data, _ := io.ReadAll(limited)
+	truncated := len(data) > maxDiffOutputSize
+	if truncated {
+		data = data[:maxDiffOutputSize]
+	}
+
+	// Drain remaining stdout so the process doesn't hang on a full pipe.
+	_, _ = io.Copy(io.Discard, stdout)
+	_ = cmd.Wait()
+
+	return string(data), truncated
+}
+
 // enrichWithUnstagedDiff populates additions/deletions and diff content for files
 // with unstaged changes by comparing the worktree against baseRef.
 func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
@@ -102,11 +166,18 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *
 		fileInfo.Additions = additions
 		fileInfo.Deletions = deletions
 
-		// Get the actual diff content for this file (compare against base branch)
-		diffCmd := exec.CommandContext(ctx, "git", "diff", baseRef, "--", filePath)
-		diffCmd.Dir = wt.workDir
-		if diffOut, err := diffCmd.Output(); err == nil {
-			fileInfo.Diff = string(diffOut)
+		if totalDiffBytes(update) >= maxTotalDiffBytes {
+			fileInfo.DiffSkipReason = diffSkipReasonBudgetExceeded
+			update.Files[filePath] = fileInfo
+			continue
+		}
+
+		diffOut, truncated := capDiffOutput(ctx, wt.workDir, "diff", baseRef, "--", filePath)
+		if diffOut != "" {
+			fileInfo.Diff = diffOut
+			if truncated {
+				fileInfo.DiffSkipReason = diffSkipReasonTruncated
+			}
 		}
 
 		update.Files[filePath] = fileInfo
@@ -153,14 +224,27 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 		}
 		// Get the staged diff content if we don't have diff content yet
 		if fileInfo.Diff == "" {
-			diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", baseRef, "--", filePath)
-			diffCmd.Dir = wt.workDir
-			if diffOut, err := diffCmd.Output(); err == nil {
-				fileInfo.Diff = string(diffOut)
+			if totalDiffBytes(update) >= maxTotalDiffBytes {
+				fileInfo.DiffSkipReason = diffSkipReasonBudgetExceeded
+				update.Files[filePath] = fileInfo
+				continue
+			}
+
+			diffOut, truncated := capDiffOutput(ctx, wt.workDir, "diff", "--cached", baseRef, "--", filePath)
+			if diffOut != "" {
+				fileInfo.Diff = diffOut
+				if truncated {
+					fileInfo.DiffSkipReason = diffSkipReasonTruncated
+				}
 			}
 		}
 		update.Files[filePath] = fileInfo
 	}
+}
+
+// isBinaryContent checks for null bytes in the data, same heuristic git uses.
+func isBinaryContent(data []byte) bool {
+	return bytes.IndexByte(data, 0) != -1
 }
 
 // enrichUntrackedFileDiffs builds a synthetic git diff for untracked files showing all
@@ -170,19 +254,62 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 		if fileInfo.Status != fileStatusUntracked {
 			continue
 		}
-		catCmd := exec.CommandContext(ctx, "cat", filePath)
-		catCmd.Dir = wt.workDir
-		catOut, err := catCmd.Output()
+
+		if totalDiffBytes(update) >= maxTotalDiffBytes {
+			fileInfo.DiffSkipReason = diffSkipReasonBudgetExceeded
+			update.Files[filePath] = fileInfo
+			continue
+		}
+
+		safePath, err := wt.sanitizePath(filePath)
 		if err != nil {
 			continue
 		}
-		content := string(catOut)
+
+		info, err := os.Stat(filepath.Clean(safePath))
+		if err != nil {
+			continue
+		}
+		if info.Size() > maxDiffFileSize {
+			fileInfo.DiffSkipReason = diffSkipReasonTooLarge
+			update.Files[filePath] = fileInfo
+			continue
+		}
+
+		f, err := os.Open(filepath.Clean(safePath))
+		if err != nil {
+			continue
+		}
+
+		// Read first chunk to check for binary content.
+		header := make([]byte, binaryCheckSize)
+		n, _ := f.Read(header)
+		if n > 0 && isBinaryContent(header[:n]) {
+			_ = f.Close()
+			fileInfo.DiffSkipReason = diffSkipReasonBinary
+			update.Files[filePath] = fileInfo
+			continue
+		}
+
+		// Read only enough content to fill maxDiffOutputSize of diff output.
+		// No need to read the full file — any diff beyond maxDiffOutputSize gets truncated anyway.
+		var buf bytes.Buffer
+		buf.Write(header[:n])
+		remaining := int64(maxDiffOutputSize) - int64(n)
+		if remaining > 0 {
+			_, _ = io.Copy(&buf, io.LimitReader(f, remaining))
+		}
+		_ = f.Close()
+
+		content := buf.String()
 		lines := strings.Split(content, "\n")
+		// Trim trailing empty element from final newline so line count is accurate.
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
 		fileInfo.Additions = len(lines)
 		fileInfo.Deletions = 0
 
-		// Format as a proper git diff with all required headers.
-		// The @git-diff-view/react library requires the full git diff format.
 		var diffBuilder strings.Builder
 		diffBuilder.WriteString("diff --git a/" + filePath + " b/" + filePath + "\n")
 		diffBuilder.WriteString("new file mode 100644\n")
@@ -193,7 +320,14 @@ func (wt *WorkspaceTracker) enrichUntrackedFileDiffs(ctx context.Context, update
 		for _, line := range lines {
 			diffBuilder.WriteString("+" + line + "\n")
 		}
-		fileInfo.Diff = diffBuilder.String()
+
+		diffContent := diffBuilder.String()
+		if len(diffContent) > maxDiffOutputSize {
+			diffContent = diffContent[:maxDiffOutputSize]
+			fileInfo.DiffSkipReason = diffSkipReasonTruncated
+		}
+
+		fileInfo.Diff = diffContent
 		update.Files[filePath] = fileInfo
 	}
 }

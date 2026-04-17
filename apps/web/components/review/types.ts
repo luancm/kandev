@@ -8,7 +8,23 @@ export type ReviewFile = {
   deletions: number;
   staged: boolean;
   source: "uncommitted" | "committed" | "pr";
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
 };
+
+export function diffSkipReasonLabel(reason?: string): string {
+  switch (reason) {
+    case "too_large":
+      return "File too large to diff (>10 MB)";
+    case "binary":
+      return "Binary file — not diffable";
+    case "truncated":
+      return "Diff truncated (>256 KB)";
+    case "budget_exceeded":
+      return "Diff skipped — too many changed files";
+    default:
+      return "Loading diff...";
+  }
+}
 
 export type FileTreeNode = {
   name: string;

@@ -29,6 +29,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import type { DiffComment } from "@/lib/diff/types";
+import { diffSkipReasonLabel } from "./types";
 import type { ReviewFile } from "./types";
 
 function isMarkdownPath(filePath: string): boolean {
@@ -451,6 +452,60 @@ function useScrollIntoViewOnSelect(
   }, [isSelected, sectionRef, setCollapsed]);
 }
 
+function renderDiffContent(opts: {
+  shouldRender: boolean;
+  file: ReviewFile;
+  sessionId: string;
+  wordWrap: boolean;
+  expandUnchanged: boolean;
+  onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
+  onCommentRun: (comment: DiffComment) => void;
+  onToggleExpandUnchanged: () => void;
+}) {
+  const {
+    shouldRender,
+    file,
+    sessionId,
+    wordWrap,
+    expandUnchanged,
+    onRevertBlock,
+    onCommentRun,
+    onToggleExpandUnchanged,
+  } = opts;
+  if (shouldRender && file.diff) {
+    return (
+      <>
+        <FileDiffViewer
+          filePath={file.path}
+          diff={file.diff}
+          status={file.status}
+          enableComments
+          enableAcceptReject
+          onRevertBlock={onRevertBlock}
+          onCommentRun={onCommentRun}
+          sessionId={sessionId}
+          wordWrap={wordWrap}
+          enableExpansion={true}
+          baseRef="HEAD"
+          hideHeader
+          expandUnchanged={expandUnchanged}
+          onToggleExpandUnchanged={onToggleExpandUnchanged}
+        />
+        {file.diff_skip_reason === "truncated" && (
+          <div className="py-1 text-center text-xs text-muted-foreground border-t">
+            Diff truncated — showing first 256 KB
+          </div>
+        )}
+      </>
+    );
+  }
+  return (
+    <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
+      {diffSkipReasonLabel(file.diff_skip_reason)}
+    </div>
+  );
+}
+
 function FileDiffSection({
   file,
   isReviewed,
@@ -478,8 +533,8 @@ function FileDiffSection({
     [wordWrap],
   );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
-  // Force load when: visible via intersection observer, or forceLoad is true (all files up to selected)
-  const shouldRenderContent = isVisible || forceLoad;
+  // Force load when visible via intersection observer, or forceLoad is true
+  const shouldRenderContent = isVisible || !!forceLoad;
   useScrollIntoViewOnSelect(isSelected, sectionRef, setCollapsed);
   const scrollSentinelRef = useAutoMarkOnScroll({
     autoMarkOnScroll,
@@ -527,28 +582,16 @@ function FileDiffSection({
       />
       <div ref={sentinelRef} />
       {!collapsed &&
-        (shouldRenderContent && file.diff ? (
-          <FileDiffViewer
-            filePath={file.path}
-            diff={file.diff}
-            status={file.status}
-            enableComments
-            enableAcceptReject
-            onRevertBlock={handleRevertBlock}
-            onCommentRun={handleCommentRun}
-            sessionId={sessionId}
-            wordWrap={effectiveWordWrap}
-            enableExpansion={true}
-            baseRef="HEAD"
-            hideHeader
-            expandUnchanged={expandUnchanged}
-            onToggleExpandUnchanged={handleToggleExpandUnchanged}
-          />
-        ) : (
-          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-            Loading diff...
-          </div>
-        ))}
+        renderDiffContent({
+          shouldRender: shouldRenderContent,
+          file,
+          sessionId,
+          wordWrap: effectiveWordWrap,
+          expandUnchanged,
+          onRevertBlock: handleRevertBlock,
+          onCommentRun: handleCommentRun,
+          onToggleExpandUnchanged: handleToggleExpandUnchanged,
+        })}
     </div>
   );
 }
