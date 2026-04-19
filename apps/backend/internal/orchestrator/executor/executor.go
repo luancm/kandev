@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/client"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -279,6 +280,7 @@ type LaunchAgentResponse struct {
 	WorktreePath     string
 	WorktreeBranch   string
 	Metadata         map[string]interface{}
+	PrepareResult    *lifecycle.EnvPrepareResult `json:"-"` // Carried from lifecycle.Launch for synchronous persistence
 }
 
 // TaskExecution tracks an active task execution
@@ -294,6 +296,8 @@ type TaskExecution struct {
 	// Worktree info for the agent
 	WorktreePath   string
 	WorktreeBranch string
+	// PrepareResult carries the env preparation result for deferred persistence
+	PrepareResult *lifecycle.EnvPrepareResult
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution

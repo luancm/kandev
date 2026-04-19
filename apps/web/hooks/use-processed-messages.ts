@@ -48,7 +48,13 @@ export type TurnGroup = {
   messages: Message[];
 };
 
-export type RenderItem = { type: "message"; message: Message } | TurnGroup;
+export type PrepareProgressItem = {
+  type: "prepare_progress";
+  id: string;
+  sessionId: string;
+};
+
+export type RenderItem = { type: "message"; message: Message } | TurnGroup | PrepareProgressItem;
 
 function buildToolCallIds(messages: Message[]): Set<string> {
   const set = new Set<string>();
@@ -220,6 +226,20 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
   return items;
 }
 
+function injectPrepareProgressItem(
+  items: RenderItem[],
+  resolvedSessionId: string | null,
+): RenderItem[] {
+  if (!resolvedSessionId) return items;
+  const prepareItem: PrepareProgressItem = {
+    type: "prepare_progress",
+    id: `prepare-progress-${resolvedSessionId}`,
+    sessionId: resolvedSessionId,
+  };
+  if (items.length === 0) return [prepareItem];
+  return [items[0], prepareItem, ...items.slice(1)];
+}
+
 export function useProcessedMessages(
   messages: Message[],
   taskId: string | null,
@@ -298,10 +318,9 @@ export function useProcessedMessages(
     return { regularMessages: regular, footerActionMessages: footer };
   }, [allMessages]);
 
-  const groupedItems = useMemo<RenderItem[]>(
-    () => groupActivityMessages(regularMessages),
-    [regularMessages],
-  );
+  const groupedItems = useMemo<RenderItem[]>(() => {
+    return injectPrepareProgressItem(groupActivityMessages(regularMessages), resolvedSessionId);
+  }, [regularMessages, resolvedSessionId]);
 
   return {
     visibleMessages,
