@@ -1,7 +1,17 @@
 "use client";
 
 import { IconX } from "@tabler/icons-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@kandev/ui/select";
+import { Fragment } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,8 +24,9 @@ import type {
 import { DIMENSION_METAS, getDimensionMeta, getOpLabel } from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
 import { FilterMultiSelect } from "./filter-multi-select";
+import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
 
-type ValueOption = { value: string; label: string; color?: string };
+type ValueOption = { value: string; label: string; color?: string; group?: string };
 
 function OptionLabel({ option }: { option: ValueOption }) {
   return (
@@ -91,7 +102,7 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
       >
         <SelectTrigger
           size="sm"
-          className="h-7 flex-1 text-xs"
+          className="h-7 w-32 shrink-0 text-xs"
           data-testid="filter-dimension-select"
         >
           <SelectValue />
@@ -106,7 +117,11 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
       </Select>
 
       <Select value={clause.op} onValueChange={(v) => handleOpChange(v as FilterOp)}>
-        <SelectTrigger size="sm" className="h-7 w-24 text-xs" data-testid="filter-op-select">
+        <SelectTrigger
+          size="sm"
+          className="h-7 w-24 shrink-0 text-xs"
+          data-testid="filter-op-select"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -157,7 +172,7 @@ function ValueInput({
         value={String(clause.value ?? "")}
         onChange={(e) => onChange(e.target.value)}
         placeholder={meta.placeholder ?? "Value"}
-        className="h-7 flex-1 text-xs"
+        className="h-7 min-w-0 flex-1 text-xs"
         data-testid="filter-value-input"
       />
     );
@@ -175,21 +190,56 @@ function ValueInput({
   const current = String(clause.value ?? "");
   return (
     <Select value={current} onValueChange={(v) => onChange(v)}>
-      <SelectTrigger size="sm" className="h-7 flex-1 text-xs" data-testid="filter-value-select">
+      <SelectTrigger
+        size="sm"
+        className="h-7 min-w-0 flex-1 text-xs"
+        data-testid="filter-value-select"
+      >
         <SelectValue placeholder="Select value" />
       </SelectTrigger>
       <SelectContent>
-        {options.length === 0 && (
+        {options.length === 0 ? (
           <SelectItem value="__empty__" disabled className="text-xs">
             No options
           </SelectItem>
+        ) : (
+          <GroupedSelectItems options={options} />
         )}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function GroupedSelectItems({ options }: { options: ValueOption[] }) {
+  if (!hasGroupedOptions(options)) {
+    return (
+      <>
         {options.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="text-xs">
             <OptionLabel option={opt} />
           </SelectItem>
         ))}
-      </SelectContent>
-    </Select>
+      </>
+    );
+  }
+
+  const groups = buildOptionGroups(options);
+
+  return (
+    <>
+      {groups.map((g, idx) => (
+        <Fragment key={g.heading || `__ungrouped__${idx}`}>
+          {idx > 0 && <SelectSeparator />}
+          <SelectGroup>
+            {g.heading && <SelectLabel>{g.heading}</SelectLabel>}
+            {g.items.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                <OptionLabel option={opt} />
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </Fragment>
+      ))}
+    </>
   );
 }
