@@ -1539,7 +1539,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		// allowWakeFromWaiting=false — this is a revert away from RUNNING, never a
 		// wake transition; the flag only matters when going WAITING_FOR_INPUT → RUNNING.
 		s.updateTaskSessionState(ctx, taskID, sessionID, previousSessionState, "", false)
-		if !isTransientPromptError(err) {
+		// ErrCancelEscalated means the user cancelled and the lifecycle manager had to
+		// force-unblock a hung agent. That is not a "review this failure" condition —
+		// Service.CancelAgent reconciles DB state (WAITING_FOR_INPUT, cancel message,
+		// complete turn) already.
+		if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
 			_ = s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview)
 		}
 		s.completeTurnForSession(ctx, sessionID)
@@ -1666,16 +1670,25 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		switch {
+		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
+			// The session was live but there is no execution to cancel — the agent process
+			// crashed, exited, or never re-registered after a backend restart. Log at error
+			// level so operators notice the stuck state; we still reconcile DB state below
+			// so the UI unsticks.
+			s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		case errors.Is(err, lifecycle.ErrCancelEscalated):
+			// The agent accepted the ACP cancel but never published a completion event.
+			// The lifecycle manager already unblocked the in-flight prompt and marked the
+			// execution ready; reconcile DB state below so the UI unsticks.
+			s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		default:
 			return fmt.Errorf("cancel agent: %w", err)
 		}
-		// The session was live but there is no execution to cancel — the agent process
-		// crashed, exited, or never re-registered after a backend restart. Log at error
-		// level so operators notice the stuck state; we still reconcile DB state below
-		// so the UI unsticks.
-		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
 	}
 
 	// Transition to WAITING_FOR_INPUT so the user can send a new prompt
