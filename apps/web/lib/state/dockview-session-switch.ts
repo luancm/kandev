@@ -144,7 +144,9 @@ export function performSessionSwitch(params: SessionSwitchParams): LayoutGroupId
 
   // Try fast path: skip fromJSON when layout structure hasn't changed
   const fastResult = tryFastSessionSwitch(params);
-  if (fastResult) return fastResult;
+  if (fastResult) {
+    return fastResult;
+  }
 
   // Slow path: full layout rebuild via fromJSON
   const saved = getSessionLayout(newSessionId);

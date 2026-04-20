@@ -116,6 +116,25 @@ describe("useSessionState", () => {
       expect(result.current.isWorking).toBe(true);
     });
 
+    it("does not set isStarting when session state is CREATED", () => {
+      mockSession = createMockSession("session-1", "task-1", "CREATED");
+
+      const { result } = renderHook(() => useSessionState("session-1"));
+
+      // CREATED is not isStarting — the input should be enabled so tests
+      // that create sessions and immediately fill() the input work correctly.
+      expect(result.current.isStarting).toBe(false);
+    });
+
+    it("does not set isStarting when WAITING_FOR_INPUT", () => {
+      mockSession = createMockSession("session-1", "task-1", "WAITING_FOR_INPUT");
+
+      const { result } = renderHook(() => useSessionState("session-1"));
+
+      expect(result.current.isStarting).toBe(false);
+      expect(result.current.isWorking).toBe(false);
+    });
+
     it("sets isAgentBusy when session state is RUNNING", () => {
       mockSession = createMockSession("session-1", "task-1", "RUNNING");
 

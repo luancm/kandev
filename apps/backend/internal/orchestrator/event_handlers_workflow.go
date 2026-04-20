@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // processOnTurnComplete processes the on_turn_complete events for the current step.
@@ -260,7 +261,20 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.finalizeStepEnter(ctx, taskID, sessionID, targetStep, task.Description)
 	} else {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		// However, we still need to switch the agent profile if the target step requires
+		// a different one — the user's prompt should go to the correct agent.
+		currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			s.logger.Warn("failed to load session for profile switch",
+				zap.String("session_id", sessionID), zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return
+		}
+		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, currentSession, targetStep)
+		if !ok {
+			return
+		}
+		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
 	}
 }
 
@@ -451,6 +465,12 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 		zap.String("current_profile", currentSession.AgentProfileID),
 		zap.String("new_profile", newAgentProfileID))
 
+	// Signal to the frontend that the task is preparing a new agent.
+	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); err != nil {
+		s.logger.Warn("failed to set task SCHEDULING during agent switch",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+
 	// Prepare the new session BEFORE touching the old one.
 	// If any step below fails, the old session remains active and the task stays recoverable.
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -475,6 +495,25 @@ func (s *Service) switchSessionForStep(ctx context.Context, taskID string, curre
 	newSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get new session: %w", err)
+	}
+
+	// Inherit the task environment from the old session — the workspace is shared
+	// across sessions within the same task, so the new session can reuse the
+	// existing agentctl connection and workspace files.
+	if currentSession.TaskEnvironmentID != "" && newSession.TaskEnvironmentID == "" {
+		newSession.TaskEnvironmentID = currentSession.TaskEnvironmentID
+		newSession.UpdatedAt = time.Now().UTC()
+		if err := s.repo.UpdateTaskSession(ctx, newSession); err != nil {
+			s.logger.Warn("failed to copy task_environment_id to new session",
+				zap.String("session_id", newSession.ID),
+				zap.Error(err))
+		}
+	}
+
+	// Promote the new session to primary so it's loaded when navigating back to this task.
+	if err := s.repo.SetSessionPrimary(ctx, newSession.ID); err != nil {
+		s.logger.Warn("failed to set new session as primary",
+			zap.String("session_id", newSession.ID), zap.Error(err))
 	}
 
 	// New session is ready — now safe to stop the old agent and complete the old session.
@@ -531,15 +570,17 @@ func (s *Service) maybySwitchSessionForProfile(
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
 	// Switch session if this step requires a different agent profile.
 	var ok bool
+	prevSessionID := session.ID
 	if session, ok = s.maybySwitchSessionForProfile(ctx, taskID, session, step); !ok {
 		return
 	}
+	sessionSwitched := session.ID != prevSessionID
 	sessionID := session.ID
 	isPassthrough := s.agentManager.IsPassthroughSession(ctx, sessionID)
 
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
-	if len(step.Events.OnEnter) == 0 {
+	if len(step.Events.OnEnter) == 0 && !sessionSwitched {
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 		return
@@ -602,6 +643,27 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		}
 
 	default:
+		// When the session was just switched (agent profile change) but the step
+		// has no auto_start_agent, launch the agent anyway — the profile override
+		// implies the user wants this agent to run on this step.
+		if sessionSwitched && step.Prompt != "" {
+			effectivePrompt := s.buildWorkflowPrompt(taskDescription, step, taskID, sessionID)
+			planMode := hasPlanMode
+			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", step.Name))
+			err := s.autoStartStepPrompt(ctx, taskID, session, step.Name, effectivePrompt, planMode, true)
+			if err != nil {
+				s.logger.Error("failed to launch agent after profile switch",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+				s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+			}
+			return
+		}
 		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 		s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
 	}
@@ -924,6 +986,9 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		if session.AgentProfileID != "" {
 			eventData["agent_profile_id"] = session.AgentProfileID
 		}
+		if session.TaskEnvironmentID != "" {
+			eventData["task_environment_id"] = session.TaskEnvironmentID
+		}
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
@@ -1079,8 +1144,10 @@ func (s *Service) applyEngineTransition(
 			return false
 		}
 	} else {
-		// Even without on_enter, verify the target step exists to avoid orphaning the task.
-		if _, err := s.workflowStepGetter.GetStep(ctx, result.ToStepID); err != nil {
+		// Even without on_enter, load the target step — needed for profile switch check.
+		var err error
+		targetStep, err = s.workflowStepGetter.GetStep(ctx, result.ToStepID)
+		if err != nil {
 			s.logger.Warn("target step not found, skipping transition",
 				zap.String("step_id", result.ToStepID),
 				zap.Error(err))
@@ -1116,7 +1183,14 @@ func (s *Service) applyEngineTransition(
 	}
 
 	if !triggerOnEnter {
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		// on_turn_start transitions: user is about to send a message, no on_enter needed.
+		// However, we still need to switch the agent profile if the target step requires
+		// a different one — the user's prompt should go to the correct agent.
+		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep)
+		if !ok {
+			return false
+		}
+		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
 		return true
 	}
 
