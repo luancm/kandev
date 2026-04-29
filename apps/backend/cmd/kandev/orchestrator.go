@@ -272,9 +272,29 @@ type repositoryResolverAdapter struct {
 }
 
 // ResolveForReview implements orchestrator.RepositoryResolver.
+//
+// If the workspace already has a Repository configured for the given provider
+// info with a non-empty LocalPath, that repo is reused and no clone is
+// performed. Otherwise the repo is cloned into the kandev-managed location and
+// a Repository entity is created.
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
+	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
+	}
+	if existing != nil && existing.LocalPath != "" {
+		baseBranch := defaultBranch
+		if baseBranch == "" {
+			baseBranch = existing.DefaultBranch
+		}
+		if baseBranch == "" {
+			baseBranch = a.detectAndPersistDefaultBranch(ctx, existing, existing.LocalPath)
+		}
+		return existing.ID, baseBranch, nil
+	}
+
 	cloneURL, err := repoclone.CloneURL(provider, owner, name, a.protocol)
 	if err != nil {
 		return "", "", fmt.Errorf("unsupported provider: %w", err)

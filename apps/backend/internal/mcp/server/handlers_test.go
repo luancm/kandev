@@ -100,18 +100,6 @@ func TestCreateTask_ExplicitParentID(t *testing.T) {
 	assert.Equal(t, "task-abc", payload["parent_id"])
 }
 
-func TestCreateTask_NoParentID_RequiresWorkspaceAndWorkflow(t *testing.T) {
-	backend := &testBackend{}
-	s := newTaskModeServer(t, backend, "task-current")
-
-	// No parent_id and no workspace/workflow -> error
-	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
-		"title": "Standalone task",
-	})
-
-	assert.True(t, result.IsError)
-}
-
 func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "task-new", "title": "Standalone"},
@@ -236,4 +224,43 @@ func TestCreateTask_WithLocalPath(t *testing.T) {
 	require.True(t, ok, "repositories should be a slice")
 	require.Len(t, repos, 1)
 	assert.Equal(t, "/Users/me/projects/myrepo", repos[0]["local_path"])
+}
+
+func TestCreateTask_WithRepositoryURL(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "task-new", "title": "Task with URL"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":          "Task with URL",
+		"workspace_id":   "ws-1",
+		"workflow_id":    "wf-1",
+		"repository_url": "https://github.com/acme/widgets",
+		"base_branch":    "main",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+
+	repos, ok := payload["repositories"].([]map[string]string)
+	require.True(t, ok, "repositories should be a slice")
+	require.Len(t, repos, 1)
+	assert.Equal(t, "https://github.com/acme/widgets", repos[0]["github_url"])
+	assert.Equal(t, "main", repos[0]["base_branch"])
+}
+
+func TestCreateTask_RepositoryURL_RejectedForSubtasks(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":          "Subtask with URL",
+		"parent_id":      "self",
+		"repository_url": "https://github.com/acme/widgets",
+	})
+
+	assert.True(t, result.IsError, "repository_url should be rejected for subtasks")
 }
