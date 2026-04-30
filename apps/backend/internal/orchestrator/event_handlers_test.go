@@ -117,6 +117,7 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 type mockAgentManager struct {
 	isPassthrough       bool
 	isAgentRunning      bool
+	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
 	promptErr           error
@@ -208,8 +209,12 @@ func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string)
 	return m.isAgentRunning
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
+	if m.resolveProfileErr != nil {
+		return nil, m.resolveProfileErr
+	}
 	return &executor.AgentProfileInfo{
-		SupportsMCP: true,
+		SupportsMCP:    true,
+		CLIPassthrough: m.isPassthrough,
 	}, nil
 }
 func (m *mockAgentManager) RestartAgentProcess(_ context.Context, agentExecutionID string) error {

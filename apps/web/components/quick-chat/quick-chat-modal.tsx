@@ -1,10 +1,12 @@
 "use client";
 
 import { memo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { IconMessageCircle, IconPlus, IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { QuickChatContent } from "./quick-chat-content";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
 import { useQuickChatModal } from "./use-quick-chat-modal";
@@ -76,6 +78,32 @@ function QuickChatTabs({
   );
 }
 
+function useIsQuickChatPassthrough(sessionId: string) {
+  return useAppStore(
+    useShallow((s) => {
+      const session = s.taskSessions.items[sessionId];
+      if (typeof session?.is_passthrough === "boolean") return session.is_passthrough;
+      const profileId =
+        session?.agent_profile_id ??
+        s.quickChat.sessions.find((qs) => qs.sessionId === sessionId)?.agentProfileId;
+      if (!profileId) return false;
+      return s.agentProfiles.items.find((p) => p.id === profileId)?.cli_passthrough === true;
+    }),
+  );
+}
+
+function QuickChatSessionView({ sessionId }: { sessionId: string }) {
+  const isPassthrough = useIsQuickChatPassthrough(sessionId);
+  if (isPassthrough) {
+    return (
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <PassthroughTerminal key={sessionId} sessionId={sessionId} mode="agent" />
+      </div>
+    );
+  }
+  return <QuickChatContent sessionId={sessionId} />;
+}
+
 function AgentPickerView({ onSelectAgent }: { onSelectAgent: (agentId: string) => void }) {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items) ?? [];
 
@@ -145,7 +173,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
             onNewChat={handleNewChat}
           />
           {activeSessionId && !activeSessionNeedsAgent && (
-            <QuickChatContent sessionId={activeSessionId} />
+            <QuickChatSessionView sessionId={activeSessionId} />
           )}
           {activeSessionNeedsAgent && <AgentPickerView onSelectAgent={handleSelectAgent} />}
         </DialogContent>
