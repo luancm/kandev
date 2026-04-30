@@ -307,7 +307,7 @@ func (s *Server) registerTools() {
 		count++
 	default: // ModeTask
 		s.registerKanbanTools()
-		count += 9
+		count += 10
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -389,6 +389,24 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent. When supplied AND the source session is mid-turn, the move is deferred to the agent's turn-end and the prompt is delivered at the new step (concatenated after the step's own auto_start prompt, if any). Omit for plain admin/config moves where there's no agent to address.")),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("message_task_kandev",
+			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session.
+
+Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward.
+
+Behaviour by session state:
+- Running/starting: the message is queued and delivered when the current turn ends.
+- Idle (waiting for input or completed): the message is sent immediately as a new turn.
+- Created (not yet started): the agent is started with this message as its first prompt.
+- Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
+
+Returns the dispatch status: "queued", "sent", or "started".`),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task ID")),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
+		),
+		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
 }
 
