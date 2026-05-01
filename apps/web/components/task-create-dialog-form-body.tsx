@@ -83,6 +83,7 @@ type CreateEditSelectorsProps = {
   freshBranchEnabled: boolean;
   onToggleFreshBranch: (enabled: boolean) => void;
   currentLocalBranch: string;
+  branchLocked?: boolean;
 };
 
 type AgentColumnProps = Pick<
@@ -134,6 +135,21 @@ function AgentColumn({
   );
 }
 
+function computeBranchDisabled(args: {
+  branchLocked?: boolean;
+  lockedToCurrentBranch: boolean;
+  hasRepositorySelection: boolean;
+  branchesLoading: boolean;
+  localBranchesLoading: boolean;
+  optionCount: number;
+}): boolean {
+  if (args.branchLocked) return true;
+  if (args.lockedToCurrentBranch) return true;
+  if (!args.hasRepositorySelection) return true;
+  if (args.branchesLoading || args.localBranchesLoading) return true;
+  return args.optionCount === 0;
+}
+
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
@@ -160,9 +176,13 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     currentLocalBranch,
     BranchSelectorComponent,
     ExecutorProfileSelectorComponent,
+    branchLocked,
   } = props;
   const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
-  const lockedToCurrentBranch = isLocalWithoutGitHubUrl && !freshBranchEnabled;
+  // When `branchLocked` is true the caller pinned a specific branch (e.g.
+  // Improve Kandev) — suppress the local-executor "current branch" shortcut and
+  // the FreshBranchToggle so users can't drift away from the pinned value.
+  const lockedToCurrentBranch = !branchLocked && isLocalWithoutGitHubUrl && !freshBranchEnabled;
   const branchPlaceholder = computeBranchPlaceholder({
     lockedToCurrentBranch,
     currentLocalBranch,
@@ -170,12 +190,14 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
     loading: branchesLoading || localBranchesLoading,
     optionCount: branchOptions.length,
   });
-  const branchDisabled =
-    lockedToCurrentBranch ||
-    !hasRepositorySelection ||
-    branchesLoading ||
-    localBranchesLoading ||
-    branchOptions.length === 0;
+  const branchDisabled = computeBranchDisabled({
+    branchLocked,
+    lockedToCurrentBranch,
+    hasRepositorySelection,
+    branchesLoading,
+    localBranchesLoading,
+    optionCount: branchOptions.length,
+  });
   // When the local executor locks to the current branch, ignore any branch
   // value the user picked under a different executor — the placeholder
   // should reflect the actual checked-out branch instead.
@@ -200,7 +222,7 @@ export const CreateEditSelectors = memo(function CreateEditSelectors(
             loading={branchesLoading || localBranchesLoading}
           />
         </div>
-        {isLocalWithoutGitHubUrl && (
+        {isLocalWithoutGitHubUrl && !branchLocked && (
           <FreshBranchToggle enabled={freshBranchEnabled} onToggle={onToggleFreshBranch} />
         )}
       </div>
@@ -288,7 +310,13 @@ export const SessionSelectors = memo(function SessionSelectors({
 type WorkflowSectionProps = {
   isCreateMode: boolean;
   isTaskStarted: boolean;
-  workflows: Array<{ id: string; name: string; agent_profile_id?: string; [key: string]: unknown }>;
+  workflows: Array<{
+    id: string;
+    name: string;
+    agent_profile_id?: string;
+    hidden?: boolean;
+    [key: string]: unknown;
+  }>;
   snapshots: Record<string, WorkflowSnapshotData>;
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
@@ -298,13 +326,17 @@ type WorkflowSectionProps = {
 export const WorkflowSection = memo(function WorkflowSection({
   isCreateMode,
   isTaskStarted,
-  workflows,
+  workflows: allWorkflows,
   snapshots,
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
 }: WorkflowSectionProps) {
   const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
+
+  // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
+  // remain reachable via their dedicated entry point.
+  const workflows = allWorkflows.filter((w) => !w.hidden);
 
   const handleWorkflowChange = useCallback(
     (workflowId: string) => {
@@ -378,6 +410,12 @@ export type DialogPromptSectionProps = {
   workspaceId?: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
+  /** Extension slot rendered below the description textarea (e.g. log-capture toggle). */
+  extraFormSlot?: React.ReactNode;
+  /** Optional override for the description textarea placeholder. */
+  descriptionPlaceholder?: string;
+  /** Optional slot rendered above the description textarea (e.g. a tab toggle). */
+  aboveDescriptionSlot?: React.ReactNode;
 };
 
 // importBindings collapses the optional Jira/Linear import callbacks into the
@@ -406,11 +444,18 @@ export function DialogPromptSection({
   workspaceId,
   onJiraImport,
   onLinearImport,
+  extraFormSlot,
+  descriptionPlaceholder,
+  aboveDescriptionSlot,
 }: DialogPromptSectionProps) {
   const importsEnabled = !isSessionMode && !isTaskStarted;
   const ws = workspaceId ?? null;
+  const placeholder = isPassthroughProfile
+    ? "Passthrough mode — prompt not supported"
+    : descriptionPlaceholder;
   return (
     <>
+      {aboveDescriptionSlot}
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
@@ -420,13 +465,14 @@ export function DialogPromptSection({
         onKeyDown={handleKeyDown}
         descriptionValueRef={fs.descriptionInputRef}
         disabled={isTaskStarted || isPassthroughProfile}
-        placeholder={isPassthroughProfile ? "Passthrough mode — prompt not supported" : undefined}
+        placeholder={placeholder}
         onEnhancePrompt={enhance?.onEnhance}
         isEnhancingPrompt={enhance?.isLoading}
         isUtilityConfigured={enhance?.isConfigured}
         jiraImport={importBindings(importsEnabled, ws, isPassthroughProfile, onJiraImport)}
         linearImport={importBindings(importsEnabled, ws, isPassthroughProfile, onLinearImport)}
       />
+      {extraFormSlot}
       {isPassthroughProfile && hasDescription && (
         <p className="text-xs text-amber-500">Prompt ignored — passthrough mode active</p>
       )}
