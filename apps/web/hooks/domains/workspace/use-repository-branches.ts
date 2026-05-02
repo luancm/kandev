@@ -1,90 +1,100 @@
+"use client";
+
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { listRepositoryBranches } from "@/lib/api";
+import { listBranches, listRepositoryBranches } from "@/lib/api";
 import type { Branch } from "@/lib/types/http";
 
 const EMPTY_BRANCHES: Branch[] = [];
 
-// Stale-while-revalidate: when the cache is older than this we fire a
-// background refresh on hook mount/repo change. The backend additionally
-// enforces a per-repo cooldown so this is the soft, client-side check.
-const CLIENT_STALE_MS = 60_000;
+/**
+ * Source of branches for a row: either a workspace repo (by id) or an
+ * on-machine folder (by path). Both routes go through one backend endpoint
+ * (`/workspaces/:id/branches`) and share one Zustand cache slice — id-based
+ * entries are keyed by the repo id, path-based entries get a synthetic key.
+ *
+ * `workspaceId` is always required because the route segment needs it.
+ */
+export type BranchSource =
+  | { kind: "id"; workspaceId: string; repositoryId: string }
+  | { kind: "path"; workspaceId: string; path: string };
 
-export function useRepositoryBranches(repositoryId: string | null, enabled = true) {
+function cacheKeyFor(source: BranchSource | null): string {
+  if (!source) return "";
+  return source.kind === "id" ? source.repositoryId : `path::${source.workspaceId}::${source.path}`;
+}
+
+/**
+ * Loads git branches for a workspace repo or an on-machine path. One hook,
+ * one cache, one backend endpoint — the source shape decides which query
+ * param goes on the wire and which key the cache uses.
+ */
+export type UseBranchesResult = {
+  branches: Branch[];
+  isLoading: boolean;
+  /**
+   * Force-refreshes the branch list with a `git fetch` first. Only available
+   * for id-based sources (workspace-imported repos); on-machine path sources
+   * resolve to `undefined` since the refresh endpoint takes a repository id.
+   */
+  refresh?: () => Promise<void>;
+};
+
+export function useBranches(source: BranchSource | null, enabled = true): UseBranchesResult {
+  const key = cacheKeyFor(source);
   const branches = useAppStore((state) =>
-    repositoryId
-      ? (state.repositoryBranches.itemsByRepositoryId[repositoryId] ?? EMPTY_BRANCHES)
-      : EMPTY_BRANCHES,
+    key ? (state.repositoryBranches.itemsByRepositoryId[key] ?? EMPTY_BRANCHES) : EMPTY_BRANCHES,
   );
   const isLoaded = useAppStore((state) =>
-    repositoryId ? (state.repositoryBranches.loadedByRepositoryId[repositoryId] ?? false) : false,
+    key ? (state.repositoryBranches.loadedByRepositoryId[key] ?? false) : false,
   );
   const isLoading = useAppStore((state) =>
-    repositoryId ? (state.repositoryBranches.loadingByRepositoryId[repositoryId] ?? false) : false,
-  );
-  const fetchedAt = useAppStore((state) =>
-    repositoryId ? state.repositoryBranches.fetchedAtByRepositoryId[repositoryId] : undefined,
-  );
-  const fetchError = useAppStore((state) =>
-    repositoryId ? state.repositoryBranches.fetchErrorByRepositoryId[repositoryId] : undefined,
+    key ? (state.repositoryBranches.loadingByRepositoryId[key] ?? false) : false,
   );
   const setRepositoryBranches = useAppStore((state) => state.setRepositoryBranches);
   const setRepositoryBranchesLoading = useAppStore((state) => state.setRepositoryBranchesLoading);
-  const setRepositoryBranchesFetchError = useAppStore(
-    (state) => state.setRepositoryBranchesFetchError,
-  );
-  const inFlightRef = useRef<string | null>(null);
-
-  // Stable fetcher closed over the store actions; the repo id is a parameter
-  // so the same identity works for both mount-time fetches and refresh().
-  const runFetch = useCallback(
-    (repoId: string, refresh: boolean) => {
-      if (inFlightRef.current === repoId) return;
-      inFlightRef.current = repoId;
-      setRepositoryBranchesLoading(repoId, true);
-      listRepositoryBranches(repoId, { refresh }, { cache: "no-store" })
-        .then((response) => {
-          setRepositoryBranches(repoId, response.branches, {
-            fetchedAt: response.fetched_at,
-            fetchError: response.fetch_error,
-          });
-        })
-        .catch((err: unknown) => {
-          // Stale-while-revalidate: keep any previously-cached branches in
-          // place on transport failure so the dropdown stays usable. Only the
-          // fetchError is updated so callers can surface the failure.
-          const message = err instanceof Error ? err.message : "request failed";
-          setRepositoryBranchesFetchError(repoId, message);
-        })
-        .finally(() => {
-          if (inFlightRef.current === repoId) inFlightRef.current = null;
-          setRepositoryBranchesLoading(repoId, false);
-        });
-    },
-    [setRepositoryBranches, setRepositoryBranchesLoading, setRepositoryBranchesFetchError],
-  );
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
-    if (!enabled || !repositoryId) return;
-    // Cold load: nothing in the cache, do a foreground fetch with refresh so
-    // the user sees fresh remote branches the first time the dialog opens.
-    if (!isLoaded) {
-      runFetch(repositoryId, true);
-      return;
-    }
-    // Warm cache, possibly stale: revalidate in the background. The backend
-    // cooldown ensures this doesn't hammer git when the dialog is reopened
-    // in quick succession.
-    const ageMs = fetchedAt ? Date.now() - new Date(fetchedAt).getTime() : Infinity;
-    if (ageMs >= CLIENT_STALE_MS) {
-      runFetch(repositoryId, true);
-    }
-  }, [enabled, isLoaded, repositoryId, fetchedAt, runFetch]);
+    if (!enabled || !source) return;
+    if (isLoaded || inFlightRef.current) return;
+    inFlightRef.current = true;
+    setRepositoryBranchesLoading(key, true);
 
-  const refresh = useCallback(() => {
-    if (!repositoryId) return;
-    runFetch(repositoryId, true);
-  }, [repositoryId, runFetch]);
+    const promise =
+      source.kind === "id"
+        ? listBranches(source.workspaceId, { repositoryId: source.repositoryId })
+        : listBranches(source.workspaceId, { path: source.path });
 
-  return { branches, isLoading, fetchedAt, fetchError, refresh };
+    promise
+      .then((response) => setRepositoryBranches(key, response.branches))
+      .catch(() => setRepositoryBranches(key, []))
+      .finally(() => {
+        inFlightRef.current = false;
+        setRepositoryBranchesLoading(key, false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key encodes source identity; listing every field re-fires on every render
+  }, [enabled, isLoaded, key, setRepositoryBranches, setRepositoryBranchesLoading]);
+
+  const refresh = useCallback(async () => {
+    if (!source || source.kind !== "id") return;
+    setRepositoryBranchesLoading(key, true);
+    try {
+      const response = await listRepositoryBranches(source.repositoryId, { refresh: true });
+      setRepositoryBranches(key, response.branches);
+    } catch {
+      // Refresh failures leave the existing branch list in place; the user
+      // can retry manually. Errors are surfaced via the BranchRefreshButton's
+      // tooltip when wired with `fetchError`, but the hook does not own
+      // error state today.
+    } finally {
+      setRepositoryBranchesLoading(key, false);
+    }
+  }, [source, key, setRepositoryBranches, setRepositoryBranchesLoading]);
+
+  return {
+    branches,
+    isLoading,
+    refresh: source?.kind === "id" ? refresh : undefined,
+  };
 }

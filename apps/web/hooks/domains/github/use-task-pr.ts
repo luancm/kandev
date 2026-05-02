@@ -45,9 +45,33 @@ export function useWorkspacePRs(workspaceId: string | null) {
 const SYNC_RETRY_DELAY = 5_000; // 5 seconds
 const SYNC_MAX_RETRIES = 6; // Up to 30 seconds of retries
 
-/** Fetch a single task's PR association, with on-demand sync via WS. */
+/**
+ * Returns the primary PR (first by created_at) for a task. Multi-repo tasks
+ * may have additional PRs — use `useTaskPRs` to get the full list.
+ */
+export function getPrimaryTaskPR(prs: TaskPR[] | undefined): TaskPR | null {
+  return prs && prs.length > 0 ? prs[0] : null;
+}
+
+/**
+ * Normalises the WS sync response into an array of TaskPR rows. Backend
+ * returns `{prs: TaskPR[]}` (current shape) for multi-repo support, but we
+ * accept the legacy bare-TaskPR shape too in case an older backend is
+ * still running. Empty / null / unknown shapes return an empty array.
+ */
+function normalizeSyncResponse(result: { prs?: TaskPR[] } | TaskPR | null | undefined): TaskPR[] {
+  if (!result) return [];
+  const envelope = result as { prs?: TaskPR[] };
+  if (Array.isArray(envelope.prs)) return envelope.prs;
+  const single = result as TaskPR;
+  if (single.task_id) return [single];
+  return [];
+}
+
+/** Fetch a single task's PR associations, with on-demand sync via WS. */
 export function useTaskPR(taskId: string | null) {
-  const pr = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
+  const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
+  const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
   const retryRef = useRef(0);
 
@@ -56,13 +80,20 @@ export function useTaskPR(taskId: string | null) {
     const client = getWebSocketClient();
     if (!client) return;
 
+    // Backend returns `{prs: TaskPR[]}` — multi-repo tasks have one row per
+    // repo. We push each into the store so the per-repo PR icon stays in
+    // sync. Empty array means no watches yet (the freshness retry below
+    // handles the polling cadence). Legacy single-PR shape (`TaskPR` only)
+    // is detected via the absence of `.prs`.
     client
-      .request<TaskPR | null>("github.task_pr.sync", { task_id: taskId })
+      .request<{ prs?: TaskPR[] } | TaskPR | null>("github.task_pr.sync", { task_id: taskId })
       .then((result) => {
-        if (result?.task_id) {
-          setTaskPR(taskId, result);
-          retryRef.current = 0;
+        const list = normalizeSyncResponse(result);
+        if (list.length === 0) return;
+        for (const pr of list) {
+          if (pr.task_id) setTaskPR(taskId, pr);
         }
+        retryRef.current = 0;
       })
       .catch(() => {
         // Ignore - sync may fail if no watch exists
@@ -97,13 +128,18 @@ export function useTaskPR(taskId: string | null) {
     return () => clearInterval(interval);
   }, [taskId, pr, refresh]);
 
-  return { pr, refresh } as { pr: TaskPR | null; refresh: () => void };
+  return { pr, prs: prs ?? [], refresh } as {
+    pr: TaskPR | null;
+    prs: TaskPR[];
+    refresh: () => void;
+  };
 }
 
-/** Read the active task's PR from the store (no fetching). */
+/** Read the active task's primary PR from the store (no fetching). */
 export function useActiveTaskPR(): TaskPR | null {
   return useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
-    return taskId ? (s.taskPRs.byTaskId[taskId] ?? null) : null;
+    if (!taskId) return null;
+    return getPrimaryTaskPR(s.taskPRs.byTaskId[taskId]);
   });
 }

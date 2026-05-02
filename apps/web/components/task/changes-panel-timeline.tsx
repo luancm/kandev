@@ -20,10 +20,11 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
-import { LineStat } from "@/components/diff-stat";
-import { FileStatusIcon } from "./file-status-icon";
-import { FileRow, BulkActionBar, DefaultActionButtons } from "./changes-panel-file-row";
-import { CommitRow, type CommitItem } from "./commit-row";
+import { FileRow, BulkActionBar } from "./changes-panel-file-row";
+import { type CommitItem } from "./commit-row";
+import { groupByRepositoryName } from "@/lib/group-by-repo";
+import { CommitsRepoGroup, RepoGroupItem } from "./changes-panel-repo-groups";
+import { PRFilesGroupedList } from "./changes-panel-pr-files";
 
 // --- Timeline visual components ---
 
@@ -34,7 +35,11 @@ type ChangedFile = {
   plus: number | undefined;
   minus: number | undefined;
   oldPath: string | undefined;
+  /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
+  repositoryName?: string;
 };
+
+// Per-repo grouping is shared with the Review dialog — see @/lib/group-by-repo.
 
 // --- Timeline section dot colors ---
 const DOT_COLORS = {
@@ -57,6 +62,7 @@ function TimelineSection({
   isLast,
   children,
   collapsible = true,
+  defaultCollapsed = false,
   "data-testid": testId,
 }: {
   dotColor: string;
@@ -66,9 +72,10 @@ function TimelineSection({
   isLast?: boolean;
   children?: React.ReactNode;
   collapsible?: boolean;
+  defaultCollapsed?: boolean;
   "data-testid"?: string;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const canCollapse = collapsible && !!label;
 
   return (
@@ -126,11 +133,28 @@ function TimelineSection({
 type CommitsSectionProps = {
   commits: CommitItem[];
   isLast: boolean;
-  onOpenCommitDetail?: (sha: string) => void;
-  onRevertCommit?: (sha: string) => void;
-  onAmendCommit?: (currentMessage: string) => void;
-  onResetToCommit?: (sha: string) => void;
+  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  // Handlers receive the commit's repository_name so amend/revert/reset land
+  // in the right git repo. The empty string routes to the workspace root for
+  // single-repo workspaces.
+  onRevertCommit?: (sha: string, repo?: string) => void;
+  onAmendCommit?: (currentMessage: string, repo?: string) => void;
+  onResetToCommit?: (sha: string, repo?: string) => void;
+  /** Per-repo Push button rendered in each commits group header. */
+  onRepoPush?: (repo: string) => void;
+  /** Per-repo Create PR button rendered in each commits group header. */
+  onRepoCreatePR?: (repo: string) => void;
+  /** Maps a repository_name to its display label (used for the empty single-repo case). */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** The session's base branch — passed through to the per-repo PR dialog. */
+  repoBaseBranch?: string;
+  /** Per-repo branch / ahead / behind summary; used for the "ahead" indicator. */
+  perRepoStatus?: Array<{ repository_name: string; ahead: number }>;
+  /** Existing PR URL keyed by repository_name; "" key for single-repo. */
+  prByRepo?: Record<string, string | undefined>;
 };
+
+// Commits grouping shares the helper above with files — see @/lib/group-by-repo.
 
 export function CommitsSection({
   commits,
@@ -139,9 +163,18 @@ export function CommitsSection({
   onRevertCommit,
   onAmendCommit,
   onResetToCommit,
+  onRepoPush,
+  onRepoCreatePR,
+  repoDisplayName,
+  repoBaseBranch,
+  perRepoStatus,
+  prByRepo,
 }: CommitsSectionProps) {
-  // Find the first unpushed commit for context menu actions (amend/revert only on latest unpushed)
-  const firstUnpushedIndex = commits.findIndex((c) => c.pushed !== true);
+  // Always group by repo. Single-repo shows up as one group with an empty
+  // repository_name; the group header still renders with a display label and
+  // per-repo buttons (Push, Create PR) so the UX is uniform across modes.
+  const groups = groupByRepositoryName(commits, (c) => c.repository_name);
+  const aheadByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s.ahead]));
 
   return (
     <TimelineSection
@@ -152,15 +185,21 @@ export function CommitsSection({
       data-testid="commits-section"
     >
       <ul data-testid="commits-list" className="space-y-0.5">
-        {commits.map((commit, index) => (
-          <CommitRow
-            key={`${commit.commit_sha}-${index}`}
-            commit={commit}
-            isLatest={index === firstUnpushedIndex}
+        {groups.map((g) => (
+          <CommitsRepoGroup
+            key={g.repositoryName || "__no_repo__"}
+            repositoryName={g.repositoryName}
+            displayName={repoDisplayName?.(g.repositoryName)}
+            groupCommits={g.items}
+            aheadCount={aheadByRepo.get(g.repositoryName) ?? 0}
+            existingPrUrl={prByRepo?.[g.repositoryName] ?? prByRepo?.[""]}
+            baseBranch={repoBaseBranch}
             onOpenCommitDetail={onOpenCommitDetail}
-            onAmendCommit={commit.pushed ? undefined : onAmendCommit}
-            onRevertCommit={commit.pushed ? undefined : onRevertCommit}
-            onResetToCommit={commit.pushed ? undefined : onResetToCommit}
+            onAmendCommit={onAmendCommit}
+            onRevertCommit={onRevertCommit}
+            onResetToCommit={onResetToCommit}
+            onRepoPush={onRepoPush}
+            onRepoCreatePR={onRepoCreatePR}
           />
         ))}
       </ul>
@@ -181,6 +220,8 @@ type ActionButtonsSectionProps = {
   canCreatePR: boolean;
   existingPrUrl?: string;
   isLast?: boolean;
+  /** Hide the Push button (per-repo Push is rendered elsewhere in multi-repo). */
+  hidePush?: boolean;
 };
 
 export function ActionButtonsSection({
@@ -194,6 +235,7 @@ export function ActionButtonsSection({
   canCreatePR,
   existingPrUrl,
   isLast = true,
+  hidePush = false,
 }: ActionButtonsSectionProps) {
   const prExists = !!existingPrUrl;
   const createPrDisabled = !canCreatePR || prExists || isLoading;
@@ -227,48 +269,53 @@ export function ActionButtonsSection({
           </TooltipTrigger>
           {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="flex items-center">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer rounded-r-none border-r-0"
-                onClick={onPush}
-                disabled={pushDisabled}
-              >
-                {isPushing ? (
-                  <IconLoader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <IconCloudUpload className="h-3 w-3" />
-                )}
-                Push
-                {aheadCount > 0 && !isPushing && (
-                  <span className="text-muted-foreground">{aheadCount} ahead</span>
-                )}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 w-5 px-0 cursor-pointer rounded-l-none"
-                    disabled={pushDisabled}
-                  >
-                    <IconChevronDown className="h-3 w-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem className="cursor-pointer gap-2 text-xs" onClick={onForcePush}>
-                    <IconCloudUpload className="h-3.5 w-3.5 shrink-0" />
-                    Force Push (with lease)
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          </TooltipTrigger>
-          {pushTooltip && <TooltipContent>{pushTooltip}</TooltipContent>}
-        </Tooltip>
+        {!hidePush && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-[11px] px-2.5 gap-1 cursor-pointer rounded-r-none border-r-0"
+                  onClick={onPush}
+                  disabled={pushDisabled}
+                >
+                  {isPushing ? (
+                    <IconLoader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <IconCloudUpload className="h-3 w-3" />
+                  )}
+                  Push
+                  {aheadCount > 0 && !isPushing && (
+                    <span className="text-muted-foreground">{aheadCount} ahead</span>
+                  )}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 w-5 px-0 cursor-pointer rounded-l-none"
+                      disabled={pushDisabled}
+                    >
+                      <IconChevronDown className="h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      className="cursor-pointer gap-2 text-xs"
+                      onClick={onForcePush}
+                    >
+                      <IconCloudUpload className="h-3.5 w-3.5 shrink-0" />
+                      Force Push (with lease)
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </span>
+            </TooltipTrigger>
+            {pushTooltip && <TooltipContent>{pushTooltip}</TooltipContent>}
+          </Tooltip>
+        )}
       </div>
     </TimelineSection>
   );
@@ -289,13 +336,106 @@ type FileListSectionProps = {
   onSecondaryAction?: () => void;
   onOpenDiff: (path: string) => void;
   onEditFile: (path: string) => void;
-  onStage: (path: string) => void;
-  onUnstage: (path: string) => void;
-  onDiscard: (path: string) => void;
+  // Multi-repo: handlers receive the file's repositoryName so each per-file op
+  // hits the right git repo. Same-named files across repos collide by path.
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string) => void;
   onBulkStage?: (paths: string[]) => void;
   onBulkUnstage?: (paths: string[]) => void;
   onBulkDiscard?: (paths: string[]) => void;
+  // Per-repo action handlers shown inline with each repo group header. Always
+  // rendered, including single-repo (with one entry pre-selected) — the empty
+  // `repo` argument routes ops to the workspace root in that case.
+  onRepoAction?: (repo: string) => void;
+  onRepoSecondaryAction?: (repo: string) => void;
+  /** Maps a repository_name to its display label; called per group header. */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
 };
+
+/**
+ * Renders the body of a file-list section. For multi-repo workspaces it
+ * groups files by repository under per-repo subheaders; single-repo
+ * workspaces fall back to a flat list (no header) so the existing UI is
+ * unchanged.
+ */
+type FileListBodyProps = {
+  variant: "unstaged" | "staged";
+  files: ChangedFile[];
+  pendingStageFiles: Set<string>;
+  multiSelect: ReturnType<typeof useMultiSelect>;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  onOpenDiff: (path: string) => void;
+  onEditFile: (path: string) => void;
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string) => void;
+  /** Per-repo group header actions; primary = Stage all (unstaged) / Commit (staged). */
+  onRepoAction?: (repo: string) => void;
+  onRepoSecondaryAction?: (repo: string) => void;
+  primaryLabel: string;
+  secondaryLabel?: string;
+  /** Maps a repository_name to its display label (e.g. "" → workspace primary repo name). */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
+};
+
+function FileListBody(props: FileListBodyProps) {
+  const { variant, files, pendingStageFiles, multiSelect } = props;
+  const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repositoryName), [files]);
+  // Per-repo collapsed state: keyed by repositoryName. Default expanded;
+  // setting an entry to true collapses that group. Persists across re-renders
+  // for the lifetime of this section instance (resets on unmount).
+  const [collapsedRepos, setCollapsedRepos] = useState<Set<string>>(() => new Set());
+  const toggleRepo = useCallback((name: string) => {
+    setCollapsedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }, []);
+
+  const renderRow = (file: ChangedFile) => (
+    <FileRow
+      key={`${file.repositoryName ?? ""}:${file.path}`}
+      file={file}
+      isPending={pendingStageFiles.has(`${file.repositoryName ?? ""}::${file.path}`)}
+      isSelected={multiSelect.isSelected(file.path)}
+      onSelect={multiSelect.handleClick}
+      onOpenDiff={props.onOpenDiff}
+      onStage={props.onStage}
+      onUnstage={props.onUnstage}
+      onDiscard={props.onDiscard}
+      onEditFile={props.onEditFile}
+    />
+  );
+
+  return (
+    <div>
+      <ul
+        data-testid={`${variant}-file-list`}
+        className="space-y-0.5"
+        tabIndex={-1}
+        onKeyDown={props.onKeyDown}
+      >
+        {groups.map((group) => (
+          <RepoGroupItem
+            key={group.repositoryName || "__no_repo__"}
+            group={group}
+            collapsed={collapsedRepos.has(group.repositoryName)}
+            onToggle={() => toggleRepo(group.repositoryName)}
+            renderRow={renderRow}
+            primaryLabel={props.primaryLabel}
+            secondaryLabel={props.secondaryLabel}
+            onRepoAction={props.onRepoAction}
+            onRepoSecondaryAction={props.onRepoSecondaryAction}
+            displayName={props.repoDisplayName?.(group.repositoryName)}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function FileListSection(props: FileListSectionProps) {
   const {
@@ -315,7 +455,9 @@ export function FileListSection(props: FileListSectionProps) {
   const filePaths = useMemo(() => files.map((f) => f.path), [files]);
   const multiSelect = useMultiSelect({ items: filePaths });
   const hasSelection = multiSelect.selectedPaths.size > 0;
-
+  // Multi-repo when any file has a repositoryName. Per-repo group headers
+  // own the action buttons in this case; the bottom-of-section global
+  // buttons would be redundant, so we skip them.
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape" && hasSelection) multiSelect.clearSelection();
@@ -332,51 +474,34 @@ export function FileListSection(props: FileListSectionProps) {
       data-testid={`${variant}-files-section`}
     >
       {files.length > 0 && (
-        <div>
-          <ul
-            data-testid={`${variant}-file-list`}
-            className="space-y-0.5"
-            tabIndex={-1}
-            onKeyDown={handleKeyDown}
-          >
-            {files.map((file) => (
-              <FileRow
-                key={file.path}
-                file={file}
-                isPending={pendingStageFiles.has(file.path)}
-                isSelected={multiSelect.isSelected(file.path)}
-                onSelect={multiSelect.handleClick}
-                onOpenDiff={onOpenDiff}
-                onStage={onStage}
-                onUnstage={onUnstage}
-                onDiscard={onDiscard}
-                onEditFile={onEditFile}
-              />
-            ))}
-          </ul>
-        </div>
+        <FileListBody
+          variant={variant}
+          files={files}
+          pendingStageFiles={pendingStageFiles}
+          multiSelect={multiSelect}
+          onKeyDown={handleKeyDown}
+          onOpenDiff={onOpenDiff}
+          onStage={onStage}
+          onUnstage={onUnstage}
+          onDiscard={onDiscard}
+          onEditFile={onEditFile}
+          primaryLabel={props.actionLabel}
+          secondaryLabel={props.secondaryActionLabel}
+          onRepoAction={props.onRepoAction}
+          onRepoSecondaryAction={props.onRepoSecondaryAction}
+          repoDisplayName={props.repoDisplayName}
+        />
       )}
-      {files.length > 0 && (
+      {files.length > 0 && hasSelection && (
         <div className="mt-1.5 flex items-center gap-1.5">
-          {hasSelection ? (
-            <BulkActionBar
-              variant={variant}
-              selectionCount={multiSelect.selectedPaths.size}
-              selectedPaths={multiSelect.selectedPaths}
-              onBulkStage={props.onBulkStage}
-              onBulkUnstage={props.onBulkUnstage}
-              onBulkDiscard={props.onBulkDiscard}
-            />
-          ) : (
-            <DefaultActionButtons
-              actionLabel={props.actionLabel}
-              isActionLoading={props.isActionLoading}
-              onAction={props.onAction}
-              secondaryActionLabel={props.secondaryActionLabel}
-              isSecondaryActionLoading={props.isSecondaryActionLoading}
-              onSecondaryAction={props.onSecondaryAction}
-            />
-          )}
+          <BulkActionBar
+            variant={variant}
+            selectionCount={multiSelect.selectedPaths.size}
+            selectedPaths={multiSelect.selectedPaths}
+            onBulkStage={props.onBulkStage}
+            onBulkUnstage={props.onBulkUnstage}
+            onBulkDiscard={props.onBulkDiscard}
+          />
         </div>
       )}
     </TimelineSection>
@@ -391,15 +516,29 @@ export type PRChangedFile = {
   plus: number | undefined;
   minus: number | undefined;
   oldPath: string | undefined;
+  /**
+   * The repository the file belongs to. Empty string for single-repo tasks
+   * (the section header alone is enough). Multi-repo tasks stamp this so
+   * `PRFilesSection` can group rows under per-repo subheaders, mirroring
+   * how the Commits and Changes sections render.
+   */
+  repository_name?: string;
 };
 
 type PRFilesSectionProps = {
   files: PRChangedFile[];
   isLast: boolean;
   onOpenDiff: (path: string) => void;
+  /** Maps a repository_name to a human-readable label (used for the per-repo header). */
+  repoDisplayName?: (repositoryName: string) => string | undefined;
 };
 
-export function PRFilesSection({ files, isLast, onOpenDiff }: PRFilesSectionProps) {
+export function PRFilesSection({
+  files,
+  isLast,
+  onOpenDiff,
+  repoDisplayName,
+}: PRFilesSectionProps) {
   return (
     <TimelineSection
       dotColor={DOT_COLORS.pr}
@@ -409,48 +548,13 @@ export function PRFilesSection({ files, isLast, onOpenDiff }: PRFilesSectionProp
       data-testid="pr-changes-section"
     >
       {files.length > 0 && (
-        <ul className="space-y-0.5">
-          {files.map((file) => (
-            <PRFileRow key={file.path} file={file} onOpenDiff={onOpenDiff} />
-          ))}
-        </ul>
+        <PRFilesGroupedList
+          files={files}
+          onOpenDiff={onOpenDiff}
+          repoDisplayName={repoDisplayName}
+        />
       )}
     </TimelineSection>
-  );
-}
-
-function PRFileRow({
-  file,
-  onOpenDiff,
-}: {
-  file: PRChangedFile;
-  onOpenDiff: (path: string) => void;
-}) {
-  const lastSlash = file.path.lastIndexOf("/");
-  const folder = lastSlash === -1 ? "" : file.path.slice(0, lastSlash);
-  const name = lastSlash === -1 ? file.path : file.path.slice(lastSlash + 1);
-
-  return (
-    <li
-      className="group flex items-center justify-between gap-2 text-sm rounded-md px-1 py-0.5 -mx-1 hover:bg-muted/60 cursor-pointer"
-      onClick={() => onOpenDiff(file.path)}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="flex-shrink-0 flex items-center justify-center size-4">
-          <IconGitPullRequest className="h-3 w-3 text-purple-500" />
-        </div>
-        <button type="button" className="min-w-0 text-left cursor-pointer" title={file.path}>
-          <p className="flex text-foreground text-xs min-w-0">
-            {folder && <span className="text-foreground/60 truncate shrink">{folder}/</span>}
-            <span className="font-medium text-foreground whitespace-nowrap shrink-0">{name}</span>
-          </p>
-        </button>
-      </div>
-      <div className="flex items-center gap-2">
-        <LineStat added={file.plus} removed={file.minus} />
-        <FileStatusIcon status={file.status} />
-      </div>
-    </li>
   );
 }
 

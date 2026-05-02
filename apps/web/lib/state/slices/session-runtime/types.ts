@@ -49,6 +49,13 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /**
+   * Repository this file belongs to in multi-repo task workspaces. Stamped
+   * by useSessionGit when aggregating per-repo statuses; empty for single-
+   * repo workspaces. The Changes panel uses it to group files under
+   * per-repository headers.
+   */
+  repository_name?: string;
 };
 
 export type GitStatusEntry = {
@@ -65,12 +72,26 @@ export type GitStatusEntry = {
   timestamp: string | null;
   branch_additions?: number;
   branch_deletions?: number;
+  /**
+   * Repository this status belongs to in multi-repo task workspaces. Empty
+   * for single-repo and used as the per-repo key in
+   * GitStatusState.byEnvironmentRepo.
+   */
+  repository_name?: string;
 };
 
 export type GitStatusState = {
   /** Git status keyed by environment ID (shared across sessions in the same environment).
-   *  Falls back to session ID when no environment exists. */
+   *  Falls back to session ID when no environment exists.
+   *  For multi-repo workspaces this holds the most recently received status
+   *  (whichever repo emitted last); per-repo state lives in byEnvironmentRepo.
+   */
   byEnvironmentId: Record<string, GitStatusEntry>;
+  /**
+   * Per-repository git status for multi-repo task workspaces, keyed by
+   * environment ID then repository name. Empty for single-repo workspaces.
+   */
+  byEnvironmentRepo: Record<string, Record<string, GitStatusEntry>>;
 };
 
 // Git Snapshot types for historical tracking
@@ -89,6 +110,8 @@ export type SessionCommit = {
   insertions: number;
   deletions: number;
   created_at: string;
+  /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
+  repository_name?: string;
 };
 
 export type CumulativeDiff = {

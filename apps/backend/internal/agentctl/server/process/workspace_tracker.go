@@ -31,6 +31,11 @@ type WorkspaceTracker struct {
 	workDir      string
 	gitIndexPath string // Cached, validated path to git index file (works with worktrees)
 	logger       *logger.Logger
+	// repositoryName identifies the repository this tracker covers when the
+	// agent's workspace is a multi-repo task root. Stamped onto every emitted
+	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.
+	// Empty for the single-repo case.
+	repositoryName string
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -82,9 +87,39 @@ type WorkspaceTracker struct {
 	cancelFunc      context.CancelFunc // Cancel function called during Stop
 }
 
-// NewWorkspaceTracker creates a new workspace tracker
+// NewWorkspaceTracker creates a new workspace tracker for a single git
+// repository (or a single workspace root that may or may not be a git repo).
+// For multi-repo task roots use NewWorkspaceTrackerForRepo per repo subdir.
 func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
-	resolvedWorkDir := resolveExistingWorkDir(workDir, log.WithFields(zap.String("component", "workspace-tracker")))
+	tlog := log.WithFields(zap.String("component", "workspace-tracker"))
+	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
+	// Multi-repo task roots are plain directories that hold one git worktree
+	// per repository as siblings. The git poller can't monitor a non-git path,
+	// so when the configured workDir isn't a git repo, fall back to the first
+	// child subdirectory that is. This preserves single-repo behavior for
+	// callers using NewWorkspaceTracker; multi-repo callers should use
+	// NewWorkspaceTrackerForRepo per repo subdir to get per-repo events.
+	resolvedWorkDir = preferGitRepoChildIfRootIsBare(resolvedWorkDir, tlog)
+	return newWorkspaceTracker(resolvedWorkDir, "", log)
+}
+
+// NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository
+// subdirectory. The repositoryName is stamped onto every emitted event so the
+// frontend can route updates per repo for multi-repo task roots.
+func NewWorkspaceTrackerForRepo(workDir, repositoryName string, log *logger.Logger) *WorkspaceTracker {
+	tlog := log.WithFields(
+		zap.String("component", "workspace-tracker"),
+		zap.String("repository_name", repositoryName),
+	)
+	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
+	return newWorkspaceTracker(resolvedWorkDir, repositoryName, log)
+}
+
+func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Logger) *WorkspaceTracker {
+	logFields := []zap.Field{zap.String("component", "workspace-tracker")}
+	if repositoryName != "" {
+		logFields = append(logFields, zap.String("repository_name", repositoryName))
+	}
 
 	// Cache validated git index path (works with worktrees where .git is a file)
 	gitIndexPath := resolveGitIndexPath(resolvedWorkDir)
@@ -94,7 +129,8 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
 		gitIndexPath:               gitIndexPath,
-		logger:                     log.WithFields(zap.String("component", "workspace-tracker")),
+		repositoryName:             repositoryName,
+		logger:                     log.WithFields(logFields...),
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
@@ -117,10 +153,56 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	}
 }
 
+// preferGitRepoChildIfRootIsBare returns workDir unchanged when it's already a
+// git repo, otherwise returns the path of the first immediate child directory
+// that is a git repo (or worktree). Used to make the workspace tracker work
+// for multi-repo task roots, which are plain holder directories with each
+// repo's worktree as a child.
+//
+// Returns workDir unchanged when no git child is found — the tracker will
+// then run with no git data, matching the pre-multi-repo behavior for
+// repo-less tasks (e.g. quick chat).
+func preferGitRepoChildIfRootIsBare(workDir string, log *logger.Logger) string {
+	if workDir == "" || resolveGitIndexPath(workDir) != "" {
+		return workDir
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return workDir
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		candidate := filepath.Join(workDir, entry.Name())
+		if resolveGitIndexPath(candidate) != "" {
+			log.Info("workspace tracker falling back to repo subdirectory (multi-repo task root is not itself a git repo)",
+				zap.String("task_root", workDir),
+				zap.String("repo_subdir", candidate))
+			return candidate
+		}
+	}
+	return workDir
+}
+
 // resolveGitIndexPath returns the validated path to the git index file.
 // Returns empty string if the path cannot be resolved or validated.
 // This handles worktrees where .git is a file pointing elsewhere.
+//
+// Multi-repo task roots are NOT git repos themselves (they hold per-repo
+// child worktrees as siblings), but `git rev-parse` ascends until it finds
+// a `.git` — for tasks nested under a developer's own kandev checkout this
+// would land on the OUTER worktree and silently emit its status as if it
+// were the task. We guard against that by requiring the resolved git
+// top-level to be the same path as workDir (or, for repo subdirs called
+// here from `scanRepositorySubdirs`, an absolute git-dir reachable from the
+// dir's own `.git` file). In practice this means: workDir must contain its
+// own `.git` entry — file or directory — for the path to be considered a
+// valid git repo for tracking.
 func resolveGitIndexPath(workDir string) string {
+	if !workDirHasOwnGitEntry(workDir) {
+		return ""
+	}
 	cmd := exec.Command("git", "rev-parse", "--git-dir")
 	cmd.Dir = workDir
 	out, err := cmd.Output()
@@ -140,6 +222,20 @@ func resolveGitIndexPath(workDir string) string {
 		return ""
 	}
 	return indexPath
+}
+
+// workDirHasOwnGitEntry returns true when workDir contains a `.git` entry of
+// its own (file for worktrees, directory for plain repos). This is what
+// makes a directory "a git repo" from a tracker's perspective — without it,
+// git would ascend up the tree to the nearest ancestor `.git`, which is the
+// wrong scope for nested layouts (e.g. a multi-repo task root sitting
+// inside the developer's kandev checkout).
+func workDirHasOwnGitEntry(workDir string) bool {
+	if workDir == "" {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(workDir, ".git"))
+	return err == nil
 }
 
 // workDirExists checks whether the workspace directory still exists on disk.

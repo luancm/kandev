@@ -21,24 +21,35 @@ export interface PRCreateResult {
 }
 
 interface UseGitOperationsReturn {
-  // Operation methods
-  pull: (rebase?: boolean) => Promise<GitOperationResult>;
-  push: (options?: { force?: boolean; setUpstream?: boolean }) => Promise<GitOperationResult>;
-  rebase: (baseBranch: string) => Promise<GitOperationResult>;
-  merge: (baseBranch: string) => Promise<GitOperationResult>;
-  abort: (operation: "merge" | "rebase") => Promise<GitOperationResult>;
-  commit: (message: string, stageAll?: boolean, amend?: boolean) => Promise<GitOperationResult>;
-  stage: (paths?: string[]) => Promise<GitOperationResult>;
-  unstage: (paths?: string[]) => Promise<GitOperationResult>;
-  discard: (paths?: string[]) => Promise<GitOperationResult>;
-  revertCommit: (commitSHA: string) => Promise<GitOperationResult>;
+  // Operation methods. The optional `repo` parameter is the multi-repo subpath
+  // (e.g. "kandev"); pass empty/undefined for single-repo workspaces. Multi-repo
+  // workspaces MUST scope each call to one repo — bulk callers fan out themselves.
+  pull: (rebase?: boolean, repo?: string) => Promise<GitOperationResult>;
+  push: (
+    options?: { force?: boolean; setUpstream?: boolean },
+    repo?: string,
+  ) => Promise<GitOperationResult>;
+  rebase: (baseBranch: string, repo?: string) => Promise<GitOperationResult>;
+  merge: (baseBranch: string, repo?: string) => Promise<GitOperationResult>;
+  abort: (operation: "merge" | "rebase", repo?: string) => Promise<GitOperationResult>;
+  commit: (
+    message: string,
+    stageAll?: boolean,
+    amend?: boolean,
+    repo?: string,
+  ) => Promise<GitOperationResult>;
+  stage: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
+  unstage: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
+  discard: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
+  revertCommit: (commitSHA: string, repo?: string) => Promise<GitOperationResult>;
   renameBranch: (newName: string) => Promise<GitOperationResult>;
-  reset: (commitSHA: string, mode: "soft" | "hard") => Promise<GitOperationResult>;
+  reset: (commitSHA: string, mode: "soft" | "hard", repo?: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,
     body: string,
     baseBranch?: string,
     draft?: boolean,
+    repo?: string,
   ) => Promise<PRCreateResult>;
 
   // State
@@ -54,60 +65,92 @@ type ExecuteOperation = <T extends GitOperationResult>(
 ) => Promise<T>;
 
 function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
-  const pull = async (rebase = false) =>
-    executeOperation<GitOperationResult>("worktree.pull", { rebase });
+  const pull = async (rebase = false, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.pull", {
+      rebase,
+      ...(repo ? { repo } : {}),
+    });
 
-  const push = async (options?: { force?: boolean; setUpstream?: boolean }) =>
+  const push = async (options?: { force?: boolean; setUpstream?: boolean }, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.push", {
       force: options?.force ?? false,
       set_upstream: options?.setUpstream ?? false,
+      ...(repo ? { repo } : {}),
     });
 
-  const rebase = async (baseBranch: string) =>
-    executeOperation<GitOperationResult>("worktree.rebase", { base_branch: baseBranch });
+  const rebase = async (baseBranch: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.rebase", {
+      base_branch: baseBranch,
+      ...(repo ? { repo } : {}),
+    });
 
-  const merge = async (baseBranch: string) =>
-    executeOperation<GitOperationResult>("worktree.merge", { base_branch: baseBranch });
+  const merge = async (baseBranch: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.merge", {
+      base_branch: baseBranch,
+      ...(repo ? { repo } : {}),
+    });
 
-  const abort = async (operation: "merge" | "rebase") =>
-    executeOperation<GitOperationResult>("worktree.abort", { operation });
+  const abort = async (operation: "merge" | "rebase", repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.abort", {
+      operation,
+      ...(repo ? { repo } : {}),
+    });
 
-  const commit = async (message: string, stageAll = true, amend = false) =>
+  const commit = async (message: string, stageAll = true, amend = false, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.commit", {
       message,
       stage_all: stageAll,
       amend,
+      ...(repo ? { repo } : {}),
     });
 
-  const stage = async (paths?: string[]) =>
-    executeOperation<GitOperationResult>("worktree.stage", { paths: paths ?? [] });
+  const stage = async (paths?: string[], repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.stage", {
+      paths: paths ?? [],
+      ...(repo ? { repo } : {}),
+    });
 
-  const unstage = async (paths?: string[]) =>
-    executeOperation<GitOperationResult>("worktree.unstage", { paths: paths ?? [] });
+  const unstage = async (paths?: string[], repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.unstage", {
+      paths: paths ?? [],
+      ...(repo ? { repo } : {}),
+    });
 
-  const discard = async (paths?: string[]) =>
-    executeOperation<GitOperationResult>("worktree.discard", { paths: paths ?? [] });
+  const discard = async (paths?: string[], repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.discard", {
+      paths: paths ?? [],
+      ...(repo ? { repo } : {}),
+    });
 
-  const revertCommit = async (commitSHA: string) =>
-    executeOperation<GitOperationResult>("worktree.revert_commit", { commit_sha: commitSHA });
+  const revertCommit = async (commitSHA: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.revert_commit", {
+      commit_sha: commitSHA,
+      ...(repo ? { repo } : {}),
+    });
 
   const renameBranch = async (newName: string) =>
     executeOperation<GitOperationResult>("worktree.rename_branch", { new_name: newName });
 
-  const reset = async (commitSHA: string, mode: "soft" | "hard") =>
-    executeOperation<GitOperationResult>("worktree.reset", { commit_sha: commitSHA, mode });
+  const reset = async (commitSHA: string, mode: "soft" | "hard", repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.reset", {
+      commit_sha: commitSHA,
+      mode,
+      ...(repo ? { repo } : {}),
+    });
 
   const createPR = async (
     title: string,
     body: string,
     baseBranch?: string,
     draft?: boolean,
+    repo?: string,
   ): Promise<PRCreateResult> =>
     executeOperation<PRCreateResult & GitOperationResult>("worktree.create_pr", {
       title,
       body,
       base_branch: baseBranch ?? "",
       draft: draft ?? true,
+      ...(repo ? { repo } : {}),
     });
 
   return {

@@ -37,6 +37,34 @@ export async function listRepositories(
   return fetchJson<ListRepositoriesResponse>(url, options);
 }
 
+/**
+ * Lists git branches for a workspace repo. Pass exactly one of `repositoryId`
+ * (an imported workspace repo) or `path` (an on-machine folder discovered
+ * but not yet imported). The backend resolves either to an absolute path and
+ * runs the same `listGitBranches`. Used by the chip row's per-repo branch
+ * picker which needs to handle both shapes.
+ */
+export async function listBranches(
+  workspaceId: string,
+  source: { repositoryId: string } | { path: string },
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams();
+  if ("repositoryId" in source) params.set("repository_id", source.repositoryId);
+  else params.set("path", source.path);
+  return fetchJson<RepositoryBranchesResponse>(
+    `/api/v1/workspaces/${workspaceId}/branches?${params.toString()}`,
+    options,
+  );
+}
+
+/**
+ * Lists git branches for an imported workspace repository, scoped by
+ * repository id only. Supports `refresh=true` to force a `git fetch` before
+ * returning the list (with the backend's per-repo cooldown applied). Used by
+ * single-repo flows that already have the repo id and want to drive the
+ * stale-while-revalidate UI in the dialog.
+ */
 export async function listRepositoryBranches(
   repositoryId: string,
   params?: { refresh?: boolean },

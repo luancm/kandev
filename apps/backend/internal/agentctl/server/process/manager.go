@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	tools "github.com/kandev/kandev/internal/tools/installer"
@@ -84,6 +85,16 @@ type Manager struct {
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
+	// repoTrackers holds per-repository trackers for multi-repo task roots.
+	// Each tracker stamps RepositoryName onto its emitted events and shares
+	// subscriber channels with the root via the Manager fan-out.
+	// Empty for single-repo workspaces.
+	repoTrackers []*WorkspaceTracker
+	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
+	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
+	// root tracker lives in workspaceTracker above.
+	workspaceTrackersBySubpath map[string]*WorkspaceTracker
+	workspaceTrackersMu        sync.Mutex
 
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
@@ -112,6 +123,10 @@ type Manager struct {
 	// Git operator for git operations (lazy-initialized)
 	gitOperator   *GitOperator
 	gitOperatorMu sync.Mutex
+	// gitOperatorsBySubpath caches per-subpath operators for multi-repo task
+	// roots. Key is the cleaned subpath (relative to cfg.WorkDir); empty key
+	// is reserved for the root operator and lives in gitOperator above.
+	gitOperatorsBySubpath map[string]*GitOperator
 
 	// Final command string (full command with all adapter args)
 	finalCommand string
@@ -130,15 +145,64 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                cfg,
 		logger:             log.WithFields(zap.String("component", "process-manager")),
-		workspaceTracker:   NewWorkspaceTracker(cfg.WorkDir, log),
 		updatesCh:          make(chan adapter.AgentEvent, 100),
 		pendingPermissions: make(map[string]*PendingPermission),
+	}
+	// Multi-repo task roots hold one git worktree per repository as siblings.
+	// In that case build a per-repo tracker for each child so each emits its
+	// own GitStatusUpdate (tagged with RepositoryName) and the changes panel
+	// can show all repos. The root tracker covers the single-repo case via
+	// preferGitRepoChildIfRootIsBare; we skip its fallback when we've already
+	// detected a multi-repo root to avoid double-tracking the first repo.
+	repoChildren := scanRepositorySubdirs(cfg.WorkDir)
+	if len(repoChildren) >= 2 {
+		// Multi-repo: root tracker bound to the bare task root (no fallback,
+		// no events), plus one tracker per repo subdir.
+		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		for _, child := range repoChildren {
+			m.repoTrackers = append(m.repoTrackers,
+				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+		}
+	} else {
+		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// repositorySubdir is one git-repo child of a multi-repo task root.
+type repositorySubdir struct {
+	name string // directory basename (used as RepositoryName on emitted events)
+	path string // absolute path to the repo subdir
+}
+
+// scanRepositorySubdirs returns the immediate child directories of workDir
+// that are themselves git repositories or worktrees. Returns an empty slice
+// when workDir doesn't exist, isn't readable, or contains zero git children.
+// Used to detect multi-repo task roots at Manager construction.
+func scanRepositorySubdirs(workDir string) []repositorySubdir {
+	if workDir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return nil
+	}
+	var out []repositorySubdir
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		candidate := filepath.Join(workDir, entry.Name())
+		if resolveGitIndexPath(candidate) == "" {
+			continue
+		}
+		out = append(out, repositorySubdir{name: entry.Name(), path: candidate})
+	}
+	return out
 }
 
 // Status returns the current process status
@@ -164,6 +228,65 @@ func (m *Manager) ExitError() error {
 // GetWorkspaceTracker returns the workspace tracker for git status and file monitoring
 func (m *Manager) GetWorkspaceTracker() *WorkspaceTracker {
 	return m.workspaceTracker
+}
+
+// SubscribeWorkspaceStream creates a single workspace stream subscriber and
+// fans it out across the root tracker plus every per-repo tracker, so the
+// caller receives events from all repositories on one channel. Use
+// UnsubscribeWorkspaceStream to detach and close.
+//
+// For single-repo workspaces this is equivalent to
+// GetWorkspaceTracker().SubscribeWorkspaceStream() — the per-repo list is
+// empty and only the root tracker fires events.
+func (m *Manager) SubscribeWorkspaceStream() types.WorkspaceStreamSubscriber {
+	sub := make(types.WorkspaceStreamSubscriber, 100)
+	m.workspaceTracker.AttachWorkspaceStreamSubscriber(sub)
+	for _, t := range m.repoTrackers {
+		t.AttachWorkspaceStreamSubscriber(sub)
+	}
+	return sub
+}
+
+// UnsubscribeWorkspaceStream detaches the subscriber from every tracker and
+// closes the channel exactly once.
+func (m *Manager) UnsubscribeWorkspaceStream(sub types.WorkspaceStreamSubscriber) {
+	m.workspaceTracker.DetachWorkspaceStreamSubscriber(sub)
+	for _, t := range m.repoTrackers {
+		t.DetachWorkspaceStreamSubscriber(sub)
+	}
+	close(sub)
+}
+
+// GetWorkspaceTrackerFor returns a workspace tracker scoped to a sub-directory
+// of the workspace. Used by multi-repo task roots where each repository lives
+// at {WorkDir}/{subpath}. Empty subpath returns the root tracker.
+//
+// Per-subpath trackers are created lazily on first request and cached. They
+// are NOT started (no polling goroutines) — the multi-repo path uses them
+// only for synchronous git-status queries via GetCurrentGitStatus, which
+// falls through to getGitStatus when no cache is present. This keeps the
+// per-repo cost cheap while preserving the long-running polling behavior of
+// the root tracker for the agent's primary workspace.
+func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, error) {
+	cleaned, full, err := m.resolveSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
+	if cleaned == "" {
+		return m.workspaceTracker, nil
+	}
+
+	m.workspaceTrackersMu.Lock()
+	defer m.workspaceTrackersMu.Unlock()
+	if m.workspaceTrackersBySubpath == nil {
+		m.workspaceTrackersBySubpath = make(map[string]*WorkspaceTracker)
+	}
+	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
+		return t, nil
+	}
+	t := NewWorkspaceTracker(full, m.logger)
+	m.workspaceTrackersBySubpath[cleaned] = t
+	return t, nil
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
@@ -198,8 +321,52 @@ func (m *Manager) ListProcesses(sessionID string) []ProcessInfo {
 	return m.processRunner.List(sessionID)
 }
 
-// GitOperator returns the git operator for git operations.
-// The operator is lazy-initialized on first call.
+// RepoSubpaths returns the subpath name (relative to cfg.WorkDir) for every
+// per-repo tracker discovered at construction time. Empty for single-repo
+// workspaces. Used by callers that want to fan an op out across repos.
+func (m *Manager) RepoSubpaths() []string {
+	out := make([]string, 0, len(m.repoTrackers))
+	for _, t := range m.repoTrackers {
+		if t.repositoryName != "" {
+			out = append(out, t.repositoryName)
+		}
+	}
+	return out
+}
+
+// SetWorkspacePollMode propagates a poll-mode change to the root tracker and
+// every per-repo tracker, then forces a RefreshGitStatus on each non-paused
+// tracker so a fresh snapshot reaches every subscriber. Without the refresh,
+// monitorTick only pushes on detected change — multi-repo workspaces would
+// leave the per-repo state map sparse (one repo present, the other missing)
+// after a focus event, since the agent's initial pushes happen at boot and
+// no replay path exists for clients that subscribe later.
+func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
+	m.workspaceTracker.SetPollMode(mode)
+	for _, t := range m.repoTrackers {
+		t.SetPollMode(mode)
+	}
+	if mode == PollModePaused {
+		return
+	}
+	// Snapshot the tracker slice before launching the goroutine so a
+	// concurrent Stop()/teardown that mutates m.repoTrackers can't race or
+	// nil-deref the iteration. Refresh in background — RefreshGitStatus
+	// blocks on git commands which can take seconds on large repos; the
+	// HTTP caller shouldn't wait.
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	go func() {
+		root.RefreshGitStatus(ctx)
+		for _, t := range trackers {
+			t.RefreshGitStatus(ctx)
+		}
+	}()
+}
+
+// GitOperator returns the git operator for git operations against the
+// workspace root. Lazy-initialized.
 func (m *Manager) GitOperator() *GitOperator {
 	m.gitOperatorMu.Lock()
 	defer m.gitOperatorMu.Unlock()
@@ -208,6 +375,87 @@ func (m *Manager) GitOperator() *GitOperator {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
 	}
 	return m.gitOperator
+}
+
+// GitOperatorFor returns a git operator scoped to a sub-directory of the
+// workspace. Used by multi-repo task roots where each repository lives at
+// {WorkDir}/{subpath}. Empty subpath returns the root operator.
+//
+// The subpath is validated to prevent path-traversal: it must be a clean
+// relative path with no parent-references and must resolve to an existing
+// directory inside cfg.WorkDir.
+func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
+	cleaned, full, err := m.resolveSubpath(subpath)
+	if err != nil {
+		return nil, err
+	}
+	if cleaned == "" {
+		return m.GitOperator(), nil
+	}
+
+	m.gitOperatorMu.Lock()
+	defer m.gitOperatorMu.Unlock()
+	if m.gitOperatorsBySubpath == nil {
+		m.gitOperatorsBySubpath = make(map[string]*GitOperator)
+	}
+	if op, ok := m.gitOperatorsBySubpath[cleaned]; ok {
+		return op, nil
+	}
+	op := NewGitOperatorForRepo(full, cleaned, m.logger, m.workspaceTracker)
+	m.gitOperatorsBySubpath[cleaned] = op
+	return op, nil
+}
+
+// resolveSubpath normalises and validates a repo subpath relative to
+// cfg.WorkDir. Returns ("", "", nil) for the root (empty/"."); otherwise
+// returns the cleaned relative path and the absolute full path.
+//
+// Rejects: parent-references, absolute paths, paths containing "..",
+// and paths that don't resolve to an existing directory.
+func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
+	subpath = strings.TrimSpace(subpath)
+	if subpath == "" || subpath == "." {
+		return "", m.cfg.WorkDir, nil
+	}
+
+	cleaned := filepath.Clean(subpath)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "..") {
+		return "", "", fmt.Errorf("invalid repo subpath: %q", subpath)
+	}
+	if filepath.IsAbs(cleaned) {
+		return "", "", fmt.Errorf("repo subpath must be relative: %q", subpath)
+	}
+	for _, part := range strings.Split(cleaned, string(filepath.Separator)) {
+		if part == ".." {
+			return "", "", fmt.Errorf("repo subpath escapes workspace: %q", subpath)
+		}
+	}
+
+	full := filepath.Join(m.cfg.WorkDir, cleaned)
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", "", fmt.Errorf("repo subpath not found: %w", err)
+	}
+	if !info.IsDir() {
+		return "", "", fmt.Errorf("repo subpath is not a directory: %q", subpath)
+	}
+	return cleaned, full, nil
+}
+
+// JoinRepoPath validates a repo subpath and returns the workspace-relative
+// path obtained by joining `subpath` and `path`. Empty `subpath` returns
+// `path` unchanged (single-repo workspaces). Used by file content / update
+// handlers to scope a per-repo path under the right repository directory
+// before delegating to the workspace tracker.
+func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
+	cleaned, _, err := m.resolveSubpath(subpath)
+	if err != nil {
+		return "", err
+	}
+	if cleaned == "" {
+		return path, nil
+	}
+	return filepath.Join(cleaned, path), nil
 }
 
 // Start starts the agent process
@@ -284,6 +532,9 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	// Start workspace tracker with background context (not tied to HTTP request)
 	m.workspaceTracker.Start(context.Background())
+	for _, t := range m.repoTrackers {
+		t.Start(context.Background())
+	}
 
 	// Auto-create shell session if enabled
 	m.startAgentShell()
@@ -306,6 +557,9 @@ func (m *Manager) startOneShot() error {
 
 	// Start workspace tracker with background context (not tied to HTTP request)
 	m.workspaceTracker.Start(context.Background())
+	for _, t := range m.repoTrackers {
+		t.Start(context.Background())
+	}
 
 	// Auto-create shell session if enabled
 	m.startAgentShell()
@@ -660,6 +914,9 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	m.logger.Debug("stopping workspace tracker")
 	if m.workspaceTracker != nil {
 		m.workspaceTracker.Stop()
+	}
+	for _, t := range m.repoTrackers {
+		t.Stop()
 	}
 	m.logger.Debug("workspace tracker stopped")
 }

@@ -31,6 +31,11 @@ type FileChangeNotification struct {
 	// Timestamp is when the change was detected.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository emitted this file change in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so per-repo views can scope refresh signals correctly.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// Path is the file path relative to workspace root.
 	Path string `json:"path"`
 
@@ -44,6 +49,10 @@ type FileChangeNotification struct {
 type FileListUpdate struct {
 	// Timestamp is when the listing was captured.
 	Timestamp time.Time `json:"timestamp"`
+
+	// RepositoryName identifies which repository this list belongs to in
+	// multi-repo workspaces. Empty for single-repo. See GitStatusUpdate.
+	RepositoryName string `json:"repository_name,omitempty"`
 
 	// Files contains the list of files in the workspace.
 	Files []FileEntry `json:"files"`
@@ -163,8 +172,13 @@ type FileSearchResponse struct {
 //
 // HTTP endpoint: POST /api/v1/workspace/file/content
 type FileUpdateRequest struct {
-	// Path is the file path (relative to workspace root).
+	// Path is the file path (relative to the per-repo subpath when Repo is
+	// set, otherwise relative to the workspace root).
 	Path string `json:"path"`
+
+	// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+	// workspaces. When set, Path is interpreted relative to <workDir>/<Repo>.
+	Repo string `json:"repo,omitempty"`
 
 	// Diff is the unified diff to apply to the file.
 	Diff string `json:"diff"`
@@ -205,8 +219,13 @@ type FileUpdateResponse struct {
 //
 // HTTP endpoint: POST /api/v1/workspace/file/create
 type FileCreateRequest struct {
-	// Path is the file path (relative to workspace root).
+	// Path is the file path (relative to the per-repo subpath when Repo is
+	// set, otherwise relative to the workspace root).
 	Path string `json:"path"`
+
+	// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+	// workspaces. When set, Path is interpreted relative to <workDir>/<Repo>.
+	Repo string `json:"repo,omitempty"`
 }
 
 // FileCreateResponse represents a response to a file create request.
@@ -248,11 +267,16 @@ type FileDeleteResponse struct {
 //
 // HTTP endpoint: POST /api/v1/workspace/file/rename
 type FileRenameRequest struct {
-	// OldPath is the current path (relative to workspace root).
+	// OldPath is the current path (relative to the per-repo subpath when
+	// Repo is set, otherwise relative to the workspace root).
 	OldPath string `json:"old_path"`
 
-	// NewPath is the new path (relative to workspace root).
+	// NewPath is the new path (same scoping rules as OldPath).
 	NewPath string `json:"new_path"`
+
+	// Repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo
+	// workspaces. Both OldPath and NewPath are scoped to this repo.
+	Repo string `json:"repo,omitempty"`
 }
 
 // FileRenameResponse represents a response to a rename request.

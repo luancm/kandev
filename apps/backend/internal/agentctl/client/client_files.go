@@ -79,9 +79,13 @@ func (c *Client) SearchFiles(ctx context.Context, query string, limit int) (*Fil
 	return &result, nil
 }
 
-// RequestFileContent requests file content via HTTP GET
-func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileContentResponse, error) {
+// RequestFileContent requests file content via HTTP GET.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) RequestFileContent(ctx context.Context, path, repo string) (*FileContentResponse, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content?path=%s", c.baseURL, url.QueryEscape(path))
+	if repo != "" {
+		reqURL += "&repo=" + url.QueryEscape(repo)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -110,9 +114,13 @@ func (c *Client) RequestFileContent(ctx context.Context, path string) (*FileCont
 	return &response, nil
 }
 
-// RequestFileContentAtRef requests file content at a specific git ref via HTTP GET
-func (c *Client) RequestFileContentAtRef(ctx context.Context, path string, ref string) (*FileContentResponse, error) {
+// RequestFileContentAtRef requests file content at a specific git ref via HTTP GET.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) RequestFileContentAtRef(ctx context.Context, path, ref, repo string) (*FileContentResponse, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/workspace/file/content-at-ref?path=%s&ref=%s", c.baseURL, url.QueryEscape(path), url.QueryEscape(ref))
+	if repo != "" {
+		reqURL += "&repo=" + url.QueryEscape(repo)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -141,10 +149,12 @@ func (c *Client) RequestFileContentAtRef(ctx context.Context, path string, ref s
 	return &response, nil
 }
 
-// ApplyFileDiff applies a unified diff to a file via HTTP POST
-func (c *Client) ApplyFileDiff(ctx context.Context, path, diff, originalHash string, desiredContent *string) (*streams.FileUpdateResponse, error) {
+// ApplyFileDiff applies a unified diff to a file via HTTP POST.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) ApplyFileDiff(ctx context.Context, path, diff, originalHash, repo string, desiredContent *string) (*streams.FileUpdateResponse, error) {
 	reqBody := streams.FileUpdateRequest{
 		Path:           path,
+		Repo:           repo,
 		Diff:           diff,
 		OriginalHash:   originalHash,
 		DesiredContent: desiredContent,
@@ -188,9 +198,10 @@ func (c *Client) ApplyFileDiff(ctx context.Context, path, diff, originalHash str
 	return &response, nil
 }
 
-// CreateFile creates a new file via HTTP POST
-func (c *Client) CreateFile(ctx context.Context, path string) (*streams.FileCreateResponse, error) {
-	reqBody := streams.FileCreateRequest{Path: path}
+// CreateFile creates a new file via HTTP POST.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) CreateFile(ctx context.Context, path, repo string) (*streams.FileCreateResponse, error) {
+	reqBody := streams.FileCreateRequest{Path: path, Repo: repo}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -230,9 +241,13 @@ func (c *Client) CreateFile(ctx context.Context, path string) (*streams.FileCrea
 	return &response, nil
 }
 
-// DeleteFile deletes a file via HTTP DELETE
-func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDeleteResponse, error) {
+// DeleteFile deletes a file via HTTP DELETE.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) DeleteFile(ctx context.Context, path, repo string) (*streams.FileDeleteResponse, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/workspace/file?path=%s", c.baseURL, url.QueryEscape(path))
+	if repo != "" {
+		reqURL += "&repo=" + url.QueryEscape(repo)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "DELETE", reqURL, nil)
 	if err != nil {
@@ -265,9 +280,10 @@ func (c *Client) DeleteFile(ctx context.Context, path string) (*streams.FileDele
 	return &response, nil
 }
 
-// RenameFile renames/moves a file or directory via HTTP POST
-func (c *Client) RenameFile(ctx context.Context, oldPath, newPath string) (*streams.FileRenameResponse, error) {
-	reqBody := streams.FileRenameRequest{OldPath: oldPath, NewPath: newPath}
+// RenameFile renames/moves a file or directory via HTTP POST.
+// repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
+func (c *Client) RenameFile(ctx context.Context, oldPath, newPath, repo string) (*streams.FileRenameResponse, error) {
+	reqBody := streams.FileRenameRequest{OldPath: oldPath, NewPath: newPath, Repo: repo}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {

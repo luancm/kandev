@@ -136,37 +136,62 @@ func (s *Service) ValidateLocalRepositoryPath(ctx context.Context, path string) 
 	}, nil
 }
 
-func (s *Service) ListRepositoryBranches(ctx context.Context, repoID string) ([]Branch, error) {
-	repo, err := s.repoEntities.GetRepository(ctx, repoID)
-	if err != nil {
-		return nil, err
-	}
-	if repo.LocalPath == "" {
-		return nil, fmt.Errorf("repository local path is empty")
-	}
-	absPath, err := filepath.Abs(repo.LocalPath)
-	if err != nil {
-		return nil, fmt.Errorf("invalid repository path: %w", err)
-	}
-	if !isPathAllowed(absPath, s.discoveryRoots()) {
-		return nil, ErrPathNotAllowed
-	}
-	info, err := os.Stat(absPath)
-	if err != nil {
-		return nil, err
-	}
-	if !info.IsDir() {
-		return nil, fmt.Errorf("repository path is not a directory")
-	}
-	return listGitBranches(absPath)
+// BranchListResult bundles a branch list with the currently-checked-out
+// branch so the unified branches endpoint can answer both in one call.
+type BranchListResult struct {
+	Branches      []Branch
+	CurrentBranch string
 }
 
-func (s *Service) ListLocalRepositoryBranches(ctx context.Context, path string) ([]Branch, error) {
-	absPath, err := s.resolveAllowedLocalPath(path)
+// ListBranches lists git branches for either an imported workspace repo
+// (by id, path resolved from the DB row) or an on-machine folder (by path
+// directly). Exactly one of `repoID` or `path` should be set; the caller
+// (the HTTP handler) validates that.
+func (s *Service) ListBranches(ctx context.Context, repoID, path string) ([]Branch, error) {
+	resolved, err := s.resolveBranchListingPath(ctx, repoID, path)
 	if err != nil {
 		return nil, err
 	}
-	return listGitBranches(absPath)
+	return listGitBranches(resolved)
+}
+
+// ListBranchesWithCurrent is ListBranches plus the current-branch readout.
+// One method so the handler resolves the path once instead of twice.
+func (s *Service) ListBranchesWithCurrent(ctx context.Context, repoID, path string) (BranchListResult, error) {
+	resolved, err := s.resolveBranchListingPath(ctx, repoID, path)
+	if err != nil {
+		return BranchListResult{}, err
+	}
+	branches, err := listGitBranches(resolved)
+	if err != nil {
+		return BranchListResult{}, err
+	}
+	// Current branch is best-effort metadata; an empty string is fine if
+	// HEAD is detached or unreadable.
+	return BranchListResult{
+		Branches:      branches,
+		CurrentBranch: readGitCurrentBranch(resolved, s.discoveryRoots()),
+	}, nil
+}
+
+// resolveBranchListingPath turns the request inputs into a validated
+// absolute path to list branches in. Both inputs go through the same
+// allowed-roots / dir / symlink validation via resolveAllowedLocalPath.
+func (s *Service) resolveBranchListingPath(ctx context.Context, repoID, path string) (string, error) {
+	switch {
+	case repoID != "":
+		repo, err := s.repoEntities.GetRepository(ctx, repoID)
+		if err != nil {
+			return "", err
+		}
+		if repo.LocalPath == "" {
+			return "", fmt.Errorf("repository local path is empty")
+		}
+		path = repo.LocalPath
+	case path == "":
+		return "", fmt.Errorf("repository_id or path is required")
+	}
+	return s.resolveAllowedLocalPath(path)
 }
 
 // LocalRepositoryCurrentBranch returns the currently checked-out branch for a

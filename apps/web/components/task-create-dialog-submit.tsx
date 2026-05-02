@@ -31,12 +31,12 @@ export function useTaskSubmitHandlers({
   workflowId,
   effectiveWorkflowId,
   effectiveDefaultStepId,
-  repositoryId,
-  selectedLocalRepo,
+  repositories,
+  discoveredRepositories,
   useGitHubUrl,
   githubUrl,
   githubPrHeadBranch,
-  branch,
+  githubBranch,
   agentProfileId,
   executorId,
   executorProfileId,
@@ -52,8 +52,8 @@ export function useTaskSubmitHandlers({
   setHasTitle,
   setHasDescription,
   setTaskName,
-  setRepositoryId,
-  setBranch,
+  setRepositories,
+  setGitHubBranch,
   setAgentProfileId,
   setExecutorId,
   setSelectedWorkflowId,
@@ -88,20 +88,19 @@ export function useTaskSubmitHandlers({
         trimmedTitle,
         workspaceId,
         effectiveWorkflowId,
-        repositoryId,
-        selectedLocalRepo,
+        repositories,
         githubUrl,
         agentProfileId,
       }),
-    [workspaceId, effectiveWorkflowId, repositoryId, selectedLocalRepo, githubUrl, agentProfileId],
+    [workspaceId, effectiveWorkflowId, repositories, githubUrl, agentProfileId],
   );
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
     setHasDescription(false);
     setTaskName("");
-    setRepositoryId("");
-    setBranch("");
+    setRepositories([]);
+    setGitHubBranch("");
     setAgentProfileId("");
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
@@ -112,8 +111,8 @@ export function useTaskSubmitHandlers({
     setHasTitle,
     setHasDescription,
     setTaskName,
-    setRepositoryId,
-    setBranch,
+    setRepositories,
+    setGitHubBranch,
     setAgentProfileId,
     setExecutorId,
     setSelectedWorkflowId,
@@ -125,21 +124,21 @@ export function useTaskSubmitHandlers({
       buildRepositoriesPayload({
         useGitHubUrl,
         githubUrl,
-        branch,
+        githubBranch,
         githubPrHeadBranch,
-        repositoryId,
-        selectedLocalRepo,
+        repositories,
+        discoveredRepositories,
         freshBranch: buildFreshBranchPayload(consentedDirtyFiles),
       }),
-    // buildFreshBranchPayload is intentionally a closure over current scope; lint exception kept narrow.
+    // buildFreshBranchPayload is a closure over current scope; lint exception kept narrow.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       useGitHubUrl,
-      repositoryId,
-      branch,
       githubUrl,
+      githubBranch,
       githubPrHeadBranch,
-      selectedLocalRepo,
+      repositories,
+      discoveredRepositories,
       isFreshBranchActive,
     ],
   );

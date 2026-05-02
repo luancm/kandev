@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import {
+  useSessionGitStatus,
+  useSessionGitStatusByRepo,
+} from "@/hooks/domains/session/use-session-git-status";
 import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
@@ -11,6 +14,31 @@ import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
+import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
+
+/**
+ * Builds the unified gitStatus.files map fed into the ReviewDialog. Multi-repo
+ * tasks have one git status per repo, and two repos can have files at the same
+ * relative path (`README.md` in both), so the map key is `repo\u0000path` and
+ * every FileInfo is stamped with its `repository_name`. Single-repo tasks keep
+ * the legacy path-only keying.
+ */
+function useReviewGitStatusFiles(sessionId: string | null): Record<string, FileInfo> | null {
+  const reviewGitStatus = useSessionGitStatus(sessionId);
+  const statusByRepo = useSessionGitStatusByRepo(sessionId);
+  return useMemo(() => {
+    const named = statusByRepo.filter((s) => s.repository_name !== "");
+    if (named.length === 0) return reviewGitStatus?.files ?? null;
+    const out: Record<string, FileInfo> = {};
+    for (const { repository_name, status } of named) {
+      if (!status?.files) continue;
+      for (const [path, file] of Object.entries(status.files)) {
+        out[`${repository_name}\u0000${path}`] = { ...file, repository_name };
+      }
+    }
+    return out;
+  }, [reviewGitStatus, statusByRepo]);
+}
 
 export function useReviewDialog(effectiveSessionId: string | null) {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
@@ -20,7 +48,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     if (!effectiveSessionId) return undefined;
     return state.taskSessions.items[effectiveSessionId]?.base_branch;
   });
-  const reviewGitStatus = useSessionGitStatus(effectiveSessionId);
+  const reviewGitStatusFiles = useReviewGitStatusFiles(effectiveSessionId);
   const { diff: reviewCumulativeDiff } = useCumulativeDiff(effectiveSessionId);
   const { openFile: reviewOpenFile } = useFileEditors();
   const reviewTaskPR = useActiveTaskPR();
@@ -60,7 +88,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     reviewDialogOpen,
     setReviewDialogOpen,
     baseBranch,
-    reviewGitStatus,
+    reviewGitStatusFiles,
     reviewCumulativeDiff,
     reviewPRDiffFiles,
     reviewOpenFile,

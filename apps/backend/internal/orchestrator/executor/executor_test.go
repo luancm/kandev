@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -799,4 +800,99 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)
 		}
 	})
+}
+
+// Regression: PrepareTaskSession launches the workspace in a background
+// goroutine while StartTaskWithSession runs a foreground launch when the
+// agent is started. Both call LaunchPreparedSession on the same session.
+// Without per-session serialisation the two launches both reach
+// agentManager.LaunchAgent and the second one errors with
+// "race resolved during register" after running env prep — surfacing as
+// "Environment setup failed" in the UI. Multi-repo amplifies the window
+// because env prep runs sequentially per repo.
+func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID:             "session-race",
+		TaskID:         "task-race",
+		AgentProfileID: "profile-1",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	// `entered` fires every time LaunchAgent is hit. `gate` blocks the
+	// caller until the test releases it, keeping the first launch holding
+	// the per-session lock so a parallel call would otherwise race in.
+	// Channel-based coordination per CLAUDE.md (no time.Sleep).
+	var launchCount int64
+	entered := make(chan struct{}, 2)
+	gate := make(chan struct{})
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			atomic.AddInt64(&launchCount, 1)
+			entered <- struct{}{}
+			<-gate
+			// Simulate the first caller persisting the agent execution id —
+			// the second caller's re-fetch under the lock will see it and
+			// take the fast path instead of launching again.
+			repo.sessions[req.SessionID].AgentExecutionID = "exec-race"
+			return &LaunchAgentResponse{AgentExecutionID: "exec-race", Status: v1.AgentStatusStarting}, nil
+		},
+		// Fast path lookup must succeed for the second caller; mirror what
+		// the live store would return after the first caller registered.
+		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
+			return "exec-race", nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: "task-race", WorkspaceID: "ws-1"}
+
+	var wg sync.WaitGroup
+	results := make([]error, 2)
+	for i := range results {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := executor.LaunchPreparedSession(context.Background(), task, "session-race", LaunchOptions{
+				AgentProfileID: "profile-1",
+				StartAgent:     true,
+			})
+			results[idx] = err
+		}(i)
+	}
+
+	// Wait for the first launch to enter LaunchAgent and block on the
+	// gate. With the per-session lock the second goroutine cannot proceed
+	// past the lock acquisition, so a second `entered` send must NOT
+	// happen within a bounded window. Without the lock, both goroutines
+	// race in well within the timeout (~ms).
+	<-entered
+	select {
+	case <-entered:
+		close(gate)
+		wg.Wait()
+		t.Fatalf("LaunchAgent entered twice — second caller raced past the per-session lock")
+	case <-time.After(100 * time.Millisecond):
+		// No second entry = the lock is holding the second caller.
+	}
+	if got := atomic.LoadInt64(&launchCount); got != 1 {
+		close(gate)
+		wg.Wait()
+		t.Fatalf("LaunchAgent call count before gate release = %d, want 1 (lock should have serialised both)", got)
+	}
+	close(gate)
+	wg.Wait()
+
+	// First call ran LaunchAgent; second call took the fast path so total
+	// stays at 1. Both return non-error (the second is a no-op start).
+	if got := atomic.LoadInt64(&launchCount); got != 1 {
+		t.Errorf("LaunchAgent total calls = %d, want 1", got)
+	}
+	for i, err := range results {
+		if err != nil {
+			t.Errorf("results[%d] = %v, want nil", i, err)
+		}
+	}
 }

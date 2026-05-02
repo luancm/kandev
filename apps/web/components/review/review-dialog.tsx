@@ -14,47 +14,103 @@ import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
 import { ReviewDiffList } from "./review-diff-list";
 import type { ReviewFile } from "./types";
-import { hashDiff, normalizeDiffContent } from "./types";
+import {
+  hashDiff,
+  normalizeDiffContent,
+  reviewFileKey,
+  splitReviewFileKey as splitFileKey,
+} from "./types";
+
+/**
+ * Multi-repo dedup: keying ReviewFile entries by `path` only collapses
+ * `kandev/README.md` and `lvc/README.md` into a single row. Use the shared
+ * `reviewFileKey` helper from `./types` so the in-memory state, persisted
+ * reviews, and the file tree all agree on one key shape. `fileMapKey` is
+ * the lower-level form for code that has the path + repo name as separate
+ * variables (e.g. when building maps from `Object.entries` of the backend
+ * payload).
+ */
+function fileMapKey(path: string, repositoryName?: string): string {
+  return reviewFileKey({ path, repository_name: repositoryName });
+}
 
 function addCumulativeDiffFiles(
   fileMap: Map<string, ReviewFile>,
   files: CumulativeDiff["files"],
   gitStatusFiles: Record<string, FileInfo> | null,
 ) {
-  for (const [path, file] of Object.entries(files)) {
-    if (fileMap.has(path)) continue;
+  // Multi-repo: backend always stamps each per-file payload with
+  // `repository_name` + the repo-relative `path`. Single-repo (or legacy)
+  // payloads keep the bare path on the map key. We trust `file.path` to be
+  // set in the multi-repo shape — a missing `path` would be a backend
+  // contract violation and indicates the caller is on an outdated agentctl;
+  // surface it loudly via a console warning rather than silently injecting
+  // the composite map key into the displayed path (which used to corrupt
+  // the file tree node names).
+  for (const [mapKey, file] of Object.entries(files)) {
+    const repoName = file.repository_name;
+    const path = file.path;
+    if (!path) {
+      console.warn("[review] cumulative diff entry missing `path` field; skipping", {
+        mapKey,
+        repoName,
+      });
+      continue;
+    }
+    const key = fileMapKey(path, repoName);
+    if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     if (diff) {
-      const hasUncommitted = gitStatusFiles != null && path in gitStatusFiles;
-      fileMap.set(path, {
+      const matchingUncommitted = findUncommittedByPathAndRepo(gitStatusFiles, path, repoName);
+      fileMap.set(key, {
         path,
         diff,
         status: file.status || "modified",
         additions: file.additions ?? 0,
         deletions: file.deletions ?? 0,
-        staged: gitStatusFiles?.[path]?.staged ?? false,
-        source: hasUncommitted ? "uncommitted" : "committed",
+        staged: matchingUncommitted?.staged ?? false,
+        source: matchingUncommitted ? "uncommitted" : "committed",
+        repository_name: repoName,
       });
     }
   }
+}
+
+/** Looks up a FileInfo in the (possibly composite-keyed) gitStatus map by
+ *  (path, repository_name). When repo is undefined or empty (single-repo),
+ *  returns the first match by path. */
+function findUncommittedByPathAndRepo(
+  gitStatusFiles: Record<string, FileInfo> | null,
+  path: string,
+  repositoryName: string | undefined,
+): FileInfo | undefined {
+  if (!gitStatusFiles) return undefined;
+  for (const file of Object.values(gitStatusFiles)) {
+    if (file.path !== path) continue;
+    if (!repositoryName) return file;
+    if (file.repository_name === repositoryName) return file;
+  }
+  return undefined;
 }
 
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   gitStatusFiles: Record<string, FileInfo>,
 ) {
-  for (const [path, file] of Object.entries(gitStatusFiles)) {
-    if (fileMap.has(path)) continue;
+  for (const file of Object.values(gitStatusFiles)) {
+    const key = fileMapKey(file.path, file.repository_name);
+    if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     if (diff)
-      fileMap.set(path, {
-        path,
+      fileMap.set(key, {
+        path: file.path,
         diff,
         status: file.status,
         additions: file.additions ?? 0,
         deletions: file.deletions ?? 0,
         staged: file.staged,
         source: "uncommitted",
+        repository_name: file.repository_name,
       });
   }
 }
@@ -113,26 +169,54 @@ function computeReviewSets(
   const reviewed = new Set<string>();
   const stale = new Set<string>();
   for (const file of allFiles) {
-    const reviewState = reviews.get(file.path);
+    const key = reviewFileKey(file);
+    const reviewState = reviews.get(key);
     if (!reviewState?.reviewed) continue;
     const currentHash = hashDiff(file.diff);
-    if (reviewState.diffHash && reviewState.diffHash !== currentHash) stale.add(file.path);
-    else reviewed.add(file.path);
+    if (reviewState.diffHash && reviewState.diffHash !== currentHash) stale.add(key);
+    else reviewed.add(key);
   }
   return { reviewedFiles: reviewed, staleFiles: stale };
 }
 
+/**
+ * Counts diff comments per file, scoped by repo when known. Multi-repo:
+ * comments carrying `repositoryId` are matched only against files in that
+ * repo (translated from `repository_name` via `repositoryNameToId`); legacy
+ * comments without `repositoryId` and same-repo unattributed comments
+ * match by path. Returned record is keyed by `reviewFileKey(file)` so the
+ * file tree's per-row badge correctly disambiguates same-named files.
+ */
 function computeCommentCounts(
   byId: Record<string, import("@/lib/state/slices/comments").Comment>,
   sessionCommentIds: string[] | undefined,
+  allFiles: ReviewFile[],
+  repositoryNameToId: Map<string, string>,
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   if (!sessionCommentIds) return counts;
+
+  type BucketKey = string;
+  const bucketKey = (repoId: string, path: string) => `${repoId}::${path}`;
+  const bucket = new Map<BucketKey, number>();
   for (const id of sessionCommentIds) {
     const comment = byId[id];
-    if (comment && isDiffComment(comment)) {
-      counts[comment.filePath] = (counts[comment.filePath] ?? 0) + 1;
+    if (!comment || !isDiffComment(comment)) continue;
+    const k = bucketKey(comment.repositoryId ?? "", comment.filePath);
+    bucket.set(k, (bucket.get(k) ?? 0) + 1);
+  }
+
+  for (const file of allFiles) {
+    let total = 0;
+    if (file.repository_name) {
+      const repoId = repositoryNameToId.get(file.repository_name) ?? "";
+      if (repoId) total += bucket.get(bucketKey(repoId, file.path)) ?? 0;
     }
+    // Path-only comments (legacy / pre-multi-repo data) match every file
+    // sharing the path; this preserves the prior single-repo behavior and
+    // keeps existing comments visible after the multi-repo rollout.
+    total += bucket.get(bucketKey("", file.path)) ?? 0;
+    if (total > 0) counts[reviewFileKey(file)] = total;
   }
   return counts;
 }
@@ -157,18 +241,20 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
     window.dispatchEvent(new CustomEvent("diff-view-mode-change", { detail: mode }));
   }, []);
 
-  const handleSelectFile = useCallback((path: string, setSelectedFile: (p: string) => void) => {
-    setSelectedFile(path);
+  const handleSelectFile = useCallback((key: string, setSelectedFile: (k: string) => void) => {
+    setSelectedFile(key);
     // Note: scrolling is now handled by FileDiffSection when isSelected changes
     // This ensures proper timing after the section expands
   }, []);
 
   const handleToggleReviewed = useCallback(
-    (path: string, reviewed: boolean) => {
+    (key: string, reviewed: boolean) => {
       if (reviewed) {
-        const file = allFiles.find((f) => f.path === path);
-        markReviewed(path, file ? hashDiff(file.diff) : "");
-      } else markUnreviewed(path);
+        // Look up by composite key so two same-name files in different repos
+        // don't share their reviewed/diff-hash.
+        const file = allFiles.find((f) => reviewFileKey(f) === key);
+        markReviewed(key, file ? hashDiff(file.diff) : "");
+      } else markUnreviewed(key);
     },
     [allFiles, markReviewed, markUnreviewed],
   );
@@ -182,9 +268,12 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   );
 
   const handleDiscard = useCallback(
-    async (path: string) => {
+    async (key: string) => {
+      // Caller passes the composite key; split out the repo + path so
+      // discard runs in the correct repo's worktree.
+      const { repositoryName, path } = splitFileKey(key);
       try {
-        const result = await discard([path]);
+        const result = await discard([path], repositoryName || undefined);
         if (result.success)
           toast({ title: "Changes discarded", description: path, variant: "success" });
         else
@@ -252,17 +341,33 @@ function useReviewDialogState(props: ReviewDialogProps) {
     () => computeReviewSets(allFiles, reviews),
     [allFiles, reviews],
   );
+  // Build a `repository_name` → `repositoryId` map from the workspace repos
+  // slice. Comments store `repositoryId` (UUID) but ReviewFiles carry
+  // `repository_name` (e.g. "kandev"); the dialog needs both to scope the
+  // per-repo comment counts. Falls back to an empty map (legacy single-repo
+  // counts by path only).
+  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  const repositoryNameToId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const list of Object.values(reposByWorkspace)) {
+      for (const r of list) m.set(r.name, r.id);
+    }
+    return m;
+  }, [reposByWorkspace]);
   const commentCountByFile = useMemo(
-    () => computeCommentCounts(byId, sessionCommentIds),
-    [byId, sessionCommentIds],
+    () => computeCommentCounts(byId, sessionCommentIds, allFiles, repositoryNameToId),
+    [byId, sessionCommentIds, allFiles, repositoryNameToId],
   );
   const totalCommentCount = useMemo(
     () => Object.values(commentCountByFile).reduce((sum, c) => sum + c, 0),
     [commentCountByFile],
   );
+  // Composite-key the file refs so two files with the same path in different
+  // repos get distinct refs (otherwise auto-scroll-on-select / "selected"
+  // styling lands on the wrong row).
   const fileRefs = useMemo(() => {
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
-    for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>());
+    for (const file of allFiles) refs.set(reviewFileKey(file), createRef<HTMLDivElement>());
     return refs;
   }, [allFiles]);
   const prevCountRef = useRef<number | null>(null);

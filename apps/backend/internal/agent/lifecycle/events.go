@@ -247,6 +247,7 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 			Files:           update.Files,
 			BranchAdditions: update.BranchAdditions,
 			BranchDeletions: update.BranchDeletions,
+			RepositoryName:  update.RepositoryName,
 		},
 	})
 }
@@ -260,15 +261,16 @@ func (p *EventPublisher) PublishGitCommit(execution *AgentExecution, commit *age
 		AgentID:   execution.ID,
 		Timestamp: time.Now().Format(time.RFC3339Nano),
 		Commit: &GitCommitData{
-			CommitSHA:    commit.CommitSHA,
-			ParentSHA:    commit.ParentSHA,
-			Message:      commit.Message,
-			AuthorName:   commit.AuthorName,
-			AuthorEmail:  commit.AuthorEmail,
-			FilesChanged: commit.FilesChanged,
-			Insertions:   commit.Insertions,
-			Deletions:    commit.Deletions,
-			CommittedAt:  commit.CommittedAt.Format(time.RFC3339),
+			CommitSHA:      commit.CommitSHA,
+			ParentSHA:      commit.ParentSHA,
+			Message:        commit.Message,
+			AuthorName:     commit.AuthorName,
+			AuthorEmail:    commit.AuthorEmail,
+			FilesChanged:   commit.FilesChanged,
+			Insertions:     commit.Insertions,
+			Deletions:      commit.Deletions,
+			CommittedAt:    commit.CommittedAt.Format(time.RFC3339),
+			RepositoryName: commit.RepositoryName,
 		},
 	})
 }
@@ -282,8 +284,9 @@ func (p *EventPublisher) PublishGitReset(execution *AgentExecution, reset *agent
 		AgentID:   execution.ID,
 		Timestamp: reset.Timestamp.Format(time.RFC3339Nano),
 		Reset: &GitResetData{
-			PreviousHead: reset.PreviousHead,
-			CurrentHead:  reset.CurrentHead,
+			PreviousHead:   reset.PreviousHead,
+			CurrentHead:    reset.CurrentHead,
+			RepositoryName: reset.RepositoryName,
 		},
 	})
 }
@@ -301,6 +304,7 @@ func (p *EventPublisher) PublishBranchSwitch(execution *AgentExecution, branchSw
 			CurrentBranch:  branchSwitch.CurrentBranch,
 			CurrentHead:    branchSwitch.CurrentHead,
 			BaseCommit:     branchSwitch.BaseCommit,
+			RepositoryName: branchSwitch.RepositoryName,
 		},
 	})
 }
@@ -314,12 +318,13 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 	sessionID := execution.SessionID
 
 	payload := FileChangeEventPayload{
-		TaskID:    execution.TaskID,
-		SessionID: sessionID,
-		AgentID:   execution.ID,
-		Path:      notification.Path,
-		Operation: notification.Operation,
-		Timestamp: notification.Timestamp.Format(time.RFC3339Nano),
+		TaskID:         execution.TaskID,
+		SessionID:      sessionID,
+		AgentID:        execution.ID,
+		Path:           notification.Path,
+		Operation:      notification.Operation,
+		Timestamp:      notification.Timestamp.Format(time.RFC3339Nano),
+		RepositoryName: notification.RepositoryName,
 	}
 
 	event := bus.NewEvent(events.FileChangeNotified, "agent-manager", payload)

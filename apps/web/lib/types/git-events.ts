@@ -24,6 +24,12 @@ export type GitStatusData = {
   files: Record<string, FileInfo>;
   branch_additions?: number;
   branch_deletions?: number;
+  /**
+   * Repository this status belongs to in multi-repo task workspaces.
+   * Empty / undefined for single-repo workspaces. The frontend keys per-repo
+   * git status off this name so the changes panel can show all repos at once.
+   */
+  repository_name?: string;
 };
 
 // Git commit data
@@ -39,6 +45,8 @@ export type GitCommitData = {
   deletions: number;
   committed_at: string;
   created_at?: string;
+  /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
+  repository_name?: string;
 };
 
 // Git reset data

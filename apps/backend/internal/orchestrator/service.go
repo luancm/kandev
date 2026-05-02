@@ -118,6 +118,7 @@ type repoStore interface {
 	// Additional methods needed by executor
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
@@ -127,6 +128,9 @@ type repoStore interface {
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
+	// Multi-repo task environment children
+	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
+	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	// Session history + plan (for context handover)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
@@ -226,7 +230,12 @@ type Service struct {
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
 
-	// Push tracker: sessionID -> last known ahead count
+	// Push tracker: "<sessionID>|<repository_name>" -> last known ahead count.
+	// The repository_name segment is required for multi-repo: each repo emits
+	// its own git status events, and keying by sessionID alone made events
+	// from different repos overwrite each other's ahead counts (so only one
+	// push got detected per session). Single-repo / repo-less sessions key
+	// against an empty repository_name.
 	pushTracker sync.Map
 
 	// gitSnapshotCache throttles per-session writes of the live git status

@@ -10,6 +10,12 @@ type GitStatusUpdate struct {
 	// Timestamp is when this status was captured.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this status belongs to when
+	// the agent's workspace contains multiple git repos as siblings (multi-repo
+	// task roots). Empty for single-repo workspaces. Frontends key per-repo
+	// state on this name.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// Modified contains paths of modified files.
 	Modified []string `json:"modified"`
 
@@ -89,6 +95,11 @@ type GitCommitNotification struct {
 	// Timestamp is when this notification was created.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this commit belongs to in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Commits panel can render per-repo group headers.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// CommitSHA is the SHA of the new commit.
 	CommitSHA string `json:"commit_sha"`
 
@@ -123,6 +134,11 @@ type GitResetNotification struct {
 	// Timestamp is when this notification was created.
 	Timestamp time.Time `json:"timestamp"`
 
+	// RepositoryName identifies which repository this reset belongs to in
+	// multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Changes panel can scope per-repo group state.
+	RepositoryName string `json:"repository_name,omitempty"`
+
 	// PreviousHead is the SHA HEAD was pointing to before the reset.
 	PreviousHead string `json:"previous_head"`
 
@@ -135,6 +151,11 @@ type GitResetNotification struct {
 type GitBranchSwitchNotification struct {
 	// Timestamp is when this notification was created.
 	Timestamp time.Time `json:"timestamp"`
+
+	// RepositoryName identifies which repository this branch switch belongs to
+	// in multi-repo task workspaces. Empty for single-repo. Carried through to
+	// the frontend so the Changes panel can update the matching per-repo group.
+	RepositoryName string `json:"repository_name,omitempty"`
 
 	// PreviousBranch is the branch name before the switch.
 	PreviousBranch string `json:"previous_branch"`

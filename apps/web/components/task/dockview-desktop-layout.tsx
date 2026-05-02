@@ -307,7 +307,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string) => addCommitDetailPanel(sha),
+    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -385,7 +385,7 @@ function renderPanel(
     case "plan":
       return <PlanContent />;
     case "pr-detail":
-      return <PRDetailPanelComponent panelId={panelId} />;
+      return <PRDetailPanelComponent panelId={panelId} params={params} />;
     default:
       return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
   }
@@ -552,7 +552,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
           baseBranch={review.baseBranch}
           onSendComments={review.handleReviewSendComments}
           onOpenFile={review.reviewOpenFile}
-          gitStatusFiles={review.reviewGitStatus?.files ?? null}
+          gitStatusFiles={review.reviewGitStatusFiles}
           cumulativeDiff={review.reviewCumulativeDiff}
           prDiffFiles={review.reviewPRDiffFiles}
         />

@@ -32,6 +32,8 @@ type ChangedFile = {
   plus: number | undefined;
   minus: number | undefined;
   oldPath: string | undefined;
+  /** Multi-repo: name of the repo this file lives in. Empty for single-repo. */
+  repositoryName?: string;
 };
 
 type FileRowProps = {
@@ -40,9 +42,12 @@ type FileRowProps = {
   isSelected?: boolean;
   onSelect?: (path: string, e: React.MouseEvent) => boolean;
   onOpenDiff: (path: string) => void;
-  onStage: (path: string) => void;
-  onUnstage: (path: string) => void;
-  onDiscard: (path: string) => void;
+  // Multi-repo: handlers receive the file's repository_name so the per-file
+  // staging op routes to the right git repo. Same-named files (e.g. README.md
+  // in two repos) cannot be disambiguated by path alone.
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
+  onDiscard: (path: string, repo?: string) => void;
   onEditFile: (path: string) => void;
 };
 
@@ -83,6 +88,7 @@ export function FileRow({
           isPending={isPending}
           staged={file.staged}
           path={file.path}
+          repo={file.repositoryName}
           onStage={onStage}
           onUnstage={onUnstage}
         />
@@ -98,7 +104,12 @@ export function FileRow({
         </button>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <FileRowActions path={file.path} onDiscard={onDiscard} onEditFile={onEditFile} />
+        <FileRowActions
+          path={file.path}
+          repo={file.repositoryName}
+          onDiscard={onDiscard}
+          onEditFile={onEditFile}
+        />
         <LineStat added={file.plus} removed={file.minus} />
         <FileStatusIcon status={file.status} />
       </div>
@@ -110,14 +121,16 @@ function StageButton({
   isPending,
   staged,
   path,
+  repo,
   onStage,
   onUnstage,
 }: {
   isPending: boolean;
   staged: boolean;
   path: string;
-  onStage: (path: string) => void;
-  onUnstage: (path: string) => void;
+  repo?: string;
+  onStage: (path: string, repo?: string) => void;
+  onUnstage: (path: string, repo?: string) => void;
 }) {
   if (isPending) {
     return (
@@ -134,7 +147,7 @@ function StageButton({
         className="group/unstage flex-shrink-0 flex items-center justify-center size-4 rounded bg-emerald-500/20 text-emerald-600 hover:bg-rose-500/20 hover:text-rose-600 cursor-pointer"
         onClick={(e) => {
           e.stopPropagation();
-          onUnstage(path);
+          onUnstage(path, repo);
         }}
       >
         <IconCheck className="h-3 w-3 group-hover/unstage:hidden" />
@@ -149,7 +162,7 @@ function StageButton({
       className="flex-shrink-0 flex items-center justify-center size-4 rounded border border-dashed border-muted-foreground/50 text-muted-foreground hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
       onClick={(e) => {
         e.stopPropagation();
-        onStage(path);
+        onStage(path, repo);
       }}
     >
       <IconPlus className="h-2.5 w-2.5" />
@@ -159,11 +172,13 @@ function StageButton({
 
 function FileRowActions({
   path,
+  repo,
   onDiscard,
   onEditFile,
 }: {
   path: string;
-  onDiscard: (path: string) => void;
+  repo?: string;
+  onDiscard: (path: string, repo?: string) => void;
   onEditFile: (path: string) => void;
 }) {
   return (
@@ -175,7 +190,7 @@ function FileRowActions({
             className="text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
-              onDiscard(path);
+              onDiscard(path, repo);
             }}
           >
             <IconArrowBackUp className="h-3.5 w-3.5" />

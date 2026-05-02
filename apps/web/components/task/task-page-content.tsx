@@ -277,6 +277,7 @@ function buildTaskTopBarProps(params: {
     worktreeBranch: merged.worktreeBranch,
     repositoryPath: taskProps.repositoryPath,
     repositoryName: taskProps.repositoryName,
+    repositoryCount: taskProps.repositoryCount,
     showDebugOverlay,
     onToggleDebugOverlay,
     workflowSteps,

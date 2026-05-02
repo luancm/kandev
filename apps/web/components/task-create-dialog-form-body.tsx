@@ -9,10 +9,6 @@ import { AgentLogo } from "@/components/agent-logo";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
 import type { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
-import {
-  FreshBranchToggle,
-  computeBranchPlaceholder,
-} from "@/components/task-create-dialog-fresh-branch";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 
@@ -24,15 +20,6 @@ type SelectorOption = {
 
 type CreateEditSelectorsProps = {
   isTaskStarted: boolean;
-  hasRepositorySelection: boolean;
-  branchOptions: SelectorOption[];
-  branch: string;
-  onBranchChange: (value: string) => void;
-  branchesLoading: boolean;
-  onRefreshBranches?: () => void;
-  branchesFetchedAt?: string;
-  branchesFetchError?: string;
-  localBranchesLoading: boolean;
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   agentProfileOptions: SelectorOption[];
@@ -47,20 +34,6 @@ type CreateEditSelectorsProps = {
   executorProfileId: string;
   onExecutorProfileChange: (value: string) => void;
   executorsLoading: boolean;
-  BranchSelectorComponent: React.ComponentType<{
-    options: SelectorOption[];
-    value: string;
-    onValueChange: (value: string) => void;
-    disabled: boolean;
-    placeholder: string;
-    searchPlaceholder: string;
-    emptyMessage: string;
-    onRefresh?: () => void;
-    refreshing?: boolean;
-    fetchedAt?: string;
-    fetchError?: string;
-    loading?: boolean;
-  }>;
   AgentSelectorComponent: React.ComponentType<{
     options: SelectorOption[];
     value: string;
@@ -77,13 +50,7 @@ type CreateEditSelectorsProps = {
     placeholder: string;
     triggerClassName?: string;
   }>;
-  isLocalExecutor: boolean;
-  useGitHubUrl: boolean;
   workflowAgentLocked: boolean;
-  freshBranchEnabled: boolean;
-  onToggleFreshBranch: (enabled: boolean) => void;
-  currentLocalBranch: string;
-  branchLocked?: boolean;
 };
 
 type AgentColumnProps = Pick<
@@ -135,97 +102,23 @@ function AgentColumn({
   );
 }
 
-function computeBranchDisabled(args: {
-  branchLocked?: boolean;
-  lockedToCurrentBranch: boolean;
-  hasRepositorySelection: boolean;
-  branchesLoading: boolean;
-  localBranchesLoading: boolean;
-  optionCount: number;
-}): boolean {
-  if (args.branchLocked) return true;
-  if (args.lockedToCurrentBranch) return true;
-  if (!args.hasRepositorySelection) return true;
-  if (args.branchesLoading || args.localBranchesLoading) return true;
-  return args.optionCount === 0;
-}
-
 export const CreateEditSelectors = memo(function CreateEditSelectors(
   props: CreateEditSelectorsProps,
 ) {
   if (props.isTaskStarted) return null;
-
   const {
-    hasRepositorySelection,
-    branchOptions,
-    branch,
-    onBranchChange,
-    branchesLoading,
-    onRefreshBranches,
-    branchesFetchedAt,
-    branchesFetchError,
-    localBranchesLoading,
     executorProfileOptions,
     executorProfileId,
     onExecutorProfileChange,
     executorsLoading,
-    isLocalExecutor,
-    useGitHubUrl,
-    freshBranchEnabled,
-    onToggleFreshBranch,
-    currentLocalBranch,
-    BranchSelectorComponent,
     ExecutorProfileSelectorComponent,
-    branchLocked,
   } = props;
-  const isLocalWithoutGitHubUrl = isLocalExecutor && !useGitHubUrl;
-  // When `branchLocked` is true the caller pinned a specific branch (e.g.
-  // Improve Kandev) — suppress the local-executor "current branch" shortcut and
-  // the FreshBranchToggle so users can't drift away from the pinned value.
-  const lockedToCurrentBranch = !branchLocked && isLocalWithoutGitHubUrl && !freshBranchEnabled;
-  const branchPlaceholder = computeBranchPlaceholder({
-    lockedToCurrentBranch,
-    currentLocalBranch,
-    hasRepositorySelection,
-    loading: branchesLoading || localBranchesLoading,
-    optionCount: branchOptions.length,
-  });
-  const branchDisabled = computeBranchDisabled({
-    branchLocked,
-    lockedToCurrentBranch,
-    hasRepositorySelection,
-    branchesLoading,
-    localBranchesLoading,
-    optionCount: branchOptions.length,
-  });
-  // When the local executor locks to the current branch, ignore any branch
-  // value the user picked under a different executor — the placeholder
-  // should reflect the actual checked-out branch instead.
-  const branchValue = lockedToCurrentBranch ? "" : branch;
 
+  // Branch + repo selection (and the FreshBranchToggle, which is per-task
+  // branch strategy) live in the chip row above the description; this row
+  // carries only agent and executor profile selectors.
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-      <div className="flex items-center gap-2 min-w-0">
-        <div className="min-w-0 flex-1">
-          <BranchSelectorComponent
-            options={branchOptions}
-            value={branchValue}
-            onValueChange={onBranchChange}
-            placeholder={branchPlaceholder}
-            searchPlaceholder="Search branches..."
-            emptyMessage="No branch found."
-            disabled={branchDisabled}
-            onRefresh={!isLocalWithoutGitHubUrl ? onRefreshBranches : undefined}
-            refreshing={branchesLoading}
-            fetchedAt={branchesFetchedAt}
-            fetchError={branchesFetchError}
-            loading={branchesLoading || localBranchesLoading}
-          />
-        </div>
-        {isLocalWithoutGitHubUrl && !branchLocked && (
-          <FreshBranchToggle enabled={freshBranchEnabled} onToggle={onToggleFreshBranch} />
-        )}
-      </div>
+    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
       <div>
         <AgentColumn {...props} />
       </div>

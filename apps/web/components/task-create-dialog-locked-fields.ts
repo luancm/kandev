@@ -8,16 +8,15 @@ import type {
 
 type LockedFieldFormState = Pick<
   DialogFormState,
-  | "selectedWorkflowId"
-  | "setSelectedWorkflowId"
-  | "repositoryId"
-  | "setRepositoryId"
-  | "branch"
-  | "setBranch"
+  "selectedWorkflowId" | "setSelectedWorkflowId" | "repositories" | "setRepositories"
 >;
 
-// Pushes late-arriving locked field values into form state when async feature
-// wrappers resolve them after the dialog is already open.
+/**
+ * Pushes late-arriving locked field values into form state when async feature
+ * wrappers resolve them after the dialog is already open. Multi-repo: locks
+ * are expressed as the first chip in `fs.repositories[]`; the dialog's
+ * single-repo locking flow (Improve Kandev) overwrites `repositories[0]`.
+ */
 export function useLockedFieldSync(
   open: boolean,
   workflowId: string | null,
@@ -31,12 +30,10 @@ export function useLockedFieldSync(
     if (workflowId && workflowId !== fs.selectedWorkflowId) {
       fs.setSelectedWorkflowId(workflowId);
     }
-    if (repoId && repoId !== fs.repositoryId) {
-      fs.setRepositoryId(repoId);
-    }
-    if (branch && branch !== fs.branch) {
-      fs.setBranch(branch);
-    }
+    if (!repoId) return;
+    const current = fs.repositories[0];
+    if (current?.repositoryId === repoId && current?.branch === (branch ?? "")) return;
+    fs.setRepositories([{ key: "row-0", repositoryId: repoId, branch: branch ?? "" }]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, workflowId, repoId, branch]);
 }

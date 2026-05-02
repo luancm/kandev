@@ -2,7 +2,7 @@ import type { useRouter } from "next/navigation";
 import type { Task, Branch, LocalRepository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
-import type { StepType } from "@/components/task-create-dialog-types";
+import type { StepType, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -138,35 +138,51 @@ export function validateCreateInputs(inputs: {
   trimmedTitle: string;
   workspaceId: string | null;
   effectiveWorkflowId: string | null;
-  repositoryId: string;
-  selectedLocalRepo: LocalRepository | null;
+  /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
+  repositories: TaskRepoRow[];
   githubUrl?: string;
   agentProfileId: string;
 }): boolean {
+  const hasRepo =
+    inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
+    Boolean(inputs.githubUrl?.trim());
   return Boolean(
     inputs.trimmedTitle &&
     inputs.workspaceId &&
     inputs.effectiveWorkflowId &&
     inputs.agentProfileId &&
-    (inputs.repositoryId || inputs.selectedLocalRepo || inputs.githubUrl?.trim()),
+    hasRepo,
   );
 }
 
-/** Builds the repositories payload for task creation from the current form state. */
+/**
+ * Builds the repositories payload for task creation from the unified list.
+ *
+ * - URL mode produces a single entry with `github_url`.
+ * - Otherwise each row maps to either a workspace `repository_id` or a
+ *   discovered `local_path`. Empty rows are dropped silently so a user
+ *   can leave an unfinished chip without blocking submit; duplicate
+ *   detection happens on the backend.
+ */
 export function buildRepositoriesPayload(opts: {
   useGitHubUrl: boolean;
   githubUrl: string;
-  branch: string;
+  githubBranch: string;
   githubPrHeadBranch: string | null;
-  repositoryId: string;
-  selectedLocalRepo: LocalRepository | null;
+  repositories: TaskRepoRow[];
+  /** Used to look up `default_branch` for `localPath` rows. */
+  discoveredRepositories: LocalRepository[];
+  /**
+   * Optional fresh-branch metadata. The UI gates this to single-row + local
+   * executor; when present we apply it to every row (which is at most one).
+   */
   freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
   if (opts.useGitHubUrl && opts.githubUrl) {
     return [
       {
         repository_id: "",
-        base_branch: opts.branch || undefined,
+        base_branch: opts.githubBranch || undefined,
         checkout_branch: opts.githubPrHeadBranch || undefined,
         github_url: opts.githubUrl.trim(),
       },
@@ -179,26 +195,23 @@ export function buildRepositoriesPayload(opts: {
         consented_dirty_files: opts.freshBranch.consentedDirtyFiles,
       }
     : {};
-  if (opts.repositoryId) {
-    return [
-      {
-        repository_id: opts.repositoryId,
-        base_branch: opts.branch || undefined,
-        checkout_branch: opts.githubPrHeadBranch || undefined,
-        ...fresh,
-      },
-    ];
-  }
-  if (opts.selectedLocalRepo) {
-    return [
-      {
+  return opts.repositories
+    .filter((row) => row.repositoryId || row.localPath)
+    .map((row) => {
+      if (row.repositoryId) {
+        return {
+          repository_id: row.repositoryId,
+          base_branch: row.branch || undefined,
+          ...fresh,
+        };
+      }
+      const local = opts.discoveredRepositories.find((d) => d.path === row.localPath);
+      return {
         repository_id: "",
-        base_branch: opts.branch || undefined,
-        local_path: opts.selectedLocalRepo.path,
-        default_branch: opts.selectedLocalRepo.default_branch || undefined,
+        base_branch: row.branch || undefined,
+        local_path: row.localPath,
+        default_branch: local?.default_branch || undefined,
         ...fresh,
-      },
-    ];
-  }
-  return [];
+      };
+    });
 }

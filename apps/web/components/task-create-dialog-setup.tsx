@@ -169,12 +169,12 @@ function useSubmitHandlersWiring({
     workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
     effectiveDefaultStepId: computed.effectiveDefaultStepId,
-    repositoryId: fs.repositoryId,
-    selectedLocalRepo: fs.selectedLocalRepo,
+    repositories: fs.repositories,
+    discoveredRepositories: fs.discoveredRepositories,
     useGitHubUrl: fs.useGitHubUrl,
     githubUrl: fs.githubUrl,
     githubPrHeadBranch: fs.githubPrHeadBranch,
-    branch: fs.branch,
+    githubBranch: fs.githubBranch,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
@@ -190,8 +190,8 @@ function useSubmitHandlersWiring({
     setHasTitle: fs.setHasTitle,
     setHasDescription: fs.setHasDescription,
     setTaskName: fs.setTaskName,
-    setRepositoryId: fs.setRepositoryId,
-    setBranch: fs.setBranch,
+    setRepositories: fs.setRepositories,
+    setGitHubBranch: fs.setGitHubBranch,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
@@ -221,17 +221,18 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     snapshots,
     repositories,
     repositoriesLoading,
-    branches,
     branchesLoading,
-    refreshBranches,
-    branchesFetchedAt,
-    branchesFetchError,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
+  // Multi-repo: the "repo local path" used by the fresh-branch preflight is
+  // the first chip's path. Empty when no chip has a repo selected (URL mode
+  // or empty rows). Discovered (path-only) chips short-circuit the lookup.
   const repositoryLocalPath = (() => {
-    if (fs.selectedLocalRepo) return fs.selectedLocalRepo.path;
-    if (fs.repositoryId) {
-      const repo = repositories.find((r) => r.id === fs.repositoryId);
+    const first = fs.repositories[0];
+    if (!first) return "";
+    if (first.localPath) return first.localPath;
+    if (first.repositoryId) {
+      const repo = repositories.find((r) => r.id === first.repositoryId);
       return repo?.local_path ?? "";
     }
     return "";
@@ -242,7 +243,6 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     workflowId,
     repositories,
     repositoriesLoading,
-    branches,
     agentProfiles,
     executors,
     workspaceDefaults: computed.workspaceDefaults,
@@ -274,9 +274,6 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     snapshots,
     repositoriesLoading,
     branchesLoading,
-    refreshBranches,
-    branchesFetchedAt,
-    branchesFetchError,
     computed,
     handlers,
     submitHandlers,

@@ -13,7 +13,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@kandev/ui/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import type { ReviewFile, FileTreeNode } from "./types";
-import { buildFileTree } from "./types";
+import { buildFileTree, reviewFileKey } from "./types";
 
 type ReviewFileTreeProps = {
   files: ReviewFile[];
@@ -107,10 +107,13 @@ function FileNode({
   depth,
 }: Omit<TreeNodeProps, "node"> & { node: FileTreeNode }) {
   const file = node.file!;
-  const isReviewed = reviewedFiles.has(file.path);
-  const isStale = staleFiles.has(file.path);
-  const commentCount = commentCountByFile[file.path] ?? 0;
-  const isSelected = selectedFile === file.path;
+  // Composite key from reviewFileKey() so two same-name files in
+  // different repos don't share reviewed/stale/comment-count slots.
+  const key = reviewFileKey(file);
+  const isReviewed = reviewedFiles.has(key);
+  const isStale = staleFiles.has(key);
+  const commentCount = commentCountByFile[key] ?? 0;
+  const isSelected = selectedFile === key;
   return (
     <div
       className={cn(
@@ -118,12 +121,12 @@ function FileNode({
         isSelected ? "bg-accent/50" : "hover:bg-muted/50",
       )}
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
-      onClick={() => onSelectFile(file.path)}
+      onClick={() => onSelectFile(key)}
     >
       <Checkbox
         checked={isReviewed && !isStale}
         onCheckedChange={(checked) => {
-          onToggleReviewed(file.path, checked === true);
+          onToggleReviewed(key, checked === true);
         }}
         onClick={(e) => e.stopPropagation()}
         className="h-3.5 w-3.5"
@@ -165,11 +168,16 @@ function TreeNode({
   };
 
   if (node.isDir) {
+    // Repo roots get a stronger label so the user sees the multi-repo grouping.
+    const fileCount = node.isRepoRoot ? countLeafFiles(node) : 0;
     return (
-      <div>
+      <div data-testid={node.isRepoRoot ? "repo-root-node" : "dir-node"}>
         <button
           type="button"
-          className="flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer"
+          className={cn(
+            "flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer",
+            node.isRepoRoot && "border-t border-border/40 first:border-t-0 mt-1 first:mt-0",
+          )}
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
           onClick={handleToggle}
         >
@@ -178,7 +186,17 @@ function TreeNode({
           ) : (
             <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="text-[13px] text-muted-foreground truncate">{node.name}</span>
+          <span
+            className={cn(
+              "text-[13px] truncate",
+              node.isRepoRoot ? "font-medium text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {node.name}
+          </span>
+          {node.isRepoRoot && fileCount > 0 && (
+            <span className="ml-auto text-[10px] text-muted-foreground/70">{fileCount}</span>
+          )}
         </button>
         {expanded && node.children && (
           <div>
@@ -192,4 +210,13 @@ function TreeNode({
   }
 
   return <FileNode node={node} {...sharedProps} depth={depth} />;
+}
+
+/** Counts leaf (file) nodes anywhere under the given node. Used for the
+ * "N files" badge on multi-repo repo-root headers. */
+function countLeafFiles(node: FileTreeNode): number {
+  if (!node.isDir) return 1;
+  let total = 0;
+  for (const child of node.children ?? []) total += countLeafFiles(child);
+  return total;
 }
