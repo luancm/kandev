@@ -17,6 +17,38 @@ import {
   type PillOption,
 } from "@/components/task-create-dialog-pill";
 import { GitHubUrlSection } from "@/components/task-create-dialog-github-url";
+import {
+  computeBranchPrefix,
+  computeBranchTooltip,
+  computeBranchDisabledReason,
+} from "@/components/task-create-dialog-branch-utils";
+
+function runAutoselect({
+  branches,
+  preferredDefaultBranch,
+  preferredDefaultBranchLoading,
+  onBranchChange,
+}: {
+  branches: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
+  preferredDefaultBranch: string | undefined;
+  preferredDefaultBranchLoading: boolean;
+  onBranchChange: (value: string) => void;
+}) {
+  if (preferredDefaultBranchLoading) return;
+  // Local-executor flow: preferredDefaultBranch is the workspace's current
+  // ref (branch name OR detached-HEAD short SHA). Seed row.branch with it
+  // unconditionally so the chip displays "current: <ref>". When the ref is a
+  // SHA (detached HEAD) it won't appear in the branches list, but falling
+  // through to autoSelectBranch would pick main/master and surface "will
+  // switch to: master", which contradicts what the user actually has checked
+  // out. Sending the SHA back on submit is a no-op because the backend's
+  // skip-when-equal check compares against the same SHA.
+  if (preferredDefaultBranch) {
+    onBranchChange(preferredDefaultBranch);
+    return;
+  }
+  autoSelectBranch(branches, onBranchChange);
+}
 
 /**
  * Chip row for the task-create dialog. Renders one chip per row in
@@ -197,6 +229,7 @@ function ChipsList({
             isLocalExecutor,
             rowBranch: row.branch,
             currentLocalBranch: fs.currentLocalBranch,
+            freshBranchEnabled: !!fs.freshBranchEnabled,
           })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
@@ -245,7 +278,11 @@ function FreshBranchToggle({
           onClick={() => onToggle(!enabled)}
           data-testid="fresh-branch-toggle"
           aria-pressed={enabled}
-          aria-label={enabled ? "Fork a new branch" : "Use current branch"}
+          aria-label={
+            enabled
+              ? "Fork a new branch from a base (turn off to use current checkout)"
+              : "Fork a new branch from a base instead of using current checkout"
+          }
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-md border border-input cursor-pointer transition-colors",
             enabled
@@ -256,10 +293,10 @@ function FreshBranchToggle({
           <IconGitFork className="h-3.5 w-3.5" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>
+      <TooltipContent className="max-w-xs">
         {enabled
-          ? "Forking a new branch from the selected base. Click to use the existing branch instead."
-          : "Use the existing branch. Click to fork a new branch from a base instead."}
+          ? "Fork mode: a new branch will be created from the selected base before the agent runs. Click to turn off and use your repository's current checkout instead."
+          : "By default the local executor uses your repository's current checkout. Click to fork a new branch from a base instead, leaving your working tree untouched."}
       </TooltipContent>
     </Tooltip>
   );
@@ -298,12 +335,15 @@ type RepoChipProps = {
    */
   branchLocked?: boolean;
   /**
-   * When set, prefer this branch as the auto-selected default for an empty
-   * row.branch. Used by the local-executor flow to surface the workspace's
-   * current branch as the chip's default value (so submit always carries
-   * an explicit branch and the user sees what's on disk). Falls back to the
-   * existing last-used / preferred-default autoselect when unset or when
-   * the value isn't in the loaded branch list.
+   * When set, seed row.branch with this value (for an empty row). Used by
+   * the local-executor flow to surface the workspace's current ref — either
+   * a branch name like "main" or, on detached HEAD, the short commit SHA
+   * returned by the backend. The chip displays it verbatim ("current: main"
+   * or "current: 4fbc5d7"); on submit the backend's skip-when-equal check
+   * matches the same SHA so it's a no-op.
+   *
+   * When unset, the chip falls back to the existing last-used / preferred-
+   * default autoselect (main / master / develop, etc.).
    */
   preferredDefaultBranch?: string;
   /**
@@ -403,18 +443,12 @@ function useRepoChipData({
   // so the current-branch preference gets first crack at row.branch.
   useEffect(() => {
     if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
-    if (preferredDefaultBranchLoading) return;
-    if (
-      preferredDefaultBranch &&
-      branches.some((b) => {
-        const displayName = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-        return displayName === preferredDefaultBranch || b.name === preferredDefaultBranch;
-      })
-    ) {
-      onBranchChange(preferredDefaultBranch);
-      return;
-    }
-    autoSelectBranch(branches, onBranchChange);
+    runAutoselect({
+      branches,
+      preferredDefaultBranch,
+      preferredDefaultBranchLoading: !!preferredDefaultBranchLoading,
+      onBranchChange,
+    });
   }, [
     branchSource,
     branchesLoading,
@@ -531,7 +565,7 @@ function RepoChip({
         searchPlaceholder="Search branches..."
         emptyMessage="No branches"
         testId="branch-chip-trigger"
-        tooltip="Base branch"
+        tooltip={computeBranchTooltip(branchPrefix)}
         onRefresh={refreshBranches}
         refreshing={branchesLoading}
         filter={scoreBranch}
@@ -553,54 +587,6 @@ function RepoChip({
       </Tooltip>
     </span>
   );
-}
-
-/**
- * Decide the muted text shown before the branch value to qualify intent.
- * Local executor: "current: " when the user kept the workspace's current
- * branch, "will switch to: " when they picked something different — surfaces
- * the destructive `git checkout` decision the backend will make on submit.
- * Non-local executors: "from: " — the picked branch is the base for the new
- * worktree branch, not a switch target.
- *
- * Returns "" when there's no value yet, so the chip's placeholder ("branch")
- * doesn't get a misleading prefix.
- */
-export function computeBranchPrefix({
-  isLocalExecutor,
-  rowBranch,
-  currentLocalBranch,
-}: {
-  isLocalExecutor: boolean;
-  rowBranch: string;
-  currentLocalBranch: string;
-}): string {
-  if (!rowBranch) return "";
-  if (isLocalExecutor) {
-    if (currentLocalBranch && rowBranch === currentLocalBranch) return "current: ";
-    return "will switch to: ";
-  }
-  return "from: ";
-}
-
-function computeBranchDisabledReason({
-  branchLocked,
-  hasRepo,
-  branchesLoading,
-  optionCount,
-}: {
-  branchLocked: boolean;
-  hasRepo: boolean;
-  branchesLoading: boolean;
-  optionCount: number;
-}): string | undefined {
-  if (branchLocked) {
-    return "The local executor uses your repository's current checkout, so the branch can't change here. Toggle 'Fork a new branch' to pick a different base.";
-  }
-  if (!hasRepo) return "Select a repository first.";
-  if (branchesLoading) return "Loading branches…";
-  if (optionCount === 0) return "No branches available for this repository.";
-  return undefined;
 }
 
 function normalizeRepoPath(path: string): string {
