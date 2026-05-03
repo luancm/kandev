@@ -16,6 +16,7 @@ import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
+import { buildBranchKeywords } from "./task-create-dialog-pill";
 
 type OptionItem = {
   value: string;
@@ -114,20 +115,6 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
   }, [branchOptionsRaw]);
 }
 
-const BRANCH_SEGMENT_RE = /[/_.\-\s]+/;
-
-function buildBranchKeywords(name: string, remote?: string): string[] {
-  const out = new Set<string>();
-  out.add(name);
-  const leafIdx = name.lastIndexOf("/");
-  if (leafIdx >= 0) out.add(name.slice(leafIdx + 1));
-  for (const seg of name.split(BRANCH_SEGMENT_RE)) {
-    if (seg) out.add(seg);
-  }
-  if (remote) out.add(remote);
-  return Array.from(out);
-}
-
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
   return useMemo(() => {
     return agentProfiles.map((profile: AgentProfileOption) => {
@@ -193,14 +180,31 @@ export function useIsLocalExecutor(executors: Executor[], executorId: string): b
   }, [executors, executorId]);
 }
 
-export function useExecutorHint(executors: Executor[], executorId: string): string | null {
-  return useMemo(() => {
-    const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
-    if (selectedExecutor?.type === "worktree")
-      return "A git worktree will be created from the base branch.";
-    if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
-    return null;
-  }, [executors, executorId]);
+export function computeExecutorHint(
+  executors: Executor[],
+  executorId: string,
+  repoCount: number,
+): string | null {
+  const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
+  if (selectedExecutor?.type === "worktree") {
+    if (repoCount > 1) {
+      return "A git worktree will be created for each repository in a parent folder. The agent runs in that parent folder so it can see every worktree side by side.";
+    }
+    return "A git worktree will be created from the base branch.";
+  }
+  if (selectedExecutor?.type === "local") return "The agent will run directly on the repository.";
+  return null;
+}
+
+export function useExecutorHint(
+  executors: Executor[],
+  executorId: string,
+  repoCount: number,
+): string | null {
+  return useMemo(
+    () => computeExecutorHint(executors, executorId, repoCount),
+    [executors, executorId, repoCount],
+  );
 }
 
 export type ExecutorProfileOptionItem = OptionItem & {
