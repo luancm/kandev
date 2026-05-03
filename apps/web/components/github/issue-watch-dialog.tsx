@@ -20,7 +20,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
 import {
   ScriptEditor,
   computeEditorHeight,
@@ -41,12 +41,15 @@ type IssueWatchDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   watch: IssueWatch | null;
-  workspaceId: string;
+  // Pre-binds the dialog to one workspace. Omit on the install-wide settings
+  // page so the create flow shows a workspace picker.
+  workspaceId?: string;
   onCreate: (req: CreateIssueWatchRequest) => Promise<void>;
   onUpdate: (id: string, req: UpdateIssueWatchRequest) => Promise<void>;
 };
 
 type FormState = {
+  workspaceId: string;
   selectedRepos: RepoFilter[];
   allRepos: boolean;
   workflowId: string;
@@ -60,27 +63,29 @@ type FormState = {
   pollInterval: number;
 };
 
-type WorkflowStepOption = { id: string; name: string };
-
 const DEFAULT_QUERY = "type:issue state:open";
 
-const defaultFormState: FormState = {
-  selectedRepos: [],
-  allRepos: false,
-  workflowId: "",
-  workflowStepId: "",
-  agentProfileId: "",
-  executorProfileId: "",
-  prompt: DEFAULT_ISSUE_WATCH_PROMPT,
-  labels: "",
-  customQuery: DEFAULT_QUERY,
-  enabled: true,
-  pollInterval: 300,
-};
+function makeDefaultForm(workspaceId: string): FormState {
+  return {
+    workspaceId,
+    selectedRepos: [],
+    allRepos: false,
+    workflowId: "",
+    workflowStepId: "",
+    agentProfileId: "",
+    executorProfileId: "",
+    prompt: DEFAULT_ISSUE_WATCH_PROMPT,
+    labels: "",
+    customQuery: DEFAULT_QUERY,
+    enabled: true,
+    pollInterval: 300,
+  };
+}
 
 function formStateFromWatch(watch: IssueWatch): FormState {
   const hasRepos = watch.repos && watch.repos.length > 0;
   return {
+    workspaceId: watch.workspace_id,
     selectedRepos: hasRepos ? watch.repos : [],
     allRepos: !hasRepos,
     workflowId: watch.workflow_id,
@@ -93,32 +98,6 @@ function formStateFromWatch(watch: IssueWatch): FormState {
     enabled: watch.enabled,
     pollInterval: watch.poll_interval_seconds,
   };
-}
-
-function useWorkflowSteps(workflowId: string) {
-  const [steps, setSteps] = useState<WorkflowStepOption[]>([]);
-
-  useEffect(() => {
-    if (!workflowId) {
-      void Promise.resolve().then(() => setSteps([]));
-      return;
-    }
-    let cancelled = false;
-    listWorkflowSteps(workflowId)
-      .then((response) => {
-        if (cancelled) return;
-        const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setSteps(sorted.map((s) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => {
-        if (!cancelled) setSteps([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
-
-  return steps;
 }
 
 function useWatchFormData(workspaceId: string) {
@@ -179,25 +158,39 @@ function PlaceholdersHelp() {
 function IssueWatchFormFields({
   form,
   setForm,
-  workspaceId,
+  workspaceLocked,
   onAllReposChange,
   onSelectedReposChange,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  workspaceId: string;
+  workspaceLocked: boolean;
   onAllReposChange: (checked: boolean) => void;
   onSelectedReposChange: (repos: RepoFilter[]) => void;
 }) {
   return (
     <div className="space-y-5">
+      <WorkspacePicker
+        value={form.workspaceId}
+        onChange={(v) =>
+          setForm((prev) => ({
+            ...prev,
+            workspaceId: v,
+            workflowId: "",
+            workflowStepId: "",
+            selectedRepos: [],
+            allRepos: false,
+          }))
+        }
+        disabled={workspaceLocked}
+      />
       <IssueFilterFields
         form={form}
         setForm={setForm}
         onAllReposChange={onAllReposChange}
         onSelectedReposChange={onSelectedReposChange}
       />
-      <IssueAutomationFields form={form} setForm={setForm} workspaceId={workspaceId} />
+      <IssueAutomationFields form={form} setForm={setForm} />
       <IssueSettingsFields form={form} setForm={setForm} />
     </div>
   );
@@ -254,14 +247,12 @@ function IssueFilterFields({
 function IssueAutomationFields({
   form,
   setForm,
-  workspaceId,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  workspaceId: string;
 }) {
-  const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(workspaceId);
-  const workflowSteps = useWorkflowSteps(form.workflowId);
+  const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(form.workspaceId);
+  const { steps: workflowSteps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
 
   return (
     <>
@@ -280,8 +271,9 @@ function IssueAutomationFields({
           description="Initial step for new tasks."
           value={form.workflowStepId}
           onChange={(v) => setForm((prev) => ({ ...prev, workflowStepId: v }))}
-          placeholder={form.workflowId ? "Select step" : "Select a workflow first"}
+          placeholder={stepPlaceholder(form.workflowId, stepsLoading, workflowSteps.length)}
           items={workflowSteps.map((s) => ({ id: s.id, label: s.name }))}
+          disabled={!form.workflowId || stepsLoading || workflowSteps.length === 0}
         />
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -382,12 +374,19 @@ export function IssueWatchDialog({
   onCreate,
   onUpdate,
 }: IssueWatchDialogProps) {
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(defaultFormState);
+  const [form, setForm] = useState<FormState>(() => makeDefaultForm(workspaceId ?? ""));
 
   useEffect(() => {
-    setForm(watch ? formStateFromWatch(watch) : defaultFormState);
-  }, [watch, open]);
+    if (watch) {
+      setForm(formStateFromWatch(watch));
+    } else {
+      setForm(makeDefaultForm(workspaceId ?? activeWorkspaceId ?? ""));
+    }
+  }, [watch, open, workspaceId, activeWorkspaceId]);
+
+  const workspaceLocked = !!watch || !!workspaceId;
 
   const handleSelectedReposChange = useCallback((repos: RepoFilter[]) => {
     setForm((prev) => ({ ...prev, selectedRepos: repos }));
@@ -420,7 +419,7 @@ export function IssueWatchDialog({
       if (watch) {
         await onUpdate(watch.id, payload);
       } else {
-        await onCreate({ ...payload, workspace_id: workspaceId });
+        await onCreate({ ...payload, workspace_id: form.workspaceId });
       }
       onOpenChange(false);
     } catch {
@@ -428,9 +427,13 @@ export function IssueWatchDialog({
     } finally {
       setSaving(false);
     }
-  }, [form, watch, workspaceId, onCreate, onUpdate, onOpenChange]);
+  }, [form, watch, onCreate, onUpdate, onOpenChange]);
 
-  const canSave = !!form.workflowId && !!form.workflowStepId && form.prompt.trim().length > 0;
+  const canSave =
+    !!form.workspaceId &&
+    !!form.workflowId &&
+    !!form.workflowStepId &&
+    form.prompt.trim().length > 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -444,7 +447,7 @@ export function IssueWatchDialog({
         <IssueWatchFormFields
           form={form}
           setForm={setForm}
-          workspaceId={workspaceId}
+          workspaceLocked={workspaceLocked}
           onAllReposChange={handleAllReposChange}
           onSelectedReposChange={handleSelectedReposChange}
         />
@@ -468,12 +471,17 @@ function SelectField(props: {
   onChange: (v: string) => void;
   placeholder: string;
   items: { id: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
       <Label>{props.label}</Label>
       {props.description && <p className="text-xs text-muted-foreground">{props.description}</p>}
-      <Select value={props.value || undefined} onValueChange={props.onChange}>
+      <Select
+        value={props.value || undefined}
+        onValueChange={props.onChange}
+        disabled={props.disabled}
+      >
         <SelectTrigger className="cursor-pointer">
           <SelectValue placeholder={props.placeholder} />
         </SelectTrigger>
@@ -486,5 +494,28 @@ function SelectField(props: {
         </SelectContent>
       </Select>
     </div>
+  );
+}
+
+function WorkspacePicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+}) {
+  const workspaces = useAppStore((s) => s.workspaces.items);
+  return (
+    <SelectField
+      label="Workspace"
+      description="Tasks created by this watcher land in the selected workspace."
+      value={value}
+      onChange={onChange}
+      placeholder="Select workspace"
+      items={workspaces.map((w) => ({ id: w.id, label: w.name }))}
+      disabled={disabled}
+    />
   );
 }
