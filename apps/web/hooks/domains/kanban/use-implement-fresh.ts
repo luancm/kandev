@@ -1,6 +1,7 @@
 import type React from "react";
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useToast } from "@/components/toast-provider";
 import { setChatDraftContent } from "@/lib/local-storage";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildImplementPlanContent } from "./use-plan-actions";
@@ -26,6 +27,7 @@ export function useImplementFresh(
   const planningSession = useAppStore((s) =>
     resolvedSessionId ? s.taskSessions.items[resolvedSessionId] : undefined,
   );
+  const { toast } = useToast();
 
   return useCallback(async () => {
     if (!taskId || !resolvedSessionId || !planningSession?.agent_profile_id) return;
@@ -51,6 +53,7 @@ export function useImplementFresh(
       setChatDraftContent(resolvedSessionId, null);
     } catch (err) {
       console.error("Failed to launch fresh implementation session:", err);
+      toast({ description: "Failed to start implementation session", variant: "error" });
     }
-  }, [taskId, resolvedSessionId, planningSession, chatInputRef]);
+  }, [taskId, resolvedSessionId, planningSession, chatInputRef, toast]);
 }

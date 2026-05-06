@@ -140,8 +140,9 @@ function useImplementPlan(
         attachments.length > 0 ? 30000 : 10000,
       )
       .then(() => {
-        // Clear composer + persisted draft only on success so a failed send
-        // leaves the user's input intact for retry.
+        // Exit plan mode + clear composer only on success so a failed send
+        // leaves the layout and input intact for retry.
+        handlePlanModeChange(false);
         chatInputRef.current?.clear();
         setChatDraftContent(resolvedSessionId, null);
         // Authoritatively clear plan_mode in session metadata so a refresh
@@ -155,8 +156,6 @@ function useImplementPlan(
           );
       })
       .catch((err: unknown) => console.error("Failed to send implement plan message:", err));
-
-    handlePlanModeChange(false);
   }, [resolvedSessionId, taskId, handlePlanModeChange, chatInputRef]);
 }
 

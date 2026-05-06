@@ -5,6 +5,7 @@ import type { MessageAttachment } from "@/components/task/chat/chat-input-contai
 
 const mockLaunchSession = vi.fn();
 const mockSetChatDraftContent = vi.fn();
+const mockToast = vi.fn();
 
 let mockStoreState: { taskSessions: { items: Record<string, TaskSession> } } = {
   taskSessions: { items: {} },
@@ -12,6 +13,10 @@ let mockStoreState: { taskSessions: { items: Record<string, TaskSession> } } = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof mockStoreState) => unknown) => selector(mockStoreState),
+}));
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: mockToast }),
 }));
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -136,6 +141,18 @@ describe("useImplementFresh", () => {
 
     expect(clear).not.toHaveBeenCalled();
     expect(mockSetChatDraftContent).not.toHaveBeenCalled();
+  });
+
+  it("shows an error toast when launch fails", async () => {
+    mockLaunchSession.mockRejectedValueOnce(new Error("timeout"));
+    const { ref } = makeChatRef({ value: "implement" });
+    const { result } = renderHook(() => useImplementFresh("sess-plan", "task-1", ref));
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
   });
 
   it("no-ops when session ID is missing", async () => {
