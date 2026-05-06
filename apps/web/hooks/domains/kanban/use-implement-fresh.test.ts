@@ -43,9 +43,9 @@ vi.mock("@/lib/local-storage", async (importOriginal) => {
 
 import { useImplementFresh } from "./use-implement-fresh";
 
-const TASK_ID = TASK_ID;
-const SESS_PLAN = SESS_PLAN;
-const SESS_FRESH = SESS_FRESH;
+const TASK_ID = "task-1";
+const SESS_PLAN = "sess-plan";
+const SESS_FRESH = "sess-fresh";
 
 function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
   return {
