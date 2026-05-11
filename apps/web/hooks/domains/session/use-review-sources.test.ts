@@ -251,6 +251,47 @@ describe("buildReviewSources", () => {
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
+  it("multi-repo: same filename in two repos both appear (no collision)", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: {
+            files: {
+              "README.md": {
+                diff: "@@frontend@@",
+                status: "modified",
+                additions: 1,
+                deletions: 0,
+              },
+            },
+          },
+        },
+        {
+          repository_name: "backend",
+          status: {
+            files: {
+              "README.md": {
+                diff: "@@backend@@",
+                status: "modified",
+                additions: 2,
+                deletions: 0,
+              },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: null,
+      prDiffFiles: undefined,
+    });
+    expect(result.allFiles).toHaveLength(2);
+    const byRepo = Object.fromEntries(result.allFiles.map((f) => [f.repository_name, f]));
+    expect(byRepo["frontend"]?.path).toBe("README.md");
+    expect(byRepo["backend"]?.path).toBe("README.md");
+    expect(result.sourceCounts).toEqual({ uncommitted: 2, committed: 0, pr: 0 });
+  });
+
   it("sorts files by repository_name then path", () => {
     const result = buildReviewSources({
       gitStatus: undefined,
