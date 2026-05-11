@@ -6,7 +6,7 @@ import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
-import { TaskChangesPanel } from "../task-changes-panel";
+import { MobileChangesTabs } from "./mobile-changes-tabs";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
@@ -135,7 +135,7 @@ function MobilePanelArea({
       )}
       {currentMobilePanel === "changes" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
-          <TaskChangesPanel
+          <MobileChangesTabs
             selectedDiff={selectedDiff}
             onClearSelected={handleClearSelectedDiff}
             onOpenFile={handleOpenFileFromChat}

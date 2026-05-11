@@ -4,13 +4,8 @@ import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } fr
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import {
-  useSessionGitStatus,
-  useSessionGitStatusByRepo,
-} from "@/hooks/domains/session/use-session-git-status";
-import { useCumulativeDiff } from "@/hooks/domains/session/use-cumulative-diff";
+import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
@@ -19,8 +14,7 @@ import { updateUserSettings } from "@/lib/api";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
 import type { ReviewFile } from "@/components/review/types";
-import { hashDiff, normalizeDiffContent } from "@/components/review/types";
-import type { PRDiffFile } from "@/lib/types/github";
+import { hashDiff } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { ChangesTopBar } from "./changes-top-bar";
 import type { SelectedDiff } from "./task-layout";
@@ -34,89 +28,12 @@ type TaskChangesPanelProps = {
   onBecameEmpty?: () => void;
   /** Callback to open file in editor */
   onOpenFile?: (filePath: string) => void;
+  /**
+   * Restrict the diff list to a single source. Defaults to `"all"` (no
+   * filter). Mobile uses this for source tabs; desktop omits it.
+   */
+  sourceFilter?: "all" | ReviewSource;
 };
-
-type UncommittedFile = {
-  diff?: string;
-  diff_skip_reason?: ReviewFile["diff_skip_reason"];
-  status?: string;
-  additions?: number;
-  deletions?: number;
-  staged?: boolean;
-};
-type CumulativeFile = { diff?: string; status?: string; additions?: number; deletions?: number };
-
-function addUncommittedFiles(
-  fileMap: Map<string, ReviewFile>,
-  files: Record<string, UncommittedFile>,
-  repositoryName?: string,
-) {
-  for (const [path, file] of Object.entries(files)) {
-    const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    const skipReason = file.diff_skip_reason;
-    if (diff || skipReason) {
-      // For multi-repo workspaces the file tree groups by repository_name
-      // (see components/review/types.ts buildMultiRepoTree). Key the map by
-      // "repo:path" so two repos with the same filename don't collide.
-      const key = repositoryName ? `${repositoryName}:${path}` : path;
-      fileMap.set(key, {
-        path,
-        diff,
-        status: file.status ?? "modified",
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: file.staged ?? false,
-        source: "uncommitted",
-        diff_skip_reason: skipReason,
-        repository_name: repositoryName,
-      });
-    }
-  }
-}
-
-function addCumulativeFiles(
-  fileMap: Map<string, ReviewFile>,
-  files: Record<string, CumulativeFile>,
-) {
-  for (const [path, file] of Object.entries(files)) {
-    if (fileMap.has(path)) continue;
-    const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff) {
-      fileMap.set(path, {
-        path,
-        diff,
-        status: file.status || "modified",
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: false,
-        source: "committed",
-      });
-    }
-  }
-}
-
-function prFileStatus(status: string): "added" | "deleted" | "modified" {
-  if (status === "added") return "added";
-  if (status === "removed") return "deleted";
-  return "modified";
-}
-
-function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
-  for (const file of files) {
-    if (fileMap.has(file.filename)) continue;
-    const diff = file.patch ? normalizeDiffContent(file.patch) : "";
-    if (diff)
-      fileMap.set(file.filename, {
-        path: file.filename,
-        diff,
-        status: prFileStatus(file.status),
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: false,
-        source: "pr",
-      });
-  }
-}
 
 // Returns true only after gitStatus loads and the file's uncommitted diff is gone.
 export function shouldCloseFileDiffPanel(
@@ -128,72 +45,15 @@ export function shouldCloseFileDiffPanel(
   return !entry?.diff;
 }
 
-/** Merge PR + uncommitted + committed files into a single sorted list.
- *
- * For multi-repo workspaces statusByRepo carries one entry per repo, each
- * tagged with repository_name; the merge stamps that name onto every
- * uncommitted file so the file tree's per-repo grouping (see
- * components/review/types.ts buildMultiRepoTree) kicks in automatically.
- *
- * Falls back to the single-repo gitStatus when statusByRepo is empty so
- * legacy single-repo tasks keep their pre-multi-repo behavior.
- */
-function mergeReviewFiles(
-  gitStatus: ReturnType<typeof useSessionGitStatus>,
-  cumulativeDiff: { files?: Record<string, CumulativeFile> } | null,
-  prDiffFiles?: PRDiffFile[],
-  statusByRepo?: ReturnType<typeof useSessionGitStatusByRepo>,
-): ReviewFile[] {
-  const fileMap = new Map<string, ReviewFile>();
-  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
-  if (statusByRepo && statusByRepo.length > 0) {
-    for (const { repository_name, status } of statusByRepo) {
-      if (status?.files) {
-        addUncommittedFiles(
-          fileMap,
-          status.files as Record<string, UncommittedFile>,
-          repository_name || undefined,
-        );
-      }
-    }
-  } else if (gitStatus?.files) {
-    addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
-  }
-  if (cumulativeDiff?.files) addCumulativeFiles(fileMap, cumulativeDiff.files);
-  return Array.from(fileMap.values()).sort((a, b) => {
-    // Sort by repo then path so files cluster within their repo group.
-    const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
-    if (repoCmp !== 0) return repoCmp;
-    return a.path.localeCompare(b.path);
-  });
-}
-
-function useChangesData(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
+function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const gitStatus = useSessionGitStatus(activeSessionId);
-  const statusByRepo = useSessionGitStatusByRepo(activeSessionId);
-  const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(activeSessionId);
+  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus } =
+    useReviewSources(activeSessionId);
   const pr = useActiveTaskPR();
-  const { files: prDiffFiles, loading: prDiffLoading } = usePRDiff(
-    pr?.owner ?? null,
-    pr?.repo ?? null,
-    pr?.pr_number ?? null,
-  );
   const { reviews } = useSessionFileReviews(activeSessionId);
   const byId = useCommentsStore((s) => s.byId);
   const commentSessionIds = useCommentsStore((s) =>
     activeSessionId ? s.bySession[activeSessionId] : undefined,
-  );
-
-  const allFiles = useMemo<ReviewFile[]>(
-    () =>
-      mergeReviewFiles(
-        gitStatus,
-        cumulativeDiff,
-        prDiffFiles.length > 0 ? prDiffFiles : undefined,
-        statusByRepo,
-      ),
-    [gitStatus, statusByRepo, cumulativeDiff, prDiffFiles],
   );
 
   const { reviewedFiles, staleFiles } = useMemo(() => {
@@ -384,16 +244,21 @@ function useChangesActions(activeSessionId: string | null | undefined, allFiles:
 function useAutoCloseWhenEmpty(opts: {
   mode: "all" | "file";
   filePath: string | undefined;
+  sourceFilter: "all" | ReviewSource;
   gitStatus: { files?: Record<string, { diff?: string }> } | undefined;
   visibleCount: number;
   onBecameEmpty: (() => void) | undefined;
 }) {
-  const { mode, filePath, gitStatus, visibleCount, onBecameEmpty } = opts;
+  const { mode, filePath, sourceFilter, gitStatus, visibleCount, onBecameEmpty } = opts;
   const prevVisibleCountRef = useRef<number | null>(null);
   const prevFileSeenRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (!onBecameEmpty) return;
+    // A filtered tab going empty is not a "panel is empty" signal — the
+    // other sources may still have content. Only close in the unfiltered
+    // case.
+    if (sourceFilter !== "all") return;
 
     if (mode === "file" && filePath) {
       // File-mode: close when the file no longer has an uncommitted diff,
@@ -412,7 +277,23 @@ function useAutoCloseWhenEmpty(opts: {
       onBecameEmpty();
     }
     prevVisibleCountRef.current = visibleCount;
-  }, [mode, filePath, gitStatus, onBecameEmpty, visibleCount]);
+  }, [mode, filePath, sourceFilter, gitStatus, onBecameEmpty, visibleCount]);
+}
+
+function filterVisibleFiles(
+  allFiles: ReviewFile[],
+  mode: "all" | "file",
+  filePath: string | undefined,
+  sourceFilter: "all" | ReviewSource,
+): ReviewFile[] {
+  let files = allFiles;
+  if (mode === "file" && filePath) {
+    files = files.filter((file) => file.path === filePath);
+  }
+  if (sourceFilter !== "all") {
+    files = files.filter((file) => file.source === sourceFilter);
+  }
+  return files;
 }
 
 const TaskChangesPanel = memo(function TaskChangesPanel({
@@ -422,6 +303,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onClearSelected,
   onBecameEmpty,
   onOpenFile: onOpenFileProp,
+  sourceFilter = "all",
 }: TaskChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const { openFile: panelOpenFile, openFileInMarkdownPreview } = usePanelActions();
@@ -436,13 +318,11 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     fileRefs,
     cumulativeLoading,
     gitStatus,
-  } = useChangesData(selectedDiff, onClearSelected);
-  const visibleFiles = useMemo(() => {
-    if (mode === "file" && filePath) {
-      return allFiles.filter((file) => file.path === filePath);
-    }
-    return allFiles;
-  }, [allFiles, mode, filePath]);
+  } = useChangesView(selectedDiff, onClearSelected);
+  const visibleFiles = useMemo(
+    () => filterVisibleFiles(allFiles, mode, filePath, sourceFilter),
+    [allFiles, mode, filePath, sourceFilter],
+  );
   const visibleFileRefs = useMemo(() => {
     if (mode !== "file" || !filePath) return fileRefs;
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
@@ -475,6 +355,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   useAutoCloseWhenEmpty({
     mode,
     filePath,
+    sourceFilter,
     gitStatus,
     visibleCount: visibleFiles.length,
     onBecameEmpty,
@@ -580,4 +461,4 @@ function ChangesPanelContent({
   );
 }
 
-export { TaskChangesPanel };
+export { TaskChangesPanel, filterVisibleFiles };

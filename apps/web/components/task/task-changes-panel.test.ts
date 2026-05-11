@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { shouldCloseFileDiffPanel } from "./task-changes-panel";
+import { shouldCloseFileDiffPanel, filterVisibleFiles } from "./task-changes-panel";
+import type { ReviewFile } from "@/components/review/types";
 
 const PATH = "src/foo.ts";
 
@@ -34,5 +35,62 @@ describe("shouldCloseFileDiffPanel", () => {
   it("is not affected by unrelated files in gitStatus.files", () => {
     const gitStatus = { files: { "other/file.ts": { diff: "diff content" } } };
     expect(shouldCloseFileDiffPanel(gitStatus, PATH)).toBe(true);
+  });
+});
+
+function file(path: string, source: ReviewFile["source"]): ReviewFile {
+  return {
+    path,
+    diff: "@@@@",
+    status: "modified",
+    additions: 0,
+    deletions: 0,
+    staged: false,
+    source,
+  };
+}
+
+describe("filterVisibleFiles", () => {
+  const files: ReviewFile[] = [
+    file("a.ts", "uncommitted"),
+    file("b.ts", "committed"),
+    file("c.ts", "pr"),
+  ];
+
+  it("returns all files when mode=all and sourceFilter=all", () => {
+    expect(filterVisibleFiles(files, "all", undefined, "all")).toHaveLength(3);
+  });
+
+  it("filters by uncommitted source", () => {
+    const result = filterVisibleFiles(files, "all", undefined, "uncommitted");
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("a.ts");
+  });
+
+  it("filters by pr source", () => {
+    const result = filterVisibleFiles(files, "all", undefined, "pr");
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("c.ts");
+  });
+
+  it("filters by committed source", () => {
+    const result = filterVisibleFiles(files, "all", undefined, "committed");
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("b.ts");
+  });
+
+  it("file-mode + sourceFilter intersect (file present in source)", () => {
+    const result = filterVisibleFiles(files, "file", "a.ts", "uncommitted");
+    expect(result).toHaveLength(1);
+    expect(result[0].path).toBe("a.ts");
+  });
+
+  it("file-mode + sourceFilter intersect (file absent from source)", () => {
+    const result = filterVisibleFiles(files, "file", "a.ts", "pr");
+    expect(result).toHaveLength(0);
+  });
+
+  it("returns empty list when no files match", () => {
+    expect(filterVisibleFiles([], "all", undefined, "all")).toEqual([]);
   });
 });
