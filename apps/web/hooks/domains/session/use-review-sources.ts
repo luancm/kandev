@@ -49,9 +49,10 @@ function addUncommittedFiles(
 function addCumulativeFiles(
   fileMap: Map<string, ReviewFile>,
   files: Record<string, CumulativeFile>,
+  uncommittedPaths: Set<string>,
 ) {
   for (const [path, file] of Object.entries(files)) {
-    if (fileMap.has(path)) continue;
+    if (fileMap.has(path) || uncommittedPaths.has(path)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     if (!diff) continue;
     fileMap.set(path, {
@@ -72,9 +73,13 @@ function prFileStatus(status: string): "added" | "deleted" | "modified" {
   return "modified";
 }
 
-function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
+function addPRFiles(
+  fileMap: Map<string, ReviewFile>,
+  files: PRDiffFile[],
+  uncommittedPaths: Set<string>,
+) {
   for (const file of files) {
-    if (fileMap.has(file.filename)) continue;
+    if (fileMap.has(file.filename) || uncommittedPaths.has(file.filename)) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
     if (!diff) continue;
     fileMap.set(file.filename, {
@@ -87,6 +92,29 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
       source: "pr",
     });
   }
+}
+
+function collectPathsFromFiles(paths: Set<string>, files: Record<string, UncommittedFile>): void {
+  for (const [path, file] of Object.entries(files)) {
+    const diff = file.diff ? normalizeDiffContent(file.diff) : "";
+    if (diff || file.diff_skip_reason) paths.add(path);
+  }
+}
+
+function collectUncommittedPaths(
+  statusByRepo: BuildReviewSourcesInput["statusByRepo"],
+  gitStatus: BuildReviewSourcesInput["gitStatus"],
+): Set<string> {
+  const paths = new Set<string>();
+  if (statusByRepo && statusByRepo.length > 0) {
+    for (const { status } of statusByRepo) {
+      if (status?.files)
+        collectPathsFromFiles(paths, status.files as Record<string, UncommittedFile>);
+    }
+  } else if (gitStatus?.files) {
+    collectPathsFromFiles(paths, gitStatus.files as Record<string, UncommittedFile>);
+  }
+  return paths;
 }
 
 export type BuildReviewSourcesInput = {
@@ -105,15 +133,17 @@ export type BuildReviewSourcesResult = {
 
 /**
  * Pure helper that merges the three diff sources into one sorted, deduped
- * list and computes per-source counts. PR files come first into the map so
- * that uncommitted and committed entries overwrite same-path PR rows
- * (dedup priority: uncommitted > committed > PR).
+ * list and computes per-source counts. Uncommitted files write first under
+ * composite `repo:path` keys (multi-repo) or simple `path` keys (single-repo).
+ * Committed and PR files write next under simple `path` keys but skip any
+ * path that already appears in the uncommitted set — preserving dedup
+ * priority (uncommitted > committed > PR) across the key-shape mismatch.
  */
 export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewSourcesResult {
   const { gitStatus, statusByRepo, cumulativeDiff, prDiffFiles } = input;
   const fileMap = new Map<string, ReviewFile>();
 
-  if (prDiffFiles && prDiffFiles.length > 0) addPRFiles(fileMap, prDiffFiles);
+  const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus);
 
   if (statusByRepo && statusByRepo.length > 0) {
     for (const { repository_name, status } of statusByRepo) {
@@ -129,7 +159,9 @@ export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewS
     addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
   }
 
-  if (cumulativeDiff?.files) addCumulativeFiles(fileMap, cumulativeDiff.files);
+  if (cumulativeDiff?.files) addCumulativeFiles(fileMap, cumulativeDiff.files, uncommittedPaths);
+
+  if (prDiffFiles && prDiffFiles.length > 0) addPRFiles(fileMap, prDiffFiles, uncommittedPaths);
 
   const allFiles = Array.from(fileMap.values()).sort((a, b) => {
     const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");

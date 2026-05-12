@@ -7,7 +7,8 @@ import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
-import { ReviewDialog } from "../review-dialog";
+import { ReviewDialog } from "@/components/review/review-dialog";
+import { useReviewDialog } from "../use-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughTerminal } from "../passthrough-terminal";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
@@ -213,6 +214,29 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
   );
 }
 
+function MobileReviewDialogMount({
+  sessionId,
+  review,
+}: {
+  sessionId: string | null;
+  review: ReturnType<typeof useReviewDialog>;
+}) {
+  if (!sessionId) return null;
+  return (
+    <ReviewDialog
+      open={review.reviewDialogOpen}
+      onOpenChange={review.setReviewDialogOpen}
+      sessionId={sessionId}
+      baseBranch={review.baseBranch}
+      onSendComments={review.handleReviewSendComments}
+      onOpenFile={review.reviewOpenFile}
+      gitStatusFiles={review.reviewGitStatusFiles}
+      cumulativeDiff={review.reviewCumulativeDiff}
+      prDiffFiles={review.reviewPRDiffFiles}
+    />
+  );
+}
+
 function useMobilePanelHandlers({
   handleSelectDiff,
   handlePanelChange,
@@ -287,6 +311,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
       handlePanelChange,
     });
 
+  const review = useReviewDialog(effectiveSessionId);
+
   return (
     <div className="h-dvh relative bg-background">
       <MobileTopBarSticky
@@ -346,8 +372,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         workflowId={workflowId}
       />
 
-      {/* Review Dialog — mounted once at layout level, triggered by window event */}
-      <ReviewDialog />
+      <MobileReviewDialogMount sessionId={effectiveSessionId} review={review} />
     </div>
   );
 });

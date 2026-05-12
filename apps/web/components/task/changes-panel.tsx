@@ -617,3 +617,4 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
 });
 
 export { ChangesPanel, ChangesPanelBody, useChangesPanelData, buildChangesPanelBodyProps };
+export type { ChangesPanelBodyProps };
