@@ -14,7 +14,7 @@ import { updateUserSettings } from "@/lib/api";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
 import type { ReviewFile } from "@/components/review/types";
-import { hashDiff } from "@/components/review/types";
+import { hashDiff, reviewFileKey, splitReviewFileKey } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { ChangesTopBar } from "./changes-top-bar";
 import type { SelectedDiff } from "./task-layout";
@@ -50,10 +50,20 @@ function scrollToFileAndClear(
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>,
   onClearSelected: () => void,
 ) {
-  const ref = fileRefs.get(path);
+  // Try exact key first (bare path for single-repo, composite if caller provides one).
+  let ref = fileRefs.get(path);
+  if (!ref) {
+    // Fallback: selectedDiff.path is always bare — find the first matching ref.
+    for (const [key, r] of fileRefs.entries()) {
+      if (splitReviewFileKey(key).path === path) {
+        ref = r;
+        break;
+      }
+    }
+  }
   if (ref?.current) {
     requestAnimationFrame(() => {
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ref!.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       onClearSelected();
     });
   } else {
@@ -82,13 +92,14 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
       return { reviewedFiles: reviewed, staleFiles: stale };
     }
     for (const file of allFiles) {
-      const reviewState = reviews.get(file.path);
+      const key = reviewFileKey(file);
+      const reviewState = reviews.get(key);
       if (!reviewState?.reviewed) continue;
       const currentHash = hashDiff(file.diff);
       if (reviewState.diffHash && reviewState.diffHash !== currentHash) {
-        stale.add(file.path);
+        stale.add(key);
       } else {
-        reviewed.add(file.path);
+        reviewed.add(key);
       }
     }
     return { reviewedFiles: reviewed, staleFiles: stale };
@@ -104,12 +115,12 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
     return count;
   }, [byId, commentSessionIds]);
 
-  // Derive a stable key from file paths so refs are only recreated when
-  // the file list itself changes, not when diff content updates.
-  const filePathsKey = useMemo(() => allFiles.map((f) => f.path).join("\0"), [allFiles]);
+  // Derive a stable key from composite file keys so refs are only recreated
+  // when the file list itself changes, not when diff content updates.
+  const filePathsKey = useMemo(() => allFiles.map((f) => reviewFileKey(f)).join("\0"), [allFiles]);
   const fileRefs = useMemo(() => {
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
-    for (const file of allFiles) refs.set(file.path, createRef<HTMLDivElement>());
+    for (const file of allFiles) refs.set(reviewFileKey(file), createRef<HTMLDivElement>());
     return refs;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on stable path list, not allFiles reference
   }, [filePathsKey]);
@@ -173,19 +184,20 @@ function useChangesActions(activeSessionId: string | null | undefined, allFiles:
   }, []);
 
   const handleToggleReviewed = useCallback(
-    (path: string, reviewed: boolean) => {
+    (key: string, reviewed: boolean) => {
       if (reviewed) {
-        const file = allFiles.find((f) => f.path === path);
-        markReviewed(path, file ? hashDiff(file.diff) : "");
+        const file = allFiles.find((f) => reviewFileKey(f) === key);
+        markReviewed(key, file ? hashDiff(file.diff) : "");
       } else {
-        markUnreviewed(path);
+        markUnreviewed(key);
       }
     },
     [allFiles, markReviewed, markUnreviewed],
   );
 
   const handleDiscard = useCallback(
-    async (path: string) => {
+    async (key: string) => {
+      const { path } = splitReviewFileKey(key);
       try {
         const result = await discard([path]);
         if (result.success) {
@@ -337,8 +349,10 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const visibleFileRefs = useMemo(() => {
     if (mode !== "file" || !filePath) return fileRefs;
     const refs = new Map<string, React.RefObject<HTMLDivElement | null>>();
-    const fileRef = fileRefs.get(filePath);
-    if (fileRef) refs.set(filePath, fileRef);
+    // filePath is always bare — collect all refs whose composite key matches.
+    for (const [key, ref] of fileRefs.entries()) {
+      if (splitReviewFileKey(key).path === filePath) refs.set(key, ref);
+    }
     return refs;
   }, [mode, filePath, fileRefs]);
   const {
@@ -356,7 +370,8 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const reviewedCount = useMemo(
     () =>
       visibleFiles.reduce((count, file) => {
-        if (!staleFiles.has(file.path) && reviewedFiles.has(file.path)) return count + 1;
+        const key = reviewFileKey(file);
+        if (!staleFiles.has(key) && reviewedFiles.has(key)) return count + 1;
         return count;
       }, 0),
     [visibleFiles, reviewedFiles, staleFiles],

@@ -9,6 +9,8 @@ import {
 } from "../changes-panel";
 import { ChangesPanelHeader } from "../changes-panel-header";
 import { MobileDiffSheet } from "./mobile-diff-sheet";
+import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
+import { useAppStore } from "@/components/state-provider";
 import type { SelectedDiff } from "../task-layout";
 
 type DiffSheetMode =
@@ -33,6 +35,8 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   onOpenFile,
 }: MobileChangesPanelProps) {
   const data = useChangesPanelData();
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const { sourceCounts } = useReviewSources(activeSessionId);
   const [diffSheet, setDiffSheet] = useState<DiffSheetMode | null>(null);
 
   // Track the previous selectedDiff to detect changes
@@ -45,15 +49,15 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     }
 
     const prevPath = prevSelectedDiffRef.current?.path;
-    if (prevPath !== selectedDiff.path) {
-      // Defer setState to next render to avoid cascading renders
-      requestAnimationFrame(() => {
-        setDiffSheet({ kind: "file", path: selectedDiff.path });
-      });
-      onClearSelected();
-    }
-
     prevSelectedDiffRef.current = selectedDiff;
+    if (prevPath === selectedDiff.path) return;
+
+    // Defer setState to next render to avoid cascading renders
+    const handle = requestAnimationFrame(() => {
+      setDiffSheet({ kind: "file", path: selectedDiff.path });
+    });
+    onClearSelected();
+    return () => cancelAnimationFrame(handle);
   }, [selectedDiff, onClearSelected]);
 
   const handleOpenDiffAll = useCallback(() => {
@@ -112,7 +116,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
         onOpenFile={onOpenFile}
         selectedDiff={selectedDiff}
         onClearSelected={onClearSelected}
-        data-testid="mobile-diff-sheet"
+        sourceCounts={sourceCounts}
       />
     </>
   );

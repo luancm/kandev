@@ -1,14 +1,12 @@
 "use client";
 
-import { memo, useMemo, useState, useEffect, useRef } from "react";
+import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { TaskChangesPanel } from "../task-changes-panel";
 import { CommitDiffView } from "../commit-detail-panel";
-import { useAppStore } from "@/components/state-provider";
-import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
-import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
+import type { ReviewSource, SourceCounts } from "@/hooks/domains/session/use-review-sources";
 import type { SelectedDiff } from "../task-layout";
 
 type DiffSheetMode =
@@ -22,7 +20,162 @@ type MobileDiffSheetProps = {
   onOpenFile?: (filePath: string) => void;
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
+  sourceCounts: SourceCounts;
 };
+
+function pickFirstNonEmpty(sourceCounts: SourceCounts): ReviewSource | null {
+  if (sourceCounts.uncommitted > 0) return "uncommitted";
+  if (sourceCounts.committed > 0) return "committed";
+  if (sourceCounts.pr > 0) return "pr";
+  return null;
+}
+
+function useAutoSelectSource(
+  modeKind: string | undefined,
+  sourceCounts: SourceCounts,
+  activeSource: ReviewSource,
+  setActiveSource: (s: ReviewSource) => void,
+) {
+  const userPickedRef = useRef(false);
+  const prevModeKindRef = useRef<string | undefined>(undefined);
+
+  // Reset the "user picked" flag whenever the sheet closes/reopens.
+  useEffect(() => {
+    if (modeKind !== "all" && prevModeKindRef.current === "all") {
+      userPickedRef.current = false;
+    }
+    prevModeKindRef.current = modeKind;
+  }, [modeKind]);
+
+  // Auto-select highest-priority non-empty source. Runs on open AND when
+  // counts change (so a later-arriving "uncommitted" count overrides the
+  // initial "pr" fallback). Stops once the user makes an explicit choice.
+  useEffect(() => {
+    if (modeKind !== "all") return;
+    if (userPickedRef.current) return;
+    const pick = pickFirstNonEmpty(sourceCounts);
+    if (pick === null) return;
+    if (pick === activeSource) return;
+    setActiveSource(pick);
+  }, [modeKind, sourceCounts, activeSource, setActiveSource]);
+
+  const handleUserPick = useCallback(
+    (s: ReviewSource) => {
+      userPickedRef.current = true;
+      setActiveSource(s);
+    },
+    [setActiveSource],
+  );
+
+  return { handleUserPick };
+}
+
+type SourceTab = { key: ReviewSource; label: string; count: number };
+
+function buildSourceTabs(sourceCounts: SourceCounts): SourceTab[] {
+  return [
+    { key: "uncommitted" as ReviewSource, label: "Uncommitted", count: sourceCounts.uncommitted },
+    { key: "committed" as ReviewSource, label: "Committed", count: sourceCounts.committed },
+    { key: "pr" as ReviewSource, label: "PR", count: sourceCounts.pr },
+  ].filter((t) => t.count > 0);
+}
+
+function deriveTitle(mode: DiffSheetMode | null, sourceTabs: SourceTab[]): string {
+  if (!mode) return "";
+  if (mode.kind === "all") {
+    if (sourceTabs.length === 1) return `${sourceTabs[0].label} Changes`;
+    return "All Changes";
+  }
+  if (mode.kind === "file") return "File Changes";
+  if (mode.kind === "commit") return "Commit Changes";
+  return "";
+}
+
+function SheetHeader({
+  title,
+  showSourceChip,
+  sourceLabel,
+  onClose,
+}: {
+  title: string;
+  showSourceChip: boolean;
+  sourceLabel: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <DrawerHeader className="flex items-center justify-between py-2 px-4 border-b shrink-0">
+      <DrawerTitle className="text-base flex items-center gap-2">
+        <span>{title}</span>
+        {showSourceChip && sourceLabel && (
+          <span
+            className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground bg-muted/60 rounded-sm px-1.5 py-0.5"
+            data-testid="mobile-diff-sheet-source-chip"
+          >
+            {sourceLabel}
+          </span>
+        )}
+      </DrawerTitle>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="px-2"
+        onClick={onClose}
+        data-testid="mobile-diff-sheet-close"
+      >
+        Close
+      </Button>
+    </DrawerHeader>
+  );
+}
+
+function SourceTabBar({
+  tabs,
+  activeSource,
+  onPick,
+}: {
+  tabs: SourceTab[];
+  activeSource: ReviewSource;
+  onPick: (s: ReviewSource) => void;
+}) {
+  return (
+    <div className="px-4 py-2 border-b shrink-0">
+      <Tabs value={activeSource} onValueChange={(v) => onPick(v as ReviewSource)}>
+        <TabsList className="h-8">
+          {tabs.map((tab) => (
+            <TabsTrigger key={tab.key} value={tab.key} className="text-xs px-2">
+              {tab.label} ({tab.count})
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+    </div>
+  );
+}
+
+function renderPanel(
+  mode: DiffSheetMode | null,
+  activeSource: ReviewSource,
+  selectedDiff: SelectedDiff | null,
+  onClearSelected: () => void,
+  onOpenFile?: (filePath: string) => void,
+): React.ReactNode {
+  if (!mode) return null;
+  if (mode.kind === "commit") {
+    return <CommitDiffView sha={mode.sha} repo={mode.repo} onOpenFile={onOpenFile} />;
+  }
+  const panelMode = mode.kind;
+  const filePath = mode.kind === "file" ? mode.path : undefined;
+  return (
+    <TaskChangesPanel
+      mode={panelMode}
+      filePath={filePath}
+      selectedDiff={selectedDiff}
+      onClearSelected={onClearSelected}
+      onOpenFile={onOpenFile}
+      sourceFilter={mode.kind === "all" ? activeSource : "all"}
+    />
+  );
+}
 
 /**
  * Full-screen mobile diff viewer sheet. Shows either merged diffs (mode=all),
@@ -35,105 +188,39 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
   onOpenFile,
   selectedDiff,
   onClearSelected,
+  sourceCounts,
 }: MobileDiffSheetProps) {
-  const open = mode !== null;
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const { sourceCounts } = useReviewSources(activeSessionId);
-
   const [activeSource, setActiveSource] = useState<ReviewSource>("uncommitted");
-  const prevModeKindRef = useRef<string | undefined>(undefined);
-
-  // Auto-select the first non-empty source when the all-mode sheet opens.
-  // Use requestAnimationFrame to defer setState out of the effect body.
-  useEffect(() => {
-    if (mode?.kind !== "all" || prevModeKindRef.current === "all") {
-      prevModeKindRef.current = mode?.kind;
-      return;
-    }
-    prevModeKindRef.current = "all";
-    requestAnimationFrame(() => {
-      if (sourceCounts.uncommitted > 0) setActiveSource("uncommitted");
-      else if (sourceCounts.committed > 0) setActiveSource("committed");
-      else setActiveSource("pr");
-    });
-  }, [mode?.kind, sourceCounts.uncommitted, sourceCounts.committed]);
-
-  const title = useMemo(() => {
-    if (!mode) return "";
-    if (mode.kind === "all") return "All Changes";
-    if (mode.kind === "file") return "File Changes";
-    if (mode.kind === "commit") return "Commit Changes";
-    return "";
-  }, [mode]);
-
-  const taskChangesPanelProps = useMemo(() => {
-    if (!mode || mode.kind === "all") return { mode: "all" as const };
-    if (mode.kind === "file") return { mode: "file" as const, filePath: mode.path };
-    return null;
-  }, [mode]);
-
-  const sourceTabs = useMemo<Array<{ key: ReviewSource; label: string; count: number }>>(
-    () =>
-      [
-        {
-          key: "uncommitted" as ReviewSource,
-          label: "Uncommitted",
-          count: sourceCounts.uncommitted,
-        },
-        { key: "committed" as ReviewSource, label: "Committed", count: sourceCounts.committed },
-        { key: "pr" as ReviewSource, label: "PR", count: sourceCounts.pr },
-      ].filter((t) => t.count > 0),
-    [sourceCounts],
+  const { handleUserPick } = useAutoSelectSource(
+    mode?.kind,
+    sourceCounts,
+    activeSource,
+    setActiveSource,
+  );
+  const sourceTabs = useMemo(() => buildSourceTabs(sourceCounts), [sourceCounts]);
+  const activeSourceLabel = useMemo(
+    () => sourceTabs.find((t) => t.key === activeSource)?.label ?? null,
+    [sourceTabs, activeSource],
+  );
+  const title = useMemo(() => deriveTitle(mode, sourceTabs), [mode, sourceTabs]);
+  const panelContent = useMemo(
+    () => renderPanel(mode, activeSource, selectedDiff, onClearSelected, onOpenFile),
+    [mode, activeSource, selectedDiff, onClearSelected, onOpenFile],
   );
 
-  function renderPanelContent() {
-    if (mode?.kind === "commit") {
-      return <CommitDiffView sha={mode.sha} repo={mode.repo} onOpenFile={onOpenFile} />;
-    }
-    if (!taskChangesPanelProps) return null;
-    return (
-      <TaskChangesPanel
-        mode={taskChangesPanelProps.mode}
-        filePath={taskChangesPanelProps.filePath}
-        selectedDiff={selectedDiff}
-        onClearSelected={onClearSelected}
-        onOpenFile={onOpenFile}
-        sourceFilter={mode?.kind === "all" ? activeSource : "all"}
-      />
-    );
-  }
-
   return (
-    <Drawer open={open} onOpenChange={onClose}>
+    <Drawer open={mode !== null} onOpenChange={onClose}>
       <DrawerContent className="h-full max-h-screen flex flex-col rounded-none">
-        <DrawerHeader className="flex items-center justify-between py-2 px-4 border-b shrink-0">
-          <DrawerTitle className="text-base">{title}</DrawerTitle>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="px-2"
-            onClick={onClose}
-            data-testid="mobile-diff-sheet-close"
-          >
-            Close
-          </Button>
-        </DrawerHeader>
-
+        <SheetHeader
+          title={title}
+          showSourceChip={mode?.kind === "all" && sourceTabs.length === 1}
+          sourceLabel={activeSourceLabel}
+          onClose={onClose}
+        />
         {mode?.kind === "all" && sourceTabs.length > 1 && (
-          <div className="px-4 py-2 border-b shrink-0">
-            <Tabs value={activeSource} onValueChange={(v) => setActiveSource(v as ReviewSource)}>
-              <TabsList className="h-8">
-                {sourceTabs.map((tab) => (
-                  <TabsTrigger key={tab.key} value={tab.key} className="text-xs px-2">
-                    {tab.label} ({tab.count})
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </div>
+          <SourceTabBar tabs={sourceTabs} activeSource={activeSource} onPick={handleUserPick} />
         )}
-
-        <div className="flex-1 min-h-0 overflow-y-auto">{renderPanelContent()}</div>
+        <div className="flex-1 min-h-0 overflow-y-auto">{panelContent}</div>
       </DrawerContent>
     </Drawer>
   );

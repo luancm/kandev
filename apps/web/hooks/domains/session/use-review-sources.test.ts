@@ -217,7 +217,7 @@ describe("buildReviewSources", () => {
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
-  it("multi-repo uncommitted + PR overlap: file appears once as uncommitted", () => {
+  it("multi-repo uncommitted + PR overlap: file appears once as uncommitted (same repo)", () => {
     const result = buildReviewSources({
       gitStatus: undefined,
       statusByRepo: [
@@ -245,10 +245,70 @@ describe("buildReviewSources", () => {
           deletions: 0,
         },
       ],
+      prRepoName: "frontend",
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
+  });
+
+  it("multi-repo: same filename uncommitted in one repo, committed in another — both appear", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: {
+            files: {
+              "README.md": { diff: "@@f@@", status: "modified", additions: 1, deletions: 0 },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: {
+        files: {
+          "README.md": {
+            diff: "@@b@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+            repository_name: "backend",
+          },
+        },
+      },
+      prDiffFiles: undefined,
+    });
+    expect(result.allFiles).toHaveLength(2);
+    const byRepo = Object.fromEntries(result.allFiles.map((f) => [f.repository_name, f]));
+    expect(byRepo["frontend"]?.source).toBe("uncommitted");
+    expect(byRepo["backend"]?.source).toBe("committed");
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 1, pr: 0 });
+  });
+
+  it("multi-repo: same filename uncommitted in one repo, PR in another — both appear", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: {
+            files: {
+              "README.md": { diff: "@@f@@", status: "modified", additions: 1, deletions: 0 },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: null,
+      prDiffFiles: [
+        { filename: "README.md", status: "modified", patch: "@@p@@", additions: 1, deletions: 0 },
+      ],
+      prRepoName: "backend",
+    });
+    expect(result.allFiles).toHaveLength(2);
+    const byRepo = Object.fromEntries(result.allFiles.map((f) => [f.repository_name, f]));
+    expect(byRepo["frontend"]?.source).toBe("uncommitted");
+    expect(byRepo["backend"]?.source).toBe("pr");
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 1 });
   });
 
   it("multi-repo: same filename in two repos both appear (no collision)", () => {

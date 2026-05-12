@@ -1,16 +1,15 @@
 "use client";
 
-import { memo, useState, useEffect, useCallback, useMemo } from "react";
+import { memo, useEffect, useMemo } from "react";
 import { IconLoader2 } from "@tabler/icons-react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileDiffViewer } from "@/components/diff";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { useToast } from "@/components/toast-provider";
+import { useCommitDiff } from "@/hooks/domains/session/use-commit-diff";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import type { FileInfo } from "@/lib/state/store";
-import { requestCommitDiff } from "./commit-diff-request";
 
 type CommitDetailPanelProps = {
   panelId: string;
@@ -47,66 +46,28 @@ function getInitials(name: string): string {
     .toUpperCase();
 }
 
+function useSortedFileEntries(files: Record<string, FileInfo> | null): [string, FileInfo][] {
+  return useMemo(() => {
+    if (!files) return [];
+    return Object.entries(files).sort(([a], [b]) => a.localeCompare(b));
+  }, [files]);
+}
+
+function useActiveCommit(commitSha: string) {
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const { commits } = useSessionCommits(activeSessionId ?? null);
+  return useMemo(() => commits.find((c) => c.commit_sha === commitSha), [commits, commitSha]);
+}
+
 /** Standalone commit diff viewer — no dockview dependencies. */
 export const CommitDiffView = memo(function CommitDiffView({
   sha: commitSha,
   repo,
   onOpenFile,
 }: CommitDiffViewProps) {
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const sessionTaskId = useAppStore((state) =>
-    activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
-  );
-  const agentctlReady = useAppStore((state) =>
-    activeSessionId
-      ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
-      : false,
-  );
-  const { commits } = useSessionCommits(activeSessionId ?? null);
-  const { toast } = useToast();
-
-  const [files, setFiles] = useState<Record<string, FileInfo> | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const commit = useMemo(
-    () => commits.find((c) => c.commit_sha === commitSha),
-    [commits, commitSha],
-  );
-
-  const fetchDiff = useCallback(async () => {
-    if (!activeSessionId) return;
-    setLoading(true);
-    try {
-      const response = await requestCommitDiff({
-        sessionId: activeSessionId,
-        taskId: sessionTaskId ?? activeTaskId ?? null,
-        commitSha,
-        agentctlReady,
-        repo,
-      });
-      if (response?.success && response.files) {
-        setFiles(response.files);
-      }
-    } catch (err) {
-      toast({
-        title: "Failed to load commit diff",
-        description: err instanceof Error ? err.message : "An unexpected error occurred",
-        variant: "error",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [activeSessionId, activeTaskId, agentctlReady, commitSha, repo, sessionTaskId, toast]);
-
-  useEffect(() => {
-    fetchDiff();
-  }, [fetchDiff]);
-
-  const fileEntries = useMemo(() => {
-    if (!files) return [];
-    return Object.entries(files).sort(([a], [b]) => a.localeCompare(b));
-  }, [files]);
+  const commit = useActiveCommit(commitSha);
+  const { files, loading } = useCommitDiff(commitSha, repo);
+  const fileEntries = useSortedFileEntries(files);
 
   if (loading) {
     return (
@@ -137,28 +98,10 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
 }: CommitDetailPanelProps) {
   const commitSha = params.commitSha as string;
   const repo = (params.repo as string | undefined) ?? undefined;
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const sessionTaskId = useAppStore((state) =>
-    activeSessionId ? state.taskSessions.items[activeSessionId]?.task_id : undefined,
-  );
-  const agentctlReady = useAppStore((state) =>
-    activeSessionId
-      ? state.sessionAgentctl.itemsBySessionId[activeSessionId]?.status === "ready"
-      : false,
-  );
-  const { commits } = useSessionCommits(activeSessionId ?? null);
-  const { toast } = useToast();
   const { openFile } = usePanelActions();
-
-  const [files, setFiles] = useState<Record<string, FileInfo> | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  // Find commit metadata
-  const commit = useMemo(
-    () => commits.find((c) => c.commit_sha === commitSha),
-    [commits, commitSha],
-  );
+  const commit = useActiveCommit(commitSha);
+  const { files, loading } = useCommitDiff(commitSha, repo);
+  const fileEntries = useSortedFileEntries(files);
 
   // Update tab title via dockview API stored in portal manager
   useEffect(() => {
@@ -171,41 +114,6 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
       setPanelTitle(panelId, `${shortSha} ${msg}`);
     }
   }, [commit, commitSha, panelId]);
-
-  // Fetch diff
-  const fetchDiff = useCallback(async () => {
-    if (!activeSessionId) return;
-    setLoading(true);
-    try {
-      const response = await requestCommitDiff({
-        sessionId: activeSessionId,
-        taskId: sessionTaskId ?? activeTaskId ?? null,
-        commitSha,
-        agentctlReady,
-        repo,
-      });
-      if (response?.success && response.files) {
-        setFiles(response.files);
-      }
-    } catch (err) {
-      toast({
-        title: "Failed to load commit diff",
-        description: err instanceof Error ? err.message : "An unexpected error occurred",
-        variant: "error",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [activeSessionId, activeTaskId, agentctlReady, commitSha, repo, sessionTaskId, toast]);
-
-  useEffect(() => {
-    fetchDiff();
-  }, [fetchDiff]);
-
-  const fileEntries = useMemo(() => {
-    if (!files) return [];
-    return Object.entries(files).sort(([a], [b]) => a.localeCompare(b));
-  }, [files]);
 
   if (loading) {
     return (
