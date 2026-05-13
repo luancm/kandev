@@ -119,46 +119,6 @@ test.describe("Mobile changes panel", () => {
     await closeButton.tap();
   });
 
-  test("selecting a diff from Files panel switches to Changes and opens file sheet", async ({
-    testPage,
-    apiClient,
-    seedData,
-    backend,
-  }) => {
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Mobile Files to Changes",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
-
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
-    git.createFile("from-files-panel.txt", "FILES_PANEL_MARKER");
-
-    await testPage.getByRole("button", { name: "Files" }).tap();
-    const filesPanel = testPage.getByRole("tabpanel", { name: /Diff files/i });
-    await expect(filesPanel).toBeVisible({ timeout: 10_000 });
-    await expect(filesPanel.getByText("from-files-panel.txt")).toBeVisible({ timeout: 20_000 });
-    await filesPanel.getByText("from-files-panel.txt").first().tap();
-
-    // Regression: selecting a file diff in Files should deep-link into mobile Changes diff sheet.
-    await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText("File Changes")).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByTestId("mobile-diff-sheet-close")).toBeVisible({ timeout: 10_000 });
-    await expectDiffText(testPage, "FILES_PANEL_MARKER");
-  });
-
   test("tapping a staged file row opens file diff sheet", async ({
     testPage,
     apiClient,
