@@ -74,6 +74,10 @@ const (
 	MetadataKeyGitUserEmail     = "git_user_email"
 	MetadataKeyImageTagOverride = "image_tag_override"
 	MetadataKeyContainerID      = "container_id"
+	MetadataKeySpriteName       = "sprite_name"
+	MetadataKeySpriteState      = "sprite_state"
+	MetadataKeySpriteCreatedAt  = "sprite_created_at"
+	MetadataKeyLocalPort        = "local_port"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -82,10 +86,10 @@ const (
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
 	// Sprites runtime
-	"sprite_name":       true,
-	"sprite_state":      true,
-	"sprite_created_at": true,
-	"local_port":        true,
+	MetadataKeySpriteName:      true,
+	MetadataKeySpriteState:     true,
+	MetadataKeySpriteCreatedAt: true,
+	MetadataKeyLocalPort:       true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,
