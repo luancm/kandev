@@ -287,22 +287,33 @@ function useAutoCloseWhenEmpty(opts: {
 
   useEffect(() => {
     if (!onBecameEmpty) return;
-    // A filtered tab going empty is not a "panel is empty" signal — the
-    // other sources may still have content. Only close in the unfiltered
-    // case.
-    if (sourceFilter !== "all") return;
-
     if (mode === "file" && filePath) {
-      // File-mode: close when the file no longer has an uncommitted diff,
-      // regardless of whether it still appears in PR/cumulative diff sources.
-      const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
-      if (prevFileSeenRef.current && shouldClose) {
+      if (sourceFilter === "all") {
+        // File-mode in aggregate source: close when the file no longer has an
+        // uncommitted diff, regardless of whether it still appears in
+        // PR/cumulative sources.
+        const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
+        if (prevFileSeenRef.current && shouldClose) {
+          onBecameEmpty();
+          return;
+        }
+        if (!shouldClose) prevFileSeenRef.current = true;
+        return;
+      }
+      // File-mode with explicit source (uncommitted/committed/pr): close when
+      // that source-specific view becomes empty for the opened file.
+      const prevCount = prevVisibleCountRef.current;
+      if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
         onBecameEmpty();
         return;
       }
-      if (!shouldClose) prevFileSeenRef.current = true;
+      prevVisibleCountRef.current = visibleCount;
       return;
     }
+
+    // In list mode, a filtered tab going empty is not a "panel is empty"
+    // signal — other sources may still have content.
+    if (sourceFilter !== "all") return;
 
     const prevCount = prevVisibleCountRef.current;
     if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
