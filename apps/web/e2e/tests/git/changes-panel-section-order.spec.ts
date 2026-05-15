@@ -398,6 +398,7 @@ test.describe("Changes panel section ordering", () => {
       seedData.workspaceId,
     );
 
+    // Seed PR with a file "overlap-desktop.txt"
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
     await apiClient.mockGitHubAddPRs([
@@ -424,6 +425,7 @@ test.describe("Changes panel section ordering", () => {
       },
     ]);
 
+    // Create task and move to "done" workflow step
     const profile = await createStandardProfile(apiClient, "Desktop Overlap Profile");
     const task = await apiClient.createTask(seedData.workspaceId, "Desktop PR Overlap Task", {
       workflow_id: workflow.id,
@@ -434,12 +436,12 @@ test.describe("Changes panel section ordering", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-
     await apiClient.moveTask(task.id, workflow.id, workingStep.id);
     await expect(kanban.taskCardInColumn("Desktop PR Overlap Task", doneStep.id)).toBeVisible({
       timeout: 45_000,
     });
 
+    // Associate PR with task
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",
@@ -454,8 +456,7 @@ test.describe("Changes panel section ordering", () => {
       deletions: 0,
     });
 
-    // Create local change to the same file — forces allFiles to deduplicate the
-    // PR entry, which was the bug that caused "No changes" on PR file row click.
+    // Create local change to the same file
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const gitEnv = {
       ...process.env,
@@ -468,20 +469,20 @@ test.describe("Changes panel section ordering", () => {
     const git = new GitHelper(repoDir, gitEnv);
     git.createFile("overlap-desktop.txt", "local change LOCAL_CHANGE_MARKER");
 
+    // Open task and verify PR diff appears (not "No changes")
     await kanban.taskCardInColumn("Desktop PR Overlap Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.clickTab("Changes");
 
-    // Both unstaged and PR sections should be present
     await expect(testPage.getByTestId("unstaged-files-section")).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("pr-files-section")).toBeVisible({ timeout: 15_000 });
 
     await session.expandPRChangesSection();
     await session.prFilesSection().getByText("overlap-desktop.txt").click();
 
-    // PR diff content must appear — not "No changes"
+    // PR diff content must appear
     await testPage.waitForFunction(
       (text: string) => {
         for (const c of document.querySelectorAll("diffs-container")) {
