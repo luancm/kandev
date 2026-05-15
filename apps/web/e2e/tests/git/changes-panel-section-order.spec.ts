@@ -494,5 +494,6 @@ test.describe("Changes panel section ordering", () => {
     );
 
     git.exec("git checkout -- .");
+    git.exec("git clean -fd");
   });
 });

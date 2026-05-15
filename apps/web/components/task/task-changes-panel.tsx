@@ -273,6 +273,21 @@ function useChangesActions(
   };
 }
 
+function shouldCloseFileDiffPanelAggregate(
+  prevFileSeenRef: React.MutableRefObject<boolean>,
+  gitStatus: { files?: Record<string, { diff?: string }> } | undefined,
+  filePath: string,
+  onBecameEmpty: (() => void) | undefined,
+): boolean {
+  const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
+  if (prevFileSeenRef.current && shouldClose) {
+    onBecameEmpty?.();
+    return true;
+  }
+  if (!shouldClose) prevFileSeenRef.current = true;
+  return false;
+}
+
 function useAutoCloseWhenEmpty(opts: {
   mode: "all" | "file";
   filePath: string | undefined;
@@ -284,30 +299,28 @@ function useAutoCloseWhenEmpty(opts: {
   const { mode, filePath, sourceFilter, gitStatus, visibleCount, onBecameEmpty } = opts;
   const prevVisibleCountRef = useRef<number | null>(null);
   const prevFileSeenRef = useRef<boolean>(false);
+  const prevSourceFilterRef = useRef<typeof sourceFilter | null>(null);
 
   useEffect(() => {
     if (!onBecameEmpty) return;
     if (mode === "file" && filePath) {
       if (sourceFilter === "all") {
-        // File-mode in aggregate source: close when the file no longer has an
-        // uncommitted diff, regardless of whether it still appears in
-        // PR/cumulative sources.
-        const shouldClose = shouldCloseFileDiffPanel(gitStatus, filePath);
-        if (prevFileSeenRef.current && shouldClose) {
-          onBecameEmpty();
-          return;
-        }
-        if (!shouldClose) prevFileSeenRef.current = true;
+        shouldCloseFileDiffPanelAggregate(prevFileSeenRef, gitStatus, filePath, onBecameEmpty);
         return;
       }
       // File-mode with explicit source (uncommitted/committed/pr): close when
       // that source-specific view becomes empty for the opened file.
+      // Reset tracking when the filtered source changes so a tab switch
+      // doesn't fire onBecameEmpty just because the new tab starts empty.
+      if (prevSourceFilterRef.current !== sourceFilter) {
+        prevSourceFilterRef.current = sourceFilter;
+        prevVisibleCountRef.current = null;
+      }
       const prevCount = prevVisibleCountRef.current;
+      prevVisibleCountRef.current = visibleCount;
       if (prevCount !== null && prevCount > 0 && visibleCount === 0) {
         onBecameEmpty();
-        return;
       }
-      prevVisibleCountRef.current = visibleCount;
       return;
     }
 
@@ -338,7 +351,7 @@ function filterVisibleFiles(allFiles: ReviewFile[], opts: FilterVisibleFilesOpts
   // priority uncommitted > committed > PR: a file that also has local changes
   // will not appear with source "pr" in allFiles, causing "No changes" in PR rows.
   if (mode === "file" && filePath && sourceFilter === "pr" && rawPRFiles && rawPRFiles.length > 0) {
-    let prFiles = rawPRFiles.filter((f) => f.path === filePath);
+    let prFiles = rawPRFiles.filter((f) => f.path === filePath && f.source === "pr");
     if (fileRepositoryName !== undefined) {
       prFiles = prFiles.filter((f) => (f.repository_name ?? "") === fileRepositoryName);
     }

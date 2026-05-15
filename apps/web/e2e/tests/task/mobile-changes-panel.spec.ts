@@ -309,6 +309,7 @@ test.describe("Mobile changes panel", () => {
     await testPage.getByTestId("mobile-diff-sheet-close").tap();
 
     git.exec("git checkout -- .");
+    git.exec("git clean -fd");
   });
 
   test("Diff sheet auto-selects Committed tab when no uncommitted changes exist", async ({
