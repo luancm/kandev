@@ -18,10 +18,11 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
+import type { GitHubPR, GitHubPRStatus, TaskPR } from "@/lib/types/github";
 import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
 import { PRStatusBadges } from "./pr-status-badges";
 import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
+import { PRRowTaskIndicator } from "./pr-row-task-indicator";
 
 type PRListProps = {
   items: GitHubPR[];
@@ -29,6 +30,7 @@ type PRListProps = {
   error: string | null;
   presets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
+  prKeyToTasks?: Map<string, TaskPR[]>;
 };
 
 function prStateIcon(pr: GitHubPR): { Icon: Icon; className: string } {
@@ -86,11 +88,13 @@ function PRRow({
   status,
   presets,
   onStartTask,
+  tasks,
 }: {
   pr: GitHubPR;
   status: GitHubPRStatus | null | undefined;
   presets: TaskPreset[];
   onStartTask: PRListProps["onStartTask"];
+  tasks: TaskPR[] | undefined;
 }) {
   const { Icon: StateIcon, className: stateIconClass } = prStateIcon(pr);
   return (
@@ -114,6 +118,7 @@ function PRRow({
             by {pr.author_login} · opened {formatRelativeTime(pr.created_at)}
           </span>
           <PRStatusBadges pr={pr} status={status} />
+          <PRRowTaskIndicator tasks={tasks} />
         </div>
       </div>
       <div className="shrink-0">
@@ -123,7 +128,7 @@ function PRRow({
   );
 }
 
-function PRListBody({ loading, error, items, presets, onStartTask }: PRListProps) {
+function PRListBody({ loading, error, items, presets, onStartTask, prKeyToTasks }: PRListProps) {
   const statuses = usePRStatuses(items);
   if (loading) {
     return (
@@ -153,6 +158,7 @@ function PRListBody({ loading, error, items, presets, onStartTask }: PRListProps
             status={statuses.get(key)}
             presets={presets}
             onStartTask={onStartTask}
+            tasks={prKeyToTasks?.get(key)}
           />
         );
       })}
