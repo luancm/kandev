@@ -286,7 +286,7 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
+	t := NewWorkspaceTrackerWithBase(full, m.cfg.BaseBranch, m.logger)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
