@@ -97,6 +97,11 @@ type CreateRequest struct {
 
 	// McpMode controls which MCP tools are registered: "task" (default) or "config".
 	McpMode string `json:"mcp_mode,omitempty"`
+
+	// BaseBranch is the canonical base branch for the task (e.g. "main",
+	// "upstream/main"). Forwarded to the workspace tracker to fix change counts
+	// in forked repositories.
+	BaseBranch string `json:"base_branch,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

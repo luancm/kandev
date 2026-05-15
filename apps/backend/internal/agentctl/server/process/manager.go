@@ -160,13 +160,13 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	if len(repoChildren) >= 2 {
 		// Multi-repo: root tracker bound to the bare task root (no fallback,
 		// no events), plus one tracker per repo subdir.
-		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		m.workspaceTracker = NewWorkspaceTrackerForRepoWithBase(cfg.WorkDir, "", cfg.BaseBranch, log)
 		for _, child := range repoChildren {
 			m.repoTrackers = append(m.repoTrackers,
-				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+				NewWorkspaceTrackerForRepoWithBase(child.path, child.name, cfg.BaseBranch, log))
 		}
 	} else {
-		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
+		m.workspaceTracker = NewWorkspaceTrackerWithBase(cfg.WorkDir, cfg.BaseBranch, log)
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)

@@ -93,6 +93,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		DisableAskQuestion: req.DisableAskQuestion,
 		AssumeMcpSse:       req.AssumeMcpSse,
 		McpMode:            req.McpMode,
+		BaseBranch:         req.BaseBranch,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",

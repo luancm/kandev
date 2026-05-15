@@ -135,12 +135,23 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	// Always use the integration branch (origin/main, etc.) rather than the tracking branch,
 	// so we show all changes this branch introduces compared to the main development line.
 	var baseBranch string
-	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+	if wt.baseBranch != "" {
+		// Use the explicitly configured base branch when available — avoids
+		// picking up origin/main (fork tip) in forked repositories.
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", wt.baseBranch)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
-			baseBranch = candidate
-			break
+		if checkCmd.Run() == nil {
+			baseBranch = wt.baseBranch
+		}
+	}
+	if baseBranch == "" {
+		for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
+			checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+			checkCmd.Dir = wt.workDir
+			if err := checkCmd.Run(); err == nil {
+				baseBranch = candidate
+				break
+			}
 		}
 	}
 	if baseBranch != "" {
@@ -161,16 +172,24 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // the remote tracking branch, because after a rebase the tracking branch has stale
 // commit SHAs that produce inflated counts.
 func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate) {
-	// Always compare against the base branch (origin/main or origin/master).
-	// Using the remote tracking branch (origin/<feature-branch>) gives wrong counts
-	// after rebase because rebased commits have new SHAs.
+	// Prefer the explicitly configured base branch so forked repos compare
+	// against the real upstream, not the fork tip (origin/main).
 	var compareRef string
-	for _, candidate := range []string{"origin/main", "origin/master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+	if wt.baseBranch != "" {
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", wt.baseBranch)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
-			compareRef = candidate
-			break
+		if checkCmd.Run() == nil {
+			compareRef = wt.baseBranch
+		}
+	}
+	if compareRef == "" {
+		for _, candidate := range []string{"origin/main", "origin/master"} {
+			checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+			checkCmd.Dir = wt.workDir
+			if err := checkCmd.Run(); err == nil {
+				compareRef = candidate
+				break
+			}
 		}
 	}
 	if compareRef == "" {

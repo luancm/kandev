@@ -37,6 +37,12 @@ type WorkspaceTracker struct {
 	// Empty for the single-repo case.
 	repositoryName string
 
+	// baseBranch is the canonical base branch for this task (e.g. "main",
+	// "upstream/main"). When set it is used for merge-base and ahead/behind
+	// calculations instead of the hardcoded heuristics (origin/main etc.),
+	// which is critical for forked repos where origin/main is the fork tip.
+	baseBranch string
+
 	// Current state
 	currentStatus types.GitStatusUpdate
 	currentFiles  types.FileListUpdate
@@ -103,6 +109,19 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 	return newWorkspaceTracker(resolvedWorkDir, "", log)
 }
 
+// NewWorkspaceTrackerWithBase creates a workspace tracker with an explicit base
+// branch. The base branch is used for merge-base and ahead/behind calculations
+// instead of the default heuristics, which avoids inflated counts in forked
+// repos where origin/main points to the fork tip.
+func NewWorkspaceTrackerWithBase(workDir, baseBranch string, log *logger.Logger) *WorkspaceTracker {
+	tlog := log.WithFields(zap.String("component", "workspace-tracker"))
+	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
+	resolvedWorkDir = preferGitRepoChildIfRootIsBare(resolvedWorkDir, tlog)
+	wt := newWorkspaceTracker(resolvedWorkDir, "", log)
+	wt.baseBranch = baseBranch
+	return wt
+}
+
 // NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository
 // subdirectory. The repositoryName is stamped onto every emitted event so the
 // frontend can route updates per repo for multi-repo task roots.
@@ -113,6 +132,19 @@ func NewWorkspaceTrackerForRepo(workDir, repositoryName string, log *logger.Logg
 	)
 	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
 	return newWorkspaceTracker(resolvedWorkDir, repositoryName, log)
+}
+
+// NewWorkspaceTrackerForRepoWithBase creates a per-repository tracker with an
+// explicit base branch. See NewWorkspaceTrackerWithBase for why this matters.
+func NewWorkspaceTrackerForRepoWithBase(workDir, repositoryName, baseBranch string, log *logger.Logger) *WorkspaceTracker {
+	tlog := log.WithFields(
+		zap.String("component", "workspace-tracker"),
+		zap.String("repository_name", repositoryName),
+	)
+	resolvedWorkDir := resolveExistingWorkDir(workDir, tlog)
+	wt := newWorkspaceTracker(resolvedWorkDir, repositoryName, log)
+	wt.baseBranch = baseBranch
+	return wt
 }
 
 func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Logger) *WorkspaceTracker {

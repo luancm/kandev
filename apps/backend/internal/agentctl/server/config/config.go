@@ -181,6 +181,12 @@ type InstanceConfig struct {
 	// Used for TUI/passthrough agents that don't need clarification tools.
 	DisableAskQuestion bool
 
+	// BaseBranch is the canonical base branch for the task (e.g. "main",
+	// "upstream/main"). When set it is forwarded to the workspace tracker so
+	// git change counts are relative to the real branch-off point, not the
+	// heuristic integration ref (important for forked repos).
+	BaseBranch string
+
 	// AssumeMcpSse overrides MCP capability filtering to assume the agent supports SSE.
 	AssumeMcpSse bool
 
@@ -340,6 +346,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.McpMode != "" {
 		cfg.McpMode = overrides.McpMode
 	}
+	if overrides.BaseBranch != "" {
+		cfg.BaseBranch = overrides.BaseBranch
+	}
 }
 
 // InstanceOverrides allows overriding default values when creating an instance
@@ -357,6 +366,7 @@ type InstanceOverrides struct {
 	DisableAskQuestion bool
 	AssumeMcpSse       bool
 	McpMode            string
+	BaseBranch         string
 }
 
 // ParseCommand splits a command string into arguments

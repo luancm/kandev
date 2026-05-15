@@ -246,6 +246,7 @@ func (r *SpritesExecutor) createAgentInstance(
 		AgentType:     agentTypeFromReq(req),
 		McpServers:    req.McpServers,
 		McpMode:       req.McpMode,
+		BaseBranch:    getMetadataString(req.Metadata, MetadataKeyBaseBranch),
 	}
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {

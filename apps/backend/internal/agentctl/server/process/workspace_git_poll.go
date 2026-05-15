@@ -340,20 +340,30 @@ func (wt *WorkspaceTracker) handleBranchSwitch(ctx context.Context, previousBran
 
 // getBaseCommitForBranch calculates the base commit (merge-base) for a given branch.
 // This is the common ancestor between the branch and the integration branch (e.g., main).
-// Prioritizes integration branches (origin/main, origin/master, main, master) over upstream
-// to ensure the base commit represents the branch-off point from the main development line.
+// When wt.baseBranch is set it is used directly; otherwise the function falls back to
+// the integration branch heuristics (origin/main, origin/master, main, master).
 // Uses the provided head SHA to avoid race conditions with concurrent git operations.
 func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, head string) string {
 	var baseBranch string
 
-	// Try integration branch candidates first (origin/main, origin/master, main, master)
-	// This ensures we get the branch-off point from the main development line
-	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+	// Prefer the explicitly configured base branch over heuristics.
+	if wt.baseBranch != "" {
+		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", wt.baseBranch)
 		checkCmd.Dir = wt.workDir
-		if err := checkCmd.Run(); err == nil {
-			baseBranch = candidate
-			break
+		if checkCmd.Run() == nil {
+			baseBranch = wt.baseBranch
+		}
+	}
+
+	// Fall back to integration branch candidates (origin/main, origin/master, main, master)
+	if baseBranch == "" {
+		for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
+			checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
+			checkCmd.Dir = wt.workDir
+			if err := checkCmd.Run(); err == nil {
+				baseBranch = candidate
+				break
+			}
 		}
 	}
 

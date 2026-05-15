@@ -45,6 +45,10 @@ type ContainerConfig struct {
 	ImageTagOverride  string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
 	LocalClonePath    string // Host path for file:// repository clone URLs; mounted read-only at the same path.
 	BootstrapNonce    string // one-time nonce for agentctl handshake (set internally)
+	// BaseBranch is the canonical base branch for the task (e.g. "main",
+	// "upstream/main"). Forwarded to the workspace tracker inside the container
+	// so git change counts are correct in forked repos.
+	BaseBranch string
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -206,6 +210,7 @@ func (cm *ContainerManager) createInstanceAndClient(
 		DisableAskQuestion: disableAskQuestion,
 		AssumeMcpSse:       assumeMcpSse,
 		McpMode:            config.McpMode,
+		BaseBranch:         config.BaseBranch,
 	}
 
 	resp, err := ctl.CreateInstance(ctx, createReq)

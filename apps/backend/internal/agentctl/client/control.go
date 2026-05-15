@@ -53,6 +53,9 @@ type CreateInstanceRequest struct {
 	DisableAskQuestion bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
 	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	McpMode            string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default) or "config"
+	// BaseBranch is the canonical base branch for the task; forwarded to the workspace
+	// tracker so git change counts don't inflate in forked repos.
+	BaseBranch string `json:"base_branch,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

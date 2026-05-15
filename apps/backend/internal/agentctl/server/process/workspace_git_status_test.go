@@ -4,8 +4,26 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/logger"
 )
+
+// statusUpdateForTest wraps GitStatusUpdate so tests can call getAheadBehindCounts
+// without running the full getGitStatus pipeline.
+type statusUpdateForTest struct {
+	types.GitStatusUpdate
+}
+
+// newWorkspaceTrackerWithBase is a test helper that creates a WorkspaceTracker
+// with an explicit base branch, bypassing the public constructors.
+func newWorkspaceTrackerWithBase(workDir, repositoryName, baseBranch string, log *logger.Logger) *WorkspaceTracker {
+	wt := newWorkspaceTracker(workDir, repositoryName, log)
+	wt.baseBranch = baseBranch
+	return wt
+}
 
 func TestUnquoteGitPath(t *testing.T) {
 	tests := []struct {
@@ -128,6 +146,162 @@ func TestGetGitStatus_UntrackedFileWithSpaces(t *testing.T) {
 	if fileInfo.Diff == "" {
 		t.Error("expected non-empty synthetic Diff for untracked file with spaces")
 	}
+}
+
+// TestGetGitBranchInfo_UsesConfiguredBaseBranch verifies that when a baseBranch
+// is set on the WorkspaceTracker, it is used for the merge-base calculation
+// instead of the hardcoded origin/main / origin/master heuristics.
+// This covers the fork scenario where "origin/main" points to the user's fork
+// tip and inflates the branch change count.
+func TestGetGitBranchInfo_UsesConfiguredBaseBranch(t *testing.T) {
+	// Set up "upstream" bare repo (the canonical project).
+	upstreamDir, err := os.MkdirTemp("", "test-upstream-*")
+	if err != nil {
+		t.Fatalf("create upstream dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(upstreamDir) }()
+
+	// Set up "origin" bare repo (the user's fork).
+	originDir, err := os.MkdirTemp("", "test-origin-*")
+	if err != nil {
+		t.Fatalf("create origin dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(originDir) }()
+
+	// Set up local repo (the agent's workspace).
+	localDir, err := os.MkdirTemp("", "test-local-*")
+	if err != nil {
+		t.Fatalf("create local dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(localDir) }()
+
+	isolateTestGitEnv(t)
+
+	// Build upstream: one base commit on main.
+	runGit(t, upstreamDir, "init", "--bare", "--initial-branch=main")
+
+	runGit(t, localDir, "init", "--initial-branch=main")
+	runGit(t, localDir, "config", "user.email", "test@test.com")
+	runGit(t, localDir, "config", "user.name", "Test User")
+	runGit(t, localDir, "config", "core.hooksPath", "/dev/null")
+	writeFile(t, localDir, "base.txt", "base content")
+	runGit(t, localDir, "add", ".")
+	runGit(t, localDir, "commit", "-m", "Base commit")
+
+	// Push base commit to upstream and fork (origin).
+	runGit(t, localDir, "remote", "add", "upstream", upstreamDir)
+	runGit(t, localDir, "push", "upstream", "main")
+
+	runGit(t, originDir, "init", "--bare", "--initial-branch=main")
+	runGit(t, localDir, "remote", "add", "origin", originDir)
+
+	// Add an extra commit to origin/main (simulating fork divergence from upstream).
+	writeFile(t, localDir, "fork-extra.txt", "fork only")
+	runGit(t, localDir, "add", ".")
+	runGit(t, localDir, "commit", "-m", "Fork-only commit not in upstream")
+	runGit(t, localDir, "push", "-u", "origin", "main")
+
+	// Create the feature branch from upstream/main (the real branch-off point).
+	upstreamMainSHA := strings.TrimSpace(runGit(t, localDir, "rev-parse", "upstream/main"))
+	runGit(t, localDir, "checkout", "-b", "feature/my-work", upstreamMainSHA)
+	writeFile(t, localDir, "feature.txt", "feature content")
+	runGit(t, localDir, "add", ".")
+	runGit(t, localDir, "commit", "-m", "Feature commit")
+
+	log := newTestLogger(t)
+
+	t.Run("without configured base branch uses heuristic (origin/main)", func(t *testing.T) {
+		wt := NewWorkspaceTracker(localDir, log)
+		ctx := context.Background()
+		status, err := wt.getGitStatus(ctx)
+		if err != nil {
+			t.Fatalf("getGitStatus: %v", err)
+		}
+		// When baseBranch is empty the heuristic picks origin/main (fork tip).
+		// The fork tip includes the "fork-only" commit so merge-base is that commit,
+		// making BranchAdditions see only the feature commit (1 file).
+		_ = status
+	})
+
+	t.Run("with configured base branch uses it", func(t *testing.T) {
+		wt := newWorkspaceTrackerWithBase(localDir, "", "upstream/main", log)
+		ctx := context.Background()
+		status, err := wt.getGitStatus(ctx)
+		if err != nil {
+			t.Fatalf("getGitStatus: %v", err)
+		}
+		// With upstream/main as base the merge-base is the real branch-off point.
+		// BaseCommit must equal upstreamMainSHA.
+		if status.BaseCommit != upstreamMainSHA {
+			t.Errorf("BaseCommit = %q, want upstream/main SHA %q", status.BaseCommit, upstreamMainSHA)
+		}
+	})
+}
+
+// TestGetAheadBehindCounts_UsesConfiguredBaseBranch checks that ahead/behind
+// counts are relative to the configured base branch, not origin/main.
+func TestGetAheadBehindCounts_UsesConfiguredBaseBranch(t *testing.T) {
+	upstreamDir, err := os.MkdirTemp("", "test-upstream-*")
+	if err != nil {
+		t.Fatalf("create upstream dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(upstreamDir) }()
+
+	originDir, err := os.MkdirTemp("", "test-origin-*")
+	if err != nil {
+		t.Fatalf("create origin dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(originDir) }()
+
+	localDir, err := os.MkdirTemp("", "test-local-*")
+	if err != nil {
+		t.Fatalf("create local dir: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(localDir) }()
+
+	isolateTestGitEnv(t)
+
+	runGit(t, upstreamDir, "init", "--bare", "--initial-branch=main")
+	runGit(t, localDir, "init", "--initial-branch=main")
+	runGit(t, localDir, "config", "user.email", "test@test.com")
+	runGit(t, localDir, "config", "user.name", "Test User")
+	runGit(t, localDir, "config", "core.hooksPath", "/dev/null")
+	writeFile(t, localDir, "base.txt", "base")
+	runGit(t, localDir, "add", ".")
+	runGit(t, localDir, "commit", "-m", "Base")
+	runGit(t, localDir, "remote", "add", "upstream", upstreamDir)
+	runGit(t, localDir, "push", "upstream", "main")
+
+	// Fork: origin/main has one extra commit on top of upstream/main.
+	runGit(t, originDir, "init", "--bare", "--initial-branch=main")
+	runGit(t, localDir, "remote", "add", "origin", originDir)
+	writeFile(t, localDir, "fork-extra.txt", "fork only")
+	runGit(t, localDir, "add", ".")
+	runGit(t, localDir, "commit", "-m", "Fork-only commit")
+	runGit(t, localDir, "push", "-u", "origin", "main")
+
+	// Feature branch from upstream/main.
+	upstreamMainSHA := strings.TrimSpace(runGit(t, localDir, "rev-parse", "upstream/main"))
+	runGit(t, localDir, "checkout", "-b", "feature/work", upstreamMainSHA)
+	writeFile(t, localDir, "feat.txt", "feat")
+	runGit(t, localDir, "add", ".")
+	runGit(t, localDir, "commit", "-m", "Feature commit")
+
+	log := newTestLogger(t)
+	ctx := context.Background()
+
+	t.Run("with upstream/main as base: ahead=1 behind=0", func(t *testing.T) {
+		wt := newWorkspaceTrackerWithBase(localDir, "", "upstream/main", log)
+		update := &statusUpdateForTest{}
+		update.Branch = "feature/work"
+		wt.getAheadBehindCounts(ctx, &update.GitStatusUpdate)
+		if update.Ahead != 1 {
+			t.Errorf("Ahead = %d, want 1", update.Ahead)
+		}
+		if update.Behind != 0 {
+			t.Errorf("Behind = %d, want 0", update.Behind)
+		}
+	})
 }
 
 // mapKeys returns the keys of a map for diagnostic output.

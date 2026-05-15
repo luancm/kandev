@@ -208,6 +208,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		PrepareScript:     r.resolvePrepareScript(req),
 		ImageTagOverride:  getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:    localCloneMountPath(req.Metadata),
+		BaseBranch:        getMetadataString(req.Metadata, MetadataKeyBaseBranch),
 	}
 }
 
