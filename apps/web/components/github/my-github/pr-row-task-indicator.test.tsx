@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { PRRowTaskIndicator } from "./pr-row-task-indicator";
 import type { TaskPR } from "@/lib/types/github";
 
 function renderWithStore(ui: ReactNode) {
-  return render(<StateProvider>{ui}</StateProvider>);
+  return render(
+    <StateProvider>
+      <TooltipProvider>{ui}</TooltipProvider>
+    </StateProvider>,
+  );
 }
 
 function makeTaskPR(overrides: Partial<TaskPR> = {}): TaskPR {
