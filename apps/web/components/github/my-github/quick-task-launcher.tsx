@@ -4,7 +4,8 @@ import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import { associateTaskPR } from "@/lib/api/domains/github-api";
+import type { Repository, Task, TaskRepository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 
 export type TaskPreset = {
@@ -38,6 +39,21 @@ function matchRepo(repos: Repository[], owner: string, name: string): Repository
 
 function emptyToUndefined(value: string | undefined): string | undefined {
   return value ? value : undefined;
+}
+
+// Multi-repo tasks have one task_repository row per repo; pick the one that
+// matches the PR's owner/repo by checking against the matching `repositoryId`
+// captured at dialog-time. Fallback to the first row so single-repo tasks
+// without that info still associate.
+function pickRepositoryIdForPR(
+  taskRepos: TaskRepository[] | undefined,
+  pr: GitHubPR,
+): string | undefined {
+  if (!taskRepos || taskRepos.length === 0) return undefined;
+  // The dialog only sets one repository_id (the matched repo's id); if the
+  // task has multiple, we still want the one with the PR's head_branch.
+  const byBranch = taskRepos.find((r) => r.checkout_branch === pr.head_branch);
+  return (byBranch ?? taskRepos[0]).repository_id;
 }
 
 function extractPayload(payload: LaunchPayload) {
@@ -129,6 +145,20 @@ export function QuickTaskLauncher({
     if (!open) onClose();
   };
   const handleSuccess = (task: Task) => {
+    if (payload?.kind === "pr") {
+      const repositoryId = pickRepositoryIdForPR(task.repositories, payload.pr);
+      // Fire-and-forget: associating the PR is best-effort. A failure (network,
+      // missing GH client) shouldn't block navigation — the existing
+      // branch-based poller will still try once the agent starts.
+      void associateTaskPR({
+        task_id: task.id,
+        repository_id: repositoryId,
+        pr_url: payload.pr.html_url,
+      }).catch(() => {
+        // Silently ignore — the indicator will populate via the poller path
+        // (legacy behavior) if branch matching succeeds.
+      });
+    }
     onClose();
     router.push(`/tasks/${task.id}`);
   };

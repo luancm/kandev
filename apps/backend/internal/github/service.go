@@ -596,6 +596,35 @@ func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID 
 	return tp, nil
 }
 
+// AssociateExistingPRByURL parses a GitHub PR URL, fetches the PR data, and
+// associates it with the given task. No PR watch is created — this is used
+// when the caller already knows the PR (e.g. user clicked "+ Task" on a PR
+// in the GitHub page), so branch-based discovery is unnecessary. The watch
+// for ongoing status sync is still created later when the agent session
+// starts (see ensureSessionPRWatch).
+//
+// Returns the persisted TaskPR row so callers can confirm the association
+// and react to errors synchronously, in contrast to AssociatePRByURL's
+// fire-and-forget logging.
+func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, repositoryID, prURL string) (*TaskPR, error) {
+	if s.client == nil {
+		return nil, fmt.Errorf("github client not available")
+	}
+	owner, repo, prNumber, err := parsePRURL(prURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse PR URL: %w", err)
+	}
+	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
+	if err != nil {
+		return nil, fmt.Errorf("fetch PR: %w", err)
+	}
+	tp, err := s.AssociatePRWithTask(ctx, taskID, repositoryID, pr)
+	if err != nil {
+		return nil, fmt.Errorf("associate PR with task: %w", err)
+	}
+	return tp, nil
+}
+
 // AssociatePRByURL parses a GitHub PR URL, fetches the PR data, creates a PR
 // watch, and associates it with the given task. Called after the user
 // creates a PR from the UI. `repositoryID` scopes the watch + association to

@@ -65,6 +65,20 @@ export async function getTaskPR(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskPR>(`/api/v1/github/task-prs/${taskId}`, options);
 }
 
+export async function associateTaskPR(
+  data: { task_id: string; repository_id?: string; pr_url: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskPR>(`/api/v1/github/task-prs/associate`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify(data),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
 // PR feedback (live from GitHub)
 export async function getPRFeedback(
   owner: string,

@@ -33,6 +33,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
+	api.POST("/task-prs/associate", c.httpAssociateTaskPR)
 
 	api.GET("/prs/:owner/:repo/:number", c.httpGetPRFeedback)
 	api.GET("/prs/:owner/:repo/:number/info", c.httpGetPRInfo)
@@ -134,6 +135,33 @@ func (c *Controller) httpListTaskPRs(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"task_prs": result})
+}
+
+// httpAssociateTaskPR creates a task-PR association from a known PR URL.
+// Used by the GitHub PR list "+ Task" flow: the PR is already known, so we
+// persist the linkage immediately instead of waiting for branch-based
+// discovery (which fails for review tasks that use synthetic worktree
+// branches that don't exist on GitHub).
+func (c *Controller) httpAssociateTaskPR(ctx *gin.Context) {
+	var req struct {
+		TaskID       string `json:"task_id"`
+		RepositoryID string `json:"repository_id"`
+		PRURL        string `json:"pr_url"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if req.TaskID == "" || req.PRURL == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "task_id and pr_url are required"})
+		return
+	}
+	tp, err := c.service.AssociateExistingPRByURL(ctx.Request.Context(), req.TaskID, req.RepositoryID, req.PRURL)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, tp)
 }
 
 func (c *Controller) httpGetTaskPR(ctx *gin.Context) {

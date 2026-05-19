@@ -32,6 +32,16 @@ test.describe("GitHub PR list task indicator", () => {
         repo_owner: "testorg",
         repo_name: "testrepo",
       },
+      {
+        number: 102,
+        title: "PR with multiple tasks",
+        state: "open",
+        head_branch: "feat/multi",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
     ]);
 
     const task = await apiClient.createTask(seedData.workspaceId, "Linked task title", {
@@ -53,6 +63,36 @@ test.describe("GitHub PR list task indicator", () => {
       author_login: "test-user",
     });
 
+    // Multi-task case: two distinct tasks linked to the same PR (PR #102).
+    // Regression guard for the bug where review tasks created via "+ Task"
+    // on the GitHub page never got their github_task_prs row written
+    // (synthetic worktree branches never matched the PR head on GitHub).
+    const multiA = await apiClient.createTask(seedData.workspaceId, "Multi task A", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const multiB = await apiClient.createTask(seedData.workspaceId, "Multi task B", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    for (const t of [multiA, multiB]) {
+      await apiClient.mockGitHubAssociateTaskPR({
+        task_id: t.id,
+        owner: "testorg",
+        repo: "testrepo",
+        pr_number: 102,
+        pr_url: "https://github.com/testorg/testrepo/pull/102",
+        pr_title: "PR with multiple tasks",
+        head_branch: "feat/multi",
+        base_branch: "main",
+        author_login: "test-user",
+      });
+    }
+
     await testPage.goto("/github");
 
     const singleIndicator = testPage.getByTestId("pr-row-task-indicator-single");
@@ -62,6 +102,10 @@ test.describe("GitHub PR list task indicator", () => {
     const emptyIndicator = testPage.getByTestId("pr-row-task-indicator-empty");
     await expect(emptyIndicator).toBeVisible();
     await expect(emptyIndicator).toHaveText("No task created yet");
+
+    const multiIndicator = testPage.getByTestId("pr-row-task-indicator-multi");
+    await expect(multiIndicator).toBeVisible();
+    await expect(multiIndicator).toContainText("2");
 
     await singleIndicator.hover();
 
