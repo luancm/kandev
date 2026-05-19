@@ -92,6 +92,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | Spec | Status |
 |---|---|
 | [improve-kandev](improve-kandev/spec.md) | draft |
+| [homebrew-core](homebrew-core/spec.md) | draft |
 
 ---
 
