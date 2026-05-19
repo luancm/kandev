@@ -127,8 +127,11 @@ export function PRRowTaskIndicator({ tasks }: PRRowTaskIndicatorProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
         {tasks.map((t) => (
+          // Use the TaskPR row id rather than task_id — multi-repo tasks can
+          // produce more than one TaskPR row for the same PR, which would
+          // collide on task_id.
           <DropdownMenuItem
-            key={t.task_id}
+            key={t.id}
             className="cursor-pointer"
             onSelect={() => navigate(t.task_id)}
           >
