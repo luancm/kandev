@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("GitHub PR list task indicator", () => {
-  test("renders single-task button, empty badge, and tooltip with task + step", async ({
+  test("renders indicator states, tooltip content, and navigates on click", async ({
     testPage,
     apiClient,
     seedData,
@@ -71,5 +71,16 @@ test.describe("GitHub PR list task indicator", () => {
     if (startStep?.title) {
       await expect(tooltip).toContainText(`Step: ${startStep.title}`);
     }
+
+    // Click the indicator and confirm a real route change to /t/<task.id>.
+    // Regression guard: `replaceTaskUrl` previously only mutated history.state
+    // without triggering Next.js navigation, leaving the PR list rendered.
+    await singleIndicator.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:\\?|$)`), {
+      timeout: 15_000,
+    });
+    await expect(testPage.getByTestId("pr-row-task-indicator-single")).toHaveCount(0, {
+      timeout: 10_000,
+    });
   });
 });
