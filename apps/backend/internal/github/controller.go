@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/prs/:owner/:repo/:number/status", c.httpGetPRStatus)
 	api.POST("/prs/statuses", c.httpGetPRStatusesBatch)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
+	api.PUT("/prs/:owner/:repo/:number/merge", c.httpMergePR)
 
 	api.GET("/watches/pr", c.httpListPRWatches)
 	api.DELETE("/watches/pr/:id", c.httpDeletePRWatch)
@@ -301,6 +303,58 @@ func (c *Controller) httpSubmitReview(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"submitted": true})
+}
+
+func (c *Controller) httpMergePR(ctx *gin.Context) {
+	owner := ctx.Param("owner")
+	repo := ctx.Param("repo")
+	numberStr := ctx.Param("number")
+	number, err := strconv.Atoi(numberStr)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+		return
+	}
+	var req struct {
+		MergeMethod string `json:"merge_method"`
+	}
+	// Body is optional — an empty body (io.EOF) means "use the repo default
+	// merge method". A non-empty but malformed body is a client bug, not a
+	// silent "use default", so reject it with 400.
+	if bindErr := ctx.ShouldBindJSON(&req); bindErr != nil && !errors.Is(bindErr, io.EOF) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	validMethods := map[string]bool{"": true, "merge": true, "squash": true, "rebase": true}
+	if !validMethods[req.MergeMethod] {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "merge_method must be merge, squash, or rebase"})
+		return
+	}
+	if err := c.service.MergePR(ctx.Request.Context(), owner, repo, number, req.MergeMethod); err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "GitHub is not configured. Install the gh CLI and run 'gh auth login', or add a GITHUB_TOKEN secret.",
+				"code":  "github_not_configured",
+			})
+			return
+		}
+		status := http.StatusInternalServerError
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusMethodNotAllowed, http.StatusConflict:
+				status = http.StatusConflict
+			case http.StatusUnauthorized:
+				status = http.StatusUnauthorized
+			case http.StatusForbidden:
+				status = http.StatusForbidden
+			case http.StatusNotFound:
+				status = http.StatusNotFound
+			}
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"merged": true})
 }
 
 func (c *Controller) httpListPRWatches(ctx *gin.Context) {
