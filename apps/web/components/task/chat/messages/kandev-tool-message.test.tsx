@@ -188,7 +188,7 @@ describe("KandevToolMessage task renderers", () => {
   });
 });
 
-describe("KandevToolMessage document & question renderers", () => {
+describe("KandevToolMessage plan renderer", () => {
   it("renders task plan markdown content for get_task_plan", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
@@ -263,7 +263,9 @@ describe("KandevToolMessage document & question renderers", () => {
     // Selected option gets the "default" Badge variant; unselected stays "outline".
     expect(html).toMatch(/data-variant="default"[^>]*>A<\/span>/);
   });
+});
 
+describe("KandevToolMessage edge cases & permission renderer", () => {
   it("does not render anything when the renderer is missing", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage
@@ -271,5 +273,39 @@ describe("KandevToolMessage document & question renderers", () => {
       />,
     );
     expect(html).toBe("");
+  });
+
+  it("renders permission buttons when a pending permission message is provided", () => {
+    const toolMsg = kandevToolCall({
+      status: "running",
+      toolName: "mcp__kandev__list_workspaces_kandev",
+    });
+    const permissionMsg: Message = {
+      id: "perm-1",
+      session_id: toolMsg.session_id,
+      task_id: toolMsg.task_id,
+      author_type: "agent",
+      content: "Permission required",
+      type: "permission_request",
+      created_at: "2026-05-21T10:00:01Z",
+      metadata: {
+        pending_id: "pend-1",
+        tool_call_id: "tc-1",
+        status: "pending",
+        action_type: "other",
+        action_details: {},
+        options: [
+          { option_id: "allow", name: "Allow", kind: "allow_once" },
+          { option_id: "reject", name: "Reject", kind: "reject_once" },
+        ],
+      },
+    };
+
+    const html = renderToStaticMarkup(
+      <KandevToolMessage comment={toolMsg} permissionMessage={permissionMsg} />,
+    );
+
+    expect(html).toContain("Approve");
+    expect(html).toContain("Deny");
   });
 });
