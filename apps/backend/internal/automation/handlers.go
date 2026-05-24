@@ -30,6 +30,7 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerUpdate, wsUpdateTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerTypes, wsTriggerTypes())
+	dispatcher.RegisterFunc(ws.ActionAutomationWebhookRevealSecret, wsRevealWebhookSecret(svc, log))
 }
 
 func registerHTTPRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
@@ -80,7 +81,7 @@ func wsGet(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.M
 	}
 }
 
-func wsCreate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+func wsCreate(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 		var req CreateAutomationRequest
 		if err := msg.ParsePayload(&req); err != nil {
@@ -90,7 +91,20 @@ func wsCreate(svc *Service, log *logger.Logger) func(ctx context.Context, msg *w
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, a)
+		// Service.CreateAutomation ends with store.GetAutomation which returns
+		// (nil, nil) if the row vanished between insert and select — guard here
+		// so we don't dereference a nil pointer building the response.
+		if a == nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to load created automation", nil)
+		}
+		// One-time reveal of the webhook secret. Service.CreateAutomation
+		// re-reads the row before returning, so a.WebhookSecret is already
+		// populated — no second DB round-trip needed (and avoiding one keeps
+		// us from silently shipping an empty secret on a transient failure).
+		// The Automation struct hides it via `json:"-"` so list/get stay safe;
+		// the response DTO surfaces the plaintext value for the client to
+		// display once.
+		return ws.NewResponse(msg.ID, msg.Action, &CreateAutomationResponse{Automation: a, WebhookSecret: a.WebhookSecret})
 	}
 }
 
@@ -167,7 +181,7 @@ func wsManualTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 		if err != nil || a == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
 		}
-		data, _ := json.Marshal(map[string]string{"source": "manual"})
+		data, _ := json.Marshal(map[string]string{triggerDataSourceKey: triggerDataSourceManual})
 		triggerID := ""
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
@@ -247,5 +261,32 @@ func wsDeleteTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 func wsTriggerTypes() func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(_ context.Context, msg *ws.Message) (*ws.Message, error) {
 		return ws.NewResponse(msg.ID, msg.Action, GetTriggerTypes())
+	}
+}
+
+func wsRevealWebhookSecret(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		id, _ := payload["id"].(string)
+		if id == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "id required", nil)
+		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		// GetAutomation returns nil (not an error) when the row is missing —
+		// map that to a NotFound response so the client can surface it cleanly.
+		// We also return NotFound (not Forbidden) when the automation belongs
+		// to a different workspace — this avoids disclosing whether the id
+		// exists at all across workspace boundaries.
+		a, err := svc.GetAutomation(ctx, id)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if a == nil || a.WorkspaceID != workspaceID {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "automation not found", nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, &RevealWebhookSecretResponse{WebhookSecret: a.WebhookSecret})
 	}
 }

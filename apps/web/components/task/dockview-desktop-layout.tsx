@@ -16,6 +16,7 @@ import {
   setupGroupTracking,
   setupLayoutPersistence,
   setupPortalCleanup,
+  setupSashDragCapToggle,
 } from "./dockview-layout-setup";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
@@ -45,6 +46,7 @@ import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
+import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import {
   setupSessionTabSync,
@@ -61,7 +63,7 @@ import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
-import { PreviewController } from "./preview/preview-controller";
+import { PreviewController } from "./preview-controller";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { BottomTerminalPanel } from "./bottom-terminal-panel";
 import { useReviewDialog } from "./use-review-dialog";
@@ -189,6 +191,7 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   changesTab: ChangesTab,
   planTab: PlanTab,
   sessionTab: SessionTab,
+  terminalTab: TerminalTab,
   previewFileTab: PreviewFileTab,
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,
@@ -520,9 +523,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       readyDisposersRef.current.push(setupGroupTracking(api));
       setupSessionTabSync(api, appStore);
       setupChatPanelSafetyNet(api, appStore);
-      setupLayoutPersistence(api, saveTimerRef, envIdRef);
+      readyDisposersRef.current.push(setupLayoutPersistence(api, saveTimerRef, envIdRef));
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
+      readyDisposersRef.current.push(setupSashDragCapToggle(api));
     },
     [setApi, buildDefaultLayout, initialLayout, compact, appStore],
   );

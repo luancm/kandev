@@ -19,47 +19,31 @@ import {
 } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
+  CreateAutomationResponse,
   TriggerType,
   AutomationTrigger,
   TriggerTypeInfo,
   PlaceholderInfo,
-  ExecutionMode,
 } from "@/lib/types/automation";
 import { TriggersSection } from "./triggers-section";
 import { PromptSection } from "./prompt-section";
-import { ConfigSection, type RepositorySelection } from "./config-section";
+import { ConfigSection } from "./config-section";
 import { RunsSection } from "./runs-section";
-import { createRepositoryAction } from "@/app/actions/workspaces";
+import { WebhookCreatedDialog } from "./webhook-created-dialog";
+import {
+  type CreatedWebhookDetails,
+  type FormState,
+  type PendingTrigger,
+  buildCreatePayload,
+  buildUpdatePayload,
+  buildWebhookUrl,
+  resolveRepositoryId,
+} from "./automation-payload";
 import { generateUUID } from "@/lib/utils";
 
 type AutomationEditorProps = {
   workspaceId: string;
   automationId: string | null; // null = create mode
-};
-
-type FormState = {
-  name: string;
-  description: string;
-  workflowId: string;
-  workflowStepId: string;
-  agentProfileId: string;
-  executorProfileId: string;
-  // repositorySelection captures either a registered workspace repo (id),
-  // a discovered local repo (path — registered at save time to obtain an
-  // id), or "auto" for workspace-first fallback.
-  repositorySelection: RepositorySelection;
-  prompt: string;
-  taskTitleTemplate: string;
-  executionMode: ExecutionMode;
-  enabled: boolean;
-  maxConcurrentRuns: number;
-};
-
-type PendingTrigger = {
-  tempId: string;
-  type: TriggerType;
-  config: Record<string, unknown>;
-  enabled: boolean;
 };
 
 const DEFAULT_PROMPT = "Run scheduled automation.\n\nTrigger: {{trigger.type}}";
@@ -71,7 +55,7 @@ const defaultForm: FormState = {
   workflowStepId: "",
   agentProfileId: "",
   executorProfileId: "",
-  repositorySelection: { kind: "auto" },
+  repositorySelection: { kind: "none" },
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
   executionMode: "task",
@@ -89,7 +73,7 @@ function formFromAutomation(a: Automation): FormState {
     executorProfileId: a.executor_profile_id,
     repositorySelection: a.repository_id
       ? { kind: "registered", id: a.repository_id }
-      : { kind: "auto" },
+      : { kind: "none" },
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
     executionMode: a.execution_mode ?? "task",
@@ -190,67 +174,20 @@ function isDefaultPrompt(prompt: string, triggerTypes: TriggerTypeInfo[]): boole
   return triggerTypes.some((t) => t.default_prompt === prompt);
 }
 
-// resolveRepositoryId turns a RepositorySelection into a concrete
-// repository_id, registering a discovered local repo with the workspace
-// first when needed. Empty string for "auto" (workspace-first fallback).
-async function resolveRepositoryId(
-  workspaceId: string,
-  selection: RepositorySelection,
-): Promise<string> {
-  if (selection.kind === "auto") return "";
-  if (selection.kind === "registered") return selection.id;
-  const created = await createRepositoryAction({
-    workspace_id: workspaceId,
-    name: selection.name,
-    source_type: "local",
-    local_path: selection.path,
-    provider: "",
-    provider_repo_id: "",
-    provider_owner: "",
-    provider_name: "",
-    default_branch: selection.defaultBranch,
-    worktree_branch_prefix: "feature/",
-    pull_before_worktree: true,
-    setup_script: "",
-    cleanup_script: "",
-    dev_script: "",
-  });
-  return created.id;
-}
-
-function buildCreatePayload(
-  workspaceId: string,
-  form: FormState,
-  repositoryId: string,
-  pending: PendingTrigger[],
-) {
-  return {
-    workspace_id: workspaceId,
-    name: form.name || "New Automation",
-    description: form.description,
-    workflow_id: form.workflowId,
-    workflow_step_id: form.workflowStepId,
-    agent_profile_id: form.agentProfileId,
-    executor_profile_id: form.executorProfileId,
-    repository_id: repositoryId,
-    prompt: form.prompt,
-    task_title_template: form.taskTitleTemplate,
-    execution_mode: form.executionMode,
-    max_concurrent_runs: form.maxConcurrentRuns,
-    triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
-  };
-}
-
 type SaveHandlerOpts = {
   isNew: boolean;
   workspaceId: string;
   form: FormState;
   currentId: string | null;
-  create: (payload: ReturnType<typeof buildCreatePayload>) => Promise<Automation>;
+  create: (payload: ReturnType<typeof buildCreatePayload>) => Promise<CreateAutomationResponse>;
   update: (id: string, payload: ReturnType<typeof buildUpdatePayload>) => Promise<unknown>;
   setSaving: React.Dispatch<React.SetStateAction<boolean>>;
   setCurrentId: React.Dispatch<React.SetStateAction<string | null>>;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  // setCreatedWebhook surfaces the URL + secret in a dialog after creating
+  // a webhook automation, then the user is redirected to the listings page.
+  // Null when no webhook trigger was configured on the new automation.
+  setCreatedWebhook: React.Dispatch<React.SetStateAction<CreatedWebhookDetails | null>>;
   triggerActions: ReturnType<typeof useTriggerActions>;
   router: ReturnType<typeof useRouter>;
 };
@@ -261,7 +198,7 @@ type SaveHandlerOpts = {
 // registers discovered repos before persisting the automation.
 function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   const { isNew, workspaceId, form, currentId, create, update } = opts;
-  const { setSaving, setCurrentId, setForm, triggerActions, router } = opts;
+  const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router } = opts;
   return async () => {
     setSaving(true);
     try {
@@ -278,11 +215,20 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         const a = await create(
           buildCreatePayload(workspaceId, form, repositoryId, triggerActions.pending),
         );
-        setCurrentId(a.id);
-        triggerActions.setTriggers(a.triggers ?? []);
-        triggerActions.clearPending();
         promoteSelection();
-        router.replace(`/settings/workspace/${workspaceId}/automations/${a.id}`);
+        // Webhook automations need their URL + secret communicated to the
+        // user; show the dialog and let its close handler do the redirect.
+        // Everything else goes straight to the listings page with a toast.
+        const hasWebhookTrigger = (a.triggers ?? []).some((t) => t.type === "webhook");
+        if (hasWebhookTrigger && a.webhook_secret) {
+          setCurrentId(a.id);
+          triggerActions.setTriggers(a.triggers ?? []);
+          triggerActions.clearPending();
+          setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
+        } else {
+          toast.success("Automation created");
+          router.push(`/settings/workspace/${workspaceId}/automations`);
+        }
       } else if (currentId) {
         await update(currentId, buildUpdatePayload(form, repositoryId));
         promoteSelection();
@@ -296,26 +242,31 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   };
 }
 
-function buildUpdatePayload(form: FormState, repositoryId: string) {
-  return {
-    name: form.name,
-    description: form.description,
-    workflow_id: form.workflowId,
-    workflow_step_id: form.workflowStepId,
-    agent_profile_id: form.agentProfileId,
-    executor_profile_id: form.executorProfileId,
-    repository_id: repositoryId,
-    prompt: form.prompt,
-    task_title_template: form.taskTitleTemplate,
-    execution_mode: form.executionMode,
-    enabled: form.enabled,
-    max_concurrent_runs: form.maxConcurrentRuns,
-  };
-}
-
 function getSaveLabel(saving: boolean, isNew: boolean): string {
   if (saving) return "Saving...";
   return isNew ? "Create Automation" : "Save Changes";
+}
+
+/** Loads an existing automation on mount and populates form + trigger state. */
+function useLoadAutomation(
+  automationId: string | null,
+  workspaceId: string,
+  setForm: React.Dispatch<React.SetStateAction<FormState>>,
+  setTriggers: (triggers: AutomationTrigger[]) => void,
+  router: ReturnType<typeof useRouter>,
+) {
+  useEffect(() => {
+    if (!automationId) return;
+    getAutomation(automationId)
+      .then((a) => {
+        setForm(formFromAutomation(a));
+        setTriggers(a.triggers ?? []);
+      })
+      .catch(() => {
+        router.push(`/settings/workspace/${workspaceId}/automations`);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [automationId]);
 }
 
 function useConditionMetadata(triggers: AutomationTrigger[], triggerTypes: TriggerTypeInfo[]) {
@@ -355,6 +306,10 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const [form, setForm] = useState<FormState>(defaultForm);
   const [saving, setSaving] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(automationId);
+  // createdWebhook holds the URL + secret of a freshly-created webhook
+  // automation. Set in the save handler; cleared when the user dismisses
+  // the dialog, at which point we redirect to the listings page.
+  const [createdWebhook, setCreatedWebhook] = useState<CreatedWebhookDetails | null>(null);
   const isNew = currentId === null;
   const triggerActions = useTriggerActions(currentId);
   const triggerTypes = useTriggerTypeMetadata();
@@ -364,19 +319,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     triggerTypes,
   );
   useAutoPromptUpdate(activeTriggerInfo, conditionType, triggerTypes, setForm);
-
-  useEffect(() => {
-    if (!automationId) return;
-    getAutomation(automationId)
-      .then((a) => {
-        setForm(formFromAutomation(a));
-        triggerActions.setTriggers(a.triggers ?? []);
-      })
-      .catch(() => {
-        router.push(`/settings/workspace/${workspaceId}/automations`);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [automationId]);
+  useLoadAutomation(automationId, workspaceId, setForm, triggerActions.setTriggers, router);
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -392,6 +335,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     setSaving,
     setCurrentId,
     setForm,
+    setCreatedWebhook,
     triggerActions,
     router,
   });
@@ -424,6 +368,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         triggerActions={triggerActions}
         triggerTypes={triggerTypes}
         currentId={currentId}
+        workspaceId={workspaceId}
       />
       <Separator />
       <ThenSection
@@ -445,7 +390,32 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         onSave={handleSave}
         onDelete={handleRemove}
       />
+      <CreatedWebhookDialogHost
+        details={createdWebhook}
+        onClose={() => {
+          setCreatedWebhook(null);
+          router.push(`/settings/workspace/${workspaceId}/automations`);
+        }}
+      />
     </div>
+  );
+}
+
+function CreatedWebhookDialogHost({
+  details,
+  onClose,
+}: {
+  details: CreatedWebhookDetails | null;
+  onClose: () => void;
+}) {
+  if (!details) return null;
+  return (
+    <WebhookCreatedDialog
+      open
+      webhookUrl={details.url}
+      webhookSecret={details.secret}
+      onClose={onClose}
+    />
   );
 }
 
@@ -455,10 +425,12 @@ function WhenSection({
   triggerActions,
   triggerTypes,
   currentId,
+  workspaceId,
 }: {
   triggerActions: TriggerActionsResult;
   triggerTypes: TriggerTypeInfo[];
   currentId: string | null;
+  workspaceId: string;
 }) {
   return (
     <div className="space-y-2">
@@ -470,6 +442,7 @@ function WhenSection({
         <TriggersSection
           triggers={triggerActions.allTriggers}
           automationId={currentId}
+          workspaceId={workspaceId}
           triggerTypes={triggerTypes}
           onAddTrigger={triggerActions.handleAdd}
           onUpdateTrigger={triggerActions.handleUpdate}

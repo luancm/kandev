@@ -21,6 +21,21 @@ const (
 	TriggerTypeWebhook    TriggerType = "webhook"
 )
 
+const (
+	defaultBranchMain           = "main"
+	exampleRepositoryOwner      = "org/repo"
+	placeholderRepositoryOwner  = "Repository (owner/name)"
+	triggerCategoryGitHub       = "github"
+	triggerDataSourceKey        = "source"
+	triggerDataSourceManual     = "manual"
+	triggerCronHourlyShorthand  = "@hourly"
+	triggerCronHourlyExpression = "0 * * * *"
+	triggerCronDailyShorthand   = "@daily"
+	triggerCronDailyExpression  = "0 0 * * *"
+	triggerCronWeeklyShorthand  = "@weekly"
+	triggerCronWeeklyExpression = "0 0 * * 0"
+)
+
 // RunStatus tracks the outcome of a trigger firing.
 type RunStatus string
 
@@ -200,6 +215,21 @@ type AddTriggerRequest struct {
 type UpdateTriggerRequest struct {
 	Config  *json.RawMessage `json:"config,omitempty"`
 	Enabled *bool            `json:"enabled,omitempty"`
+}
+
+// CreateAutomationResponse wraps a newly-created automation and returns the
+// generated webhook secret in plaintext exactly once, so the UI can show the
+// user a value they can paste into an external system. Subsequent GET / list
+// responses keep the secret hidden (WebhookSecret is `json:"-"`) — the
+// dedicated reveal endpoint is the way back to it.
+type CreateAutomationResponse struct {
+	*Automation
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// RevealWebhookSecretResponse returns the webhook secret for an automation.
+type RevealWebhookSecretResponse struct {
+	WebhookSecret string `json:"webhook_secret"`
 }
 
 // AutomationTriggeredEvent is published when a trigger fires.

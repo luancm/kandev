@@ -477,11 +477,37 @@ export class SessionPage {
     return this.page.getByTestId("pr-approve-button");
   }
 
-  // --- CI hover popover accessors (kept here so the spec stays declarative) ---
+  // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---
 
   /** The single-PR hover popover content (visible after hovering the topbar button). */
   prTopbarPopover(): Locator {
     return this.page.getByTestId("pr-topbar-popover");
+  }
+
+  /** Compact PR/CI status chip rendered in the chat status bar. */
+  prStatusChip(): Locator {
+    return this.page.getByTestId("pr-status-chip");
+  }
+
+  /** Mobile bottom-sheet drawer that hosts the PR CI popover. */
+  prStatusChipDrawer(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer");
+  }
+
+  /** Close button inside the chip's mobile drawer. */
+  prStatusChipDrawerClose(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer-close");
+  }
+
+  /** PRCIPopover body when rendered inside the mobile chip drawer. */
+  prStatusChipPopoverInner(): Locator {
+    return this.prStatusChipDrawer().getByTestId("pr-topbar-popover-inner");
+  }
+
+  /** Tap the chip and wait for the mobile drawer to be visible. */
+  async tapPRStatusChip(): Promise<void> {
+    await this.prStatusChip().tap();
+    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
   }
 
   /** Multi-PR aggregate popover content. */
@@ -945,7 +971,7 @@ export class SessionPage {
 
   /** All session reopen items in the + dropdown. */
   sessionReopenItems(): Locator {
-    return this.page.locator("[data-testid^='reopen-session-']");
+    return this.page.locator("[role='menuitem'][data-testid^='reopen-session-']");
   }
 
   /** All session tabs in dockview (panels using the sessionTab tab component). */

@@ -11,7 +11,11 @@ import {
   triggerAutomation,
 } from "@/lib/api/domains/automation-api";
 import { useAppStore } from "@/components/state-provider";
-import type { CreateAutomationRequest, UpdateAutomationRequest } from "@/lib/types/automation";
+import type {
+  CreateAutomationRequest,
+  CreateAutomationResponse,
+  UpdateAutomationRequest,
+} from "@/lib/types/automation";
 
 export function useAutomations(workspaceId: string | null) {
   const items = useAppStore((state) => state.automations.items);
@@ -60,9 +64,13 @@ export function useAutomations(workspaceId: string | null) {
   }, [workspaceId, setAutomations, setLoading]);
 
   const create = useCallback(
-    async (req: CreateAutomationRequest) => {
+    async (req: CreateAutomationRequest): Promise<CreateAutomationResponse> => {
       const automation = await createAutomation(req);
-      addToStore(automation);
+      // Strip the one-time webhook_secret before persisting to the store so it
+      // doesn't leak into devtools or error-reporting SDKs. The full response
+      // (with secret) is still returned to the caller for the reveal dialog.
+      const { webhook_secret: _secret, ...stored } = automation;
+      addToStore(stored);
       return automation;
     },
     [addToStore],
