@@ -110,7 +110,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   return (
     <>
       {rendered}
-      <div className="mt-2 ml-7">
+      <div className="mt-2 ml-7" data-testid="kandev-tool-permission">
         <PermissionActionRow
           onApprove={handleApprove}
           onReject={handleReject}

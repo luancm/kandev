@@ -146,11 +146,12 @@ test.describe("Permission approval persistence", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    // First() not strict count: a backend race can render a duplicate generic
-    // ToolCallMessage row for the same pending_id; either button approves it.
-    const approveButtons = session.permissionApproveButtons();
-    await expect(approveButtons.first()).toBeVisible({ timeout: 30_000 });
-    await approveButtons.first().click();
+    // Scope strictly to the Kandev-MCP approval row. A backend race may also
+    // render a duplicate generic ToolCallMessage approve button for the same
+    // pending_id; clicking that would prove nothing about the Kandev custom UI.
+    const approveButton = session.kandevPermissionApproveButtons();
+    await expect(approveButton).toHaveCount(1, { timeout: 30_000 });
+    await approveButton.click();
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
