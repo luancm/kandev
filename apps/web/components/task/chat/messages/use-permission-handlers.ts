@@ -17,7 +17,7 @@ export type PermissionRequestMetadata = {
   options: PermissionOption[];
   action_type: PermissionActionType;
   action_details: { command?: string; path?: string; cwd?: string };
-  status?: "pending" | "approved" | "rejected";
+  status?: "pending" | "approved" | "rejected" | "expired";
 };
 
 export type ParsedPermission = {
@@ -30,7 +30,7 @@ export function parsePermission(permissionMessage: Message | undefined): ParsedP
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
   const permissionStatus = permissionMetadata?.status;
   const isPermissionPending =
-    !!permissionMessage && permissionStatus !== "approved" && permissionStatus !== "rejected";
+    !!permissionMessage && (!permissionStatus || permissionStatus === "pending");
   return { permissionMetadata, permissionStatus, isPermissionPending };
 }
 
@@ -46,7 +46,7 @@ export function usePermissionResponseHandlers({
   const [isResponding, setIsResponding] = useState(false);
 
   const handleRespond = useCallback(
-    async (optionId: string, cancelled: boolean = false) => {
+    async (optionId: string, cancelled: boolean = false, rejected: boolean = false) => {
       if (!permissionMetadata || !permissionMessage) return;
       const client = getWebSocketClient();
       if (!client) {
@@ -60,6 +60,7 @@ export function usePermissionResponseHandlers({
           pending_id: permissionMetadata.pending_id,
           option_id: cancelled ? undefined : optionId,
           cancelled,
+          rejected,
         });
       } catch (error) {
         console.error("Failed to respond to permission request:", error);
@@ -82,7 +83,10 @@ export function usePermissionResponseHandlers({
       (opt) => opt.kind === "reject_once" || opt.kind === "reject_always",
     );
     if (rejectOption) {
-      handleRespond(rejectOption.option_id);
+      // rejected=true tells the backend to persist "rejected" status without
+      // treating this as a dialog cancellation (cancelled=true would race with
+      // the EventTypePermissionCancelled → "expired" update path).
+      handleRespond(rejectOption.option_id, false, true);
     } else {
       handleRespond("", true);
     }
