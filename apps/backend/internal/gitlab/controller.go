@@ -222,16 +222,27 @@ func (c *Controller) httpSyncTaskMR(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, row)
 }
 
-// httpSearchUserMRs surfaces the configured user's MR queue. filter is one of
-// "assigned", "authored", "review_requested" (matching the GitLab "scope"
-// query param); custom_query passes through verbatim for power users.
+// httpSearchUserMRs surfaces the configured user's MR queue. filter is one
+// of "assigned_to_me", "created_by_me", "review_requested" (the /gitlab
+// page's tab values), or a raw GitLab API filter in `key=value` form;
+// custom_query passes through verbatim for power users and disables tab
+// translation entirely.
 func (c *Controller) httpSearchUserMRs(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
+	filter := ctx.Query("filter")
+	customQuery := ctx.Query("custom_query")
+	if customQuery == "" {
+		translated, err := c.translateMRFilter(ctx, filter)
+		if err != nil {
+			// translateMRFilter has already written the HTTP error.
+			return
+		}
+		if translated != "" {
+			filter = translated
+		}
+	}
 	result, err := c.service.Client().SearchMRsPaged(
-		ctx.Request.Context(),
-		ctx.Query("filter"),
-		ctx.Query("custom_query"),
-		page, perPage,
+		ctx.Request.Context(), filter, customQuery, page, perPage,
 	)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
@@ -240,20 +251,59 @@ func (c *Controller) httpSearchUserMRs(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, result)
 }
 
-// httpSearchUserIssues surfaces the configured user's issue queue.
+// httpSearchUserIssues surfaces the configured user's issue queue. filter
+// supports "assigned_to_me" and "created_by_me" (the /gitlab page's issue
+// tabs). "review_requested" is explicitly rejected with 400 — GitLab has no
+// reviewer-assigned concept for issues, and silently serving the global
+// unscoped listing would re-introduce the bug this translator layer was
+// added to prevent.
 func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
+	filter := ctx.Query("filter")
+	customQuery := ctx.Query("custom_query")
+	if customQuery == "" {
+		if filter == filterTokenReviewRequested {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
+			return
+		}
+		if translated := translateUserSearchFilter(filter, ""); translated != "" {
+			filter = translated
+		}
+	}
 	result, err := c.service.Client().ListIssuesPaged(
-		ctx.Request.Context(),
-		ctx.Query("filter"),
-		ctx.Query("custom_query"),
-		page, perPage,
+		ctx.Request.Context(), filter, customQuery, page, perPage,
 	)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
+}
+
+// translateMRFilter resolves the authenticated user (only when the
+// review_requested tab needs it) and runs the filter through
+// translateUserSearchFilter. On a username-lookup failure — including a
+// successful call that returns no username (NoopClient, an unexpected
+// GitLab response) — it writes a 500 to ctx and returns an error so the
+// caller can short-circuit. Silently falling back to an unfiltered listing
+// would re-introduce the very bug this translation layer was added to
+// prevent.
+func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string, error) {
+	var username string
+	if filter == filterTokenReviewRequested {
+		u, err := c.service.Client().GetAuthenticatedUser(ctx.Request.Context())
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+			return "", err
+		}
+		if u == "" {
+			err := errors.New("cannot resolve authenticated GitLab user")
+			ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
+			return "", err
+		}
+		username = u
+	}
+	return translateUserSearchFilter(filter, username), nil
 }
 
 // paginationFromQuery reads ?page=&per_page= with the same clamps SearchMRsPaged
