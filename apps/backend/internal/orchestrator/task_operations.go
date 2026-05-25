@@ -2019,7 +2019,8 @@ func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID,
 		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
-		zap.Bool("cancelled", cancelled))
+		zap.Bool("cancelled", cancelled),
+		zap.Bool("rejected", rejected))
 
 	// Respond to the permission via agentctl
 	if err := s.executor.RespondToPermission(ctx, sessionID, pendingID, optionID, cancelled); err != nil {
