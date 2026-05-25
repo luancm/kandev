@@ -7,6 +7,7 @@ import { getPlanLastSeen } from "@/lib/local-storage";
 import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 
 export type SelectedDiff = {
   path: string;
@@ -62,12 +63,7 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Agent state ---
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
 
-  const isPassthroughMode = useMemo(() => {
-    if (!activeSession?.agent_profile_snapshot) return false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const snapshot = activeSession.agent_profile_snapshot as any;
-    return snapshot?.cli_passthrough === true;
-  }, [activeSession?.agent_profile_snapshot]);
+  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
 
   const { selectedDiff, handleSelectDiff, handleClearSelectedDiff } = useSelectedDiffState();
   const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();
