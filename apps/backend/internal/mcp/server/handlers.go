@@ -184,6 +184,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 				repo["base_branch"] = baseBranch
 			}
 			payload["repositories"] = []map[string]string{repo}
+		} else if baseBranch != "" {
+			// Forward base_branch at the top level only when the caller
+			// supplied no repo identifier — the backend uses it as a fallback
+			// applied to inherited subtask repos. When explicit repo entries
+			// are present, the per-repo base_branch above is authoritative
+			// and a top-level value here would be ignored.
+			payload["base_branch"] = baseBranch
 		}
 
 		var result map[string]interface{}
