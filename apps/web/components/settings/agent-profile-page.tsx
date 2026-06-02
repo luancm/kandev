@@ -448,6 +448,8 @@ function ProfileEditorBody({
       <ProfileMcpConfigCard
         profileId={draft.id}
         supportsMcp={agent.supports_mcp}
+        cliPassthrough={draft.cliPassthrough}
+        mcpInjection={passthroughConfig?.mcp_injection}
         initialConfig={initialMcpConfig}
         onToastError={onToastError}
       />

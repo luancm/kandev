@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -59,6 +60,9 @@ func NewCursorACP() *CursorACP {
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
+				// cursor-agent has no MCP flag/env; write a project-local
+				// .cursor/mcp.json into the worktree (only if absent).
+				MCPStrategy: mcpconfig.CursorStrategy{},
 			},
 		},
 	}
