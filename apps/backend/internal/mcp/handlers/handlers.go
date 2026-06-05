@@ -170,6 +170,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
+	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
@@ -788,6 +789,53 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 	})
 }
 
+// handleUpdateRepositoryBaseBranch updates the base_branch on a single
+// task_repositories row. The agentctl side is notified live via the service's
+// AgentBaseBranchPusher hook so the changes-panel diff stats reflect the new
+// base immediately, not just at next session start.
+func (h *Handlers) handleUpdateRepositoryBaseBranch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID           string `json:"task_id"`
+		TaskRepositoryID string `json:"task_repository_id"`
+		BaseBranch       string `json:"base_branch"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required", nil)
+	}
+	taskRepo, err := h.taskSvc.UpdateRepositoryBaseBranch(ctx, service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           req.TaskID,
+		TaskRepositoryID: req.TaskRepositoryID,
+		BaseBranch:       req.BaseBranch,
+	})
+	if err != nil {
+		h.logger.Error("failed to update repository base branch", zap.Error(err))
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
+		// Caller-facing validation messages (required-field, invalid ref
+		// name) pass through verbatim so MCP agents can react; internal
+		// faults stay opaque so DB-level details don't leak.
+		if isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update base branch", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"id":              taskRepo.ID,
+		keyTaskID:         taskRepo.TaskID,
+		keyRepositoryID:   taskRepo.RepositoryID,
+		keyBaseBranch:     taskRepo.BaseBranch,
+		keyCheckoutBranch: taskRepo.CheckoutBranch,
+		keyPosition:       taskRepo.Position,
+	})
+}
+
 // boolCount returns how many of the supplied boolean flags are true. Used
 // to enforce mutual exclusion across optional input fields without a chain
 // of nested ifs.
@@ -799,6 +847,21 @@ func boolCount(flags ...bool) int {
 		}
 	}
 	return n
+}
+
+// isValidationError matches the user-facing fragments emitted by the
+// service-layer validators (required fields, invalid ref names). Shared by
+// every MCP write handler so service-side message tweaks need only one
+// place to flow through to the MCP error classification. Kept narrow on
+// purpose — DB / IO failures often carry "invalid" in their message and
+// must surface as InternalError, not Validation.
+func isValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "is required") ||
+		strings.Contains(msg, "not allowed in a git ref name")
 }
 
 // classifyAddBranchError maps service-layer add_branch failures to ws error
@@ -1102,11 +1165,12 @@ const errorField = "error"
 // goconst doesn't flag the literals as repeated, and so a future rename of
 // a wire-protocol key updates every handler in one place.
 const (
-	keyTaskID         = "task_id"
-	keyRepositoryID   = "repository_id"
-	keyBaseBranch     = "base_branch"
-	keyCheckoutBranch = "checkout_branch"
-	keyPosition       = "position"
+	keyTaskID           = "task_id"
+	keyRepositoryID     = "repository_id"
+	keyTaskRepositoryID = "task_repository_id"
+	keyBaseBranch       = "base_branch"
+	keyCheckoutBranch   = "checkout_branch"
+	keyPosition         = "position"
 )
 
 // dispatchTaskMessage routes a message to the right delivery path based on session state.

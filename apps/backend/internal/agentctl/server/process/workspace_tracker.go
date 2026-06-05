@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -37,6 +38,13 @@ type WorkspaceTracker struct {
 	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.
 	// Empty for the single-repo case.
 	repositoryName string
+
+	// baseBranch is the task-specific base branch used to compute diff stats
+	// (BaseCommit, Ahead/Behind). When set, it takes precedence over the
+	// hardcoded origin/main → master fallback list in workspace_git_status.go.
+	// Sourced from task_repositories.base_branch on the kandev backend.
+	// Empty for legacy tasks or external branches with no recorded base.
+	baseBranch string
 
 	// Current state
 	currentStatus types.GitStatusUpdate
@@ -110,6 +118,74 @@ func NewWorkspaceTracker(workDir string, log *logger.Logger) *WorkspaceTracker {
 // rescan path to decide whether a discovered subdir already has a tracker.
 func (wt *WorkspaceTracker) RepositoryName() string {
 	return wt.repositoryName
+}
+
+// SetBaseBranch records the task's stored base branch for this repository.
+// Called once after construction by the process manager; subsequent git
+// status updates use this value as the first candidate when resolving
+// BaseCommit / Ahead / Behind. Empty disables the override and falls back
+// to the hardcoded origin/main → master priority list.
+//
+// Unsafe ref names (leading "-", whitespace, shell metacharacters, ".." or
+// other format violations) are rejected at this boundary because the value
+// is interpolated into `exec.Command("git", …, baseBranch)` downstream and
+// git itself interprets leading "-" as a flag. Rejection downgrades to the
+// no-override fallback rather than erroring — keeps the tracker functional
+// when an untrusted caller supplies garbage.
+func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if !IsSafeGitRef(baseBranch) {
+		wt.baseBranch = ""
+		return
+	}
+	wt.baseBranch = baseBranch
+}
+
+// IsSafeGitRef reports whether ref is safe to splice into a `git`
+// subprocess argument list. Empty input returns true so callers can treat
+// "" as "no override" without an extra branch. Delegates to the
+// `securityutil.IsValidBranchName` sanitiser that the rest of the agentctl
+// git operations (Rebase, Merge, RenameBranch, …) already use — keeps one
+// canonical allowlist across the package and inherits the CodeQL
+// taint-tracking recognition that pattern carries.
+//
+// `origin/<name>` refs are split before the underlying check because the
+// shared validator rejects "/" in the first character class.
+func IsSafeGitRef(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	return SanitizeGitRef(ref) != ""
+}
+
+// SanitizeGitRef returns ref when securityutil.IsValidBranchName accepts
+// it (after handling the `origin/<name>` prefix), else the empty string.
+// Use this at the call site immediately before passing a user-controlled
+// ref name into a `git` subprocess argument so the sanitiser barrier sits
+// inline with the sink.
+func SanitizeGitRef(ref string) string {
+	if ref == "" || ref[len(ref)-1] == '/' {
+		return ""
+	}
+	if rest, ok := strings.CutPrefix(ref, "origin/"); ok {
+		if securityutil.IsValidBranchName(rest) {
+			return ref
+		}
+		return ""
+	}
+	if securityutil.IsValidBranchName(ref) {
+		return ref
+	}
+	return ""
+}
+
+// BaseBranch returns the recorded base branch override, if any. Exposed for
+// tests; production callers read it indirectly through the git-status loops.
+func (wt *WorkspaceTracker) BaseBranch() string {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.baseBranch
 }
 
 // NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository

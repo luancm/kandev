@@ -111,6 +111,16 @@ type Manager struct {
 	workspaceTrackersBySubpath map[string]*WorkspaceTracker
 	workspaceTrackersMu        sync.Mutex
 
+	// baseBranchesMu guards mutations to cfg.BaseBranches so the
+	// UpdateBaseBranches writer doesn't race with the rescan-path and
+	// lazy-subpath readers that look up per-repo overrides via
+	// lookupBaseBranch. Two existing mutexes already cover the trackers
+	// themselves (repoTrackersMu, workspaceTrackersMu) but each guards a
+	// different field — without this dedicated lock the writer could
+	// publish a new map under repoTrackersMu while a reader walked the
+	// same map under workspaceTrackersMu.
+	baseBranchesMu sync.RWMutex
+
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
 	// per-repo trackers into the same channels without re-subscription. The
@@ -183,18 +193,77 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		// Multi-repo: root tracker bound to the bare task root (no fallback,
 		// no events), plus one tracker per repo subdir.
 		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 		for _, child := range repoChildren {
-			m.repoTrackers = append(m.repoTrackers,
-				NewWorkspaceTrackerForRepo(child.path, child.name, log))
+			tr := NewWorkspaceTrackerForRepo(child.path, child.name, log)
+			tr.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, child.name))
+			m.repoTrackers = append(m.repoTrackers, tr)
 		}
 	} else {
 		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
+		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
 	}
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
 	return m
+}
+
+// getBaseBranches returns a snapshot of cfg.BaseBranches under the
+// dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
+// UpdateBaseBranches re-stamp loop) read a consistent map even when a
+// concurrent UpdateBaseBranches writer is publishing a replacement.
+func (m *Manager) getBaseBranches() map[string]string {
+	m.baseBranchesMu.RLock()
+	defer m.baseBranchesMu.RUnlock()
+	if m.cfg == nil || m.cfg.BaseBranches == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m.cfg.BaseBranches))
+	for k, v := range m.cfg.BaseBranches {
+		out[k] = v
+	}
+	return out
+}
+
+// setBaseBranches replaces cfg.BaseBranches under baseBranchesMu so the
+// write is serialized with every getBaseBranches reader. UpdateBaseBranches
+// uses this to publish the new map after sanitizing it at the HTTP edge.
+func (m *Manager) setBaseBranches(branches map[string]string) {
+	m.baseBranchesMu.Lock()
+	defer m.baseBranchesMu.Unlock()
+	if m.cfg == nil {
+		return
+	}
+	m.cfg.BaseBranches = branches
+}
+
+// lookupBaseBranch reads the task's recorded base branch for a given
+// repository name from the per-instance map. The empty key "" addresses the
+// single-repo / root tracker. Falls back to the empty-key entry when the
+// per-repo entry is missing — preserves single-repo behavior for tasks
+// that record only one base branch under the legacy unkeyed slot.
+//
+// Each value is re-sanitised through SanitizeGitRef before it leaves the
+// function. The map was sanitised at the HTTP boundary and again on
+// SetBaseBranch, but static analysis (CodeQL `go/command-injection`)
+// loses the sanitised state across map writes and field stores —
+// transforming the value at every read point keeps the source→sink path
+// covered no matter which entry point the analyser walks.
+func lookupBaseBranch(branches map[string]string, repoName string) string {
+	if len(branches) == 0 {
+		return ""
+	}
+	if v, ok := branches[repoName]; ok && v != "" {
+		return SanitizeGitRef(v)
+	}
+	if repoName != "" {
+		if v, ok := branches[""]; ok && v != "" {
+			return SanitizeGitRef(v)
+		}
+	}
+	return ""
 }
 
 // repositorySubdir is one git-repo child of a multi-repo task root.
@@ -355,8 +424,71 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
+	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
+}
+
+// UpdateBaseBranches replaces the per-repo base-branch map and re-stamps every
+// active tracker with the new value for its repositoryName, then triggers a
+// non-blocking RefreshGitStatus on each so the UI sees the new
+// BaseCommit/Ahead/Behind without waiting for the next poll tick. Idempotent
+// for unchanged values (RefreshGitStatus is cheap — it's the same call the
+// frontend already makes after stage/unstage).
+//
+// Newly-spawned trackers (rescan path, lazy subpath lookup) read the updated
+// map via lookupBaseBranch — no second push needed for them.
+func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]string) {
+	m.setBaseBranches(branches)
+
+	m.repoTrackersMu.RLock()
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	m.repoTrackersMu.RUnlock()
+
+	m.workspaceTrackersMu.Lock()
+	bySubpath := make(map[string]*WorkspaceTracker, len(m.workspaceTrackersBySubpath))
+	for k, v := range m.workspaceTrackersBySubpath {
+		bySubpath[k] = v
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	// Stamp the new baseBranch on each tracker synchronously so the field is
+	// visible to the next poll, but kick the RefreshGitStatus probes
+	// (which can each spawn 3–5 git subprocesses) onto a background
+	// goroutine. The HTTP handler that called us doesn't need to block on
+	// per-tracker git work; the picker UI re-fetches via the existing WS
+	// stream once Refresh emits a new GitStatusUpdate. Detach from the
+	// caller's ctx so an HTTP request cancel after the field stores
+	// can't strand half the trackers without their refresh.
+	if root != nil {
+		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
+	}
+	for _, t := range trackers {
+		t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
+	}
+	for subpath, t := range bySubpath {
+		t.SetBaseBranch(lookupBaseBranch(branches, subpath))
+	}
+	go m.refreshTrackersDetached(root, trackers, bySubpath)
+}
+
+// refreshTrackersDetached runs RefreshGitStatus on every supplied tracker
+// using a background context. Spawned as a goroutine by UpdateBaseBranches
+// so the per-tracker git subprocesses don't block the HTTP handler that
+// drove the picker-save.
+func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*WorkspaceTracker, bySubpath map[string]*WorkspaceTracker) {
+	ctx := context.Background()
+	if root != nil {
+		root.RefreshGitStatus(ctx)
+	}
+	for _, t := range trackers {
+		t.RefreshGitStatus(ctx)
+	}
+	for _, t := range bySubpath {
+		t.RefreshGitStatus(ctx)
+	}
 }
 
 // StartProcess runs a script/process with isolated stdout/stderr.
