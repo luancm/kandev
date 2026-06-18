@@ -52,17 +52,29 @@ if [[ "$recreate_config_count" != "2" ]]; then
 fi
 pass "OpenCode project config is recreated before writing the review agent"
 
+allowed_tools_prompt_count="$(count_occurrences 'Use only read/search tools made available by OpenCode, such as glob, grep, and read.')"
+if [[ "$allowed_tools_prompt_count" != "2" ]]; then
+  fail "OpenCode review prompts explicitly limit the model to read/search tools"
+fi
+pass "OpenCode review prompts explicitly limit the model to read/search tools"
+
+deny_bash_prompt_count="$(count_occurrences 'Never call bash, shell, edit, patch, task, todo, fetch, or web tools.')"
+if [[ "$deny_bash_prompt_count" != "2" ]]; then
+  fail "OpenCode review prompts explicitly forbid bash and mutation tools"
+fi
+pass "OpenCode review prompts explicitly forbid bash and mutation tools"
+
 explicit_model_env_count="$(count_occurrences 'OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}')"
 if [[ "$explicit_model_env_count" != "2" ]]; then
   fail "OpenCode posting steps explicitly pass OPENCODE_MODEL"
 fi
 pass "OpenCode posting steps explicitly pass OPENCODE_MODEL"
 
-trusted_fork_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
-if [[ "$trusted_fork_script_count" != "1" ]]; then
-  fail "Fork review executes the parser script from the trusted base commit"
+trusted_script_count="$(count_occurrences 'git show "$BASE_SHA:scripts/opencode-code-review" > .opencode-review/opencode-code-review')"
+if [[ "$trusted_script_count" != "2" ]]; then
+  fail "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 fi
-pass "Fork review executes the parser script from the trusted base commit"
+pass "OpenCode review executes the parser script from the trusted base commit in both workflow paths"
 
 artifact_upload_count="$(count_occurrences 'uses: actions/upload-artifact@v4')"
 if [[ "$artifact_upload_count" != "2" ]]; then
