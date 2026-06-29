@@ -47,8 +47,8 @@ import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } fr
 import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { setupSessionTabSync } from "./dockview-session-tab-sync";
 import {
-  setupSessionTabSync,
   setupChatPanelSafetyNet,
   useAutoSessionTab,
   useAutoPRPanel,
@@ -583,8 +583,10 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
       useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
       readyDisposersRef.current.push(setupGroupTracking(api));
-      setupSessionTabSync(api, appStore);
-      setupChatPanelSafetyNet(api, appStore);
+      const sessionTabSyncDisposable = setupSessionTabSync(api, appStore);
+      readyDisposersRef.current.push(() => sessionTabSyncDisposable.dispose());
+      const chatPanelSafetyNetDisposable = setupChatPanelSafetyNet(api, appStore);
+      readyDisposersRef.current.push(() => chatPanelSafetyNetDisposable.dispose());
       readyDisposersRef.current.push(setupLayoutPersistence(api, saveTimerRef, envIdRef));
       setupPortalCleanup(api, appStore);
       readyDisposersRef.current.push(setupContainerResizeSync(api));
