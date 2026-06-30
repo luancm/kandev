@@ -243,6 +243,22 @@ func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionI
 	return nil
 }
 
+// RestoreSession replaces a session's queue and pending move from a snapshot,
+// preserving queued-message identity fields.
+func (s *Service) RestoreSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	if err := s.repo.ReplaceSession(ctx, sessionID, entries, pendingMove); err != nil {
+		s.logger.Error("restore session queue failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("restored session queue",
+		zap.String("session_id", sessionID),
+		zap.Int("entries", len(entries)),
+		zap.Bool("pending_move", pendingMove != nil))
+	return nil
+}
+
 // SetPendingMove records a pending move for a session (replaces any existing one).
 // The move is applied by handleAgentReady when the agent's current turn completes.
 func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
@@ -256,6 +272,21 @@ func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *Pe
 		zap.String("session_id", sessionID),
 		zap.String("task_id", move.TaskID),
 		zap.String("workflow_step_id", move.WorkflowStepID))
+}
+
+// GetPendingMove retrieves the pending move for a session without removing it.
+func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("get pending move failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	if move == nil {
+		return nil, false
+	}
+	return move, true
 }
 
 // TakePendingMove retrieves and removes the pending move for a session.
