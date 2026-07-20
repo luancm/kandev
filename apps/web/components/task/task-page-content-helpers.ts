@@ -118,7 +118,7 @@ export function resolveEffectiveTask(
 
   if (!baseTask && !kanbanTask) return null;
   if (baseTask) return mergeBaseWithKanban(baseTask, kanbanTask);
-  if (kanbanTask) return buildTaskFromKanban(kanbanTask, taskDetails, initialTask);
+  if (kanbanTask) return buildTaskFromKanban(kanbanTask);
   return null;
 }
 
@@ -127,6 +127,13 @@ export function mergeBaseWithKanban(
   kanbanTask: KanbanState["tasks"][number] | null,
 ): Task {
   if (!kanbanTask) return baseTask;
+  const kanbanUpdatedAt = Date.parse(kanbanTask.updatedAt ?? "");
+  const baseUpdatedAt = Date.parse(baseTask.updated_at ?? "");
+  const hasNewerKanbanState =
+    Boolean(baseTask.archived_at) &&
+    Number.isFinite(kanbanUpdatedAt) &&
+    Number.isFinite(baseUpdatedAt) &&
+    kanbanUpdatedAt > baseUpdatedAt;
   return {
     ...baseTask,
     title: kanbanTask.title ?? baseTask.title,
@@ -136,25 +143,11 @@ export function mergeBaseWithKanban(
     position: kanbanTask.position ?? baseTask.position,
     state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
     repositories: baseTask.repositories,
-    // A task present in the kanban board is by definition not archived: the
-    // board never holds archived tasks, and unarchive re-adds it via
-    // task.updated(archived_at=null). The one-shot `fetchTask` that seeds
-    // baseTask only refetches on task-id change, so it keeps a stale
-    // archived_at after an in-place unarchive from the detail top bar —
-    // trust the live kanban entry instead. Without this the top bar keeps
-    // showing the Unarchive button / archived banner and the task "never
-    // comes back" even though the backend restored it.
-    archived_at: null,
+    archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
   };
 }
 
-export function buildTaskFromKanban(
-  kanbanTask: KanbanState["tasks"][number],
-  taskDetails: Task | null,
-  initialTask: Task | null,
-): Task {
-  const prevWorkspaceId = taskDetails?.workspace_id ?? initialTask?.workspace_id;
-  const prevBoardId = taskDetails?.workflow_id ?? initialTask?.workflow_id;
+export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): Task {
   return {
     id: toTaskId(kanbanTask.id),
     title: kanbanTask.title,
@@ -162,8 +155,8 @@ export function buildTaskFromKanban(
     workflow_step_id: kanbanTask.workflowStepId,
     position: kanbanTask.position,
     state: kanbanTask.state ?? "CREATED",
-    workspace_id: prevWorkspaceId ?? toWorkspaceId(""),
-    workflow_id: prevBoardId ?? toWorkflowId(""),
+    workspace_id: toWorkspaceId(""),
+    workflow_id: toWorkflowId(""),
     priority: 0,
     repositories: [],
     created_at: "",
