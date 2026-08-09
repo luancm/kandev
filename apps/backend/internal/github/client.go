@@ -166,3 +166,11 @@ type Client interface {
 	// status 404.
 	GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error)
 }
+
+// ExactPRBranchFinder is implemented by GitHub clients that can discover an
+// open PR by an attached repository anchor plus the exact observed head ref.
+// It is optional so third-party test clients and legacy adapters continue to
+// use FindPRByBranch safely when no runtime head identity is available.
+type ExactPRBranchFinder interface {
+	FindPRByExactHead(ctx context.Context, attachedOwner, attachedRepo string, head PRHeadRef) (*PR, error)
+}

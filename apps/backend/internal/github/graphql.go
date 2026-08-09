@@ -138,6 +138,7 @@ type graphQLBranchRef struct {
 	Owner  string
 	Repo   string
 	Branch string
+	Head   *PRHeadRef
 }
 
 // chunkedRefs splits refs into chunks of at most graphQLBatchChunkSize so
@@ -177,11 +178,13 @@ type batchedPRResult struct {
 	Author      struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	MergedAt  string    `json:"mergedAt"`
-	ClosedAt  string    `json:"closedAt"`
-	Reviews   struct {
+	CreatedAt      time.Time                 `json:"createdAt"`
+	UpdatedAt      time.Time                 `json:"updatedAt"`
+	MergedAt       string                    `json:"mergedAt"`
+	ClosedAt       string                    `json:"closedAt"`
+	Repository     graphQLRepositoryIdentity `json:"repository"`
+	HeadRepository graphQLRepositoryIdentity `json:"headRepository"`
+	Reviews        struct {
 		Nodes []reviewNode `json:"nodes"`
 	} `json:"reviews"`
 	ReviewRequests struct {
@@ -197,6 +200,14 @@ type batchedPRResult struct {
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+type graphQLRepositoryIdentity struct {
+	Name          string `json:"name"`
+	NameWithOwner string `json:"nameWithOwner"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
 }
 
 type batchedBranchPRNode struct {
@@ -371,6 +382,8 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid additions deletions ` +
+		`repository { name nameWithOwner owner { login } } ` +
+		`headRepository { name nameWithOwner owner { login } } ` +
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
@@ -385,8 +398,18 @@ func buildBatchedBranchQuery(refs []graphQLBranchRef) (string, map[string]any) {
 	var b strings.Builder
 	b.WriteString("query Branches { ")
 	for i, r := range refs {
-		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number %s } } } `,
-			i, r.Owner, r.Repo, graphQLBranchProbeLimit, r.Branch, prFieldsBlock())
+		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { `, i, r.Owner, r.Repo)
+		branch := r.Branch
+		if r.Head != nil {
+			branch = r.Head.Branch
+		}
+		fmt.Fprintf(&b, `pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number %s } } `,
+			graphQLBranchProbeLimit, branch, prFieldsBlock())
+		if r.Head != nil {
+			fmt.Fprintf(&b, `ref(qualifiedName: %q) { associatedPullRequests(first: %d, states: OPEN) { nodes { number %s } } } `,
+				"refs/heads/"+r.Head.Branch, graphQLBranchProbeLimit, prFieldsBlock())
+		}
+		b.WriteString(`} `)
 	}
 	b.WriteString(`rateLimit { limit remaining resetAt cost } `)
 	b.WriteString(`}`)
@@ -400,6 +423,12 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 	if raw.MergedAt != "" {
 		state = prStateMerged
 	}
+	baseOwner, baseRepo := owner, repo
+	if raw.Repository.Owner.Login != "" && raw.Repository.Name != "" {
+		baseOwner, baseRepo = raw.Repository.Owner.Login, raw.Repository.Name
+	} else if parts := strings.SplitN(raw.Repository.NameWithOwner, "/", 2); len(parts) == 2 {
+		baseOwner, baseRepo = parts[0], parts[1]
+	}
 	pr := &PR{
 		Number:         number,
 		Title:          raw.Title,
@@ -410,8 +439,10 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		HeadSHA:        raw.HeadRefOid,
 		BaseBranch:     raw.BaseRefName,
 		AuthorLogin:    raw.Author.Login,
-		RepoOwner:      owner,
-		RepoName:       repo,
+		RepoOwner:      baseOwner,
+		RepoName:       baseRepo,
+		BaseRepoOwner:  baseOwner,
+		BaseRepoName:   baseRepo,
 		Draft:          raw.IsDraft,
 		Mergeable:      raw.Mergeable == "MERGEABLE",
 		MergeableState: strings.ToLower(raw.MergeStatus),
@@ -421,6 +452,16 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		UpdatedAt:      raw.UpdatedAt,
 		MergedAt:       parseTimePtr(raw.MergedAt),
 		ClosedAt:       parseTimePtr(raw.ClosedAt),
+	}
+	pr.HeadRepoOwner = raw.HeadRepository.Owner.Login
+	pr.HeadRepoName = raw.HeadRepository.Name
+	if parts := strings.SplitN(raw.HeadRepository.NameWithOwner, "/", 2); len(parts) == 2 {
+		if pr.HeadRepoOwner == "" {
+			pr.HeadRepoOwner = parts[0]
+		}
+		if pr.HeadRepoName == "" {
+			pr.HeadRepoName = parts[1]
+		}
 	}
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
@@ -923,11 +964,29 @@ func decodeBatchedBranchChunk(
 			PullRequests struct {
 				Nodes []batchedBranchPRNode `json:"nodes"`
 			} `json:"pullRequests"`
+			Ref *struct {
+				AssociatedPullRequests struct {
+					Nodes []batchedBranchPRNode `json:"nodes"`
+				} `json:"associatedPullRequests"`
+			} `json:"ref"`
 		}
 		if err := json.Unmarshal(raw, &inner); err != nil {
 			return fmt.Errorf("decode branch alias %s: %w", alias, err)
 		}
-		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
+		if ref.Head == nil {
+			node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
+			if !ok {
+				continue
+			}
+			status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
+			result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
+			continue
+		}
+		candidates := append([]batchedBranchPRNode(nil), inner.PullRequests.Nodes...)
+		if inner.Ref != nil {
+			candidates = append(candidates, inner.Ref.AssociatedPullRequests.Nodes...)
+		}
+		node, ok := selectExactBranchPRNode(candidates, ref)
 		if !ok {
 			// Zero nodes is a definitive answer: the repository resolved and
 			// has no open PR on this branch. Two or more is ambiguous and
@@ -941,6 +1000,45 @@ func decodeBatchedBranchChunk(
 		out.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 	}
 	return nil
+}
+
+func selectExactBranchPRNode(nodes []batchedBranchPRNode, ref graphQLBranchRef) (*batchedBranchPRNode, bool) {
+	if ref.Head == nil {
+		return nil, false
+	}
+	unique := make(map[string]*batchedBranchPRNode)
+	for i := range nodes {
+		node := &nodes[i]
+		if node.HeadRefName != ref.Head.Branch {
+			continue
+		}
+		headOwner := node.HeadRepository.Owner.Login
+		headRepo := node.HeadRepository.Name
+		if headOwner == "" || headRepo == "" {
+			parts := strings.SplitN(node.HeadRepository.NameWithOwner, "/", 2)
+			if len(parts) == 2 {
+				headOwner, headRepo = parts[0], parts[1]
+			}
+		}
+		if headOwner != ref.Head.Owner || headRepo != ref.Head.Repo {
+			continue
+		}
+		baseOwner, baseRepo := ref.Owner, ref.Repo
+		if node.Repository.Owner.Login != "" && node.Repository.Name != "" {
+			baseOwner, baseRepo = node.Repository.Owner.Login, node.Repository.Name
+		} else if parts := strings.SplitN(node.Repository.NameWithOwner, "/", 2); len(parts) == 2 {
+			baseOwner, baseRepo = parts[0], parts[1]
+		}
+		key := fmt.Sprintf("%s/%s#%d", baseOwner, baseRepo, node.Number)
+		unique[key] = node
+	}
+	if len(unique) != 1 {
+		return nil, false
+	}
+	for _, node := range unique {
+		return node, true
+	}
+	return nil, false
 }
 
 func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNode, bool) {

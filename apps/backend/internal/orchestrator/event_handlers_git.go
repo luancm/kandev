@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -161,7 +162,7 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	}
 
 	// Update PR watch branch if the user changed branches (e.g. renamed)
-	s.syncPRWatchBranch(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch)
+	s.syncPRWatchTarget(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch, data.Status.HeadRemote)
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
 	s.trackPushAndAssociatePR(ctx, data)
@@ -277,6 +278,7 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 		data.TaskID,
 		data.Status.RepositoryName,
 		data.Status.Branch,
+		data.Status.HeadRemote,
 	)
 }
 
@@ -287,7 +289,11 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // provider) repository — this passes the shared repository identity into the
 // existing provider-specific path. Extracted from trackPushAndAssociatePR to
 // keep that function inside the statement budget.
-func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string, headRemotes ...*streams.GitHeadRemote) {
+	var headRemote *streams.GitHeadRemote
+	if len(headRemotes) > 0 {
+		headRemote = headRemotes[0]
+	}
 	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
 	if identity.provider == gitlabProviderName {
 		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
@@ -296,7 +302,7 @@ func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, 
 	if s.githubService == nil {
 		return
 	}
-	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity, headRemote)
 }
 
 type pushRepositoryIdentity struct {
@@ -462,17 +468,10 @@ func (s *Service) pushTrackerForget(sessionID string) {
 	})
 }
 
-// syncPRWatchBranch updates the PR watch branch if the live git branch
-// differs from what's stored (e.g. user renamed the branch).
-// Only updates watches that haven't found a PR yet (pr_number=0), and only
-// within the repository the status belongs to — a session holds one watch per
-// (repository, branch), so a session-wide lookup would re-point whichever row
-// the query happened to return first.
-//
-// This runs on every git-status tick, so the single watch listing is also the
-// early-out: once every watch has found its PR there is nothing to re-point
-// and we return before resolving the repository.
-func (s *Service) syncPRWatchBranch(ctx context.Context, taskID, sessionID, repositoryName, liveBranch string) {
+// syncPRWatchTarget updates the PR watch's local branch and runtime head if
+// the live git status differs from what's stored.
+// Only updates watches that haven't found a PR yet (pr_number=0).
+func (s *Service) syncPRWatchTarget(ctx context.Context, taskID, sessionID, repositoryName, liveBranch string, headRemote *streams.GitHeadRemote) {
 	if s.githubService == nil || liveBranch == "" {
 		return
 	}
@@ -487,20 +486,56 @@ func (s *Service) syncPRWatchBranch(ctx context.Context, taskID, sessionID, repo
 		return
 	}
 	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
-	if watchForRepoBranch(watches, repositoryID, liveBranch) != nil {
+	if watch := watchForRepoBranch(watches, repositoryID, liveBranch); watch != nil {
+		if watch.PRNumber != 0 || sameGitHeadRemote(watch, headRemote) {
+			return
+		}
+		if updateErr := s.updatePRWatchSearchTarget(ctx, watch, liveBranch, headRemote); updateErr != nil {
+			s.logger.Error("failed to update PR watch head from git status",
+				zap.String("session_id", sessionID), zap.Error(updateErr))
+		}
 		return
 	}
-	if !s.repointSearchingPRWatch(ctx, watches, sessionID, repositoryID, liveBranch, "git status") {
-		// Reached only when the session has a searching watch but none for
-		// this repository — most often because resolvePushRepo could not
-		// resolve repositoryName and returned "". Silent here made "the PR
-		// for branch X was never picked up" indistinguishable from a failed
-		// reset; push detection and the poller still cover the branch.
-		s.logger.Debug("no searching PR watch to re-point for branch",
-			zap.String("session_id", sessionID),
-			zap.String("repository_id", repositoryID),
-			zap.String("branch", liveBranch))
+	for _, watch := range watches {
+		if watch == nil || watch.RepositoryID != repositoryID || watch.PRNumber != 0 {
+			continue
+		}
+		if updateErr := s.updatePRWatchSearchTarget(ctx, watch, liveBranch, headRemote); updateErr != nil {
+			s.logger.Error("failed to update PR watch target from git status",
+				zap.String("session_id", sessionID), zap.Error(updateErr))
+		} else {
+			s.logger.Info("PR watch branch changed, updating from git status",
+				zap.String("session_id", sessionID),
+				zap.String("old_branch", watch.Branch),
+				zap.String("new_branch", liveBranch))
+		}
+		return
 	}
+	// Reached only when the session has a searching watch but none for this
+	// repository — most often because resolvePushRepo could not resolve
+	// repositoryName. Push detection and the poller still cover the branch.
+	s.logger.Debug("no searching PR watch to re-point for branch",
+		zap.String("session_id", sessionID),
+		zap.String("repository_id", repositoryID),
+		zap.String("branch", liveBranch))
+}
+
+func (s *Service) updatePRWatchSearchTarget(ctx context.Context, watch *github.PRWatch, branch string, headRemote *streams.GitHeadRemote) error {
+	var headHost, headOwner, headRepo, headBranch string
+	if headRemote != nil {
+		headHost, headOwner, headRepo, headBranch = headRemote.Host, headRemote.Owner, headRemote.Repo, headRemote.Branch
+	}
+	return s.githubService.UpdatePRWatchSearchTargetIfSearching(ctx, watch.ID, branch, headHost, headOwner, headRepo, headBranch)
+}
+
+func sameGitHeadRemote(watch *github.PRWatch, headRemote *streams.GitHeadRemote) bool {
+	if watch == nil {
+		return false
+	}
+	if headRemote == nil {
+		return watch.HeadHost == "" && watch.HeadOwner == "" && watch.HeadRepo == "" && watch.HeadBranch == ""
+	}
+	return watch.HeadHost == headRemote.Host && watch.HeadOwner == headRemote.Owner && watch.HeadRepo == headRemote.Repo && watch.HeadBranch == headRemote.Branch
 }
 
 func anySearchingPRWatch(watches []*github.PRWatch) bool {

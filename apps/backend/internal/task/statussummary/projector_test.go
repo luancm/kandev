@@ -1,3 +1,4 @@
+//revive:disable:file-length-limit // Existing status-summary regression coverage is scenario-heavy.
 package statussummary
 
 //revive:disable:file-length-limit // Projector regression coverage is intentionally scenario-heavy.

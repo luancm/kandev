@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -71,6 +72,58 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		}
 		if payload.Status.RemoteHeadCommit != "upstream-head" || payload.Status.RemoteAhead != 2 || payload.Status.RemoteBehind != 1 {
 			t.Errorf("upstream evidence was dropped: head=%q ahead=%d behind=%d", payload.Status.RemoteHeadCommit, payload.Status.RemoteAhead, payload.Status.RemoteBehind)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for git status event")
+	}
+}
+
+func TestPublishGitStatus_PropagatesHeadRemote(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	eventBus := bus.NewMemoryEventBus(log)
+	pub := NewEventPublisher(eventBus, log)
+
+	received := make(chan *bus.Event, 1)
+	subj := events.BuildGitEventSubject("sess-head")
+	sub, err := eventBus.Subscribe(subj, func(_ context.Context, ev *bus.Event) error {
+		received <- ev
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "sess-head"}
+	pub.PublishGitStatus(exec, &agentctl.GitStatusUpdate{
+		Timestamp: time.Now(),
+		Branch:    "feature/x",
+		HeadRemote: &agentctl.GitHeadRemote{
+			Provider: "github",
+			Host:     "github.com",
+			Owner:    "fork",
+			Repo:     "project",
+			Branch:   "feature/x",
+		},
+	})
+
+	select {
+	case ev := <-received:
+		payload, ok := ev.Data.(*GitEventPayload)
+		if !ok || payload == nil || payload.Status == nil {
+			t.Fatalf("expected status payload, got %T", ev.Data)
+		}
+		body, err := json.Marshal(payload.Status)
+		if err != nil {
+			t.Fatalf("marshal status: %v", err)
+		}
+		var status map[string]any
+		if err := json.Unmarshal(body, &status); err != nil {
+			t.Fatalf("unmarshal status: %v", err)
+		}
+		head, ok := status["head_remote"].(map[string]any)
+		if !ok || head["owner"] != "fork" || head["repo"] != "project" {
+			t.Fatalf("head_remote = %v, want propagated fork/project identity", status["head_remote"])
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for git status event")

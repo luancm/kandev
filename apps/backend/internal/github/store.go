@@ -95,6 +95,10 @@ const createTablesSQL = `
 		repo TEXT NOT NULL,
 		pr_number INTEGER NOT NULL,
 		branch TEXT NOT NULL,
+		head_host TEXT NOT NULL DEFAULT '',
+		head_owner TEXT NOT NULL DEFAULT '',
+		head_repo TEXT NOT NULL DEFAULT '',
+		head_branch TEXT NOT NULL DEFAULT '',
 		last_checked_at DATETIME,
 		last_comment_at DATETIME,
 		last_check_status TEXT DEFAULT '',
@@ -507,6 +511,10 @@ func (s *Store) applyIdempotentSchemaColumns() {
 	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN head_host TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN head_owner TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN head_repo TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN head_branch TEXT NOT NULL DEFAULT ''`)
 	// CI popover: aggregate counts + branch protection's required_approving_review_count
 	// + unresolved review-threads, surfaced in the PR top-bar hover popover so the
 	// frontend can render the counts row without a second round-trip.
@@ -1211,6 +1219,10 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 				repo TEXT NOT NULL,
 				pr_number INTEGER NOT NULL,
 				branch TEXT NOT NULL,
+				head_host TEXT NOT NULL DEFAULT '',
+				head_owner TEXT NOT NULL DEFAULT '',
+				head_repo TEXT NOT NULL DEFAULT '',
+				head_branch TEXT NOT NULL DEFAULT '',
 				last_checked_at DATETIME,
 				last_comment_at DATETIME,
 				last_check_status TEXT DEFAULT '',
@@ -1221,10 +1233,12 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			)`,
 			`INSERT INTO github_pr_watches_new (
 				id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
+				head_host, head_owner, head_repo, head_branch,
 				last_checked_at, last_comment_at, last_check_status, last_review_state,
 				created_at, updated_at
 			) SELECT
 				id, COALESCE(workspace_id, ''), session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
+				COALESCE(head_host, ''), COALESCE(head_owner, ''), COALESCE(head_repo, ''), COALESCE(head_branch, ''),
 				last_checked_at, last_comment_at, last_check_status, last_review_state,
 				created_at, updated_at
 			FROM github_pr_watches`,
@@ -1331,9 +1345,11 @@ func (s *Store) CreatePRWatch(ctx context.Context, w *PRWatch) error {
 	w.CreatedAt = now
 	w.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_pr_watches (id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch, last_check_status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
+		INSERT INTO github_pr_watches (id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
+			head_host, head_owner, head_repo, head_branch, last_check_status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch,
+		w.HeadHost, w.HeadOwner, w.HeadRepo, w.HeadBranch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
 	return err
 }
 
@@ -1499,6 +1515,26 @@ func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo str
 	return err
 }
 
+// ResolvePRWatch atomically transitions a searching watch to a discovered PR.
+// The canonical base repository is persisted alongside the PR number so all
+// subsequent status operations address the repository that owns the PR. A
+// false result means another caller already resolved the watch (or it no
+// longer exists).
+func (s *Store) ResolvePRWatch(ctx context.Context, id, owner, repo string, prNumber int) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET owner = ?, repo = ?, pr_number = ?, updated_at = ?
+		 WHERE id = ? AND pr_number = 0`,
+		owner, repo, prNumber, time.Now().UTC(), id)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 // ResetPRWatch atomically resets a watch to the searching state: updates the
 // tracked branch and clears pr_number in a single statement. Used when the
 // session's active branch changes (rename, checkout) so the poller re-searches
@@ -1521,6 +1557,29 @@ func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 // source row (which is still searching, pr_number=0, so it owns no PR
 // state) and let the sibling continue to track the branch.
 func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error {
+	return s.updatePRWatchSearchTargetIfSearching(ctx, id, branch, nil)
+}
+
+// UpdatePRWatchSearchTargetIfSearching updates the local branch and the exact
+// runtime head target only while a watch is still searching. It retains the
+// existing branch-collision behavior: a searching source row is dropped when
+// its destination branch is already owned by a sibling watch.
+func (s *Store) UpdatePRWatchSearchTargetIfSearching(
+	ctx context.Context,
+	id, branch, headHost, headOwner, headRepo, headBranch string,
+) error {
+	return s.updatePRWatchSearchTargetIfSearching(ctx, id, branch, &prWatchHeadTarget{
+		host: headHost, owner: headOwner, repo: headRepo, branch: headBranch,
+	})
+}
+
+type prWatchHeadTarget struct {
+	host, owner, repo, branch string
+}
+
+func (s *Store) updatePRWatchSearchTargetIfSearching(
+	ctx context.Context, id, branch string, head *prWatchHeadTarget,
+) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1554,9 +1613,15 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 		return dropSourceAndCommit(ctx, tx, id)
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`,
-		branch, time.Now().UTC(), id); err != nil {
+	updateSQL := `UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`
+	args := []interface{}{branch, time.Now().UTC(), id}
+	if head != nil {
+		updateSQL = `UPDATE github_pr_watches
+			SET branch = ?, head_host = ?, head_owner = ?, head_repo = ?, head_branch = ?, updated_at = ?
+			WHERE id = ? AND pr_number = 0`
+		args = []interface{}{branch, head.host, head.owner, head.repo, head.branch, time.Now().UTC(), id}
+	}
+	if _, err := tx.ExecContext(ctx, updateSQL, args...); err != nil {
 		// Defensive belt-and-suspenders: the SQLite writer pool is
 		// SetMaxOpenConns(1), so an in-process CreatePRWatch cannot
 		// commit a sibling row between our probe and this UPDATE. But

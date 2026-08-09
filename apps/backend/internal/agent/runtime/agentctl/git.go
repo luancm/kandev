@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // GitOperationResult represents the result of a git operation.
@@ -530,6 +532,7 @@ type GitStatusResult struct {
 	IsSubmodule      bool                   `json:"is_submodule,omitempty"`
 	Branch           string                 `json:"branch"`
 	RemoteBranch     string                 `json:"remote_branch"`
+	HeadRemote       *streams.GitHeadRemote `json:"head_remote,omitempty"`
 	HeadCommit       string                 `json:"head_commit"`
 	BaseCommit       string                 `json:"base_commit"` // Merge-base with origin branch
 	Ahead            int                    `json:"ahead"`

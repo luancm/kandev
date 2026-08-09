@@ -182,6 +182,38 @@ printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.c
 	}
 }
 
+func TestGHClient_FindPRByExactHeadUsesGraphQLMatcher(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+printf '%s\n' '{"data":{"b0":{"ref":{"associatedPullRequests":{"nodes":[{"number":42,"state":"OPEN","title":"upstream PR","url":"https://github.com/upstream/project/pull/42","headRefName":"review-feature","baseRefName":"main","repository":{"name":"project","nameWithOwner":"upstream/project","owner":{"login":"upstream"}},"headRepository":{"name":"project","nameWithOwner":"fork/project","owner":{"login":"fork"}}}]}}}}}'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	pr, err := NewGHClient().FindPRByExactHead(context.Background(), "fork", "project", PRHeadRef{
+		Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature",
+	})
+	if err != nil {
+		t.Fatalf("FindPRByExactHead: %v", err)
+	}
+	if pr == nil || pr.Number != 42 || pr.RepoOwner != "upstream" || pr.RepoName != "project" {
+		t.Fatalf("unexpected exact-head PR: %#v", pr)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read gh args: %v", err)
+	}
+	if !strings.Contains(string(args), "associatedPullRequests") || !strings.Contains(string(args), "refs/heads/review-feature") {
+		t.Fatalf("exact-head lookup did not use GraphQL associated ref query: %s", args)
+	}
+}
+
 func TestGHClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "gh-args.log")

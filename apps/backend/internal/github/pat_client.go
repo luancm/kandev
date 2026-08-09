@@ -244,6 +244,23 @@ func (c *PATClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, he
 	return nil, nil
 }
 
+func (c *PATClient) FindPRByExactHead(ctx context.Context, attachedOwner, attachedRepo string, head PRHeadRef) (*PR, error) {
+	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
+		Owner:  attachedOwner,
+		Repo:   attachedRepo,
+		Head:   &head,
+		Branch: head.Branch,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("find PR by exact head %s/%s:%s: %w", head.Owner, head.Repo, head.Branch, err)
+	}
+	status := statuses.Statuses[graphqlBranchKey(attachedOwner, attachedRepo, head.Branch, &head)]
+	if status == nil {
+		return nil, nil
+	}
+	return status.PR, nil
+}
+
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
 	user, err := c.GetAuthenticatedUser(ctx)
 	if err != nil {

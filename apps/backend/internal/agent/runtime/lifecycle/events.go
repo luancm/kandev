@@ -305,6 +305,7 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 		Status: &GitStatusData{
 			Branch:           update.Branch,
 			RemoteBranch:     update.RemoteBranch,
+			HeadRemote:       update.HeadRemote,
 			HeadCommit:       update.HeadCommit,
 			BaseCommit:       update.BaseCommit,
 			Modified:         update.Modified,

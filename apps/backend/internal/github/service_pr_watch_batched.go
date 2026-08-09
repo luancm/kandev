@@ -172,8 +172,9 @@ func batchedFetchSingleflightKey(numbered, searching []*PRWatch) string {
 			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.PRNumber))
 	}
 	for _, w := range searching {
-		parts = append(parts, fmt.Sprintf("b:%s/%s@%s",
-			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.Branch))
+		parts = append(parts, fmt.Sprintf("b:%s/%s@%s|%s/%s/%s",
+			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.Branch,
+			strings.ToLower(w.HeadHost), strings.ToLower(w.HeadOwner), strings.ToLower(w.HeadRepo)+"/"+w.HeadBranch))
 	}
 	sort.Strings(parts)
 	return "batched-fetch:" + strings.Join(parts, "|")
@@ -221,7 +222,11 @@ func (s *Service) fetchBatchedBranchStatuses(
 		if s.isRepoCachedAsMissingForScope(cacheScope, w.Owner, w.Repo) {
 			continue
 		}
-		refs = append(refs, graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch})
+		ref := graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch}
+		if w.HeadOwner != "" && w.HeadRepo != "" && w.HeadBranch != "" {
+			ref.Head = &PRHeadRef{Host: w.HeadHost, Owner: w.HeadOwner, Repo: w.HeadRepo, Branch: w.HeadBranch}
+		}
+		refs = append(refs, ref)
 	}
 	if len(refs) == 0 {
 		return nil
@@ -421,10 +426,19 @@ func (s *Service) applyBatchedSearchingWatch(
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
 	}
-	if err := s.store.UpdatePRWatchPRNumber(ctx, w.ID, status.PR.Number); err != nil {
+	if w.HeadOwner != "" && w.HeadRepo != "" && w.HeadBranch != "" {
+		if err := s.validateDiscoveredPRBase(ctx, client, w.WorkspaceID, status.PR); err != nil {
+			return PRWatchSyncResult{Watch: w, Status: status, SyncFailed: true}
+		}
+	}
+	resolved, err := s.store.ResolvePRWatch(ctx, w.ID, status.PR.RepoOwner, status.PR.RepoName, status.PR.Number)
+	if err != nil {
 		s.logger.Error("failed to update PR watch with detected PR",
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, Status: status, Found: true}
+	}
+	if !resolved {
+		return PRWatchSyncResult{Watch: w, Status: status}
 	}
 	if _, err := s.AssociatePRWithTaskForWorkspace(ctx, w.WorkspaceID, w.TaskID, w.RepositoryID, status.PR); err != nil {
 		s.logger.Error("failed to associate detected PR with task",

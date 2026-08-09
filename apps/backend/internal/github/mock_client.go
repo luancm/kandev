@@ -226,6 +226,36 @@ func (m *MockClient) FindPRByBranch(_ context.Context, owner, repo, branch strin
 	return pr, nil
 }
 
+func (m *MockClient) FindPRByExactHead(_ context.Context, attachedOwner, attachedRepo string, head PRHeadRef) (*PR, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var found *PR
+	for _, pr := range m.prs {
+		if !matchesExactHeadPR(pr, attachedOwner, attachedRepo, head) {
+			continue
+		}
+		if found == nil {
+			found = pr
+			continue
+		}
+		if found.RepoOwner != pr.RepoOwner || found.RepoName != pr.RepoName || found.Number != pr.Number {
+			return nil, nil
+		}
+	}
+	return found, nil
+}
+
+func matchesExactHeadPR(pr *PR, attachedOwner, attachedRepo string, head PRHeadRef) bool {
+	if pr == nil || (pr.State != "" && strings.ToLower(pr.State) != defaultPRState) {
+		return false
+	}
+	if pr.HeadBranch != head.Branch || !strings.EqualFold(pr.HeadRepoOwner, head.Owner) || !strings.EqualFold(pr.HeadRepoName, head.Repo) {
+		return false
+	}
+	return (strings.EqualFold(pr.RepoOwner, attachedOwner) && strings.EqualFold(pr.RepoName, attachedRepo)) ||
+		(strings.EqualFold(pr.HeadRepoOwner, attachedOwner) && strings.EqualFold(pr.HeadRepoName, attachedRepo))
+}
+
 func (m *MockClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
 	pr, err := m.FindPRByBranch(ctx, owner, repo, branch)
 	if err != nil || pr == nil {

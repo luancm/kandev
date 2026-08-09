@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -1296,6 +1297,7 @@ type GitStatusResult struct {
 	IsSubmodule      bool                   `json:"is_submodule,omitempty"`
 	Branch           string                 `json:"branch"`
 	RemoteBranch     string                 `json:"remote_branch"`
+	HeadRemote       *streams.GitHeadRemote `json:"head_remote,omitempty"`
 	HeadCommit       string                 `json:"head_commit"`
 	BaseCommit       string                 `json:"base_commit"` // Merge-base with origin branch
 	Ahead            int                    `json:"ahead"`
@@ -1410,6 +1412,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 			IsSubmodule:      status.IsSubmodule,
 			Branch:           status.Branch,
 			RemoteBranch:     status.RemoteBranch,
+			HeadRemote:       status.HeadRemote,
 			HeadCommit:       status.HeadCommit,
 			BaseCommit:       status.BaseCommit,
 			Ahead:            status.Ahead,
@@ -1472,6 +1475,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		IsSubmodule:      status.IsSubmodule,
 		Branch:           status.Branch,
 		RemoteBranch:     status.RemoteBranch,
+		HeadRemote:       status.HeadRemote,
 		HeadCommit:       status.HeadCommit,
 		BaseCommit:       status.BaseCommit,
 		Ahead:            status.Ahead,

@@ -309,6 +309,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	if remoteOut, err := wt.runGitOutput(ctx, "rev-parse", "--abbrev-ref", "@{upstream}"); err == nil {
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
+	update.HeadRemote = wt.getGitHeadRemote(ctx, update.Branch)
 
 	// Get current HEAD commit SHA
 	if headOut, err := wt.runGitOutput(ctx, "rev-parse", "HEAD"); err == nil {

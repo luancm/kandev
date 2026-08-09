@@ -166,6 +166,100 @@ func sameRepositoryIdentity(ownerA, repoA, ownerB, repoB string) bool {
 		strings.EqualFold(strings.TrimSpace(repoA), strings.TrimSpace(repoB))
 }
 
+// FindPRByExactHeadForWorkspace discovers an open PR that connects the
+// attached repository to the exact runtime head repository and branch. The
+// attached repository is validated before resolving credentials; a discovered
+// PR's canonical base is then checked against workspace scope and automation
+// visibility before it can be returned to a watch.
+func (s *Service) FindPRByExactHeadForWorkspace(
+	ctx context.Context, workspaceID, attachedOwner, attachedRepo string, head PRHeadRef,
+) (*PR, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, attachedOwner, attachedRepo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, attachedOwner, attachedRepo)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(head.Owner) == "" || strings.TrimSpace(head.Repo) == "" || strings.TrimSpace(head.Branch) == "" {
+		return resolved.Client.FindPRByBranch(ctx, attachedOwner, attachedRepo, head.Branch)
+	}
+	return s.findPRByExactHeadWithClient(ctx, resolved.Client, workspaceID, attachedOwner, attachedRepo, head)
+}
+
+func (s *Service) findPRByExactHeadWithClient(
+	ctx context.Context, client Client, workspaceID, attachedOwner, attachedRepo string, head PRHeadRef,
+) (*PR, error) {
+	finder, ok := client.(ExactPRBranchFinder)
+	if !ok {
+		return client.FindPRByBranch(ctx, attachedOwner, attachedRepo, head.Branch)
+	}
+	pr, err := finder.FindPRByExactHead(ctx, attachedOwner, attachedRepo, head)
+	if err != nil || pr == nil {
+		return pr, err
+	}
+	if err := s.validateDiscoveredPRBase(ctx, client, workspaceID, pr); err != nil {
+		return nil, err
+	}
+	return pr, nil
+}
+
+func (s *Service) validateDiscoveredPRBase(ctx context.Context, client Client, workspaceID string, pr *PR) error {
+	baseOwner, baseRepo := pr.RepoOwner, pr.RepoName
+	if baseOwner == "" {
+		baseOwner = pr.BaseRepoOwner
+	}
+	if baseRepo == "" {
+		baseRepo = pr.BaseRepoName
+	}
+	if baseOwner == "" || baseRepo == "" {
+		return ErrRepoNotResolvable
+	}
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, baseOwner, baseRepo); err != nil {
+		return err
+	}
+	checker, ok := client.(repositoryAccessChecker)
+	if !ok {
+		return fmt.Errorf("verify automation repository access for %s/%s: unsupported client", baseOwner, baseRepo)
+	}
+	visible, err := checker.HasRepositoryAccess(ctx, baseOwner, baseRepo)
+	if err != nil {
+		if repositoryAccessDenied(err) {
+			return fmt.Errorf("%w: automation connection cannot access %s/%s", ErrRepoNotResolvable, baseOwner, baseRepo)
+		}
+		return fmt.Errorf("verify automation repository access for %s/%s: %w", baseOwner, baseRepo, err)
+	}
+	if !visible {
+		return fmt.Errorf("%w: automation connection cannot access %s/%s", ErrRepoNotResolvable, baseOwner, baseRepo)
+	}
+	return nil
+}
+
+func (s *Service) findPRForWatchWithResolvedClient(
+	ctx context.Context, resolved *resolvedServiceClient, watch *PRWatch,
+) (*PR, error) {
+	if resolved == nil || resolved.Client == nil || watch == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	if watch.HeadOwner == "" || watch.HeadRepo == "" || watch.HeadBranch == "" {
+		return resolved.Client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
+	}
+	return s.findPRByExactHeadWithClient(ctx, resolved.Client, watch.WorkspaceID, watch.Owner, watch.Repo, PRHeadRef{
+		Host: watch.HeadHost, Owner: watch.HeadOwner, Repo: watch.HeadRepo, Branch: watch.HeadBranch,
+	})
+}
+
+func (s *Service) findPRForWatch(ctx context.Context, watch *PRWatch) (*PR, error) {
+	if watch == nil || watch.WorkspaceID == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
+	if err != nil {
+		return nil, err
+	}
+	return s.findPRForWatchWithResolvedClient(ctx, resolved, watch)
+}
+
 func (s *Service) GetPRFeedbackForAutomation(
 	ctx context.Context,
 	workspaceID, owner, repo string,

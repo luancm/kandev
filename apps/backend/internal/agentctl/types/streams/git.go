@@ -70,6 +70,12 @@ type GitStatusUpdate struct {
 	// checkout with an upstream snapshot without confusing it with the base.
 	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
 
+	// HeadRemote identifies the repository and remote branch that owns the
+	// current branch's contribution head. It prefers Git's push target and
+	// falls back to the upstream tracking target. This is distinct from
+	// RemoteBranch, which always reports the upstream tracking ref.
+	HeadRemote *GitHeadRemote `json:"head_remote,omitempty"`
+
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`
 
@@ -86,6 +92,17 @@ type GitStatusUpdate struct {
 	// BranchDeletions is the total number of deleted lines across all changes on
 	// this branch compared to the merge-base (committed + staged + unstaged).
 	BranchDeletions int `json:"branch_deletions,omitempty"`
+}
+
+// GitHeadRemote is the normalized, credential-free identity of a branch's
+// configured remote head. It is used by backend contribution discovery and is
+// intentionally separate from the existing RemoteBranch tracking-ref field.
+type GitHeadRemote struct {
+	Provider string `json:"provider,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Owner    string `json:"owner,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	Branch   string `json:"branch,omitempty"`
 }
 
 // FileInfo represents detailed information about a file's git status.

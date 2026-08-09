@@ -28,6 +28,7 @@ type (
 
 	// Git stream types
 	GitStatusUpdate             = streams.GitStatusUpdate
+	GitHeadRemote               = streams.GitHeadRemote
 	GitCommitNotification       = streams.GitCommitNotification
 	GitResetNotification        = streams.GitResetNotification
 	GitBranchSwitchNotification = streams.GitBranchSwitchNotification

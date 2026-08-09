@@ -24,6 +24,8 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 (the task-level control plane for the five switches was superseded by per-PR
 scoping; see that ADR's Consequences section).
 
+Decision: [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-08-09-runtime-branch-remote-identity.md).
+
 ## What
 
 - The PR CI popover above the chat input shows five automation controls,
@@ -168,6 +170,29 @@ scoping; see that ADR's Consequences section).
 - Branch-only PR discovery associates PR metadata without fetching unused
   review-thread continuation pages. Once the watch has a PR number, the next
   numbered status sync produces the complete review-thread count.
+- Branch-only PR discovery uses the current branch's configured Git push ref as
+  its exact head identity, falling back to the upstream tracking ref when Git
+  has no distinct push ref. Kandev resolves the referenced remote under its
+  configured name and never assigns behavior to the literal names `origin` or
+  `upstream`.
+- `origin` for a contributor fork and `upstream` for the main repository remain
+  a recommended convention, not a requirement. A user may name either remote
+  differently or use another valid Git push/tracking configuration.
+- The task's attached repository remains the authorization and association
+  anchor. Runtime Git configuration supplies only a credential-free observed
+  head repository identity; it never rewrites the persisted repository's
+  provider identity. A discovered PR must connect that attached repository and
+  the exact observed head ref, and its base repository must remain inside the
+  workspace GitHub scope and automation principal's access.
+- A searching PR watch persists the observed head host, owner, and repository
+  so restart and background polling keep the same exact lookup. Once Kandev
+  finds an unambiguous PR, it atomically records the PR number and switches the
+  watch target to the PR's base repository for numbered status checks while
+  retaining the task repository association.
+- When no usable runtime remote identity is available, Kandev falls back to the
+  attached repository as the expected head. A same-named branch in another
+  fork is never enough to select a PR, and multiple eligible PRs remain
+  unlinked as ambiguous.
 - Saving PR automation options while any option is enabled immediately
   evaluates the task's current linked PRs instead of waiting for the next PR
   watch poll. Prompt edits do not reset unchanged checkpoints.
@@ -204,6 +229,20 @@ scoping; see that ADR's Consequences section).
 - Automation controls persist across Kandev restarts.
 
 ## Data model
+
+`github_pr_watches` additions for branch-only discovery
+
+- `head_host` string, default `""`. Normalized host of the current branch's
+  observed push/tracking remote while the watch is searching.
+- `head_owner` string, default `""`. Exact observed GitHub head owner.
+- `head_repo` string, default `""`. Exact observed GitHub head repository.
+- `head_branch` string, default `""`. Exact remote branch ref name; the
+  existing `branch` remains the local task branch used to identify the watch.
+- Existing `repository_id` remains the attached task-repository anchor.
+- Existing `owner` and `repo` initially identify the attached repository used
+  to authorize discovery. Once a PR is found, they atomically change to the
+  PR's base owner and repository with `pr_number` so later numbered status
+  checks address the canonical PR location.
 
 `github_task_ci_options`
 
@@ -488,6 +527,9 @@ Auto-merge cycle for one task/PR:
 | Dependency / invariant                                                 | Behavior                                                                                                                                                                                                                                                        |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GitHub auth is missing or invalid                                      | Controls remain visible but saving/enabling or automation execution surfaces an error; no auto-fix prompt, lifecycle prompt, or merge is attempted.                                                                                                             |
+| Current branch remote cannot be normalized                             | Keep the attached repository as the expected head, never persist or log a credential-bearing URL, and leave cross-fork candidates unlinked unless the attached exact ref identifies one unambiguous PR.                                                        |
+| Exact head ref has multiple eligible open PRs                          | Leave the task unlinked and retry on a later poll; never choose by result order, remote name, or branch name alone.                                                                                                                                             |
+| Discovered PR base is outside workspace GitHub scope or access         | Reject the candidate and keep the watch searching; a runtime remote cannot expand workspace automation authority.                                                                                                                                              |
 | Workspace GitHub login changes                                         | Kandev atomically rebinds `review_reviewer_login`, resets review-request baselines, and emits no notification for the identity change itself. If identity lookup fails, it preserves the prior login and checkpoints and retries later.                            |
 | PR is closed or merged                                                 | Auto-fix and auto-merge stop. The matching enabled terminal prompt remains eligible exactly once per observed terminal entry.                                                                                                                                   |
 | Full PR feedback fetch fails                                           | Auto-fix does not prompt; per-PR automation state records the error and the next materially changed lightweight status may retry.                                                                                                                               |
@@ -547,6 +589,23 @@ Auto-merge cycle for one task/PR:
   review-thread continuation fails in the same batch, **WHEN** lightweight PR
   status sync handles the failure, **THEN** it discards all partial statuses
   while still negative-caching the unresolvable repository.
+- **GIVEN** a task is attached to a GitHub fork and its current branch pushes
+  through a custom-named remote to that fork, with one open pull request
+  against the main repository, **WHEN** branch-only PR discovery runs, **THEN**
+  Kandev links that pull request and watches it under the main repository's
+  base identity.
+- **GIVEN** a task is attached to the main repository and its current branch's
+  configured push remote points to a contributor fork, **WHEN** one open pull
+  request connects that exact fork branch to the attached repository, **THEN**
+  Kandev links it without requiring the remote to be named `origin`.
+- **GIVEN** another fork has an open pull request with the same branch name,
+  **WHEN** branch-only PR discovery runs with an exact configured head remote,
+  **THEN** Kandev ignores the sibling fork's pull request and links only an
+  unambiguous pull request from the observed head repository.
+- **GIVEN** the current branch has no usable push or tracking remote identity,
+  **WHEN** branch-only PR discovery runs, **THEN** Kandev accepts only an
+  unambiguous pull request whose head is the attached repository and does not
+  guess among same-named branches in other forks.
 - **GIVEN** a user is viewing the CI popover automation controls, **WHEN** they activate the info icon, **THEN** they see help text explaining that Kandev uses the existing 1-minute PR watch checks, fetches full feedback only for candidate PRs, snapshots each auto-fix round, and merges only when readiness gates pass.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-fix CI & address comments`, **THEN** the setting persists and remains enabled after page reload.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-merge when ready`, **THEN** the setting persists and remains enabled after page reload.
@@ -700,6 +759,9 @@ Auto-merge cycle for one task/PR:
   immutable and server-owned; only the three per-PR booleans are exposed.
 - Streaming CI logs into the chat or popover.
 - Editing GitHub branch protection, review rules, or workflow files directly from the automation controls.
+- Redesigning the branch picker to group, label, or filter branches by remote.
+  Branch records already retain their remote name; whether additional remote
+  UI improves branch selection should be evaluated separately.
 - GitLab merge request automation.
 - Changing when terminal-only PR associations hide the PR status chip. Existing
   merged/closed banners continue to own that tray state.

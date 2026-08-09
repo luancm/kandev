@@ -2,15 +2,63 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap/zapcore"
 )
+
+func TestGetGitStatus_ReportsConfiguredPushHeadRemote(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	runGit(t, repoDir, "checkout", "-b", "feature/x")
+	runGit(t, repoDir, "push", "-u", "origin", "feature/x")
+	runGit(t, repoDir, "remote", "add", "fork", "https://github.com/fork/project.git")
+	runGit(t, repoDir, "remote", "set-url", "--push", "fork", "https://user:secret@github.com/fork/project.git")
+	runGit(t, repoDir, "config", "branch.feature/x.pushRemote", "fork")
+
+	status, err := wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus: %v", err)
+	}
+	body, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal status: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	head, ok := payload["head_remote"].(map[string]any)
+	if !ok {
+		t.Fatalf("head_remote = %v, want normalized runtime head identity", payload["head_remote"])
+	}
+	for field, want := range map[string]string{
+		"provider": "github",
+		"host":     "github.com",
+		"owner":    "fork",
+		"repo":     "project",
+		"branch":   "feature/x",
+	} {
+		if got := head[field]; got != want {
+			t.Errorf("head_remote.%s = %v, want %q", field, got, want)
+		}
+	}
+	if string(body) == "" || strings.Contains(string(body), "secret") {
+		t.Fatal("status exposed credentials in the runtime head identity")
+	}
+}
 
 // TestUpdateGitStatus_CancellationLogsDebugNotWarn verifies that a canceled
 // observation (the expected outcome during tracker teardown) is logged at

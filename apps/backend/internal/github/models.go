@@ -282,6 +282,16 @@ type PR struct {
 	ClosedAt            *time.Time          `json:"closed_at,omitempty"`
 }
 
+// PRHeadRef identifies the exact remote repository and branch observed in a
+// runtime checkout. Host is included for multi-host GitHub deployments; the
+// client executing the lookup remains the authority for credentials/access.
+type PRHeadRef struct {
+	Host   string `json:"host,omitempty"`
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+}
+
 // RequestedReviewer represents a pending reviewer request on a PR.
 type RequestedReviewer struct {
 	Login string `json:"login"`
@@ -399,6 +409,10 @@ type PRWatch struct {
 	Repo            string     `json:"repo" db:"repo"`
 	PRNumber        int        `json:"pr_number" db:"pr_number"`
 	Branch          string     `json:"branch" db:"branch"`
+	HeadHost        string     `json:"head_host,omitempty" db:"head_host"`
+	HeadOwner       string     `json:"head_owner,omitempty" db:"head_owner"`
+	HeadRepo        string     `json:"head_repo,omitempty" db:"head_repo"`
+	HeadBranch      string     `json:"head_branch,omitempty" db:"head_branch"`
 	LastCheckedAt   *time.Time `json:"last_checked_at,omitempty" db:"last_checked_at"`
 	LastCommentAt   *time.Time `json:"last_comment_at,omitempty" db:"last_comment_at"`
 	LastCheckStatus string     `json:"last_check_status" db:"last_check_status"`

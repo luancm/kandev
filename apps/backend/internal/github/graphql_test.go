@@ -180,6 +180,22 @@ func TestBuildBatchedBranchQuery_AliasesAllBranches(t *testing.T) {
 	}
 }
 
+func TestBuildBatchedBranchQuery_ExactHeadIncludesAssociatedRef(t *testing.T) {
+	q, _ := buildBatchedBranchQuery([]graphQLBranchRef{{
+		Owner: "upstream", Repo: "project", Branch: "local-feature",
+		Head: &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature"},
+	}})
+	if !strings.Contains(q, `ref(qualifiedName: "refs/heads/review-feature")`) {
+		t.Fatalf("exact-head lookup should inspect the observed head ref, got: %s", q)
+	}
+	if !strings.Contains(q, `associatedPullRequests(first: 2, states: OPEN)`) {
+		t.Fatalf("exact-head lookup should inspect associated pull requests, got: %s", q)
+	}
+	if !strings.Contains(q, `headRepository {`) || !strings.Contains(q, `repository {`) {
+		t.Fatalf("exact-head lookup should request base and head repository identities, got: %s", q)
+	}
+}
+
 func TestRunBatchedPRQuery_DecodesAliasesBackToRefs(t *testing.T) {
 	exec := &stubGraphQLExecutor{
 		response: `{
@@ -639,6 +655,75 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	}
 	if status.PR == nil || status.PR.Number != 7 {
 		t.Errorf("expected PR number 7, got %#v", status.PR)
+	}
+}
+
+func TestRunBatchedBranchQuery_MatchesExactHeadAndDeduplicatesRepresentations(t *testing.T) {
+	exec := &stubGraphQLExecutor{response: `{
+		"data": {
+			"b0": {
+				"pullRequests": {"nodes": [{
+					"number": 8, "state": "OPEN", "title": "sibling", "url": "https://x/8",
+					"headRefName": "review-feature", "baseRefName": "main",
+					"repository": {"name": "project", "nameWithOwner": "upstream/project", "owner": {"login": "upstream"}},
+					"headRepository": {"name": "project", "nameWithOwner": "other/project", "owner": {"login": "other"}}
+				}]},
+				"ref": {"associatedPullRequests": {"nodes": [{
+					"number": 7, "state": "OPEN", "title": "upstream PR", "url": "https://x/7",
+					"headRefName": "review-feature", "baseRefName": "main",
+					"repository": {"name": "project", "nameWithOwner": "upstream/project", "owner": {"login": "upstream"}},
+					"headRepository": {"name": "project", "nameWithOwner": "fork/project", "owner": {"login": "fork"}}
+				}, {
+					"number": 7, "state": "OPEN", "title": "upstream PR duplicate", "url": "https://x/7",
+					"headRefName": "review-feature", "baseRefName": "main",
+					"repository": {"name": "project", "nameWithOwner": "upstream/project", "owner": {"login": "upstream"}},
+					"headRepository": {"name": "project", "nameWithOwner": "fork/project", "owner": {"login": "fork"}}
+				}]}}
+			}
+		}
+	}`}
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{{
+		Owner: "fork", Repo: "project", Branch: "local-feature",
+		Head: &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature"},
+	}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	status := got[graphqlBranchKey("fork", "project", "local-feature")]
+	if status == nil || status.PR == nil {
+		t.Fatalf("exact-head status = %#v, want one PR", status)
+	}
+	if status.PR.Number != 7 || status.PR.RepoOwner != "upstream" || status.PR.RepoName != "project" {
+		t.Fatalf("exact-head PR = %+v, want upstream/project#7", status.PR)
+	}
+	if status.PR.HeadRepoOwner != "fork" || status.PR.HeadRepoName != "project" {
+		t.Fatalf("exact-head identity = %+v, want fork/project", status.PR)
+	}
+}
+
+func TestRunBatchedBranchQuery_RejectsAmbiguousExactHeadMatches(t *testing.T) {
+	exec := &stubGraphQLExecutor{response: `{
+		"data": {
+			"b0": {"ref": {"associatedPullRequests": {"nodes": [{
+				"number": 7, "state": "OPEN", "headRefName": "feature",
+				"repository": {"name": "project", "owner": {"login": "upstream"}},
+				"headRepository": {"name": "project", "owner": {"login": "fork"}}
+			}, {
+				"number": 8, "state": "OPEN", "headRefName": "feature",
+				"repository": {"name": "project", "owner": {"login": "upstream"}},
+				"headRepository": {"name": "project", "owner": {"login": "fork"}}
+			}]}}}
+		}
+	}`}
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{{
+		Owner: "fork", Repo: "project", Branch: "feature",
+		Head: &PRHeadRef{Owner: "fork", Repo: "project", Branch: "feature"},
+	}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ambiguous exact-head matches = %#v, want no result", got)
 	}
 }
 

@@ -33,6 +33,10 @@ func (c *NoopClient) FindPRByBranch(context.Context, string, string, string) (*P
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) FindPRByExactHead(context.Context, string, string, PRHeadRef) (*PR, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) FindPRByHead(context.Context, string, string, string, string, string) (*PR, error) {
 	return nil, ErrNoClient
 }

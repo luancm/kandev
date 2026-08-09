@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -43,12 +44,16 @@ type GitHubService interface {
 	CreatePRWatchForWorkspace(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*github.PRWatch, error)
 	EnsurePRWatchForWorkspace(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo, branch string) (*github.PRWatch, error)
 	FindPRByBranchForWorkspace(ctx context.Context, workspaceID, owner, repo, branch string) (*github.PR, error)
+	FindPRByExactHeadForWorkspace(ctx context.Context, workspaceID, owner, repo string, head github.PRHeadRef) (*github.PR, error)
+	GetPRWatchBySession(ctx context.Context, sessionID string) (*github.PRWatch, error)
 	GetPRWatchBySessionAndRepo(ctx context.Context, sessionID, repositoryID string) (*github.PRWatch, error)
 	GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID, repositoryID, branch string) (*github.PRWatch, error)
 	ListPRWatchesBySession(ctx context.Context, sessionID string) ([]*github.PRWatch, error)
 	UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch string) error
+	UpdatePRWatchSearchTargetIfSearching(ctx context.Context, id, branch, headHost, headOwner, headRepo, headBranch string) error
 	UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error
 	UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error
+	ResolvePRWatch(ctx context.Context, id, owner, repo string, prNumber int) (bool, error)
 	ResetPRWatch(ctx context.Context, id, branch string) error
 	AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
 	AssociatePRWithTaskForWorkspace(ctx context.Context, workspaceID, taskID, repositoryID string, pr *github.PR) (*github.TaskPR, error)
@@ -622,17 +627,21 @@ func (s *Service) resolveReviewRepository(ctx context.Context, workspaceID strin
 // and associated independently. Empty repositoryName falls back to the
 // session's primary repo (legacy single-repo path).
 func (s *Service) detectPushAndAssociatePR(
-	ctx context.Context, sessionID, taskID, repositoryName, branch string,
+	ctx context.Context, sessionID, taskID, repositoryName, branch string, headRemotes ...*streams.GitHeadRemote,
 ) {
+	var headRemote *streams.GitHeadRemote
+	if len(headRemotes) > 0 {
+		headRemote = headRemotes[0]
+	}
 	if s.githubService == nil {
 		return
 	}
 	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
-	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity, headRemote)
 }
 
 func (s *Service) detectPushAndAssociatePRWithIdentity(
-	ctx context.Context, sessionID, taskID, repositoryName, branch string, identity pushRepositoryIdentity,
+	ctx context.Context, sessionID, taskID, repositoryName, branch string, identity pushRepositoryIdentity, headRemote *streams.GitHeadRemote,
 ) {
 	workspaceID := s.taskWorkspaceID(ctx, taskID)
 	if workspaceID == "" {
@@ -655,7 +664,7 @@ func (s *Service) detectPushAndAssociatePRWithIdentity(
 		if existing.PRNumber > 0 {
 			return // PR already found and being monitored
 		}
-		s.searchPRForExistingWatch(ctx, workspaceID, existing, sessionID, taskID, branch)
+		s.searchPRForExistingWatch(ctx, workspaceID, existing, sessionID, taskID, branch, headRemote)
 		return
 	}
 
@@ -673,9 +682,19 @@ func (s *Service) detectPushAndAssociatePRWithIdentity(
 				return
 			}
 		}
-		foundPR, findErr := s.githubService.FindPRByBranchForWorkspace(
-			ctx, workspaceID, identity.owner, identity.name, branch,
-		)
+		var foundPR *github.PR
+		var findErr error
+		if headRemote != nil {
+			foundPR, findErr = s.githubService.FindPRByExactHeadForWorkspace(
+				ctx, workspaceID, identity.owner, identity.name, github.PRHeadRef{
+					Host: headRemote.Host, Owner: headRemote.Owner, Repo: headRemote.Repo, Branch: headRemote.Branch,
+				},
+			)
+		} else {
+			foundPR, findErr = s.githubService.FindPRByBranchForWorkspace(
+				ctx, workspaceID, identity.owner, identity.name, branch,
+			)
+		}
 		if findErr != nil || foundPR == nil {
 			s.logger.Debug("no PR found for branch (will retry)",
 				zap.String("branch", branch),
@@ -788,12 +807,16 @@ func isMultiBranchSubdir(subdir, repoName string) bool {
 // branch, then does a single immediate search so we don't wait for the 1-minute poller.
 func (s *Service) searchPRForExistingWatch(
 	ctx context.Context, workspaceID string, watch *github.PRWatch,
-	sessionID, taskID, branch string,
+	sessionID, taskID, branch string, headRemote *streams.GitHeadRemote,
 ) {
 	// Update branch if the agent switched branches since the watch was created.
 	// Use the atomic variant to guard against a concurrent PR association.
-	if watch.Branch != branch {
-		if err := s.githubService.UpdatePRWatchBranchIfSearching(ctx, watch.ID, branch); err != nil {
+	if watch.Branch != branch || (headRemote != nil && (watch.HeadHost != headRemote.Host || watch.HeadOwner != headRemote.Owner || watch.HeadRepo != headRemote.Repo || watch.HeadBranch != headRemote.Branch)) || (headRemote == nil && (watch.HeadHost != "" || watch.HeadOwner != "" || watch.HeadRepo != "" || watch.HeadBranch != "")) {
+		var headHost, headOwner, headRepo, headBranch string
+		if headRemote != nil {
+			headHost, headOwner, headRepo, headBranch = headRemote.Host, headRemote.Owner, headRemote.Repo, headRemote.Branch
+		}
+		if err := s.githubService.UpdatePRWatchSearchTargetIfSearching(ctx, watch.ID, branch, headHost, headOwner, headRepo, headBranch); err != nil {
 			s.logger.Warn("failed to update PR watch branch",
 				zap.String("watch_id", watch.ID),
 				zap.String("old_branch", watch.Branch),
@@ -804,9 +827,19 @@ func (s *Service) searchPRForExistingWatch(
 	// Immediate search — if found, update the existing watch and associate.
 	// We must not call associatePRFromPush here because it calls CreatePRWatch,
 	// which would fail with a UNIQUE constraint since the watch already exists.
-	foundPR, findErr := s.githubService.FindPRByBranchForWorkspace(
-		ctx, workspaceID, watch.Owner, watch.Repo, branch,
-	)
+	var foundPR *github.PR
+	var findErr error
+	if headRemote != nil {
+		foundPR, findErr = s.githubService.FindPRByExactHeadForWorkspace(
+			ctx, workspaceID, watch.Owner, watch.Repo, github.PRHeadRef{
+				Host: headRemote.Host, Owner: headRemote.Owner, Repo: headRemote.Repo, Branch: headRemote.Branch,
+			},
+		)
+	} else {
+		foundPR, findErr = s.githubService.FindPRByBranchForWorkspace(
+			ctx, workspaceID, watch.Owner, watch.Repo, branch,
+		)
+	}
 	if findErr == nil && foundPR != nil {
 		if foundPR.RepoOwner != "" && foundPR.RepoName != "" &&
 			(!strings.EqualFold(watch.Owner, foundPR.RepoOwner) || !strings.EqualFold(watch.Repo, foundPR.RepoName)) {
@@ -821,11 +854,14 @@ func (s *Service) searchPRForExistingWatch(
 			watch.Owner = foundPR.RepoOwner
 			watch.Repo = foundPR.RepoName
 		}
-		if err := s.githubService.UpdatePRWatchPRNumber(ctx, watch.ID, foundPR.Number); err != nil {
+		resolved, err := s.githubService.ResolvePRWatch(ctx, watch.ID, foundPR.RepoOwner, foundPR.RepoName, foundPR.Number)
+		if err != nil {
 			s.logger.Warn("failed to update PR watch number",
 				zap.String("watch_id", watch.ID),
 				zap.Int("pr_number", foundPR.Number),
 				zap.Error(err))
+		} else if !resolved {
+			return
 		}
 		// Use the watch's own repository_id so the association lands on the
 		// correct per-repo TaskPR row (matters once multi-repo watches exist;
@@ -1188,6 +1224,14 @@ func (s *Service) associatePRFromPushScoped(
 	if pr != nil && pr.RepoOwner != "" && pr.RepoName != "" {
 		watchOwner, watchRepo = pr.RepoOwner, pr.RepoName
 	}
+	baseOwner, baseRepo := pr.RepoOwner, pr.RepoName
+	if baseOwner == "" {
+		baseOwner = owner
+	}
+	if baseRepo == "" {
+		baseRepo = repoName
+	}
+	watchOwner, watchRepo = baseOwner, baseRepo
 	watch, watchErr := s.githubService.CreatePRWatchForWorkspace(
 		ctx, workspaceID, sessionID, taskID, repositoryID, watchOwner, watchRepo, pr.Number, branch,
 	)
@@ -1264,18 +1308,27 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	if workspaceID == "" {
 		return false, github.ErrGitHubWorkspaceRequired
 	}
-	if _, watchErr := s.githubService.EnsurePRWatchForWorkspace(
+	watch, watchErr := s.githubService.EnsurePRWatchForWorkspace(
 		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, branch,
-	); watchErr != nil {
+	)
+	if watchErr != nil {
 		s.logger.Warn("failed to ensure PR watch during check",
 			zap.String("session_id", sessionID),
 			zap.Error(watchErr))
 	}
 
 	// Try to find the PR immediately
-	pr, findErr := s.githubService.FindPRByBranchForWorkspace(
-		ctx, workspaceID, owner, repoName, branch,
-	)
+	var pr *github.PR
+	var findErr error
+	if watch != nil && watch.HeadOwner != "" && watch.HeadRepo != "" && watch.HeadBranch != "" {
+		pr, findErr = s.githubService.FindPRByExactHeadForWorkspace(
+			ctx, workspaceID, owner, repoName, github.PRHeadRef{
+				Host: watch.HeadHost, Owner: watch.HeadOwner, Repo: watch.HeadRepo, Branch: watch.HeadBranch,
+			},
+		)
+	} else {
+		pr, findErr = s.githubService.FindPRByBranchForWorkspace(ctx, workspaceID, owner, repoName, branch)
+	}
 	if findErr != nil || pr == nil {
 		return false, nil
 	}

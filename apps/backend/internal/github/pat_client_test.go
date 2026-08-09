@@ -379,6 +379,41 @@ func TestPATClient_FindPRByBranch_UsesGraphQLHeadRefName(t *testing.T) {
 	}
 }
 
+func TestPATClient_FindPRByExactHead_UsesAssociatedRefAndCanonicalBase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+			return
+		}
+		if !strings.Contains(body.Query, `ref(qualifiedName: "refs/heads/review-feature")`) ||
+			!strings.Contains(body.Query, `associatedPullRequests(first: 2, states: OPEN)`) {
+			t.Errorf("exact-head query missing associated ref lookup: %s", body.Query)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"b0":{"ref":{"associatedPullRequests":{"nodes":[{
+			"number":42,"state":"OPEN","title":"upstream PR","url":"https://github.com/upstream/project/pull/42",
+			"headRefName":"review-feature","baseRefName":"main",
+			"repository":{"name":"project","nameWithOwner":"upstream/project","owner":{"login":"upstream"}},
+			"headRepository":{"name":"project","nameWithOwner":"fork/project","owner":{"login":"fork"}}
+		}]}}}}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	pr, err := c.FindPRByExactHead(context.Background(), "fork", "project", PRHeadRef{
+		Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature",
+	})
+	if err != nil {
+		t.Fatalf("FindPRByExactHead: %v", err)
+	}
+	if pr == nil || pr.Number != 42 || pr.RepoOwner != "upstream" || pr.RepoName != "project" {
+		t.Fatalf("unexpected exact-head PR: %#v", pr)
+	}
+}
+
 func TestPATClient_FindPRByHead_UsesExactSourceRepository(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/kdlbs/kandev/pulls" {

@@ -333,9 +333,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
-	pr, err := p.service.FindPRByBranchForWorkspace(
-		ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch,
-	)
+	pr, err := p.service.findPRForWatch(ctx, watch)
 	if err != nil {
 		p.logger.Debug("failed to search for PR by branch",
 			zap.String("watch_id", watch.ID),
@@ -361,11 +359,15 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 	}
 
 	// Found a PR — update the watch and create association
-	if updateErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); updateErr != nil {
+	resolved, updateErr := p.service.store.ResolvePRWatch(ctx, watch.ID, pr.RepoOwner, pr.RepoName, pr.Number)
+	if updateErr != nil {
 		p.logger.Error("failed to update PR watch with detected PR",
 			zap.String("watch_id", watch.ID),
 			zap.Int("pr_number", pr.Number),
 			zap.Error(updateErr))
+		return
+	}
+	if !resolved {
 		return
 	}
 

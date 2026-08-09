@@ -142,6 +142,14 @@ func (s *Service) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch
 	return s.store.UpdatePRWatchBranchIfSearching(ctx, id, branch)
 }
 
+// UpdatePRWatchSearchTargetIfSearching persists the live local branch and
+// credential-free runtime head while the watch is still searching.
+func (s *Service) UpdatePRWatchSearchTargetIfSearching(
+	ctx context.Context, id, branch, headHost, headOwner, headRepo, headBranch string,
+) error {
+	return s.store.UpdatePRWatchSearchTargetIfSearching(ctx, id, branch, headHost, headOwner, headRepo, headBranch)
+}
+
 // UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
 func (s *Service) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
 	return s.store.UpdatePRWatchPRNumber(ctx, id, prNumber)
@@ -167,6 +175,12 @@ func (s *Service) rebindPRWatchRepository(ctx context.Context, watch *PRWatch, p
 	watch.Owner = pr.RepoOwner
 	watch.Repo = pr.RepoName
 	return nil
+}
+
+// ResolvePRWatch atomically stores the canonical PR base and number for a
+// searching watch.
+func (s *Service) ResolvePRWatch(ctx context.Context, id, owner, repo string, prNumber int) (bool, error) {
+	return s.store.ResolvePRWatch(ctx, id, owner, repo, prNumber)
 }
 
 // ResetPRWatch atomically resets a watch's branch and clears its pr_number so
@@ -1147,9 +1161,7 @@ func (s *Service) detectPRForWatchOnce(
 	// fires WHILE FindPRByBranch is running wins over our post-fetch
 	// classification — see Service.markRepoAsMissing for the rationale.
 	repoErrGen := s.repoErrorGenSnapshot()
-	pr, err := s.findPRByBranchInForkNetwork(
-		ctx, resolved.Client, resolved.CacheScope, watch.Owner, watch.Repo, watch.Branch,
-	)
+	pr, err := s.findPRForWatchWithResolvedClient(ctx, resolved, watch)
 	if err != nil && isRepoNotResolvableErr(err) {
 		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
 		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
@@ -1180,10 +1192,14 @@ func (s *Service) detectPRForWatchOnce(
 	if rebindErr := s.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
 		return nil, rebindErr
 	}
-	if err := s.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
-		s.logger.Error("failed to update PR watch number during sync",
-			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
-		return nil, fmt.Errorf("update PR watch: %w", err)
+	resolvedWatch, resolveErr := s.store.ResolvePRWatch(ctx, watch.ID, pr.RepoOwner, pr.RepoName, pr.Number)
+	if resolveErr != nil {
+		s.logger.Error("failed to resolve PR watch during sync",
+			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(resolveErr))
+		return nil, fmt.Errorf("resolve PR watch: %w", resolveErr)
+	}
+	if !resolvedWatch {
+		return s.store.GetTaskPRByRepository(ctx, taskID, watch.RepositoryID)
 	}
 	if _, assocErr := s.AssociatePRWithTaskForWorkspace(ctx, watch.WorkspaceID, taskID, watch.RepositoryID, pr); assocErr != nil {
 		s.logger.Error("failed to associate PR with task during sync",
@@ -1191,6 +1207,8 @@ func (s *Service) detectPRForWatchOnce(
 		return nil, fmt.Errorf("associate PR: %w", assocErr)
 	}
 	// Also fetch status so the first response includes review/check state
+	watch.Owner = pr.RepoOwner
+	watch.Repo = pr.RepoName
 	watch.PRNumber = pr.Number
 	return s.triggerPRStatusSync(ctx, watch, taskID)
 }

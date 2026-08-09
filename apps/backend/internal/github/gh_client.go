@@ -324,6 +324,23 @@ func (c *GHClient) findPRByHead(ctx context.Context, owner, repo, head, branchFo
 	return nil, nil
 }
 
+func (c *GHClient) FindPRByExactHead(ctx context.Context, attachedOwner, attachedRepo string, head PRHeadRef) (*PR, error) {
+	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
+		Owner:  attachedOwner,
+		Repo:   attachedRepo,
+		Head:   &head,
+		Branch: head.Branch,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("find PR by exact head %s/%s:%s: %w", head.Owner, head.Repo, head.Branch, err)
+	}
+	status := statuses[graphqlBranchKey(attachedOwner, attachedRepo, head.Branch)]
+	if status == nil {
+		return nil, nil
+	}
+	return status.PR, nil
+}
+
 func (c *GHClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
 	out, err := c.run(ctx, "pr", "list",
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
