@@ -73,6 +73,16 @@ func (m *remoteHeadGitHubService) AssociatePRWithTask(
 	return m.mockGitHubService.AssociatePRWithTask(ctx, taskID, repositoryID, pr)
 }
 
+func (m *remoteHeadGitHubService) AssociatePRWithTaskForWorkspace(
+	ctx context.Context, workspaceID, taskID, repositoryID string, pr *github.PR,
+) (*github.TaskPR, error) {
+	if pr != nil {
+		m.associatedOwner = pr.RepoOwner
+		m.associatedRepo = pr.RepoName
+	}
+	return m.mockGitHubService.AssociatePRWithTaskForWorkspace(ctx, workspaceID, taskID, repositoryID, pr)
+}
+
 func TestSyncPRWatchTargetPersistsRuntimeHead(t *testing.T) {
 	svc := newRemoteHeadTestService(t)
 	ghSvc := &remoteHeadGitHubService{mockGitHubService: &mockGitHubService{prWatch: &github.PRWatch{
