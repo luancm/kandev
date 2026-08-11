@@ -359,6 +359,12 @@ func (m *mockGitHubService) CreatePRWatchForWorkspace(
 	m.lastCreateWatchWorkspaceID = workspaceID
 	return m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
 }
+func (m *mockGitHubService) CreatePRWatchForWorkspaceWithHead(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string,
+	prNumber int, branch string, _ github.PRHeadRef,
+) (*github.PRWatch, error) {
+	return m.CreatePRWatchForWorkspace(ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
+}
 func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	m.lastAssociateRepositoryID = repositoryID

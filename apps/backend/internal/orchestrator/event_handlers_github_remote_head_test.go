@@ -41,10 +41,23 @@ type remoteHeadGitHubService struct {
 	*mockGitHubService
 	updatedHead      github.PRHeadRef
 	updatedBranch    string
+	createdHead      github.PRHeadRef
+	createdWithHead  bool
 	associatedOwner  string
 	associatedRepo   string
 	resolvedBase     github.PRHeadRef
 	resolvedPRNumber int
+}
+
+func (m *remoteHeadGitHubService) CreatePRWatchForWorkspaceWithHead(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string,
+	prNumber int, branch string, head github.PRHeadRef,
+) (*github.PRWatch, error) {
+	m.createdWithHead = true
+	m.createdHead = head
+	return m.mockGitHubService.CreatePRWatchForWorkspace(
+		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch,
+	)
 }
 
 func (m *remoteHeadGitHubService) UpdatePRWatchSearchTargetIfSearching(
@@ -130,6 +143,34 @@ func TestDetectPushAndAssociatePRUsesExactRuntimeHeadAndCanonicalBase(t *testing
 
 	if ghSvc.associatedOwner != "upstream" || ghSvc.associatedRepo != "project" {
 		t.Fatalf("associated base = %s/%s, want upstream/project", ghSvc.associatedOwner, ghSvc.associatedRepo)
+	}
+}
+
+func TestDetectPushAndAssociatePRPersistsRuntimeHeadOnNewWatch(t *testing.T) {
+	svc := newRemoteHeadTestService(t)
+	client := github.NewMockClient()
+	client.AddPR(&github.PR{
+		Number:        17,
+		State:         "open",
+		RepoOwner:     "upstream",
+		RepoName:      "project",
+		HeadRepoOwner: "fork",
+		HeadRepoName:  "project",
+		HeadBranch:    "review-feature",
+		BaseBranch:    "main",
+	})
+	ghSvc := &remoteHeadGitHubService{mockGitHubService: &mockGitHubService{client: client}}
+	svc.SetGitHubService(ghSvc)
+
+	svc.detectPushAndAssociatePR(context.Background(), "s1", "t1", "", "local-feature", &streams.GitHeadRemote{
+		Provider: "github", Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature",
+	})
+
+	if !ghSvc.createdWithHead {
+		t.Fatal("new resolved watch was created without the runtime head")
+	}
+	if ghSvc.createdHead.Host != "github.com" || ghSvc.createdHead.Owner != "fork" || ghSvc.createdHead.Repo != "project" || ghSvc.createdHead.Branch != "review-feature" {
+		t.Fatalf("created runtime head = %+v, want github.com fork/project:review-feature", ghSvc.createdHead)
 	}
 }
 

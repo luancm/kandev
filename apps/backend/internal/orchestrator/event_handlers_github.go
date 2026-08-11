@@ -42,6 +42,7 @@ const (
 type GitHubService interface {
 	CreatePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*github.PRWatch, error)
 	CreatePRWatchForWorkspace(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*github.PRWatch, error)
+	CreatePRWatchForWorkspaceWithHead(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string, head github.PRHeadRef) (*github.PRWatch, error)
 	EnsurePRWatchForWorkspace(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo, branch string) (*github.PRWatch, error)
 	FindPRByBranchForWorkspace(ctx context.Context, workspaceID, owner, repo, branch string) (*github.PR, error)
 	FindPRByExactHeadForWorkspace(ctx context.Context, workspaceID, owner, repo string, head github.PRHeadRef) (*github.PR, error)
@@ -709,7 +710,7 @@ func (s *Service) detectPushAndAssociatePRWithIdentity(
 			zap.String("repository_name", repositoryName),
 			zap.Int("pr_number", foundPR.Number),
 			zap.String("branch", branch))
-		s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, identity.owner, identity.name, identity.repositoryID, branch, foundPR)
+		s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, identity.owner, identity.name, identity.repositoryID, branch, headRemote, foundPR)
 		return
 	}
 	s.logger.Warn("exhausted all retries, no PR found after push",
@@ -1218,7 +1219,7 @@ func (s *Service) resolveTaskRepo(ctx context.Context, taskID string) (string, s
 // pass the per-repo id resolved from the git event's repository_name; the
 // legacy single-repo path passes the primary task_repository id.
 func (s *Service) associatePRFromPushScoped(
-	ctx context.Context, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch string, pr *github.PR,
+	ctx context.Context, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch string, headRemote *streams.GitHeadRemote, pr *github.PR,
 ) {
 	watchOwner, watchRepo := owner, repoName
 	if pr != nil && pr.RepoOwner != "" && pr.RepoName != "" {
@@ -1232,9 +1233,18 @@ func (s *Service) associatePRFromPushScoped(
 		baseRepo = repoName
 	}
 	watchOwner, watchRepo = baseOwner, baseRepo
-	watch, watchErr := s.githubService.CreatePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, watchOwner, watchRepo, pr.Number, branch,
-	)
+	var watch *github.PRWatch
+	var watchErr error
+	if headRemote != nil {
+		watch, watchErr = s.githubService.CreatePRWatchForWorkspaceWithHead(
+			ctx, workspaceID, sessionID, taskID, repositoryID, baseOwner, baseRepo, pr.Number, branch,
+			github.PRHeadRef{Host: headRemote.Host, Owner: headRemote.Owner, Repo: headRemote.Repo, Branch: headRemote.Branch},
+		)
+	} else {
+		watch, watchErr = s.githubService.CreatePRWatchForWorkspace(
+			ctx, workspaceID, sessionID, taskID, repositoryID, baseOwner, baseRepo, pr.Number, branch,
+		)
+	}
 	if watchErr != nil {
 		s.logger.Error("failed to create PR watch on push detection",
 			zap.String("session_id", sessionID),
@@ -1334,7 +1344,13 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	}
 
 	// Found a PR — associate it with the task
-	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch, pr)
+	var headRemote *streams.GitHeadRemote
+	if watch != nil && watch.HeadOwner != "" && watch.HeadRepo != "" && watch.HeadBranch != "" {
+		headRemote = &streams.GitHeadRemote{
+			Provider: "github", Host: watch.HeadHost, Owner: watch.HeadOwner, Repo: watch.HeadRepo, Branch: watch.HeadBranch,
+		}
+	}
+	s.associatePRFromPushScoped(ctx, workspaceID, sessionID, taskID, owner, repoName, repositoryID, branch, headRemote, pr)
 	return true, nil
 }
 

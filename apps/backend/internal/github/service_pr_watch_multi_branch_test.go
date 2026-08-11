@@ -46,6 +46,41 @@ func TestCreatePRWatch_AllowsMultipleBranchesPerRepo(t *testing.T) {
 	}
 }
 
+func TestCreatePRWatchForWorkspaceWithHeadPersistsRuntimeHead(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", false)
+
+	watch, err := svc.CreatePRWatchForWorkspaceWithHead(
+		ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "upstream", "repo", 42, "local-feature",
+		PRHeadRef{Host: "github.com", Owner: "fork", Repo: "repo", Branch: "review-feature"},
+	)
+	if err != nil {
+		t.Fatalf("CreatePRWatchForWorkspaceWithHead: %v", err)
+	}
+	if watch.HeadHost != "github.com" || watch.HeadOwner != "fork" || watch.HeadRepo != "repo" || watch.HeadBranch != "review-feature" {
+		t.Fatalf("returned runtime head = %+v, want github.com fork/repo:review-feature", watch)
+	}
+
+	persisted, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get persisted watch: %v", err)
+	}
+	if persisted.HeadHost != "github.com" || persisted.HeadOwner != "fork" || persisted.HeadRepo != "repo" || persisted.HeadBranch != "review-feature" {
+		t.Fatalf("persisted runtime head = %+v, want exact fork head", persisted)
+	}
+	if err := store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); err != nil {
+		t.Fatalf("reset watch to searching: %v", err)
+	}
+	reset, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get reset watch: %v", err)
+	}
+	if reset.HeadOwner != "fork" || reset.HeadRepo != "repo" || reset.HeadBranch != "review-feature" {
+		t.Fatalf("runtime head lost after terminal reset = %+v, want exact fork head", reset)
+	}
+}
+
 // TestCreatePRWatch_IdempotentPerBranch verifies that re-creating a watch
 // for the same (session, repo, branch) triple is a no-op returning the
 // existing row — push detection retries that race the original create

@@ -594,6 +594,11 @@ Auto-merge cycle for one task/PR:
   against the main repository, **WHEN** branch-only PR discovery runs, **THEN**
   Kandev links that pull request and watches it under the main repository's
   base identity.
+- **GIVEN** push detection finds an open cross-fork pull request before a
+  searching watch exists, **WHEN** Kandev creates the resolved watch, **THEN**
+  it persists the exact observed head identity alongside the canonical PR base
+  and number, and a later terminal-watch reset continues searching by that
+  exact head rather than only by the local branch name.
 - **GIVEN** a task is attached to the main repository and its current branch's
   configured push remote points to a contributor fork, **WHEN** one open pull
   request connects that exact fork branch to the attached repository, **THEN**

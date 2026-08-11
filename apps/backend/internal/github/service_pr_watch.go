@@ -23,7 +23,7 @@ import (
 // its own watch row. Multi-branch tasks store one watch per branch so a
 // secondary branch's push isn't lost behind the primary's existing watch.
 func (s *Service) CreatePRWatch(ctx context.Context, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string) (*PRWatch, error) {
-	return s.createPRWatch(ctx, "", sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
+	return s.createPRWatch(ctx, "", sessionID, taskID, repositoryID, owner, repo, prNumber, branch, nil)
 }
 
 func (s *Service) CreatePRWatchForWorkspace(
@@ -35,11 +35,27 @@ func (s *Service) CreatePRWatchForWorkspace(
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.createPRWatch(ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
+	return s.createPRWatch(ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch, nil)
+}
+
+// CreatePRWatchForWorkspaceWithHead creates a watch with the exact runtime
+// head captured by agentctl. The head is persisted in the same insert as a
+// resolved PR watch so a later terminal reset can rediscover the same fork PR.
+func (s *Service) CreatePRWatchForWorkspaceWithHead(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string,
+	prNumber int, branch string, head PRHeadRef,
+) (*PRWatch, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.createPRWatch(ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch, &head)
 }
 
 func (s *Service) createPRWatch(
-	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string,
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, owner, repo string, prNumber int, branch string, head *PRHeadRef,
 ) (*PRWatch, error) {
 	// Evict any negative-cache entry up front. Caller intent on either
 	// branch (creating a new watch or re-finding an existing one) is "I
@@ -63,6 +79,12 @@ func (s *Service) createPRWatch(
 		Repo:         repo,
 		PRNumber:     prNumber,
 		Branch:       branch,
+	}
+	if head != nil {
+		w.HeadHost = head.Host
+		w.HeadOwner = head.Owner
+		w.HeadRepo = head.Repo
+		w.HeadBranch = head.Branch
 	}
 	if err := s.store.CreatePRWatch(ctx, w); err != nil {
 		return nil, fmt.Errorf("create PR watch: %w", err)

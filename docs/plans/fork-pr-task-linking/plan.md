@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/ci-pr-automation.md
 created: 2026-08-09
-status: complete
+status: in_progress
 ---
 
 # Implementation Plan: Link fork pull requests to tasks
@@ -136,6 +136,16 @@ records the split:
   successful path resolves the watch to `pr.RepoOwner`, `pr.RepoName`, and the
   PR number before status sync and task association.
 
+### QA repair: preserve the head on immediate association
+
+The initial implementation left one path incomplete: when push detection
+found a PR before a watch existed, `associatePRFromPushScoped` created an
+already-numbered watch without the runtime head fields. Preserve the exact
+head in that creation operation and pass it from push detection; on-demand
+association must preserve the watch's existing head as well. Do not add
+`is_fork` or parent-repository metadata: the runtime push target and GitHub's
+canonical PR result remain the sources of truth.
+
 ## Tests
 
 - **Runtime remote selection:** custom remote names, push target preferred over
@@ -156,6 +166,10 @@ records the split:
   immediate and polled discovery use the persisted head; a found upstream PR is
   subsequently queried under its base repository. **Files:** orchestrator and
   GitHub watch-service tests.
+- **Immediate resolved-watch regression:** a push found before watch creation
+  stores the exact runtime head with the canonical base and PR number, and the
+  persisted head survives a terminal reset. **Files:** orchestrator and GitHub
+  watch-service tests.
 
 Implementation follows RED-GREEN-REFACTOR for each task. Permanent regression
 tests land with the production change; the diagnostic throwaway test does not
@@ -199,6 +213,10 @@ Wave 2 (sequential, after the protocol contract is available):
 Wave 3 (sequential, after behavior is final):
 
 - [x] [task-03-document-fork-pr-linking](task-03-document-fork-pr-linking.md)
+
+Wave 4 (sequential, QA repair):
+
+- [x] [task-04-preserve-immediate-watch-head](task-04-preserve-immediate-watch-head.md)
 
 No tasks are marked parallel-safe. Task 02 consumes Task 01's status contract,
 and public wording must describe the final tested behavior. Shared spec, plan,
