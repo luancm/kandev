@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/ci-pr-automation.md
 created: 2026-08-09
-status: in_progress
+status: complete
 ---
 
 # Implementation Plan: Link fork pull requests to tasks
