@@ -1,7 +1,7 @@
 ---
 id: "06-compute-comparison-status"
 title: "Compute status and counts from comparison context"
-status: pending
+status: in_progress
 wave: 6
 depends_on: ["05-transport-comparison-context"]
 plan: "plan.md"

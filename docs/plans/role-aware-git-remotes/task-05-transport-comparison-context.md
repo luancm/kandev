@@ -1,7 +1,7 @@
 ---
 id: "05-transport-comparison-context"
 title: "Transport comparison context into every runtime"
-status: in_progress
+status: complete
 wave: 5
 depends_on: ["01-resolve-remote-roles", "04-persist-provider-source-identities"]
 plan: "plan.md"

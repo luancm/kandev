@@ -100,11 +100,11 @@ Wave 4:
 
 Wave 5:
 
-- [ ] [Task 05: Transport comparison context](task-05-transport-comparison-context.md) (`in_progress`)
+- [x] [Task 05: Transport comparison context](task-05-transport-comparison-context.md) (`completed`)
 
 Wave 6:
 
-- [ ] [Task 06: Compute comparison status and counts](task-06-compute-comparison-status.md)
+- [ ] [Task 06: Compute comparison status and counts](task-06-compute-comparison-status.md) (`in_progress`)
 
 Wave 7:
 
