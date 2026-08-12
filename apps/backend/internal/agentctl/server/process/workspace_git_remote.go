@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"net"
 	"net/url"
 	"strings"
 
@@ -314,7 +315,7 @@ func parseRemoteRepositoryIdentities(urls []string) (*gitremote.RemoteRepository
 }
 
 func parseRemoteRepositoryIdentity(remoteURL string) (gitremote.RemoteRepositoryIdentity, bool) {
-	host := remoteHostFromURL(remoteURL)
+	host := remoteIdentityHost(remoteURL)
 	if host == "" {
 		return gitremote.RemoteRepositoryIdentity{}, false
 	}
@@ -351,6 +352,43 @@ func parseRemoteRepositoryIdentity(remoteURL string) (gitremote.RemoteRepository
 		Host:           host,
 		RepositoryPath: path,
 	}, true
+}
+
+// remoteIdentityHost preserves an explicit non-default HTTP(S) port because
+// it is part of a self-hosted provider's repository identity. SSH transport
+// ports are intentionally ignored: provider authorization is based on the
+// web host that owns the repository, matching the existing provider adapter
+// normalization.
+func remoteIdentityHost(remoteURL string) string {
+	trimmed := strings.TrimSpace(remoteURL)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.Contains(trimmed, "://") {
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Hostname() == "" {
+			return ""
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if strings.EqualFold(parsed.Scheme, "ssh") {
+			return host
+		}
+		port := parsed.Port()
+		if port == "" || (strings.EqualFold(parsed.Scheme, "http") && port == "80") || (strings.EqualFold(parsed.Scheme, "https") && port == "443") {
+			return host
+		}
+		return net.JoinHostPort(host, port)
+	}
+	if _, after, ok := strings.Cut(trimmed, "@"); ok {
+		trimmed = after
+	}
+	if host, _, ok := strings.Cut(trimmed, ":"); ok {
+		if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+			return strings.ToLower(strings.Trim(host, "[]"))
+		}
+		return strings.ToLower(host)
+	}
+	return remoteHostFromURL(trimmed)
 }
 
 func normalizeAzureRepositoryPath(host string, segments []string) string {

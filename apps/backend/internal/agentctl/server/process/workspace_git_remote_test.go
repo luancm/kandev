@@ -167,6 +167,13 @@ func TestParseRemoteRepositoryIdentityPreservesProviderPaths(t *testing.T) {
 			path:      "group/nested/project",
 		},
 		{
+			name:      "self hosted gitlab port",
+			remoteURL: "https://gitlab.example.com:8443/group/nested/project.git",
+			provider:  gitremote.ProviderGitLab,
+			host:      "gitlab.example.com:8443",
+			path:      "group/nested/project",
+		},
+		{
 			name:      "azure devops http",
 			remoteURL: "https://dev.azure.com/acme/Platform/_git/Widget.git",
 			provider:  gitremote.ProviderAzureRepos,
