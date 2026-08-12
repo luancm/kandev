@@ -1,7 +1,7 @@
 ---
 id: "01-resolve-remote-roles"
 title: "Resolve provider-neutral remote roles"
-status: in_progress
+status: complete
 wave: 1
 depends_on: ["00-integrate-upstream"]
 plan: "plan.md"
