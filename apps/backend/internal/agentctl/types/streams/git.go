@@ -98,11 +98,13 @@ type GitStatusUpdate struct {
 // configured remote head. It is used by backend contribution discovery and is
 // intentionally separate from the existing RemoteBranch tracking-ref field.
 type GitHeadRemote struct {
-	Provider string `json:"provider,omitempty"`
-	Host     string `json:"host,omitempty"`
-	Owner    string `json:"owner,omitempty"`
-	Repo     string `json:"repo,omitempty"`
-	Branch   string `json:"branch,omitempty"`
+	Provider             string `json:"provider,omitempty"`
+	Host                 string `json:"host,omitempty"`
+	Owner                string `json:"owner,omitempty"`
+	Repo                 string `json:"repo,omitempty"`
+	Branch               string `json:"branch,omitempty"`
+	RepositoryPath       string `json:"repository_path,omitempty"`
+	ProviderRepositoryID string `json:"provider_repository_id,omitempty"`
 }
 
 // FileInfo represents detailed information about a file's git status.
