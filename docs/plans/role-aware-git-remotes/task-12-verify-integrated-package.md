@@ -2,7 +2,7 @@
 id: "12-verify-integrated-package"
 title: "Verify the integrated role-aware package"
 status: pending
-wave: 11
+wave: 12
 depends_on: ["11-document-remote-roles"]
 plan: "plan.md"
 spec: "../../specs/platform/git-remote-roles.md"

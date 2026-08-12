@@ -1,7 +1,7 @@
 ---
 id: "00-integrate-upstream"
 title: "Integrate upstream and re-audit the package"
-status: pending
+status: completed
 wave: 0
 depends_on: []
 plan: "plan.md"

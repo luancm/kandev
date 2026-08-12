@@ -2,7 +2,7 @@
 id: "11-document-remote-roles"
 title: "Document role-aware Git behavior"
 status: pending
-wave: 10
+wave: 11
 depends_on: ["10-cover-desktop-mobile-role-parity"]
 plan: "plan.md"
 spec: "../../specs/platform/git-remote-roles.md"

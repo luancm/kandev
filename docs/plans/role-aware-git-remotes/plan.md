@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/platform/git-remote-roles.md
 created: 2026-08-12
-status: draft
+status: in_progress
 ---
 
 # Implementation Plan: Role-Aware Git Remotes
@@ -33,7 +33,7 @@ Task 01 owns the provider-neutral resolver in `apps/backend/internal/agentctl/se
 
 ### Comparison-context transport
 
-Task 05 owns comparison selection and delivery from task/provider state to agentctl. It extends the existing base-branch path instead of creating a parallel selector: orchestrator launch/resume projection, backend adapters, lifecycle launch/restart/live-update paths, every executor, agentctl configuration and instance creation, process manager and workspace tracker, and the control/API endpoint all carry one per-repository comparison context keyed by deterministic worktree subpath. Selection precedence is linked canonical base, validated remote-contribution target, then attached repository plus selected base. Presence-aware observations distinguish omission from an explicit clear, incomplete refreshes cannot erase a known context, and no raw credential-bearing URL crosses the boundary.
+Task 05 owns comparison selection and delivery from task/provider state to agentctl. It extends the existing base-branch path instead of creating a parallel selector: orchestrator launch/resume projection, backend adapters, lifecycle launch/restart/live-update paths, every executor, agentctl configuration and instance creation, process manager and workspace tracker, and the control/API endpoint all carry one per-repository comparison context keyed by deterministic worktree subpath. Selection precedence is a unique linked change whose exact source repository/ref matches the worktree's writable action head, then a validated remote-contribution target when no linked change competes, then attached repository plus selected base. Presence-aware observations distinguish omission from an explicit clear, incomplete refreshes cannot erase a known context, and no raw credential-bearing URL crosses the boundary.
 
 ### Consumers
 
@@ -80,11 +80,11 @@ Task 05 is the sequential transport gate after the provider identities and event
 
 Wave 0:
 
-- [ ] [Task 00: Integrate upstream and re-audit](task-00-integrate-upstream.md)
+- [x] [Task 00: Integrate upstream and re-audit](task-00-integrate-upstream.md) (`completed`)
 
 Wave 1:
 
-- [ ] [Task 01: Resolve remote roles](task-01-resolve-remote-roles.md)
+- [ ] [Task 01: Resolve remote roles](task-01-resolve-remote-roles.md) (`in_progress`)
 
 Wave 2:
 
@@ -102,32 +102,35 @@ Wave 5:
 
 - [ ] [Task 05: Transport comparison context](task-05-transport-comparison-context.md)
 
-Wave 6, parallel-safe only where file ownership remains disjoint after the Task 00 audit:
+Wave 6:
 
 - [ ] [Task 06: Compute comparison status and counts](task-06-compute-comparison-status.md)
-- [ ] [Task 07: Route Git operations](task-07-route-git-operations.md)
 
 Wave 7:
 
-- [ ] [Task 08: Align frontend remote safety](task-08-align-frontend-remote-safety.md)
+- [ ] [Task 07: Route Git operations](task-07-route-git-operations.md)
 
 Wave 8:
 
-- [ ] [Task 09: Resolve external file links](task-09-resolve-external-file-links.md)
+- [ ] [Task 08: Align frontend remote safety](task-08-align-frontend-remote-safety.md)
 
 Wave 9:
 
-- [ ] [Task 10: Cover desktop and mobile role parity](task-10-cover-desktop-mobile-role-parity.md)
+- [ ] [Task 09: Resolve external file links](task-09-resolve-external-file-links.md)
 
 Wave 10:
 
-- [ ] [Task 11: Document remote roles](task-11-document-remote-roles.md)
+- [ ] [Task 10: Cover desktop and mobile role parity](task-10-cover-desktop-mobile-role-parity.md)
 
 Wave 11:
 
+- [ ] [Task 11: Document remote roles](task-11-document-remote-roles.md)
+
+Wave 12:
+
 - [ ] [Task 12: Verify the integrated package](task-12-verify-integrated-package.md)
 
-Native implementation waves require a later explicit user request. Wave and parallel labels describe dependency and ownership constraints only; they do not authorize implementation subagents.
+Implementation is authorized by the Lunaldinho handoff session. Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
 
 ## Exact test map
 

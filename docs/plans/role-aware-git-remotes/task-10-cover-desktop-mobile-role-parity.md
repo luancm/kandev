@@ -2,7 +2,7 @@
 id: "10-cover-desktop-mobile-role-parity"
 title: "Cover desktop and mobile remote-role parity"
 status: pending
-wave: 9
+wave: 10
 depends_on: ["08-align-frontend-remote-safety", "09-resolve-external-file-links"]
 plan: "plan.md"
 spec: "../../specs/platform/git-remote-roles.md"

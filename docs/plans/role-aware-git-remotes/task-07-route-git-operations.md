@@ -2,8 +2,8 @@
 id: "07-route-git-operations"
 title: "Route Git operations by remote role"
 status: pending
-wave: 6
-depends_on: ["05-transport-comparison-context"]
+wave: 7
+depends_on: ["05-transport-comparison-context", "06-compute-comparison-status"]
 plan: "plan.md"
 spec: "../../specs/platform/git-remote-roles.md"
 ---
@@ -53,7 +53,7 @@ Task 05 delivers comparison context built from Task 04's complete provider sourc
 
 ## Parallelism
 
-Parallel-safe with Task 06 after the primary confirms ownership remains disjoint.
+Sequential after Task 06 because the upstream audit found shared agentctl Git client/API files.
 
 ## Output contract
 

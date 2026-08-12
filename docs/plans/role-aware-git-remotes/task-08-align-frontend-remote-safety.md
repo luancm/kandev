@@ -2,7 +2,7 @@
 id: "08-align-frontend-remote-safety"
 title: "Align frontend status and remote-action safety"
 status: pending
-wave: 7
+wave: 8
 depends_on: ["06-compute-comparison-status", "07-route-git-operations"]
 plan: "plan.md"
 spec: "../../specs/platform/git-remote-roles.md"

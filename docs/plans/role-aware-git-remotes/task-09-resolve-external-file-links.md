@@ -2,7 +2,7 @@
 id: "09-resolve-external-file-links"
 title: "Resolve external file links from exact provider sides"
 status: pending
-wave: 8
+wave: 9
 depends_on: ["04-persist-provider-source-identities", "08-align-frontend-remote-safety"]
 plan: "plan.md"
 spec: "../../specs/platform/git-remote-roles.md"
