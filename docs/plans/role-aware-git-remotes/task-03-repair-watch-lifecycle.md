@@ -1,7 +1,7 @@
 ---
 id: "03-repair-watch-lifecycle"
 title: "Repair GitHub watch lifecycle"
-status: pending
+status: in_progress
 wave: 3
 depends_on: ["02-repair-exact-pr-discovery"]
 plan: "plan.md"

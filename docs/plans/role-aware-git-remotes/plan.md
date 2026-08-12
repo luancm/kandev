@@ -88,11 +88,11 @@ Wave 1:
 
 Wave 2:
 
-- [ ] [Task 02: Repair exact PR discovery](task-02-repair-exact-pr-discovery.md) (`in_progress`)
+- [x] [Task 02: Repair exact PR discovery](task-02-repair-exact-pr-discovery.md) (`completed`)
 
 Wave 3:
 
-- [ ] [Task 03: Repair watch lifecycle](task-03-repair-watch-lifecycle.md)
+- [ ] [Task 03: Repair watch lifecycle](task-03-repair-watch-lifecycle.md) (`in_progress`)
 
 Wave 4:
 
