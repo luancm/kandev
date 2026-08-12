@@ -72,7 +72,13 @@ func (wt *WorkspaceTracker) resolveGitRemoteRoles(ctx context.Context, branch st
 	if tracking.Identity != nil {
 		input.TrackingUpstream = *tracking.Identity
 	}
-	if comparisonRole.Identity != nil {
+	if comparison != nil {
+		// Bind the generation to the complete accepted backend context even
+		// when no executor-local remote resolves it. Otherwise changing from
+		// one unresolved target to another could leave stale mutation evidence
+		// looking current.
+		input.ComparisonTarget = *comparison
+	} else if comparisonRole.Identity != nil {
 		input.ComparisonTarget = *comparisonRole.Identity
 	}
 
