@@ -96,11 +96,11 @@ Wave 3:
 
 Wave 4:
 
-- [ ] [Task 04: Persist provider source identities](task-04-persist-provider-source-identities.md) (`in_progress`)
+- [x] [Task 04: Persist provider source identities](task-04-persist-provider-source-identities.md) (`completed`)
 
 Wave 5:
 
-- [ ] [Task 05: Transport comparison context](task-05-transport-comparison-context.md)
+- [ ] [Task 05: Transport comparison context](task-05-transport-comparison-context.md) (`in_progress`)
 
 Wave 6:
 
