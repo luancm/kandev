@@ -105,6 +105,24 @@ function clearPendingPrUrlForRepo(draft: GitHubSlice, taskId: string, repoKey: s
   }
 }
 
+function mergeTaskPRIdentity(
+  previous: GitHubSliceState["taskPRs"]["byTaskId"][string][number],
+  incoming: GitHubSliceState["taskPRs"]["byTaskId"][string][number],
+) {
+  return {
+    ...incoming,
+    head_host: incoming.head_host ?? previous.head_host,
+    head_owner: incoming.head_owner ?? previous.head_owner,
+    head_repo: incoming.head_repo ?? previous.head_repo,
+    head_repo_id: incoming.head_repo_id ?? previous.head_repo_id,
+    head_repo_node_id: incoming.head_repo_node_id ?? previous.head_repo_node_id,
+    base_host: incoming.base_host ?? previous.base_host,
+    base_owner: incoming.base_owner ?? previous.base_owner,
+    base_repo: incoming.base_repo ?? previous.base_repo,
+    base_repo_id: incoming.base_repo_id ?? previous.base_repo_id,
+  };
+}
+
 /** Clear client-only pending URLs for the repo that just synced (not sibling repos). */
 function clearPendingForTaskPR(
   draft: GitHubSlice,
@@ -134,7 +152,24 @@ function createTaskPRActions(
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
-        draft.taskPRs.byTaskId = prs;
+        const merged = Object.fromEntries(
+          Object.entries(prs).map(([taskId, incoming]) => {
+            const previous = draft.taskPRs.byTaskId[taskId] ?? [];
+            const incomingRows = Array.isArray(incoming) ? incoming : [];
+            return [
+              taskId,
+              incomingRows.map((pr) => {
+                const existing = previous.find(
+                  (candidate) =>
+                    (candidate.repository_id ?? "") === (pr.repository_id ?? "") &&
+                    candidate.pr_number === pr.pr_number,
+                );
+                return existing ? mergeTaskPRIdentity(existing, pr) : pr;
+              }),
+            ];
+          }),
+        );
+        draft.taskPRs.byTaskId = merged;
       }),
     removeTaskPR: (taskId, associationId) =>
       set((draft) => {
@@ -170,7 +205,7 @@ function createTaskPRActions(
         const idx = existing.findIndex(
           (p) => (p.repository_id ?? "") === repoKey && p.pr_number === pr.pr_number,
         );
-        if (idx >= 0) existing[idx] = pr;
+        if (idx >= 0) existing[idx] = mergeTaskPRIdentity(existing[idx]!, pr);
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;
         clearPendingForTaskPR(draft, taskId, pr);

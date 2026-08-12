@@ -285,15 +285,41 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if store == nil {
 		return errors.New("gitlab store not configured")
 	}
-	return store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID)
+	association, err := store.GetTaskMRForWorkspace(ctx, workspaceID, associationID)
+	if err != nil {
+		return err
+	}
+	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
+		return err
+	}
+	s.publishTaskMRDeleted(ctx, workspaceID, association)
+	return nil
 }
 
 func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MRStatus) *TaskMR {
 	mr := status.MR
 	now := time.Now().UTC()
+	sourcePath := mr.SourceProjectPath
+	if sourcePath == "" && (mr.SourceProjectID == 0 || mr.SourceProjectID == mr.TargetProjectID) {
+		sourcePath = projectPath
+	}
+	targetPath := mr.TargetProjectPath
+	if targetPath == "" {
+		targetPath = projectPath
+	}
+	sourceID := mr.SourceProjectID
+	if sourceID == 0 && mr.TargetProjectID == 0 {
+		sourceID = mr.ProjectID
+	}
+	targetID := mr.TargetProjectID
+	if targetID == 0 {
+		targetID = mr.ProjectID
+	}
 	return &TaskMR{
 		TaskID: taskID, RepositoryID: repositoryID, Host: host,
 		ProjectPath: projectPath, MRIID: mr.IID, MRURL: mr.WebURL, MRTitle: mr.Title,
+		SourceHost: host, SourceProjectPath: sourcePath, SourceProjectID: sourceID,
+		TargetHost: host, TargetProjectPath: targetPath, TargetProjectID: targetID,
 		HeadBranch: mr.HeadBranch, BaseBranch: mr.BaseBranch, AuthorUsername: mr.AuthorUsername,
 		State: mr.State, ApprovalState: status.ApprovalState, PipelineState: status.PipelineState,
 		MergeStatus: status.MergeStatus, Draft: mr.Draft, ApprovalCount: status.ApprovalCount,
@@ -320,6 +346,32 @@ type TaskMRUpdatedEvent struct {
 	Reviewers      []MRReviewer `json:"reviewers"`
 	ReviewersValid bool         `json:"reviewers_valid,omitempty"`
 	*TaskMR
+}
+
+type TaskMRDeletedEvent struct {
+	WorkspaceID   string `json:"workspace_id"`
+	TaskID        string `json:"task_id"`
+	AssociationID string `json:"association_id"`
+}
+
+func (e TaskMRDeletedEvent) GetWorkspaceID() string { return e.WorkspaceID }
+
+func (s *Service) publishTaskMRDeleted(ctx context.Context, workspaceID string, association *TaskMR) {
+	if association == nil {
+		return
+	}
+	s.mu.RLock()
+	eventBus := s.eventBus
+	s.mu.RUnlock()
+	if eventBus == nil {
+		return
+	}
+	event := bus.NewEvent(events.GitLabTaskMRDeleted, eventSource, &TaskMRDeletedEvent{
+		WorkspaceID: workspaceID, TaskID: association.TaskID, AssociationID: association.ID,
+	})
+	if err := eventBus.Publish(ctx, events.GitLabTaskMRDeleted, event); err != nil {
+		s.logger.Debug("publish GitLab task MR deletion", zap.Error(err))
+	}
 }
 
 // GetWorkspaceID implements the websocket broadcaster's workspace-routing

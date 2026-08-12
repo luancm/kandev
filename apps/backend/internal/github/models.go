@@ -4,6 +4,8 @@ package github
 
 import (
 	"encoding/json"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -292,6 +294,41 @@ type PRHeadRef struct {
 	Branch string `json:"branch"`
 }
 
+func taskPRIdentityFromPR(pr *PR) (headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo string) {
+	if pr == nil {
+		return "", "", "", "", "", ""
+	}
+	headOwner, headRepo = pr.HeadRepoOwner, pr.HeadRepoName
+	if headOwner == "" {
+		headOwner = pr.RepoOwner
+	}
+	if headRepo == "" {
+		headRepo = pr.RepoName
+	}
+	baseOwner, baseRepo = pr.BaseRepoOwner, pr.BaseRepoName
+	if baseOwner == "" {
+		baseOwner = pr.RepoOwner
+	}
+	if baseRepo == "" {
+		baseRepo = pr.RepoName
+	}
+	host := defaultGitHubHost
+	for _, rawURL := range []string{pr.HTMLURL, pr.URL} {
+		parsed, err := url.Parse(rawURL)
+		if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) &&
+			parsed.Host != "" && parsed.User == nil {
+			host = strings.ToLower(parsed.Host)
+			break
+		}
+	}
+	return host, headOwner, headRepo, host, baseOwner, baseRepo
+}
+
+func taskPRHasExplicitIdentity(pr *PR) bool {
+	return pr != nil && (pr.HeadRepoOwner != "" || pr.HeadRepoName != "" || pr.HeadRepoID != 0 ||
+		pr.HeadRepoNodeID != "" || pr.BaseRepoOwner != "" || pr.BaseRepoName != "" || pr.BaseRepoID != 0)
+}
+
 // RequestedReviewer represents a pending reviewer request on a PR.
 type RequestedReviewer struct {
 	Login string `json:"login"`
@@ -425,15 +462,27 @@ type PRWatch struct {
 // repository this PR belongs to (multi-repo tasks can have one PR per repo).
 // Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
-	ID                 string `json:"id" db:"id"`
-	WorkspaceID        string `json:"workspace_id" db:"workspace_id"`
-	TaskID             string `json:"task_id" db:"task_id"`
-	RepositoryID       string `json:"repository_id,omitempty" db:"repository_id"`
-	Owner              string `json:"owner" db:"owner"`
-	Repo               string `json:"repo" db:"repo"`
-	PRNumber           int    `json:"pr_number" db:"pr_number"`
-	PRURL              string `json:"pr_url" db:"pr_url"`
-	PRTitle            string `json:"pr_title" db:"pr_title"`
+	ID           string `json:"id" db:"id"`
+	WorkspaceID  string `json:"workspace_id" db:"workspace_id"`
+	TaskID       string `json:"task_id" db:"task_id"`
+	RepositoryID string `json:"repository_id,omitempty" db:"repository_id"`
+	Owner        string `json:"owner" db:"owner"`
+	Repo         string `json:"repo" db:"repo"`
+	PRNumber     int    `json:"pr_number" db:"pr_number"`
+	PRURL        string `json:"pr_url" db:"pr_url"`
+	PRTitle      string `json:"pr_title" db:"pr_title"`
+	// Head* and Base* are the provider identities of the exact source and
+	// canonical target of the PR. Owner/Repo remain the historical target
+	// aliases used by lookup and authorization paths.
+	HeadHost           string `json:"head_host,omitempty" db:"head_host"`
+	HeadOwner          string `json:"head_owner,omitempty" db:"head_owner"`
+	HeadRepo           string `json:"head_repo,omitempty" db:"head_repo"`
+	HeadRepoID         int64  `json:"head_repo_id,omitempty" db:"head_repo_id"`
+	HeadRepoNodeID     string `json:"head_repo_node_id,omitempty" db:"head_repo_node_id"`
+	BaseHost           string `json:"base_host,omitempty" db:"base_host"`
+	BaseOwner          string `json:"base_owner,omitempty" db:"base_owner"`
+	BaseRepo           string `json:"base_repo,omitempty" db:"base_repo"`
+	BaseRepoID         int64  `json:"base_repo_id,omitempty" db:"base_repo_id"`
 	HeadBranch         string `json:"head_branch" db:"head_branch"`
 	BaseBranch         string `json:"base_branch" db:"base_branch"`
 	AuthorLogin        string `json:"author_login" db:"author_login"`

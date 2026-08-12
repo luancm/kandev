@@ -19,6 +19,21 @@ type ImmerSet = Parameters<
 
 type GitLabSliceCreator = StateCreator<GitLabSlice, [["zustand/immer", never]], [], GitLabSlice>;
 
+function mergeTaskMRIdentity(
+  previous: GitLabSliceState["taskMRs"]["byWorkspaceId"][string][string][number],
+  incoming: GitLabSliceState["taskMRs"]["byWorkspaceId"][string][string][number],
+) {
+  return {
+    ...incoming,
+    source_host: incoming.source_host ?? previous.source_host,
+    source_project_path: incoming.source_project_path ?? previous.source_project_path,
+    source_project_id: incoming.source_project_id ?? previous.source_project_id,
+    target_host: incoming.target_host ?? previous.target_host,
+    target_project_path: incoming.target_project_path ?? previous.target_project_path,
+    target_project_id: incoming.target_project_id ?? previous.target_project_id,
+  };
+}
+
 export const createGitLabSlice: GitLabSliceCreator = (set: ImmerSet) => ({
   ...defaultGitLabState,
   ...taskMRActions(set),
@@ -35,7 +50,23 @@ function taskMRActions(set: ImmerSet) {
   return {
     setTaskMRs: (workspaceId: string, mrs: GitLabSliceState["taskMRs"]["byWorkspaceId"][string]) =>
       set((draft) => {
-        draft.taskMRs.byWorkspaceId[workspaceId] = mrs;
+        const previous = draft.taskMRs.byWorkspaceId[workspaceId] ?? {};
+        draft.taskMRs.byWorkspaceId[workspaceId] = Object.fromEntries(
+          Object.entries(mrs).map(([taskId, incoming]) => [
+            taskId,
+            incoming.map((mr) => {
+              const existing = (previous[taskId] ?? []).find(
+                (candidate) =>
+                  (candidate.id && candidate.id === mr.id) ||
+                  ((candidate.repository_id ?? "") === (mr.repository_id ?? "") &&
+                    normalizeGitLabOrigin(candidate.host) === normalizeGitLabOrigin(mr.host) &&
+                    candidate.project_path === mr.project_path &&
+                    candidate.mr_iid === mr.mr_iid),
+              );
+              return existing ? mergeTaskMRIdentity(existing, mr) : mr;
+            }),
+          ]),
+        );
       }),
     setTaskMR: (
       workspaceId: string,
@@ -53,7 +84,7 @@ function taskMRActions(set: ImmerSet) {
             m.project_path === mr.project_path &&
             m.mr_iid === mr.mr_iid,
         );
-        if (idx >= 0) existing[idx] = mr;
+        if (idx >= 0) existing[idx] = mergeTaskMRIdentity(existing[idx]!, mr);
         else existing.push(mr);
         workspaceMRs[taskId] = existing;
         draft.taskMRs.byWorkspaceId[workspaceId] = workspaceMRs;

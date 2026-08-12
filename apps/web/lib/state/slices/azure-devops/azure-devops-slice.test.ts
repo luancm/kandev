@@ -35,6 +35,40 @@ function makeStore() {
 }
 
 describe("Azure DevOps task PR slice", () => {
+  it("preserves source and target identities when a partial refresh omits them", () => {
+    const store = makeStore();
+    const complete = taskPullRequest({
+      sourceOrganizationUrl: "https://dev.azure.com/fork",
+      sourceProjectId: "source-project",
+      sourceProjectName: "Source project",
+      sourceRepositoryId: "source-repo",
+      sourceRepositoryName: "source-repository",
+      targetOrganizationUrl: "https://dev.azure.com/base",
+      targetProjectId: "target-project",
+      targetProjectName: "Target project",
+      targetRepositoryId: "target-repo",
+      targetRepositoryName: "target-repository",
+    });
+    const partial = taskPullRequest({ title: "Refreshed title" });
+
+    store.getState().setAzureDevOpsTaskPullRequest("task-1", complete);
+    store.getState().setAzureDevOpsTaskPullRequest("task-1", partial);
+
+    expect(store.getState().azureDevOpsTaskPullRequests.byTaskId["task-1"]?.[0]).toMatchObject({
+      title: "Refreshed title",
+      sourceOrganizationUrl: "https://dev.azure.com/fork",
+      sourceProjectId: "source-project",
+      sourceProjectName: "Source project",
+      sourceRepositoryId: "source-repo",
+      sourceRepositoryName: "source-repository",
+      targetOrganizationUrl: "https://dev.azure.com/base",
+      targetProjectId: "target-project",
+      targetProjectName: "Target project",
+      targetRepositoryId: "target-repo",
+      targetRepositoryName: "target-repository",
+    });
+  });
+
   it("replaces workspace task associations as one snapshot", () => {
     const store = makeStore();
     store.getState().setAzureDevOpsTaskPullRequests({
@@ -65,6 +99,21 @@ describe("Azure DevOps task PR slice", () => {
     expect(store.getState().azureDevOpsTaskPullRequests.byTaskId["task-1"]?.[0]?.title).toBe(
       "Updated",
     );
+    expect(store.getState().azureDevOpsTaskPullRequests.byTaskId["task-2"]).toHaveLength(1);
+  });
+
+  it("removes only the selected task PR association", () => {
+    const store = makeStore();
+    store.getState().setAzureDevOpsTaskPullRequests({
+      "task-1": [taskPullRequest(), taskPullRequest({ id: "link-2", pullRequestId: 7 })],
+      "task-2": [taskPullRequest({ id: "link-3", taskId: "task-2" })],
+    });
+
+    store.getState().removeAzureDevOpsTaskPullRequest("task-1", "link-1");
+
+    expect(
+      store.getState().azureDevOpsTaskPullRequests.byTaskId["task-1"]?.map((pr) => pr.id),
+    ).toEqual(["link-2"]);
     expect(store.getState().azureDevOpsTaskPullRequests.byTaskId["task-2"]).toHaveLength(1);
   });
 

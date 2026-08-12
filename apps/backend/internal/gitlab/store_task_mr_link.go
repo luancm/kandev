@@ -399,3 +399,20 @@ func (s *Store) DeleteTaskMRForWorkspace(ctx context.Context, workspaceID, assoc
 	}
 	return tx.Commit()
 }
+
+func (s *Store) GetTaskMRForWorkspace(ctx context.Context, workspaceID, associationID string) (*TaskMR, error) {
+	var association TaskMR
+	err := s.ro.GetContext(ctx, &association, `
+		SELECT `+taskMRSelectColsQualified+`
+		FROM gitlab_task_mrs gtm
+		JOIN tasks t ON t.id = gtm.task_id
+		WHERE gtm.id = ? AND t.workspace_id = ?
+		LIMIT 1`, associationID, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTaskMRNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find task MR association: %w", err)
+	}
+	return &association, nil
+}

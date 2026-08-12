@@ -8,17 +8,20 @@ const WORKSPACE_A = "workspace-a";
 
 function makeStore(activeWorkspaceId: string | null) {
   const setTaskMR = vi.fn();
+  const removeTaskMR = vi.fn();
   const setTaskMRAutomationOptions = vi.fn();
   const markTaskMRAutomationExternalUpdate = vi.fn();
   const state = {
     workspaces: { activeId: activeWorkspaceId },
     setTaskMR,
+    removeTaskMR,
     setTaskMRAutomationOptions,
     markTaskMRAutomationExternalUpdate,
   } as unknown as AppState;
   return {
     store: { getState: () => state } as StoreApi<AppState>,
     setTaskMR,
+    removeTaskMR,
     setTaskMRAutomationOptions,
     markTaskMRAutomationExternalUpdate,
   };
@@ -77,6 +80,40 @@ describe("GitLab WebSocket handlers", () => {
     });
 
     expect(setTaskMR).not.toHaveBeenCalled();
+  });
+
+  it("removes a detached task MR for the active workspace", () => {
+    const { store, removeTaskMR } = makeStore(WORKSPACE_A);
+    const handler = registerGitLabHandlers(store)["gitlab.task_mr.deleted"]!;
+
+    handler({
+      type: "notification",
+      action: "gitlab.task_mr.deleted",
+      payload: {
+        workspace_id: WORKSPACE_A,
+        task_id: "task-1",
+        association_id: "mr-1",
+      },
+    });
+
+    expect(removeTaskMR).toHaveBeenCalledWith(WORKSPACE_A, "mr-1");
+  });
+
+  it("ignores a detached task MR from another workspace", () => {
+    const { store, removeTaskMR } = makeStore("workspace-b");
+    const handler = registerGitLabHandlers(store)["gitlab.task_mr.deleted"]!;
+
+    handler({
+      type: "notification",
+      action: "gitlab.task_mr.deleted",
+      payload: {
+        workspace_id: WORKSPACE_A,
+        task_id: "task-1",
+        association_id: "mr-1",
+      },
+    });
+
+    expect(removeTaskMR).not.toHaveBeenCalled();
   });
 
   it("stores a task MR automation options update pushed for the current task", () => {

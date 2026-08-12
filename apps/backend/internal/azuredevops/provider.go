@@ -11,8 +11,8 @@ import (
 
 const mockEnvVar = "KANDEV_MOCK_AZURE_DEVOPS"
 
-// Provide constructs the Azure DevOps service. The event bus is accepted to
-// match other integration providers; Task 01 does not publish events.
+// Provide constructs the Azure DevOps service and wires its task-change event
+// publisher alongside the watcher event bus.
 func Provide(
 	writer *sqlx.DB,
 	reader *sqlx.DB,

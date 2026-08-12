@@ -66,6 +66,7 @@ const FUTURE_RESET = "2030-01-01T00:00:00Z";
 const NOW = "2026-05-04T12:00:00Z";
 const WORKSPACE_A = "workspace-a";
 const WORKSPACE_B = "workspace-b";
+const GITHUB_HOST = "github.com";
 
 const baseStatus: GitHubStatus = {
   authenticated: true,
@@ -80,7 +81,7 @@ const legacyStatus: GitHubStatus = {
   automation: {
     workspace_id: "ws-1",
     source: "legacy_shared",
-    github_host: "github.com",
+    github_host: GITHUB_HOST,
     status: "active",
     credential_generation: 1,
   },
@@ -210,6 +211,39 @@ describe("workspace-scoped GitHub status", () => {
 });
 
 describe("setTaskPR", () => {
+  it("preserves source and base identities when a partial refresh omits them", () => {
+    const store = makeStore();
+    const complete = {
+      ...makePR({ repository_id: "repo-a" }),
+      head_host: GITHUB_HOST,
+      head_owner: "fork-owner",
+      head_repo: "fork-repo",
+      head_repo_id: 11,
+      head_repo_node_id: "R_head",
+      base_host: GITHUB_HOST,
+      base_owner: "base-owner",
+      base_repo: "base-repo",
+      base_repo_id: 22,
+    } as TaskPR;
+    const partial = makePR({ repository_id: "repo-a", additions: 3 });
+
+    store.getState().setTaskPR("task-1", complete);
+    store.getState().setTaskPR("task-1", partial);
+
+    expect(store.getState().taskPRs.byTaskId["task-1"]?.[0]).toMatchObject({
+      additions: 3,
+      head_host: GITHUB_HOST,
+      head_owner: "fork-owner",
+      head_repo: "fork-repo",
+      head_repo_id: 11,
+      head_repo_node_id: "R_head",
+      base_host: GITHUB_HOST,
+      base_owner: "base-owner",
+      base_repo: "base-repo",
+      base_repo_id: 22,
+    });
+  });
+
   it("appends a PR when the task has no rows yet", () => {
     const store = makeStore();
     const pr = makePR({ repository_id: "repo-a" });

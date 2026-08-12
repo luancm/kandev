@@ -686,11 +686,29 @@ func (s *Service) syncTaskMRWithClient(
 	}
 	now := time.Now().UTC()
 	mr := status.MR
+	sourcePath := mr.SourceProjectPath
+	if sourcePath == "" && (mr.SourceProjectID == 0 || mr.SourceProjectID == mr.TargetProjectID) {
+		sourcePath = projectPath
+	}
+	targetPath := mr.TargetProjectPath
+	if targetPath == "" {
+		targetPath = projectPath
+	}
+	sourceID := mr.SourceProjectID
+	if sourceID == 0 && mr.TargetProjectID == 0 {
+		sourceID = mr.ProjectID
+	}
+	targetID := mr.TargetProjectID
+	if targetID == 0 {
+		targetID = mr.ProjectID
+	}
 	row := &TaskMR{
-		TaskID:              taskID,
-		RepositoryID:        repositoryID,
-		Host:                host,
-		ProjectPath:         projectPath,
+		TaskID:       taskID,
+		RepositoryID: repositoryID,
+		Host:         host,
+		ProjectPath:  projectPath,
+		SourceHost:   host, SourceProjectPath: sourcePath, SourceProjectID: sourceID,
+		TargetHost: host, TargetProjectPath: targetPath, TargetProjectID: targetID,
 		MRIID:               mr.IID,
 		MRURL:               mr.WebURL,
 		MRTitle:             mr.Title,

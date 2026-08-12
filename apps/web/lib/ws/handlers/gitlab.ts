@@ -1,7 +1,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
+import type { TaskMRAutomationOptions, TaskMRDeletedEvent } from "@/lib/types/gitlab";
 
 export function registerGitLabHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -10,6 +10,19 @@ export function registerGitLabHandlers(store: StoreApi<AppState>): WsHandlers {
       const activeWorkspaceId = store.getState().workspaces.activeId;
       if (!mr.task_id || !mr.workspace_id || mr.workspace_id !== activeWorkspaceId) return;
       store.getState().setTaskMR(mr.workspace_id, mr.task_id, mr);
+    },
+    "gitlab.task_mr.deleted": (message) => {
+      const deleted = message.payload as TaskMRDeletedEvent;
+      const activeWorkspaceId = store.getState().workspaces.activeId;
+      if (
+        !deleted.task_id ||
+        !deleted.association_id ||
+        !deleted.workspace_id ||
+        deleted.workspace_id !== activeWorkspaceId
+      ) {
+        return;
+      }
+      store.getState().removeTaskMR(deleted.workspace_id, deleted.association_id);
     },
     "gitlab.task_mr_options.updated": (message) => {
       const options = message.payload as TaskMRAutomationOptions;

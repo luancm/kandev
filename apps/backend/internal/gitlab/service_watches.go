@@ -369,13 +369,20 @@ func taskMRVisibleFieldsChanged(previous, current *TaskMR) bool {
 	return taskMRIdentityFieldsChanged(previous, current) || taskMRStatusFieldsChanged(previous, current)
 }
 
-// taskMRIdentityFieldsChanged compares the descriptive fields a poll can
-// revise (title, branches, author) — split out from taskMRStatusFieldsChanged
+// taskMRIdentityFieldsChanged compares the descriptive and repository identity
+// fields a poll can revise (title, branches, author) — split out from
+// taskMRStatusFieldsChanged
 // purely to keep taskMRVisibleFieldsChanged under the cyclomatic-complexity
 // budget; the two halves together are the full comparison.
 func taskMRIdentityFieldsChanged(previous, current *TaskMR) bool {
 	return previous.MRURL != current.MRURL ||
 		previous.MRTitle != current.MRTitle ||
+		previous.SourceHost != current.SourceHost ||
+		previous.SourceProjectPath != current.SourceProjectPath ||
+		previous.SourceProjectID != current.SourceProjectID ||
+		previous.TargetHost != current.TargetHost ||
+		previous.TargetProjectPath != current.TargetProjectPath ||
+		previous.TargetProjectID != current.TargetProjectID ||
 		previous.HeadBranch != current.HeadBranch ||
 		previous.BaseBranch != current.BaseBranch ||
 		previous.AuthorUsername != current.AuthorUsername

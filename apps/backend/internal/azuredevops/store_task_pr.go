@@ -11,13 +11,17 @@ import (
 
 const taskPRSelectColumns = `id, task_id, repository_id, organization_url,
 	project_id, azure_repository_id, pull_request_id, pull_request_url, title,
+	source_organization_url, source_project_id, source_project_name, source_repository_id, source_repository_name,
+	target_organization_url, target_project_id, target_project_name, target_repository_id, target_repository_name,
 	source_branch, target_branch, author_id, author_name, status, review_state,
 	policy_state, is_draft, last_synced_at, created_at, updated_at`
 
 const qualifiedTaskPRSelectColumns = `atp.id, atp.task_id, atp.repository_id,
 	atp.organization_url, atp.project_id, atp.azure_repository_id,
-	atp.pull_request_id, atp.pull_request_url, atp.title, atp.source_branch,
-	atp.target_branch, atp.author_id, atp.author_name, atp.status,
+	atp.pull_request_id, atp.pull_request_url, atp.title,
+	atp.source_organization_url, atp.source_project_id, atp.source_project_name, atp.source_repository_id, atp.source_repository_name,
+	atp.target_organization_url, atp.target_project_id, atp.target_project_name, atp.target_repository_id, atp.target_repository_name,
+	atp.source_branch, atp.target_branch, atp.author_id, atp.author_name, atp.status,
 	atp.review_state, atp.policy_state, atp.is_draft, atp.last_synced_at,
 	atp.created_at, atp.updated_at`
 
@@ -39,11 +43,15 @@ func (s *Store) UpsertTaskPR(ctx context.Context, taskPR *TaskPR) error {
 		INSERT INTO azure_devops_task_prs (
 			id, task_id, repository_id, organization_url, project_id,
 			azure_repository_id, pull_request_id, pull_request_url, title,
+			source_organization_url, source_project_id, source_project_name, source_repository_id, source_repository_name,
+			target_organization_url, target_project_id, target_project_name, target_repository_id, target_repository_name,
 			source_branch, target_branch, author_id, author_name, status,
 			review_state, policy_state, is_draft, last_synced_at, created_at, updated_at
 		) VALUES (
 			:id, :task_id, :repository_id, :organization_url, :project_id,
 			:azure_repository_id, :pull_request_id, :pull_request_url, :title,
+			:source_organization_url, :source_project_id, :source_project_name, :source_repository_id, :source_repository_name,
+			:target_organization_url, :target_project_id, :target_project_name, :target_repository_id, :target_repository_name,
 			:source_branch, :target_branch, :author_id, :author_name, :status,
 			:review_state, :policy_state, :is_draft, :last_synced_at, :created_at, :updated_at
 		)
@@ -53,6 +61,16 @@ func (s *Store) UpsertTaskPR(ctx context.Context, taskPR *TaskPR) error {
 			project_id = excluded.project_id,
 			pull_request_url = excluded.pull_request_url,
 			title = excluded.title,
+			source_organization_url = CASE WHEN excluded.source_organization_url <> '' THEN excluded.source_organization_url ELSE azure_devops_task_prs.source_organization_url END,
+			source_project_id = CASE WHEN excluded.source_project_id <> '' THEN excluded.source_project_id ELSE azure_devops_task_prs.source_project_id END,
+			source_project_name = CASE WHEN excluded.source_project_name <> '' THEN excluded.source_project_name ELSE azure_devops_task_prs.source_project_name END,
+			source_repository_id = CASE WHEN excluded.source_repository_id <> '' THEN excluded.source_repository_id ELSE azure_devops_task_prs.source_repository_id END,
+			source_repository_name = CASE WHEN excluded.source_repository_name <> '' THEN excluded.source_repository_name ELSE azure_devops_task_prs.source_repository_name END,
+			target_organization_url = CASE WHEN excluded.target_organization_url <> '' THEN excluded.target_organization_url ELSE azure_devops_task_prs.target_organization_url END,
+			target_project_id = CASE WHEN excluded.target_project_id <> '' THEN excluded.target_project_id ELSE azure_devops_task_prs.target_project_id END,
+			target_project_name = CASE WHEN excluded.target_project_name <> '' THEN excluded.target_project_name ELSE azure_devops_task_prs.target_project_name END,
+			target_repository_id = CASE WHEN excluded.target_repository_id <> '' THEN excluded.target_repository_id ELSE azure_devops_task_prs.target_repository_id END,
+			target_repository_name = CASE WHEN excluded.target_repository_name <> '' THEN excluded.target_repository_name ELSE azure_devops_task_prs.target_repository_name END,
 			source_branch = excluded.source_branch,
 			target_branch = excluded.target_branch,
 			author_id = excluded.author_id,

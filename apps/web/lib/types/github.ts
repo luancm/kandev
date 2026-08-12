@@ -225,6 +225,17 @@ export type TaskPR = {
   repository_id?: string;
   owner: string;
   repo: string;
+  /** Exact source/head repository identity when the PR is cross-repository. */
+  head_host?: string;
+  head_owner?: string;
+  head_repo?: string;
+  head_repo_id?: number;
+  head_repo_node_id?: string;
+  /** Canonical base repository identity reported by the provider. */
+  base_host?: string;
+  base_owner?: string;
+  base_repo?: string;
+  base_repo_id?: number;
   pr_number: number;
   pr_url: string;
   pr_title: string;

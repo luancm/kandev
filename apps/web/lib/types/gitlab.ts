@@ -66,6 +66,14 @@ export type TaskMR = {
   repository_id?: string;
   host: string;
   project_path: string;
+  /** Exact source/head project identity, including fork projects. */
+  source_host?: string;
+  source_project_path?: string;
+  source_project_id?: number;
+  /** Canonical target project identity reported by GitLab. */
+  target_host?: string;
+  target_project_path?: string;
+  target_project_id?: number;
   mr_iid: number;
   mr_url: string;
   mr_title: string;
@@ -92,6 +100,13 @@ export type TaskMR = {
   closed_at?: string;
   last_synced_at?: string;
   updated_at: string;
+};
+
+/** Workspace-scoped websocket payload emitted when a task MR is detached. */
+export type TaskMRDeletedEvent = {
+  workspace_id: string;
+  task_id: string;
+  association_id: string;
 };
 
 /** Response shape for `GET /api/v1/gitlab/workspaces/:id/task-mrs`. */

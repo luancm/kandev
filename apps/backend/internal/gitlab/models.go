@@ -370,14 +370,22 @@ type Issue struct {
 //   - MergeStatus carries GitLab's own merge_status string verbatim
 //     (can_be_merged, cannot_be_merged, unchecked, …) for debugging.
 type TaskMR struct {
-	ID                string `json:"id" db:"id"`
-	TaskID            string `json:"task_id" db:"task_id"`
-	RepositoryID      string `json:"repository_id,omitempty" db:"repository_id"`
-	Host              string `json:"host" db:"host"`                 // gitlab base URL the MR lives on
-	ProjectPath       string `json:"project_path" db:"project_path"` // namespace/path
-	MRIID             int    `json:"mr_iid" db:"mr_iid"`             // GitLab per-project sequential id
-	MRURL             string `json:"mr_url" db:"mr_url"`
-	MRTitle           string `json:"mr_title" db:"mr_title"`
+	ID           string `json:"id" db:"id"`
+	TaskID       string `json:"task_id" db:"task_id"`
+	RepositoryID string `json:"repository_id,omitempty" db:"repository_id"`
+	Host         string `json:"host" db:"host"`                 // gitlab base URL the MR lives on
+	ProjectPath  string `json:"project_path" db:"project_path"` // namespace/path
+	MRIID        int    `json:"mr_iid" db:"mr_iid"`             // GitLab per-project sequential id
+	MRURL        string `json:"mr_url" db:"mr_url"`
+	MRTitle      string `json:"mr_title" db:"mr_title"`
+	// Source* and Target* retain the exact provider identities. Host and
+	// ProjectPath remain the historical target aliases used by API lookup.
+	SourceHost        string `json:"source_host,omitempty" db:"source_host"`
+	SourceProjectPath string `json:"source_project_path,omitempty" db:"source_project_path"`
+	SourceProjectID   int64  `json:"source_project_id,omitempty" db:"source_project_id"`
+	TargetHost        string `json:"target_host,omitempty" db:"target_host"`
+	TargetProjectPath string `json:"target_project_path,omitempty" db:"target_project_path"`
+	TargetProjectID   int64  `json:"target_project_id,omitempty" db:"target_project_id"`
 	HeadBranch        string `json:"head_branch" db:"head_branch"`
 	BaseBranch        string `json:"base_branch" db:"base_branch"`
 	AuthorUsername    string `json:"author_username" db:"author_username"`

@@ -177,6 +177,12 @@ func (s *Service) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber
 	return s.store.UpdatePRWatchPRNumber(ctx, id, prNumber)
 }
 
+// ResolvePRWatch atomically stores the canonical PR base and number for a
+// searching watch.
+func (s *Service) ResolvePRWatch(ctx context.Context, id, owner, repo string, prNumber int) (bool, error) {
+	return s.store.ResolvePRWatch(ctx, id, owner, repo, prNumber)
+}
+
 // UpdatePRWatchRepository updates a watch's provider repository identity after
 // PR discovery. This keeps future status polling on the repository that owns
 // the PR rather than the repository used to discover the branch.
@@ -197,12 +203,6 @@ func (s *Service) rebindPRWatchRepository(ctx context.Context, watch *PRWatch, p
 	watch.Owner = pr.RepoOwner
 	watch.Repo = pr.RepoName
 	return nil
-}
-
-// ResolvePRWatch atomically stores the canonical PR base and number for a
-// searching watch.
-func (s *Service) ResolvePRWatch(ctx context.Context, id, owner, repo string, prNumber int) (bool, error) {
-	return s.store.ResolvePRWatch(ctx, id, owner, repo, prNumber)
 }
 
 // ResetPRWatch atomically resets a watch's branch and clears its pr_number so
@@ -396,6 +396,8 @@ func (s *Service) associatePRWithTask(
 		MergedAt:     pr.MergedAt,
 		ClosedAt:     pr.ClosedAt,
 	}
+	tp.HeadHost, tp.HeadOwner, tp.HeadRepo, tp.BaseHost, tp.BaseOwner, tp.BaseRepo = taskPRIdentityFromPR(pr)
+	tp.HeadRepoID, tp.HeadRepoNodeID, tp.BaseRepoID = pr.HeadRepoID, pr.HeadRepoNodeID, pr.BaseRepoID
 	// ReplaceTaskPR upserts the row matching (task, repository, pr_number).
 	// Multi-branch tasks may already hold sibling rows for the SAME
 	// (task, repository) on different PR numbers — ReplaceTaskPR no longer
@@ -893,8 +895,25 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		return err
 	}
 	next := s.prepareTaskPRSyncState(ctx, tp, status)
+	headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo := taskPRIdentityFromPR(status.PR)
+	headRepoID, headRepoNodeID, baseRepoID := status.PR.HeadRepoID, status.PR.HeadRepoNodeID, status.PR.BaseRepoID
+	explicitIdentity := taskPRHasExplicitIdentity(status.PR)
+	if !explicitIdentity {
+		headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo, headRepoID, headRepoNodeID, baseRepoID =
+			preserveTaskPRIdentity(tp, headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo, headRepoID, headRepoNodeID, baseRepoID)
+	}
+	identityChanged := explicitIdentity && ((headHost != "" && tp.HeadHost != headHost) ||
+		(headOwner != "" && tp.HeadOwner != headOwner) || (headRepo != "" && tp.HeadRepo != headRepo) ||
+		(baseHost != "" && tp.BaseHost != baseHost) || (baseOwner != "" && tp.BaseOwner != baseOwner) ||
+		(baseRepo != "" && tp.BaseRepo != baseRepo) ||
+		(headRepoID != 0 && tp.HeadRepoID != headRepoID) ||
+		(headRepoNodeID != "" && tp.HeadRepoNodeID != headRepoNodeID) ||
+		(baseRepoID != 0 && tp.BaseRepoID != baseRepoID))
 
 	changedFields := taskPRChangedFields(tp, status, next)
+	if identityChanged {
+		changedFields = append(changedFields, "repository_identity")
+	}
 
 	tp.State = next.state
 	tp.PRTitle = status.PR.Title
@@ -912,6 +931,10 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 	tp.ChecksPassing = next.checksPassing
 	tp.UnresolvedReviewThreads = next.unresolved
 	tp.BaseBranch = next.baseBranch
+	// Lightweight status responses may omit repository identity. Store-side
+	// NULLIF/COALESCE updates retain an already complete identity in that case.
+	tp.HeadHost, tp.HeadOwner, tp.HeadRepo, tp.BaseHost, tp.BaseOwner, tp.BaseRepo = headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo
+	tp.HeadRepoID, tp.HeadRepoNodeID, tp.BaseRepoID = headRepoID, headRepoNodeID, baseRepoID
 	// CommentCount is no longer updated from polling -- only refreshed on-demand
 	now := time.Now().UTC()
 	tp.LastSyncedAt = &now
@@ -938,6 +961,46 @@ func (s *Service) SyncTaskPR(ctx context.Context, taskID string, status *PRStatu
 		}
 	}
 	return nil
+}
+
+func preserveTaskPRIdentity(
+	existing *TaskPR,
+	headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo string,
+	headRepoID int64,
+	headRepoNodeID string,
+	baseRepoID int64,
+) (string, string, string, string, string, string, int64, string, int64) {
+	if existing == nil {
+		return headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo, headRepoID, headRepoNodeID, baseRepoID
+	}
+	if headHost == "" {
+		headHost = existing.HeadHost
+	}
+	if headOwner == "" {
+		headOwner = existing.HeadOwner
+	}
+	if headRepo == "" {
+		headRepo = existing.HeadRepo
+	}
+	if baseHost == "" {
+		baseHost = existing.BaseHost
+	}
+	if baseOwner == "" {
+		baseOwner = existing.BaseOwner
+	}
+	if baseRepo == "" {
+		baseRepo = existing.BaseRepo
+	}
+	if headRepoID == 0 {
+		headRepoID = existing.HeadRepoID
+	}
+	if headRepoNodeID == "" {
+		headRepoNodeID = existing.HeadRepoNodeID
+	}
+	if baseRepoID == 0 {
+		baseRepoID = existing.BaseRepoID
+	}
+	return headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo, headRepoID, headRepoNodeID, baseRepoID
 }
 
 func (s *Service) fetchRequiredReviewsForTaskPR(ctx context.Context, tp *TaskPR, branch string) *int {
@@ -1226,9 +1289,6 @@ func (s *Service) detectPRForWatchOnce(
 	}
 	if err != nil || pr == nil {
 		return nil, err
-	}
-	if rebindErr := s.rebindPRWatchRepository(ctx, watch, pr); rebindErr != nil {
-		return nil, rebindErr
 	}
 	resolvedWatch, resolveErr := s.store.ResolvePRWatch(ctx, watch.ID, pr.RepoOwner, pr.RepoName, pr.Number)
 	if resolveErr != nil {

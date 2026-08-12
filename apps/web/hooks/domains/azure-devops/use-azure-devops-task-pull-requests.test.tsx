@@ -164,6 +164,58 @@ describe("useAzureDevOpsTaskPullRequests", () => {
   });
 });
 
+describe("partial Azure DevOps task PR refreshes", () => {
+  it("preserves source and target identities when a refresh omits them", async () => {
+    const complete = taskPullRequest({
+      id: "link-partial-refresh",
+      lastSyncedAt: "2020-01-01T00:00:00Z",
+      sourceOrganizationUrl: "https://dev.azure.com/fork",
+      sourceProjectId: "source-project",
+      sourceRepositoryId: "source-repo",
+      targetOrganizationUrl: "https://dev.azure.com/base",
+      targetProjectId: "target-project",
+      targetRepositoryId: "target-repo",
+    });
+    const partial = taskPullRequest({
+      id: "link-partial-refresh",
+      title: "Refreshed title",
+      lastSyncedAt: new Date().toISOString(),
+    });
+    apiMocks.list.mockResolvedValue({ taskPrs: { "task-1": [complete] } });
+    apiMocks.sync.mockResolvedValue(partial);
+
+    const { result, unmount } = renderHook(
+      () => useAzureDevOpsTaskPullRequests("workspace-partial-refresh", "task-1"),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current[0]?.title).toBe("Refreshed title"));
+    expect(result.current[0]).toMatchObject({
+      sourceOrganizationUrl: "https://dev.azure.com/fork",
+      sourceProjectId: "source-project",
+      sourceRepositoryId: "source-repo",
+      targetOrganizationUrl: "https://dev.azure.com/base",
+      targetProjectId: "target-project",
+      targetRepositoryId: "target-repo",
+    });
+
+    unmount();
+    const remounted = renderHook(
+      () => useAzureDevOpsTaskPullRequests("workspace-partial-refresh", "task-1"),
+      { wrapper },
+    );
+    await waitFor(() => expect(remounted.result.current[0]?.title).toBe("Refreshed title"));
+    expect(remounted.result.current[0]).toMatchObject({
+      sourceOrganizationUrl: "https://dev.azure.com/fork",
+      sourceProjectId: "source-project",
+      sourceRepositoryId: "source-repo",
+      targetOrganizationUrl: "https://dev.azure.com/base",
+      targetProjectId: "target-project",
+      targetRepositoryId: "target-repo",
+    });
+  });
+});
+
 describe("useAzureDevOpsTaskPullRequests workspace switch guards", () => {
   it("ignores a workspace load that completes after the workspace changes", async () => {
     const firstLoad = deferred<{ taskPrs: Record<string, AzureDevOpsTaskPullRequest[]> }>();

@@ -41,6 +41,16 @@ const createTaskPRTableSQL = `
 		organization_url TEXT NOT NULL,
 		project_id TEXT NOT NULL,
 		azure_repository_id TEXT NOT NULL,
+		source_organization_url TEXT NOT NULL DEFAULT '',
+		source_project_id TEXT NOT NULL DEFAULT '',
+		source_project_name TEXT NOT NULL DEFAULT '',
+		source_repository_id TEXT NOT NULL DEFAULT '',
+		source_repository_name TEXT NOT NULL DEFAULT '',
+		target_organization_url TEXT NOT NULL DEFAULT '',
+		target_project_id TEXT NOT NULL DEFAULT '',
+		target_project_name TEXT NOT NULL DEFAULT '',
+		target_repository_id TEXT NOT NULL DEFAULT '',
+		target_repository_name TEXT NOT NULL DEFAULT '',
 		pull_request_id INTEGER NOT NULL,
 		pull_request_url TEXT NOT NULL,
 		title TEXT NOT NULL,
@@ -190,6 +200,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	if _, err := store.db.Exec(createTaskPRTableSQL); err != nil {
 		return nil, fmt.Errorf("azure devops task PR schema init: %w", err)
 	}
+	if err := store.ensureTaskPRIdentityColumns(); err != nil {
+		return nil, fmt.Errorf("azure devops task PR identity schema init: %w", err)
+	}
 	if _, err := store.db.Exec(createTaskWorkItemTableSQL); err != nil {
 		return nil, fmt.Errorf("azure devops task work item schema init: %w", err)
 	}
@@ -197,6 +210,48 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 		return nil, fmt.Errorf("azure devops watcher schema init: %w", err)
 	}
 	return store, nil
+}
+
+func (s *Store) ensureTaskPRIdentityColumns() error {
+	columns := []struct{ name, ddl string }{
+		{"source_organization_url", "TEXT NOT NULL DEFAULT ''"},
+		{"source_project_id", "TEXT NOT NULL DEFAULT ''"},
+		{"source_project_name", "TEXT NOT NULL DEFAULT ''"},
+		{"source_repository_id", "TEXT NOT NULL DEFAULT ''"},
+		{"source_repository_name", "TEXT NOT NULL DEFAULT ''"},
+		{"target_organization_url", "TEXT NOT NULL DEFAULT ''"},
+		{"target_project_id", "TEXT NOT NULL DEFAULT ''"},
+		{"target_project_name", "TEXT NOT NULL DEFAULT ''"},
+		{"target_repository_id", "TEXT NOT NULL DEFAULT ''"},
+		{"target_repository_name", "TEXT NOT NULL DEFAULT ''"},
+	}
+	rows, err := s.db.Query(`PRAGMA table_info(azure_devops_task_prs)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		existing[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, column := range columns {
+		if existing[column.name] {
+			continue
+		}
+		if _, err := s.db.Exec("ALTER TABLE azure_devops_task_prs ADD COLUMN " + column.name + " " + column.ddl); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) ensureWorkspaceSettingsColumn() error {

@@ -117,6 +117,38 @@ func TestStore_UpsertTaskMR_InsertsThenUpdates(t *testing.T) {
 	}
 }
 
+func TestStore_TaskMRSourceAndTargetIdentityRoundTripAndPartialRefresh(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	tm := newTestMR("task-identity", "repo-identity", "group/base/project", 7)
+	tm.SourceHost = "https://gitlab.example"
+	tm.SourceProjectPath = "forks/team/project"
+	tm.SourceProjectID = 42
+	tm.TargetHost = "https://gitlab.example"
+	tm.TargetProjectPath = "group/base/project"
+	tm.TargetProjectID = 99
+	if err := store.UpsertTaskMR(ctx, tm); err != nil {
+		t.Fatalf("initial upsert: %v", err)
+	}
+
+	partial := *tm
+	partial.State = "merged"
+	partial.SourceHost, partial.SourceProjectPath, partial.TargetHost, partial.TargetProjectPath = "", "", "", ""
+	partial.SourceProjectID, partial.TargetProjectID = 0, 0
+	if err := store.UpsertTaskMR(ctx, &partial); err != nil {
+		t.Fatalf("partial refresh: %v", err)
+	}
+
+	got, err := store.GetTaskMR(ctx, tm.TaskID, tm.RepositoryID, tm.ProjectPath, tm.MRIID)
+	if err != nil {
+		t.Fatalf("get task MR: %v", err)
+	}
+	if got == nil || got.SourceHost != tm.SourceHost || got.SourceProjectPath != tm.SourceProjectPath || got.SourceProjectID != tm.SourceProjectID ||
+		got.TargetHost != tm.TargetHost || got.TargetProjectPath != tm.TargetProjectPath || got.TargetProjectID != tm.TargetProjectID {
+		t.Fatalf("partial refresh lost source/target identity: %+v", got)
+	}
+}
+
 func TestStore_UpsertTaskMR_ConcurrentCallsPreserveOriginalIdentity(t *testing.T) {
 	store := newTestStore(t)
 	const writers = 16

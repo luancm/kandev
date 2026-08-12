@@ -103,23 +103,31 @@ type PullRequestFilter struct {
 
 // PullRequest is the Azure-native PR summary used by list and task-link flows.
 type PullRequest struct {
-	ID             int        `json:"id"`
-	Title          string     `json:"title"`
-	Description    string     `json:"description,omitempty"`
-	Status         string     `json:"status"`
-	IsDraft        bool       `json:"isDraft"`
-	SourceBranch   string     `json:"sourceBranch"`
-	TargetBranch   string     `json:"targetBranch"`
-	MergeStatus    string     `json:"mergeStatus,omitempty"`
-	CreationDate   *time.Time `json:"creationDate,omitempty"`
-	ClosedDate     *time.Time `json:"closedDate,omitempty"`
-	Author         Identity   `json:"author"`
-	ProjectID      string     `json:"projectId"`
-	ProjectName    string     `json:"projectName"`
-	RepositoryID   string     `json:"repositoryId"`
-	RepositoryName string     `json:"repositoryName"`
-	WebURL         string     `json:"webUrl"`
-	APIURL         string     `json:"apiUrl"`
+	ID                   int        `json:"id"`
+	Title                string     `json:"title"`
+	Description          string     `json:"description,omitempty"`
+	Status               string     `json:"status"`
+	IsDraft              bool       `json:"isDraft"`
+	SourceBranch         string     `json:"sourceBranch"`
+	TargetBranch         string     `json:"targetBranch"`
+	MergeStatus          string     `json:"mergeStatus,omitempty"`
+	CreationDate         *time.Time `json:"creationDate,omitempty"`
+	ClosedDate           *time.Time `json:"closedDate,omitempty"`
+	Author               Identity   `json:"author"`
+	ProjectID            string     `json:"projectId"`
+	ProjectName          string     `json:"projectName"`
+	RepositoryID         string     `json:"repositoryId"`
+	RepositoryName       string     `json:"repositoryName"`
+	SourceProjectID      string     `json:"sourceProjectId,omitempty"`
+	SourceProjectName    string     `json:"sourceProjectName,omitempty"`
+	SourceRepositoryID   string     `json:"sourceRepositoryId,omitempty"`
+	SourceRepositoryName string     `json:"sourceRepositoryName,omitempty"`
+	TargetProjectID      string     `json:"targetProjectId,omitempty"`
+	TargetProjectName    string     `json:"targetProjectName,omitempty"`
+	TargetRepositoryID   string     `json:"targetRepositoryId,omitempty"`
+	TargetRepositoryName string     `json:"targetRepositoryName,omitempty"`
+	WebURL               string     `json:"webUrl"`
+	APIURL               string     `json:"apiUrl"`
 }
 
 type PullRequestPage struct {

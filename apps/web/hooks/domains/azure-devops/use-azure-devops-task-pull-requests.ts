@@ -17,6 +17,25 @@ const pendingTaskPullRequests = new Map<string, Promise<AzureDevOpsTaskPullReque
 const workspaceSnapshots = new Map<string, WorkspaceSnapshot>();
 const workspaceUpdates = new Map<string, WorkspaceSnapshot>();
 
+function mergeTaskPullRequestIdentity(
+  previous: AzureDevOpsTaskPullRequest,
+  incoming: AzureDevOpsTaskPullRequest,
+): AzureDevOpsTaskPullRequest {
+  return {
+    ...incoming,
+    sourceOrganizationUrl: incoming.sourceOrganizationUrl ?? previous.sourceOrganizationUrl,
+    sourceProjectId: incoming.sourceProjectId ?? previous.sourceProjectId,
+    sourceProjectName: incoming.sourceProjectName ?? previous.sourceProjectName,
+    sourceRepositoryId: incoming.sourceRepositoryId ?? previous.sourceRepositoryId,
+    sourceRepositoryName: incoming.sourceRepositoryName ?? previous.sourceRepositoryName,
+    targetOrganizationUrl: incoming.targetOrganizationUrl ?? previous.targetOrganizationUrl,
+    targetProjectId: incoming.targetProjectId ?? previous.targetProjectId,
+    targetProjectName: incoming.targetProjectName ?? previous.targetProjectName,
+    targetRepositoryId: incoming.targetRepositoryId ?? previous.targetRepositoryId,
+    targetRepositoryName: incoming.targetRepositoryName ?? previous.targetRepositoryName,
+  };
+}
+
 function withTaskPullRequest(
   snapshot: WorkspaceSnapshot,
   taskId: string,
@@ -25,7 +44,8 @@ function withTaskPullRequest(
   const existing = snapshot[taskId] ?? [];
   const index = existing.findIndex((item) => item.id === pullRequest.id);
   const taskPullRequests = [...existing];
-  if (index >= 0) taskPullRequests[index] = pullRequest;
+  if (index >= 0)
+    taskPullRequests[index] = mergeTaskPullRequestIdentity(taskPullRequests[index]!, pullRequest);
   else taskPullRequests.push(pullRequest);
   return { ...snapshot, [taskId]: taskPullRequests };
 }

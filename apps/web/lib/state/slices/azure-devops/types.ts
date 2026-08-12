@@ -18,6 +18,7 @@ export type AzureDevOpsSliceActions = {
     pullRequests: Record<string, AzureDevOpsTaskPullRequest[]>,
   ) => void;
   setAzureDevOpsTaskPullRequest: (taskId: string, pullRequest: AzureDevOpsTaskPullRequest) => void;
+  removeAzureDevOpsTaskPullRequest: (taskId: string, associationId: string) => void;
   resetAzureDevOpsTaskPullRequests: () => void;
   setAzureDevOpsTaskWorkItems: (workItems: Record<string, AzureDevOpsTaskWorkItem[]>) => void;
   setAzureDevOpsTaskWorkItem: (taskId: string, workItem: AzureDevOpsTaskWorkItem) => void;

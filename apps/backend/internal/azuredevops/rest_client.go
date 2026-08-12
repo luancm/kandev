@@ -695,19 +695,21 @@ type rawWorkItem struct {
 }
 
 type rawPullRequest struct {
-	PullRequestID int           `json:"pullRequestId"`
-	Title         string        `json:"title"`
-	Description   string        `json:"description"`
-	Status        string        `json:"status"`
-	IsDraft       bool          `json:"isDraft"`
-	SourceRefName string        `json:"sourceRefName"`
-	TargetRefName string        `json:"targetRefName"`
-	MergeStatus   string        `json:"mergeStatus"`
-	CreationDate  *time.Time    `json:"creationDate"`
-	ClosedDate    *time.Time    `json:"closedDate"`
-	URL           string        `json:"url"`
-	CreatedBy     Identity      `json:"createdBy"`
-	Repository    rawRepository `json:"repository"`
+	PullRequestID    int             `json:"pullRequestId"`
+	Title            string          `json:"title"`
+	Description      string          `json:"description"`
+	Status           string          `json:"status"`
+	IsDraft          bool            `json:"isDraft"`
+	SourceRefName    string          `json:"sourceRefName"`
+	TargetRefName    string          `json:"targetRefName"`
+	MergeStatus      string          `json:"mergeStatus"`
+	CreationDate     *time.Time      `json:"creationDate"`
+	ClosedDate       *time.Time      `json:"closedDate"`
+	URL              string          `json:"url"`
+	CreatedBy        Identity        `json:"createdBy"`
+	Repository       rawRepository   `json:"repository"`
+	SourceRepository rawRepository   `json:"sourceRepository"`
+	ForkSource       json.RawMessage `json:"forkSource"`
 }
 
 type rawPolicyEvaluation struct {
@@ -822,13 +824,57 @@ func convertPullRequest(raw rawPullRequest) PullRequest {
 	if raw.Repository.WebURL != "" && raw.PullRequestID > 0 {
 		webURL = strings.TrimRight(raw.Repository.WebURL, "/") + "/pullrequest/" + strconv.Itoa(raw.PullRequestID)
 	}
+	targetProjectID, targetProjectName := raw.Repository.Project.ID, raw.Repository.Project.Name
+	targetRepositoryID, targetRepositoryName := raw.Repository.ID, raw.Repository.Name
+	source := raw.SourceRepository
+	if source.ID == "" && len(raw.ForkSource) > 0 {
+		source = decodeForkSourceRepository(raw.ForkSource)
+	}
+	if source.ID == "" && source.Name == "" && source.Project.ID == "" {
+		source = raw.Repository
+	}
 	return PullRequest{
 		ID: raw.PullRequestID, Title: raw.Title, Description: raw.Description, Status: raw.Status,
 		IsDraft: raw.IsDraft, SourceBranch: trimBranchRef(raw.SourceRefName), TargetBranch: trimBranchRef(raw.TargetRefName),
 		MergeStatus: raw.MergeStatus, CreationDate: raw.CreationDate, ClosedDate: raw.ClosedDate,
-		Author: raw.CreatedBy, ProjectID: raw.Repository.Project.ID, ProjectName: raw.Repository.Project.Name,
-		RepositoryID: raw.Repository.ID, RepositoryName: raw.Repository.Name, WebURL: webURL, APIURL: raw.URL,
+		Author: raw.CreatedBy, ProjectID: targetProjectID, ProjectName: targetProjectName,
+		RepositoryID: targetRepositoryID, RepositoryName: targetRepositoryName,
+		SourceProjectID: source.Project.ID, SourceProjectName: source.Project.Name,
+		SourceRepositoryID: source.ID, SourceRepositoryName: source.Name,
+		TargetProjectID: targetProjectID, TargetProjectName: targetProjectName,
+		TargetRepositoryID: targetRepositoryID, TargetRepositoryName: targetRepositoryName,
+		WebURL: webURL, APIURL: raw.URL,
 	}
+}
+
+func decodeForkSourceRepository(raw json.RawMessage) rawRepository {
+	var repository rawRepository
+	if json.Unmarshal(raw, &repository) == nil && (repository.ID != "" || repository.Name != "" || repository.Project.ID != "") {
+		return repository
+	}
+	var remoteURL string
+	if json.Unmarshal(raw, &remoteURL) != nil || remoteURL == "" {
+		return rawRepository{}
+	}
+	parsed, err := url.Parse(remoteURL)
+	if err != nil {
+		return rawRepository{}
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	gitIndex := -1
+	for i, part := range parts {
+		if part == "_git" {
+			gitIndex = i
+			break
+		}
+	}
+	if gitIndex < 1 || gitIndex+1 >= len(parts) {
+		return rawRepository{}
+	}
+	repository.WebURL = remoteURL
+	repository.Name = parts[gitIndex+1]
+	repository.Project.Name = parts[gitIndex-1]
+	return repository
 }
 
 func stringField(fields map[string]any, key string) string {

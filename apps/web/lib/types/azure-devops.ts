@@ -236,6 +236,18 @@ export type AzureDevOpsTaskPullRequest = {
   organizationUrl: string;
   projectId: string;
   azureRepositoryId: string;
+  /** Exact source/head repository identity, including fork repositories. */
+  sourceOrganizationUrl?: string;
+  sourceProjectId?: string;
+  sourceProjectName?: string;
+  sourceRepositoryId?: string;
+  sourceRepositoryName?: string;
+  /** Canonical target repository identity reported by Azure DevOps. */
+  targetOrganizationUrl?: string;
+  targetProjectId?: string;
+  targetProjectName?: string;
+  targetRepositoryId?: string;
+  targetRepositoryName?: string;
   pullRequestId: number;
   pullRequestUrl: string;
   title: string;
@@ -250,6 +262,16 @@ export type AzureDevOpsTaskPullRequest = {
   lastSyncedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AzureDevOpsTaskPullRequestUpdatedEvent = AzureDevOpsTaskPullRequest & {
+  workspaceId: string;
+};
+
+export type AzureDevOpsTaskPullRequestDeletedEvent = {
+  workspaceId: string;
+  taskId: string;
+  associationId: string;
 };
 
 export type AssociateAzureDevOpsPullRequestRequest = {

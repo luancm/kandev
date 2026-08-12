@@ -8,6 +8,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repositoryID string) {
@@ -831,6 +835,19 @@ func TestAssociateExistingMRByURLInfersSoleRepositoryAndRejectsMultiRepoAmbiguit
 
 func TestUnlinkTaskMRRemovesOnlySelectedAssociationAndRefreshWatch(t *testing.T) {
 	svc, store, client := newTaskMRLinkService(t, DefaultHost)
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	svc.SetEventBus(eventBus)
+	deleted := make(chan *TaskMRDeletedEvent, 1)
+	if _, err := eventBus.Subscribe(events.GitLabTaskMRDeleted, func(_ context.Context, event *bus.Event) error {
+		payload, ok := event.Data.(*TaskMRDeletedEvent)
+		if !ok {
+			t.Fatalf("deleted event payload = %T", event.Data)
+		}
+		deleted <- payload
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe to task MR deletion: %v", err)
+	}
 	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
 	setTaskMRRepositoryIdentity(t, store, "repo-1", DefaultHost, "acme/api")
 	for iid := 1; iid <= 2; iid++ {
@@ -870,5 +887,13 @@ func TestUnlinkTaskMRRemovesOnlySelectedAssociationAndRefreshWatch(t *testing.T)
 	}
 	if len(watches) != 1 || watches[0].MRIID != 2 {
 		t.Fatalf("remaining refresh watches = %+v, want only !2", watches)
+	}
+	select {
+	case event := <-deleted:
+		if event.WorkspaceID != "ws-1" || event.TaskID != "task-1" || event.AssociationID != selected.ID {
+			t.Fatalf("deleted event = %+v", event)
+		}
+	default:
+		t.Fatal("expected gitlab.task_mr.deleted event")
 	}
 }

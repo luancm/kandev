@@ -6,6 +6,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 // ErrInvalidTaskPRAssociation identifies repository/task/provider validation
@@ -65,10 +70,68 @@ func (s *Service) syncTaskPR(
 		return nil, ErrNotConfigured
 	}
 	row := taskPRFromFeedback(taskID, repositoryID, cfg.OrganizationURL, binding, feedback)
+	row.WorkspaceID = workspaceID
 	if err := s.store.UpsertTaskPR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert Azure task PR: %w", err)
 	}
+	s.publishTaskPRUpdated(ctx, row)
 	return row, nil
+}
+
+type TaskPRUpdatedEvent struct {
+	WorkspaceID string `json:"workspaceId"`
+	*TaskPR
+}
+
+func (e *TaskPRUpdatedEvent) GetWorkspaceID() string {
+	if e == nil {
+		return ""
+	}
+	return e.WorkspaceID
+}
+
+type TaskPRDeletedEvent struct {
+	WorkspaceID   string `json:"workspaceId"`
+	TaskID        string `json:"taskId"`
+	AssociationID string `json:"associationId"`
+}
+
+func (e TaskPRDeletedEvent) GetWorkspaceID() string { return e.WorkspaceID }
+
+func (s *Service) publishTaskPRUpdated(ctx context.Context, row *TaskPR) {
+	if row == nil {
+		return
+	}
+	s.mu.RLock()
+	eventBus := s.eventBus
+	s.mu.RUnlock()
+	if eventBus == nil {
+		return
+	}
+	event := bus.NewEvent(events.AzureDevOpsTaskPRUpdated, "azuredevops", &TaskPRUpdatedEvent{
+		WorkspaceID: row.WorkspaceID, TaskPR: row,
+	})
+	if err := eventBus.Publish(ctx, events.AzureDevOpsTaskPRUpdated, event); err != nil {
+		s.log.Debug("publish Azure task PR update", zap.Error(err))
+	}
+}
+
+func (s *Service) publishTaskPRDeleted(ctx context.Context, workspaceID string, row *TaskPR) {
+	if row == nil {
+		return
+	}
+	s.mu.RLock()
+	eventBus := s.eventBus
+	s.mu.RUnlock()
+	if eventBus == nil {
+		return
+	}
+	event := bus.NewEvent(events.AzureDevOpsTaskPRDeleted, "azuredevops", &TaskPRDeletedEvent{
+		WorkspaceID: workspaceID, TaskID: row.TaskID, AssociationID: row.ID,
+	})
+	if err := eventBus.Publish(ctx, events.AzureDevOpsTaskPRDeleted, event); err != nil {
+		s.log.Debug("publish Azure task PR deletion", zap.Error(err))
+	}
 }
 
 func (s *Service) validateTaskPRRepository(
@@ -121,9 +184,41 @@ func taskPRFromFeedback(
 ) *TaskPR {
 	pr := feedback.PullRequest
 	now := time.Now().UTC()
+	targetProjectID, targetProjectName := pr.TargetProjectID, pr.TargetProjectName
+	if targetProjectID == "" {
+		targetProjectID = pr.ProjectID
+	}
+	if targetProjectName == "" {
+		targetProjectName = pr.ProjectName
+	}
+	targetRepositoryID, targetRepositoryName := pr.TargetRepositoryID, pr.TargetRepositoryName
+	if targetRepositoryID == "" {
+		targetRepositoryID = pr.RepositoryID
+	}
+	if targetRepositoryName == "" {
+		targetRepositoryName = pr.RepositoryName
+	}
+	sourceProjectID, sourceProjectName := pr.SourceProjectID, pr.SourceProjectName
+	if sourceProjectID == "" {
+		sourceProjectID = targetProjectID
+	}
+	if sourceProjectName == "" {
+		sourceProjectName = targetProjectName
+	}
+	sourceRepositoryID, sourceRepositoryName := pr.SourceRepositoryID, pr.SourceRepositoryName
+	if sourceRepositoryID == "" {
+		sourceRepositoryID = targetRepositoryID
+	}
+	if sourceRepositoryName == "" {
+		sourceRepositoryName = targetRepositoryName
+	}
 	return &TaskPR{
 		TaskID: taskID, RepositoryID: repositoryID, OrganizationURL: organizationURL,
 		ProjectID: binding.ProviderOwner, AzureRepositoryID: binding.ProviderRepoID,
+		SourceOrganizationURL: organizationURL, SourceProjectID: sourceProjectID, SourceProjectName: sourceProjectName,
+		SourceRepositoryID: sourceRepositoryID, SourceRepositoryName: sourceRepositoryName,
+		TargetOrganizationURL: organizationURL, TargetProjectID: targetProjectID, TargetProjectName: targetProjectName,
+		TargetRepositoryID: targetRepositoryID, TargetRepositoryName: targetRepositoryName,
 		PullRequestID: pr.ID, PullRequestURL: pr.WebURL, Title: pr.Title,
 		SourceBranch: normalizeBranch(pr.SourceBranch), TargetBranch: normalizeBranch(pr.TargetBranch),
 		AuthorID: pr.Author.ID, AuthorName: pr.Author.DisplayName, Status: pr.Status,

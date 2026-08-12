@@ -612,6 +612,15 @@ type associateTaskPRRequest struct {
 	PRNumber                int    `json:"pr_number"`
 	PRURL                   string `json:"pr_url"`
 	PRTitle                 string `json:"pr_title"`
+	HeadHost                string `json:"head_host,omitempty"`
+	HeadOwner               string `json:"head_owner,omitempty"`
+	HeadRepo                string `json:"head_repo,omitempty"`
+	HeadRepoID              int64  `json:"head_repo_id,omitempty"`
+	HeadRepoNodeID          string `json:"head_repo_node_id,omitempty"`
+	BaseHost                string `json:"base_host,omitempty"`
+	BaseOwner               string `json:"base_owner,omitempty"`
+	BaseRepo                string `json:"base_repo,omitempty"`
+	BaseRepoID              int64  `json:"base_repo_id,omitempty"`
 	HeadBranch              string `json:"head_branch"`
 	BaseBranch              string `json:"base_branch"`
 	AuthorLogin             string `json:"author_login"`
@@ -663,6 +672,26 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 // buildTaskPRFromRequest copies the required fields from the JSON body into
 // a TaskPR and applies the optional pointer fields when present.
 func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR {
+	headHost, headOwner, headRepo := req.HeadHost, req.HeadOwner, req.HeadRepo
+	baseHost, baseOwner, baseRepo := req.BaseHost, req.BaseOwner, req.BaseRepo
+	if headHost == "" {
+		headHost = defaultGitHubHost
+	}
+	if headOwner == "" {
+		headOwner = req.Owner
+	}
+	if headRepo == "" {
+		headRepo = req.Repo
+	}
+	if baseHost == "" {
+		baseHost = defaultGitHubHost
+	}
+	if baseOwner == "" {
+		baseOwner = req.Owner
+	}
+	if baseRepo == "" {
+		baseRepo = req.Repo
+	}
 	tp := &TaskPR{
 		TaskID:         req.TaskID,
 		WorkspaceID:    req.WorkspaceID,
@@ -672,6 +701,15 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		PRNumber:       req.PRNumber,
 		PRURL:          req.PRURL,
 		PRTitle:        req.PRTitle,
+		HeadHost:       headHost,
+		HeadOwner:      headOwner,
+		HeadRepo:       headRepo,
+		HeadRepoID:     req.HeadRepoID,
+		HeadRepoNodeID: req.HeadRepoNodeID,
+		BaseHost:       baseHost,
+		BaseOwner:      baseOwner,
+		BaseRepo:       baseRepo,
+		BaseRepoID:     req.BaseRepoID,
 		HeadBranch:     req.HeadBranch,
 		BaseBranch:     req.BaseBranch,
 		AuthorLogin:    req.AuthorLogin,
@@ -710,7 +748,21 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 // already seeded explicitly via addPRs (tests that pin a head_sha for
 // matching check_runs must not have it overwritten).
 func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associateTaskPRRequest, now time.Time) {
-	if existing, _ := c.mock.GetPR(ctx, req.Owner, req.Repo, req.PRNumber); existing != nil {
+	headOwner, headRepo := req.HeadOwner, req.HeadRepo
+	if headOwner == "" {
+		headOwner = req.Owner
+	}
+	if headRepo == "" {
+		headRepo = req.Repo
+	}
+	baseOwner, baseRepo := req.BaseOwner, req.BaseRepo
+	if baseOwner == "" {
+		baseOwner = req.Owner
+	}
+	if baseRepo == "" {
+		baseRepo = req.Repo
+	}
+	if existing, _ := c.mock.GetPR(ctx, baseOwner, baseRepo, req.PRNumber); existing != nil {
 		return
 	}
 	c.mock.AddPR(&PR{
@@ -720,12 +772,19 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		HTMLURL:        req.PRURL,
 		State:          req.State,
 		HeadBranch:     req.HeadBranch,
-		HeadSHA:        mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
+		HeadSHA:        mockHeadSHA(baseOwner, baseRepo, req.PRNumber),
 		BaseBranch:     req.BaseBranch,
 		AuthorLogin:    req.AuthorLogin,
 		MergeableState: req.MergeableState,
-		RepoOwner:      req.Owner,
-		RepoName:       req.Repo,
+		RepoOwner:      baseOwner,
+		RepoName:       baseRepo,
+		HeadRepoID:     req.HeadRepoID,
+		HeadRepoNodeID: req.HeadRepoNodeID,
+		HeadRepoOwner:  headOwner,
+		HeadRepoName:   headRepo,
+		BaseRepoID:     req.BaseRepoID,
+		BaseRepoOwner:  baseOwner,
+		BaseRepoName:   baseRepo,
 		Additions:      req.Additions,
 		Deletions:      req.Deletions,
 		CreatedAt:      now,

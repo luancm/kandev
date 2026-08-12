@@ -1,7 +1,7 @@
 ---
 id: "04-persist-provider-source-identities"
 title: "Persist exact provider source and base identities"
-status: in_progress
+status: completed
 wave: 4
 depends_on: ["03-repair-watch-lifecycle"]
 plan: "plan.md"
@@ -101,4 +101,10 @@ Update only this task file's `## Results`. Report each provider's source/base sh
 
 ## Results
 
-Pending.
+- Completed provider-neutral source/head and canonical base identity persistence for GitHub TaskPR, GitLab TaskMR, and Azure DevOps TaskPR while retaining the existing provider-specific target aliases and branch/ref fields.
+- GitHub now persists credential-free head host/owner/repository/IDs and base host/owner/repository/ID, preserves those fields through lightweight status refreshes, carries them through explicit projections, inserts, updates, association, and the multi-repository rebuild path, and has mock-controller coverage for production-shaped source/base data.
+- GitLab now persists source host/project path/ID and target host/project path/ID, including nested project paths and self-hosted hosts, with additive migration replay, explicit projections, omission-preserving upserts, association/sync/removal events, and provider watch/list responses.
+- Azure DevOps now retains distinct source and target organization/project/repository identities during REST conversion and TaskPR sync, adds additive migration replay and explicit projection/upsert support, and publishes TaskPR update/removal events for lifecycle cleanup and frontend refreshes.
+- All three frontend state slices and provider types preserve nonempty source/base identity during partial WebSocket, list, sync, and cache updates. GitLab removal and Azure DevOps update/removal WebSocket handlers are workspace-scoped, and the Azure DevOps hook preserves identity across refresh and remount cache hydration.
+- RED/GREEN coverage includes distinct source/base model and conversion tests, legacy schema replay tests, GitHub table rebuild and index/constraint preservation, omission-preserving store/service tests, GitHub mock fixtures, provider event tests, and frontend slice, hook, and WebSocket tests. Changed backend ownership is limited to the provider models, stores, services, lifecycle/events, and their tests; frontend changes are limited to provider contracts, state ingestion, WebSocket routing, hook cache merging, and tests.
+- Verification passed: `cd apps && pnpm install --frozen-lockfile`; focused provider tests for GitHub, GitLab, and Azure DevOps; `cd apps/backend && go test -tags fts5 ./internal/github ./internal/gitlab ./internal/azuredevops -count=1`; `cd apps/backend && make lint` via `make -C apps/backend lint` with 0 issues; the focused frontend Vitest command with 7 files and 62 tests passed; targeted frontend ESLint with 0 errors and 0 warnings; `NODE_OPTIONS=--max-old-space-size=4096 pnpm exec tsc --noEmit`; and `git diff --check`.

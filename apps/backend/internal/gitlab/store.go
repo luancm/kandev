@@ -73,6 +73,12 @@ const createTablesSQL = `
 		repository_id TEXT NOT NULL DEFAULT '',
 		host TEXT NOT NULL DEFAULT '',
 		project_path TEXT NOT NULL,
+		source_host TEXT NOT NULL DEFAULT '',
+		source_project_path TEXT NOT NULL DEFAULT '',
+		source_project_id INTEGER NOT NULL DEFAULT 0,
+		target_host TEXT NOT NULL DEFAULT '',
+		target_project_path TEXT NOT NULL DEFAULT '',
+		target_project_id INTEGER NOT NULL DEFAULT 0,
 		mr_iid INTEGER NOT NULL,
 		mr_url TEXT NOT NULL,
 		mr_title TEXT NOT NULL,
@@ -232,6 +238,9 @@ func (s *Store) createTables() error {
 	if err := s.migrateTaskMRAutomationFields(); err != nil {
 		return err
 	}
+	if err := s.migrateTaskMRSourceIdentityFields(); err != nil {
+		return err
+	}
 	if err := s.migrateMRWatchUniqueKey(); err != nil {
 		return err
 	}
@@ -239,6 +248,21 @@ func (s *Store) createTables() error {
 		return err
 	}
 	return s.healTaskOwnedOrphans()
+}
+
+// migrateTaskMRSourceIdentityFields adds the exact source and target project
+// identities to existing task-MR rows. Empty values intentionally retain the
+// legacy target aliases until the next authoritative provider refresh.
+func (s *Store) migrateTaskMRSourceIdentityFields() error {
+	columns := []struct{ name, ddl string }{
+		{"source_host", "TEXT NOT NULL DEFAULT ''"},
+		{"source_project_path", "TEXT NOT NULL DEFAULT ''"},
+		{"source_project_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"target_host", "TEXT NOT NULL DEFAULT ''"},
+		{"target_project_path", "TEXT NOT NULL DEFAULT ''"},
+		{"target_project_id", "INTEGER NOT NULL DEFAULT 0"},
+	}
+	return addMissingColumns(s, "gitlab_task_mrs", columns)
 }
 
 // migrateTaskMRAutomationFields adds the reviewer/merge-readiness columns
@@ -476,6 +500,7 @@ func (s *Store) GetMentionScope(ctx context.Context, workspaceID string) (*Menti
 // still have dropped columns (older revisions defined `unresolved_threads`
 // and `discussion_count` here) don't break sqlx struct binding.
 const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid,
+	source_host, source_project_path, source_project_id, target_host, target_project_path, target_project_id,
 	mr_url, mr_title, head_branch, base_branch, author_username, state,
 	approval_state, pipeline_state, merge_status, draft, approval_count,
 	required_approvals, pipeline_jobs_total, pipeline_jobs_pass,
@@ -486,7 +511,8 @@ const taskMRSelectCols = `id, task_id, repository_id, host, project_path, mr_iid
 // for the workspace JOIN where `tasks` shares column names (id, created_at,
 // updated_at).
 const taskMRSelectColsQualified = `gtm.id, gtm.task_id, gtm.repository_id,
-	gtm.host, gtm.project_path, gtm.mr_iid, gtm.mr_url, gtm.mr_title,
+	gtm.host, gtm.project_path, gtm.mr_iid, gtm.source_host, gtm.source_project_path, gtm.source_project_id,
+	gtm.target_host, gtm.target_project_path, gtm.target_project_id, gtm.mr_url, gtm.mr_title,
 	gtm.head_branch, gtm.base_branch, gtm.author_username, gtm.state,
 	gtm.approval_state, gtm.pipeline_state, gtm.merge_status, gtm.draft,
 	gtm.approval_count, gtm.required_approvals, gtm.pipeline_jobs_total,
@@ -509,14 +535,16 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	}
 	rows, err := s.db.NamedQueryContext(ctx, `
 		INSERT INTO gitlab_task_mrs (
-			id, task_id, repository_id, host, project_path, mr_iid, mr_url, mr_title,
+			id, task_id, repository_id, host, project_path, source_host, source_project_path, source_project_id,
+			target_host, target_project_path, target_project_id, mr_iid, mr_url, mr_title,
 			head_branch, base_branch, author_username, state, approval_state, pipeline_state,
 			merge_status, draft, approval_count, required_approvals,
 			pipeline_jobs_total, pipeline_jobs_pass,
 			detailed_merge_status, reviewer_count, unapproved_reviewers, unresolved_discussions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at
 		) VALUES (
-			:id, :task_id, :repository_id, :host, :project_path, :mr_iid, :mr_url, :mr_title,
+			:id, :task_id, :repository_id, :host, :project_path, :source_host, :source_project_path, :source_project_id,
+			:target_host, :target_project_path, :target_project_id, :mr_iid, :mr_url, :mr_title,
 			:head_branch, :base_branch, :author_username, :state, :approval_state, :pipeline_state,
 			:merge_status, :draft, :approval_count, :required_approvals,
 			:pipeline_jobs_total, :pipeline_jobs_pass,
@@ -524,7 +552,14 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 			:created_at, :merged_at, :closed_at, :last_synced_at, :updated_at
 		)
 		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
-			host = excluded.host, mr_url = excluded.mr_url, mr_title = excluded.mr_title,
+			host = excluded.host,
+			source_host = CASE WHEN excluded.source_host <> '' THEN excluded.source_host ELSE gitlab_task_mrs.source_host END,
+			source_project_path = CASE WHEN excluded.source_project_path <> '' THEN excluded.source_project_path ELSE gitlab_task_mrs.source_project_path END,
+			source_project_id = CASE WHEN excluded.source_project_id <> 0 THEN excluded.source_project_id ELSE gitlab_task_mrs.source_project_id END,
+			target_host = CASE WHEN excluded.target_host <> '' THEN excluded.target_host ELSE gitlab_task_mrs.target_host END,
+			target_project_path = CASE WHEN excluded.target_project_path <> '' THEN excluded.target_project_path ELSE gitlab_task_mrs.target_project_path END,
+			target_project_id = CASE WHEN excluded.target_project_id <> 0 THEN excluded.target_project_id ELSE gitlab_task_mrs.target_project_id END,
+			mr_url = excluded.mr_url, mr_title = excluded.mr_title,
 			head_branch = excluded.head_branch, base_branch = excluded.base_branch,
 			author_username = excluded.author_username, state = excluded.state,
 			approval_state = excluded.approval_state, pipeline_state = excluded.pipeline_state,

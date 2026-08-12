@@ -5,11 +5,13 @@ import { createGitLabSlice } from "./gitlab-slice";
 import type { GitLabSlice } from "./types";
 import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
+const GITLAB_HOST = "https://gitlab.com";
+
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
     id: "id",
     task_id: "task-1",
-    host: "https://gitlab.com",
+    host: GITLAB_HOST,
     project_path: "acme/api",
     mr_iid: 1,
     mr_url: "https://gitlab.com/acme/api/-/merge_requests/1",
@@ -149,7 +151,7 @@ describe("setTaskMR", () => {
       .setTaskMR(
         "ws-1",
         "task-1",
-        makeMR({ id: "public", repository_id: "repo-a", host: "https://gitlab.com" }),
+        makeMR({ id: "public", repository_id: "repo-a", host: GITLAB_HOST }),
       );
     store
       .getState()
@@ -176,6 +178,35 @@ describe("setTaskMR", () => {
     const list = workspaceMRs(store)["task-1"];
     expect(list).toHaveLength(2);
     expect(list.map((m) => m.id).sort()).toEqual(["x", "y"]);
+  });
+});
+
+describe("partial GitLab MR refreshes", () => {
+  it("preserves source and target identities when a partial refresh omits them", () => {
+    const store = makeStore();
+    const complete = {
+      ...makeMR({ repository_id: "repo-a" }),
+      source_host: GITLAB_HOST,
+      source_project_path: "fork-owner/project",
+      source_project_id: 11,
+      target_host: GITLAB_HOST,
+      target_project_path: "base-owner/project",
+      target_project_id: 22,
+    } as TaskMR;
+    const partial = makeMR({ repository_id: "repo-a", approval_count: 3 });
+
+    store.getState().setTaskMR("ws-1", "task-1", complete);
+    store.getState().setTaskMR("ws-1", "task-1", partial);
+
+    expect(workspaceMRs(store)["task-1"]?.[0]).toMatchObject({
+      approval_count: 3,
+      source_host: GITLAB_HOST,
+      source_project_path: "fork-owner/project",
+      source_project_id: 11,
+      target_host: GITLAB_HOST,
+      target_project_path: "base-owner/project",
+      target_project_id: 22,
+    });
   });
 });
 

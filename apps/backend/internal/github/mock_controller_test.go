@@ -350,6 +350,22 @@ func TestBuildTaskPRFromRequestCopiesWorkspaceID(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPRFromRequestCopiesSourceAndBaseIdentity(t *testing.T) {
+	req := &associateTaskPRRequest{
+		TaskID: "task-identity", WorkspaceID: "ws-identity", Owner: "base-owner", Repo: "base-repo", PRNumber: 9,
+		HeadHost: "github.example", HeadOwner: "fork-owner", HeadRepo: "fork-repo", HeadRepoID: 101, HeadRepoNodeID: "R_fork",
+		BaseHost: "github.example", BaseOwner: "base-owner", BaseRepo: "base-repo", BaseRepoID: 202,
+	}
+
+	tp := buildTaskPRFromRequest(req, time.Now().UTC())
+
+	if tp.HeadHost != req.HeadHost || tp.HeadOwner != req.HeadOwner || tp.HeadRepo != req.HeadRepo ||
+		tp.HeadRepoID != req.HeadRepoID || tp.HeadRepoNodeID != req.HeadRepoNodeID ||
+		tp.BaseHost != req.BaseHost || tp.BaseOwner != req.BaseOwner || tp.BaseRepo != req.BaseRepo || tp.BaseRepoID != req.BaseRepoID {
+		t.Fatalf("source/base identity = %+v", tp)
+	}
+}
+
 func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
 	mock := NewMockClient()
 	controller := &MockController{mock: mock}

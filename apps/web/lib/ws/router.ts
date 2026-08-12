@@ -34,6 +34,7 @@ import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
 import { registerRepositorySetsHandlers } from "@/lib/ws/handlers/repository-sets";
 import { registerGitHubHandlers } from "@/lib/ws/handlers/github";
 import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
+import { registerAzureDevOpsHandlers } from "@/lib/ws/handlers/azure-devops";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 
@@ -74,6 +75,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerTurnsHandlers(store, messages.scheduler),
     ...registerGitHubHandlers(store),
     ...registerGitLabHandlers(store),
+    ...registerAzureDevOpsHandlers(store),
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
   };

@@ -369,6 +369,31 @@ func TestRESTClientPullRequestReads(t *testing.T) {
 	}
 }
 
+func TestConvertPullRequestPreservesDistinctSourceRepository(t *testing.T) {
+	var target rawRepository
+	target.ID = "target-repo"
+	target.Name = "product"
+	target.Project.ID = "target-project"
+	target.Project.Name = "Platform"
+	target.WebURL = "https://dev.azure.com/acme/Platform/_git/product"
+	var source rawRepository
+	source.ID = "source-repo"
+	source.Name = "product-fork"
+	source.Project.ID = "source-project"
+	source.Project.Name = "Contributors"
+	source.WebURL = "https://dev.azure.com/acme/Contributors/_git/product-fork"
+
+	got := convertPullRequest(rawPullRequest{
+		PullRequestID: 42, SourceRefName: "refs/heads/feature", TargetRefName: "refs/heads/main",
+		Repository: target, SourceRepository: source,
+	})
+	if got.RepositoryID != "target-repo" || got.ProjectID != "target-project" ||
+		got.SourceRepositoryID != "source-repo" || got.SourceProjectID != "source-project" ||
+		got.SourceRepositoryName != "product-fork" || got.SourceProjectName != "Contributors" {
+		t.Fatalf("source/target identity collapsed: %+v", got)
+	}
+}
+
 func TestRESTClientErrorIsBoundedAndRedacted(t *testing.T) {
 	const pat = "never-echo-this-pat"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

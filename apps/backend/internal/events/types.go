@@ -131,6 +131,8 @@ const (
 const (
 	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
 	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
+	AzureDevOpsTaskPRUpdated         = "azure_devops.task_pr.updated"
+	AzureDevOpsTaskPRDeleted         = "azure_devops.task_pr.deleted"
 )
 
 // Event types for repository sets
@@ -319,6 +321,7 @@ const (
 	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
 	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabTaskMRDeleted  = "gitlab.task_mr.deleted"  // TaskMR association removed (for UI refresh)
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 
 	// GitLabTaskMROptionsUpdated fires after a task's MR lifecycle

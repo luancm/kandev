@@ -62,26 +62,40 @@ type TestConnectionResult struct {
 // TaskPR is the persisted summary of an Azure pull request associated with a
 // Kandev task repository. Azure-native feedback remains transient.
 type TaskPR struct {
-	ID                string     `json:"id" db:"id"`
-	TaskID            string     `json:"taskId" db:"task_id"`
-	RepositoryID      string     `json:"repositoryId" db:"repository_id"`
-	OrganizationURL   string     `json:"organizationUrl" db:"organization_url"`
-	ProjectID         string     `json:"projectId" db:"project_id"`
-	AzureRepositoryID string     `json:"azureRepositoryId" db:"azure_repository_id"`
-	PullRequestID     int        `json:"pullRequestId" db:"pull_request_id"`
-	PullRequestURL    string     `json:"pullRequestUrl" db:"pull_request_url"`
-	Title             string     `json:"title" db:"title"`
-	SourceBranch      string     `json:"sourceBranch" db:"source_branch"`
-	TargetBranch      string     `json:"targetBranch" db:"target_branch"`
-	AuthorID          string     `json:"authorId" db:"author_id"`
-	AuthorName        string     `json:"authorName" db:"author_name"`
-	Status            string     `json:"status" db:"status"`
-	ReviewState       string     `json:"reviewState,omitempty" db:"review_state"`
-	PolicyState       string     `json:"policyState,omitempty" db:"policy_state"`
-	IsDraft           bool       `json:"isDraft" db:"is_draft"`
-	LastSyncedAt      *time.Time `json:"lastSyncedAt,omitempty" db:"last_synced_at"`
-	CreatedAt         time.Time  `json:"createdAt" db:"created_at"`
-	UpdatedAt         time.Time  `json:"updatedAt" db:"updated_at"`
+	ID                string `json:"id" db:"id"`
+	WorkspaceID       string `json:"workspaceId,omitempty" db:"-"`
+	TaskID            string `json:"taskId" db:"task_id"`
+	RepositoryID      string `json:"repositoryId" db:"repository_id"`
+	OrganizationURL   string `json:"organizationUrl" db:"organization_url"`
+	ProjectID         string `json:"projectId" db:"project_id"`
+	AzureRepositoryID string `json:"azureRepositoryId" db:"azure_repository_id"`
+	// Source* and Target* are the exact provider identities of the PR head
+	// and base. The older fields above remain canonical-target aliases for
+	// existing API callers.
+	SourceOrganizationURL string     `json:"sourceOrganizationUrl,omitempty" db:"source_organization_url"`
+	SourceProjectID       string     `json:"sourceProjectId,omitempty" db:"source_project_id"`
+	SourceProjectName     string     `json:"sourceProjectName,omitempty" db:"source_project_name"`
+	SourceRepositoryID    string     `json:"sourceRepositoryId,omitempty" db:"source_repository_id"`
+	SourceRepositoryName  string     `json:"sourceRepositoryName,omitempty" db:"source_repository_name"`
+	TargetOrganizationURL string     `json:"targetOrganizationUrl,omitempty" db:"target_organization_url"`
+	TargetProjectID       string     `json:"targetProjectId,omitempty" db:"target_project_id"`
+	TargetProjectName     string     `json:"targetProjectName,omitempty" db:"target_project_name"`
+	TargetRepositoryID    string     `json:"targetRepositoryId,omitempty" db:"target_repository_id"`
+	TargetRepositoryName  string     `json:"targetRepositoryName,omitempty" db:"target_repository_name"`
+	PullRequestID         int        `json:"pullRequestId" db:"pull_request_id"`
+	PullRequestURL        string     `json:"pullRequestUrl" db:"pull_request_url"`
+	Title                 string     `json:"title" db:"title"`
+	SourceBranch          string     `json:"sourceBranch" db:"source_branch"`
+	TargetBranch          string     `json:"targetBranch" db:"target_branch"`
+	AuthorID              string     `json:"authorId" db:"author_id"`
+	AuthorName            string     `json:"authorName" db:"author_name"`
+	Status                string     `json:"status" db:"status"`
+	ReviewState           string     `json:"reviewState,omitempty" db:"review_state"`
+	PolicyState           string     `json:"policyState,omitempty" db:"policy_state"`
+	IsDraft               bool       `json:"isDraft" db:"is_draft"`
+	LastSyncedAt          *time.Time `json:"lastSyncedAt,omitempty" db:"last_synced_at"`
+	CreatedAt             time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt             time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
 // TaskPRsResponse groups workspace associations by task ID.
