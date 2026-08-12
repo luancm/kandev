@@ -41,12 +41,22 @@ type remoteHeadGitHubService struct {
 	*mockGitHubService
 	updatedHead      github.PRHeadRef
 	updatedBranch    string
+	lookupOwner      string
+	lookupRepo       string
 	createdHead      github.PRHeadRef
 	createdWithHead  bool
 	associatedOwner  string
 	associatedRepo   string
 	resolvedBase     github.PRHeadRef
 	resolvedPRNumber int
+}
+
+func (m *remoteHeadGitHubService) FindPRByExactHeadForWorkspace(
+	ctx context.Context, _ string, owner, repo string, head github.PRHeadRef,
+) (*github.PR, error) {
+	m.lookupOwner = owner
+	m.lookupRepo = repo
+	return m.mockGitHubService.FindPRByExactHeadForWorkspace(ctx, "", owner, repo, head)
 }
 
 func (m *remoteHeadGitHubService) CreatePRWatchForWorkspaceWithHead(
@@ -171,6 +181,41 @@ func TestDetectPushAndAssociatePRPersistsRuntimeHeadOnNewWatch(t *testing.T) {
 	}
 	if ghSvc.createdHead.Host != "github.com" || ghSvc.createdHead.Owner != "fork" || ghSvc.createdHead.Repo != "project" || ghSvc.createdHead.Branch != "review-feature" {
 		t.Fatalf("created runtime head = %+v, want github.com fork/project:review-feature", ghSvc.createdHead)
+	}
+}
+
+func TestSearchExistingWatchUsesAttachedRepositoryAfterCanonicalResolution(t *testing.T) {
+	svc := newRemoteHeadTestService(t)
+	client := github.NewMockClient()
+	client.AddPR(&github.PR{
+		Number:        17,
+		State:         "open",
+		RepoOwner:     "upstream",
+		RepoName:      "project",
+		HeadRepoOwner: "fork",
+		HeadRepoName:  "project",
+		HeadBranch:    "review-feature",
+		BaseBranch:    "main",
+	})
+	ghSvc := &remoteHeadGitHubService{mockGitHubService: &mockGitHubService{
+		client: client,
+		prWatch: &github.PRWatch{
+			ID: "watch-1", SessionID: "s1", TaskID: "t1", RepositoryID: "repo1", Owner: "upstream", Repo: "project",
+			PRNumber: 0, Branch: "local-feature",
+		},
+	}}
+	svc.SetGitHubService(ghSvc)
+
+	svc.searchPRForExistingWatch(
+		context.Background(), "ws1", ghSvc.prWatch, "fork", "project", "s1", "t1", "local-feature",
+		&streams.GitHeadRemote{Provider: "github", Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature"},
+	)
+
+	if ghSvc.lookupOwner != "fork" || ghSvc.lookupRepo != "project" {
+		t.Fatalf("search lookup repository = %s/%s, want persisted attachment fork/project", ghSvc.lookupOwner, ghSvc.lookupRepo)
+	}
+	if ghSvc.updatedHead.Owner != "fork" || ghSvc.updatedHead.Branch != "review-feature" {
+		t.Fatalf("searching watch head = %+v, want exact observed action head", ghSvc.updatedHead)
 	}
 }
 

@@ -134,3 +134,163 @@ func TestPRWatchRuntimeHeadUpdateDropsSearchingBranchCollision(t *testing.T) {
 		t.Fatalf("destination watch = %+v, want feature-a", owner)
 	}
 }
+
+func TestPRWatchBranchOnlyMutationClearsRuntimeHead(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{
+		ID: "watch-branch-only", WorkspaceID: "workspace-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repository-1", Owner: "attached", Repo: "project", Branch: "local-feature",
+		HeadHost: "github.com", HeadOwner: "fork", HeadRepo: "project", HeadBranch: "review-feature",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	if err := store.UpdatePRWatchBranchIfSearching(ctx, watch.ID, "local-feature-renamed"); err != nil {
+		t.Fatalf("update branch: %v", err)
+	}
+	got, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got == nil {
+		t.Fatal("watch disappeared")
+	}
+	if got.Branch != "local-feature-renamed" {
+		t.Fatalf("branch = %q, want local-feature-renamed", got.Branch)
+	}
+	if got.HeadHost != "" || got.HeadOwner != "" || got.HeadRepo != "" || got.HeadBranch != "" {
+		t.Fatalf("branch-only mutation retained stale runtime head: %+v", got)
+	}
+}
+
+func TestPRWatchBranchResetClearsRuntimeHeadAtomically(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{
+		ID: "watch-reset", WorkspaceID: "workspace-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repository-1", Owner: "canonical", Repo: "project", PRNumber: 0, Branch: "old-local",
+		HeadHost: "github.com", HeadOwner: "fork", HeadRepo: "project", HeadBranch: "review-feature",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	if err := store.ResetPRWatch(ctx, watch.ID, "new-local"); err != nil {
+		t.Fatalf("reset watch: %v", err)
+	}
+	got, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got == nil || got.Branch != "new-local" || got.PRNumber != 0 {
+		t.Fatalf("reset watch = %+v, want searching new-local", got)
+	}
+	if got.HeadHost != "" || got.HeadOwner != "" || got.HeadRepo != "" || got.HeadBranch != "" {
+		t.Fatalf("branch reset retained stale runtime head: %+v", got)
+	}
+}
+
+func TestPRWatchBranchResetDoesNotStealNumberedWatch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	watch := &PRWatch{
+		ID: "watch-numbered-reset", WorkspaceID: "workspace-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repository-1", Owner: "canonical", Repo: "project", PRNumber: 42, Branch: "old-local",
+		HeadHost: "github.com", HeadOwner: "fork", HeadRepo: "project", HeadBranch: "review-feature",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	if err := store.ResetPRWatch(ctx, watch.ID, "new-local"); err != nil {
+		t.Fatalf("reset numbered watch: %v", err)
+	}
+	got, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got.Branch != "old-local" || got.PRNumber != 42 || got.HeadBranch != "review-feature" {
+		t.Fatalf("numbered watch changed during branch reset: %+v", got)
+	}
+}
+
+func TestPRWatchTerminalResetRetainsRuntimeHeadForSameBranch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	watch := &PRWatch{
+		ID: "watch-terminal", WorkspaceID: "workspace-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repository-1", Owner: "canonical", Repo: "project", PRNumber: 42, Branch: "local-feature",
+		HeadHost: "github.com", HeadOwner: "fork", HeadRepo: "project", HeadBranch: "review-feature",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	if err := store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); err != nil {
+		t.Fatalf("terminal reset: %v", err)
+	}
+	got, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got == nil || got.PRNumber != 0 || got.Branch != "local-feature" {
+		t.Fatalf("terminal reset watch = %+v, want same searching branch", got)
+	}
+	if got.HeadHost != "github.com" || got.HeadOwner != "fork" || got.HeadRepo != "project" || got.HeadBranch != "review-feature" {
+		t.Fatalf("terminal reset lost observed runtime head: %+v", got)
+	}
+}
+
+func TestPRWatchNumberedIdentityCannotBeOverwritten(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	watch := &PRWatch{
+		ID: "watch-numbered-immutable", WorkspaceID: "workspace-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repository-1", Owner: "canonical", Repo: "project", PRNumber: 42, Branch: "feature",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	if err := store.UpdatePRWatchPRNumber(ctx, watch.ID, 99); err != nil {
+		t.Fatalf("attempt overwrite: %v", err)
+	}
+	got, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got.PRNumber != 42 {
+		t.Fatalf("numbered watch identity changed to %d, want 42", got.PRNumber)
+	}
+}
+
+func TestPRWatchTerminalResetDoesNotClearNewAssociation(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	watch := &PRWatch{
+		ID: "watch-stale-reset", WorkspaceID: "workspace-1", SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repository-1", Owner: "canonical", Repo: "project", PRNumber: 42, Branch: "feature",
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+	reset, err := store.ResetPRWatchPRNumberIfCurrent(ctx, watch.ID, 99)
+	if err != nil {
+		t.Fatalf("stale terminal reset: %v", err)
+	}
+	if reset {
+		t.Fatal("stale terminal reset cleared a different PR association")
+	}
+	got, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil {
+		t.Fatalf("get watch: %v", err)
+	}
+	if got.PRNumber != 42 {
+		t.Fatalf("stale terminal reset changed PR number to %d, want 42", got.PRNumber)
+	}
+}

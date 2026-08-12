@@ -1,7 +1,7 @@
 ---
 id: "03-repair-watch-lifecycle"
 title: "Repair GitHub watch lifecycle"
-status: in_progress
+status: complete
 wave: 3
 depends_on: ["02-repair-exact-pr-discovery"]
 plan: "plan.md"
@@ -59,4 +59,14 @@ Update only this task file's `## Results`. Report the transition matrix, reposit
 
 ## Results
 
-Pending.
+Implemented the watch lifecycle repair across store, direct and batched discovery, polling, and push-association retry paths.
+
+Transition matrix: a searching branch-only mutation or branch-switch reset updates the local branch and clears `head_host`, `head_owner`, `head_repo`, and `head_branch` atomically; an observed head update replaces all runtime head fields together; a same-branch terminal reset changes only `pr_number` and retains the observed head; stale terminal resets and branch resets cannot overwrite a numbered watch or a newer association.
+
+Searching lookup always resolves the attached GitHub owner/repository from persisted `repository_id` after canonical PR resolution, with legacy empty-`repository_id` rows retaining their direct owner/repo fallback. Mutable canonical owner/repo fields are used only for numbered PR status. The runtime source owner/repository is matched case-insensitively while source branch/ref and local branch lookups preserve case. Retry rechecks apply the newly observed head to an intervening searching watch and leave an already-numbered watch untouched.
+
+Changed files: `apps/backend/internal/github/store.go`, `store_pr_watch_remote_test.go`, `service_pr_watch_anchor_test.go`, `service_automation_auth.go`, `service_pr_watch.go`, `service_pr_watch_batched.go`, `poller.go`, `apps/backend/internal/orchestrator/event_handlers_github.go`, `event_handlers_github_remote_head_test.go`, and this task file.
+
+RED/GREEN evidence: the new store transition tests first failed because branch-only and branch-reset mutations retained stale runtime head fields; the implemented transition guards and anchor tests then passed, including canonical-base reset, unresolved-anchor rejection, exact source lookup, literal branch case, and numbered-watch race cases.
+
+Verification passed: `cd apps/backend && go test -tags fts5 ./internal/github ./internal/orchestrator -run 'Test.*(Watch|Searching|Reset|Anchor|RemoteHead)' -count=1`; `cd apps/backend && go test -race -tags fts5 ./internal/github ./internal/orchestrator -run 'Test.*(Watch|Searching|Reset|Anchor|RemoteHead)' -count=1`; `cd apps/backend && go test -tags fts5 ./internal/github ./internal/orchestrator -count=1`; `make -C apps/backend lint`; and `git diff --check`.

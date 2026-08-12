@@ -1056,8 +1056,16 @@ func (s *Service) areAllWatchesPermanentlyMissing(ctx context.Context, watches [
 		return false
 	}
 	for _, w := range watches {
-		resolved, err := s.resolveAutomationClient(ctx, w.WorkspaceID, w.Owner, w.Repo)
-		if err != nil || !s.isRepoCachedAsMissingForScope(resolved.CacheScope, w.Owner, w.Repo) {
+		owner, repo := w.Owner, w.Repo
+		if w.PRNumber == 0 {
+			var anchorErr error
+			owner, repo, anchorErr = s.resolveAttachedRepositoryForWatch(ctx, w)
+			if anchorErr != nil {
+				return false
+			}
+		}
+		resolved, err := s.resolveAutomationClient(ctx, w.WorkspaceID, owner, repo)
+		if err != nil || !s.isRepoCachedAsMissingForScope(resolved.CacheScope, owner, repo) {
 			return false
 		}
 	}
@@ -1131,7 +1139,11 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
+	attachedOwner, attachedRepo, err := s.resolveAttachedRepositoryForWatch(ctx, watch)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, attachedOwner, attachedRepo)
 	if err != nil {
 		return nil, err
 	}
@@ -1161,11 +1173,15 @@ func (s *Service) triggerPRDetection(ctx context.Context, watch *PRWatch, taskID
 func (s *Service) detectPRForWatchOnce(
 	ctx context.Context, resolved *resolvedServiceClient, watch *PRWatch, taskID string,
 ) (*TaskPR, error) {
+	attachedOwner, attachedRepo, err := s.resolveAttachedRepositoryForWatch(ctx, watch)
+	if err != nil {
+		return nil, err
+	}
 	// Short-circuit when this repo is already in the 10-min negative
 	// cache. Without this, an unresolvable repo gets a fresh per-watch
 	// probe every 5s (the frontend retry cadence) until the freshness
 	// timestamp below stamps in — multiplied by every watch the task has.
-	if s.isRepoCachedAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo) {
+	if s.isRepoCachedAsMissingForScope(resolved.CacheScope, attachedOwner, attachedRepo) {
 		return nil, ErrRepoNotResolvable
 	}
 	// Throttle branch-detection probes. A watch still searching for its PR
@@ -1185,7 +1201,7 @@ func (s *Service) detectPRForWatchOnce(
 	repoErrGen := s.repoErrorGenSnapshot()
 	pr, err := s.findPRForWatchWithResolvedClient(ctx, resolved, watch)
 	if err != nil && isRepoNotResolvableErr(err) {
-		s.markRepoAsMissingForScope(resolved.CacheScope, watch.Owner, watch.Repo, repoErrGen)
+		s.markRepoAsMissingForScope(resolved.CacheScope, attachedOwner, attachedRepo, repoErrGen)
 		// Wrap so wsSyncTaskPR can errors.Is(err, ErrRepoNotResolvable)
 		// to flag the WS response as permanent without re-running the
 		// classifier on the raw upstream error string.

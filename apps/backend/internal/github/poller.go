@@ -305,14 +305,17 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 		if hold {
 			return
 		}
-		if resetErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); resetErr != nil {
+		if reset, resetErr := p.service.store.ResetPRWatchPRNumberIfCurrent(ctx, watch.ID, watch.PRNumber); resetErr != nil {
 			p.logger.Error("failed to reset completed PR watch",
 				zap.String("id", watch.ID), zap.Error(resetErr))
-		} else {
+		} else if reset {
 			p.logger.Info("reset PR watch after PR completion",
 				zap.String("id", watch.ID),
 				zap.String("state", status.PR.State),
 				zap.Int("pr_number", watch.PRNumber))
+		} else {
+			p.logger.Debug("skipped stale PR watch reset after association changed",
+				zap.String("id", watch.ID), zap.Int("expected_pr_number", watch.PRNumber))
 		}
 		return
 	}

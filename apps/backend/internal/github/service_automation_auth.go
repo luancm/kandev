@@ -241,19 +241,43 @@ func (s *Service) findPRForWatchWithResolvedClient(
 	if resolved == nil || resolved.Client == nil || watch == nil {
 		return nil, ErrGitHubNotConfigured
 	}
-	if watch.HeadOwner == "" || watch.HeadRepo == "" || watch.HeadBranch == "" {
-		return resolved.Client.FindPRByBranch(ctx, watch.Owner, watch.Repo, watch.Branch)
+	attachedOwner, attachedRepo, err := s.resolveAttachedRepositoryForWatch(ctx, watch)
+	if err != nil {
+		return nil, err
 	}
-	return s.findPRByExactHeadWithClient(ctx, resolved.Client, watch.WorkspaceID, watch.Owner, watch.Repo, PRHeadRef{
+	if watch.HeadOwner == "" || watch.HeadRepo == "" || watch.HeadBranch == "" {
+		return resolved.Client.FindPRByBranch(ctx, attachedOwner, attachedRepo, watch.Branch)
+	}
+	return s.findPRByExactHeadWithClient(ctx, resolved.Client, watch.WorkspaceID, attachedOwner, attachedRepo, PRHeadRef{
 		Host: watch.HeadHost, Owner: watch.HeadOwner, Repo: watch.HeadRepo, Branch: watch.HeadBranch,
 	})
+}
+
+func (s *Service) resolveAttachedRepositoryForWatch(ctx context.Context, watch *PRWatch) (string, string, error) {
+	if watch == nil {
+		return "", "", fmt.Errorf("%w: PR watch is nil", ErrRepoNotResolvable)
+	}
+	if strings.TrimSpace(watch.RepositoryID) == "" {
+		if strings.TrimSpace(watch.Owner) == "" || strings.TrimSpace(watch.Repo) == "" {
+			return "", "", fmt.Errorf("%w: PR watch has no attached repository", ErrRepoNotResolvable)
+		}
+		return watch.Owner, watch.Repo, nil
+	}
+	if s == nil || s.store == nil {
+		return "", "", fmt.Errorf("%w: resolve attached repository %q without store", ErrRepoNotResolvable, watch.RepositoryID)
+	}
+	return s.store.resolveAttachedGitHubRepository(ctx, watch.RepositoryID)
 }
 
 func (s *Service) findPRForWatch(ctx context.Context, watch *PRWatch) (*PR, error) {
 	if watch == nil || watch.WorkspaceID == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, watch.Owner, watch.Repo)
+	attachedOwner, attachedRepo, err := s.resolveAttachedRepositoryForWatch(ctx, watch)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, attachedOwner, attachedRepo)
 	if err != nil {
 		return nil, err
 	}

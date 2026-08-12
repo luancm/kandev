@@ -118,6 +118,15 @@ const createTablesSQL = `
 		pr_number INTEGER NOT NULL,
 		pr_url TEXT NOT NULL,
 		pr_title TEXT NOT NULL,
+		head_host TEXT NOT NULL DEFAULT '',
+		head_owner TEXT NOT NULL DEFAULT '',
+		head_repo TEXT NOT NULL DEFAULT '',
+		head_repo_id INTEGER NOT NULL DEFAULT 0,
+		head_repo_node_id TEXT NOT NULL DEFAULT '',
+		base_host TEXT NOT NULL DEFAULT '',
+		base_owner TEXT NOT NULL DEFAULT '',
+		base_repo TEXT NOT NULL DEFAULT '',
+		base_repo_id INTEGER NOT NULL DEFAULT 0,
 		head_branch TEXT NOT NULL,
 		base_branch TEXT NOT NULL,
 		author_login TEXT NOT NULL,
@@ -508,6 +517,15 @@ func (s *Store) applyIdempotentSchemaColumns() {
 	// Idempotent migrations for existing databases.
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN last_review_state TEXT DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN mergeable_state TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN head_host TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN head_owner TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN head_repo TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN head_repo_id INTEGER NOT NULL DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN head_repo_node_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN base_host TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN base_owner TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN base_repo TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN base_repo_id INTEGER NOT NULL DEFAULT 0`)
 	// Phase 4 (multi-repo): per-repo PR association on github_task_prs.
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
 	_, _ = s.db.Exec(`ALTER TABLE github_pr_watches ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`)
@@ -1259,6 +1277,15 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			pr_number INTEGER NOT NULL,
 			pr_url TEXT NOT NULL,
 			pr_title TEXT NOT NULL,
+			head_host TEXT NOT NULL DEFAULT '',
+			head_owner TEXT NOT NULL DEFAULT '',
+			head_repo TEXT NOT NULL DEFAULT '',
+			head_repo_id INTEGER NOT NULL DEFAULT 0,
+			head_repo_node_id TEXT NOT NULL DEFAULT '',
+			base_host TEXT NOT NULL DEFAULT '',
+			base_owner TEXT NOT NULL DEFAULT '',
+			base_repo TEXT NOT NULL DEFAULT '',
+			base_repo_id INTEGER NOT NULL DEFAULT 0,
 			head_branch TEXT NOT NULL,
 			base_branch TEXT NOT NULL,
 			author_login TEXT NOT NULL,
@@ -1285,13 +1312,19 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 		)`,
 		`INSERT INTO github_task_prs_new (
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
+			head_host, head_owner, head_repo, head_repo_id, head_repo_node_id,
+			base_host, base_owner, base_repo, base_repo_id,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
-			mergeable_state, review_count, pending_review_count, comment_count,
+			mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
+			unresolved_review_threads, checks_total, checks_passing,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
+			COALESCE(head_host, ''), COALESCE(head_owner, ''), COALESCE(head_repo, ''), COALESCE(head_repo_id, 0), COALESCE(head_repo_node_id, ''),
+			COALESCE(base_host, ''), COALESCE(base_owner, ''), COALESCE(base_repo, ''), COALESCE(base_repo_id, 0),
 			head_branch, base_branch, author_login, state, review_state, checks_state,
-			mergeable_state, review_count, pending_review_count, comment_count,
+			mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
+			unresolved_review_threads, checks_total, checks_passing,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
 		FROM github_task_prs`,
 	)
@@ -1376,6 +1409,36 @@ func (s *Store) GetPRWatch(ctx context.Context, id string) (*PRWatch, error) {
 	return &w, err
 }
 
+// resolveAttachedGitHubRepository returns the provider identity persisted for
+// a task repository. PR watches keep owner/repo as the mutable canonical base
+// for numbered PR status, so searching must resolve its authorization anchor
+// through repository_id instead of reusing those fields after association.
+func (s *Store) resolveAttachedGitHubRepository(ctx context.Context, repositoryID string) (string, string, error) {
+	if strings.TrimSpace(repositoryID) == "" {
+		return "", "", nil
+	}
+	if s == nil || s.ro == nil {
+		return "", "", fmt.Errorf("%w: GitHub store is unavailable", ErrRepoNotResolvable)
+	}
+	var identity struct {
+		Provider string `db:"provider"`
+		Owner    string `db:"provider_owner"`
+		Repo     string `db:"provider_name"`
+	}
+	err := s.ro.GetContext(ctx, &identity,
+		`SELECT COALESCE(provider, '') AS provider, COALESCE(provider_owner, '') AS provider_owner,
+		        COALESCE(provider_name, '') AS provider_name
+		 FROM repositories WHERE id = ?`, repositoryID)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: resolve attached repository %q: %v", ErrRepoNotResolvable, repositoryID, err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(identity.Provider), "github") ||
+		strings.TrimSpace(identity.Owner) == "" || strings.TrimSpace(identity.Repo) == "" {
+		return "", "", fmt.Errorf("%w: attached repository %q is not a GitHub repository", ErrRepoNotResolvable, repositoryID)
+	}
+	return identity.Owner, identity.Repo, nil
+}
+
 // GetPRWatchBySessionAndRepo returns the PR watch for a (session, repository)
 // pair, or nil. Used by per-repo branch-switch / commit handlers so each
 // repo's watch is reset independently.
@@ -1405,7 +1468,7 @@ func (s *Store) GetPRWatchBySessionRepoAndBranch(ctx context.Context, sessionID,
 	var w PRWatch
 	err := s.ro.GetContext(ctx, &w,
 		`SELECT * FROM github_pr_watches
-		 WHERE session_id = ? AND repository_id = ? AND branch = ? LIMIT 1`,
+		 WHERE session_id = ? AND repository_id = ? AND branch = ? COLLATE BINARY LIMIT 1`,
 		sessionID, repositoryID, branch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -1497,22 +1560,35 @@ func (s *Store) DeletePRWatchesByTaskID(ctx context.Context, taskID string) (int
 	return n, nil
 }
 
-// UpdatePRWatchPRNumber updates a PR watch's PR number after discovery.
+// UpdatePRWatchPRNumber updates a PR watch's PR number during the searching
+// or same-branch terminal transition. A numbered watch cannot be overwritten
+// by another positive PR number.
 func (s *Store) UpdatePRWatchPRNumber(ctx context.Context, id string, prNumber int) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE github_pr_watches SET pr_number = ?, updated_at = ? WHERE id = ?`,
-		prNumber, time.Now().UTC(), id)
+		`UPDATE github_pr_watches SET pr_number = ?, updated_at = ?
+		 WHERE id = ? AND (pr_number = 0 OR ? = 0)`,
+		prNumber, time.Now().UTC(), id, prNumber)
 	return err
 }
 
-// UpdatePRWatchRepository repairs the provider repository identity after PR
-// discovery. A watch can start on a contributor fork while the PR targets the
-// canonical parent repository.
-func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE github_pr_watches SET owner = ?, repo = ?, updated_at = ? WHERE id = ?`,
-		owner, repo, time.Now().UTC(), id)
-	return err
+// ResetPRWatchPRNumberIfCurrent returns a numbered watch to searching only
+// when it still owns the expected PR number. This prevents a stale poller
+// snapshot from clearing a newer association that won an interleaved search
+// race. The existing runtime head remains intact because this is the
+// same-branch terminal transition.
+func (s *Store) ResetPRWatchPRNumberIfCurrent(ctx context.Context, id string, expectedPRNumber int) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET pr_number = 0, updated_at = ?
+		 WHERE id = ? AND pr_number = ?`,
+		time.Now().UTC(), id, expectedPRNumber)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 // ResolvePRWatch atomically transitions a searching watch to a discovered PR.
@@ -1535,6 +1611,21 @@ func (s *Store) ResolvePRWatch(ctx context.Context, id, owner, repo string, prNu
 	return rows == 1, nil
 }
 
+// ResetPRWatch atomically resets a searching watch to a new branch: updates
+// the tracked branch, clears pr_number, and clears stale runtime head fields
+// in a single statement. Numbered watches are left untouched so a branch
+// refresh cannot steal an already-associated PR.
+
+// UpdatePRWatchRepository repairs the provider repository identity after PR
+// discovery. A watch can start on a contributor fork while the PR targets the
+// canonical parent repository.
+func (s *Store) UpdatePRWatchRepository(ctx context.Context, id, owner, repo string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE github_pr_watches SET owner = ?, repo = ?, updated_at = ? WHERE id = ?`,
+		owner, repo, time.Now().UTC(), id)
+	return err
+}
+
 // ResetPRWatch atomically resets a watch to the searching state: updates the
 // tracked branch and clears pr_number in a single statement. Used when the
 // session's active branch changes (rename, checkout) so the poller re-searches
@@ -1542,13 +1633,18 @@ func (s *Store) ResolvePRWatch(ctx context.Context, id, owner, repo string, prNu
 // state.
 func (s *Store) ResetPRWatch(ctx context.Context, id, branch string) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE github_pr_watches SET branch = ?, pr_number = 0, updated_at = ? WHERE id = ?`,
+		`UPDATE github_pr_watches
+		 SET branch = ?, pr_number = 0,
+		     head_host = '', head_owner = '', head_repo = '', head_branch = '',
+		     updated_at = ?
+		 WHERE id = ? AND pr_number = 0`,
 		branch, time.Now().UTC(), id)
 	return err
 }
 
-// UpdatePRWatchBranchIfSearching atomically updates branch only when pr_number = 0,
-// preventing races with concurrent PR association.
+// UpdatePRWatchBranchIfSearching atomically updates branch and clears the
+// runtime head only when pr_number = 0, preventing races with concurrent PR
+// association.
 //
 // Collision semantics: a sibling watch may already own the destination
 // (session_id, repository_id, branch) triple — e.g. multi-branch task where
@@ -1563,7 +1659,8 @@ func (s *Store) UpdatePRWatchBranchIfSearching(ctx context.Context, id, branch s
 // UpdatePRWatchSearchTargetIfSearching updates the local branch and the exact
 // runtime head target only while a watch is still searching. It retains the
 // existing branch-collision behavior: a searching source row is dropped when
-// its destination branch is already owned by a sibling watch.
+// its destination branch is already owned by a sibling watch. A nil head
+// target, used by the branch-only method above, clears stale head fields.
 func (s *Store) UpdatePRWatchSearchTargetIfSearching(
 	ctx context.Context,
 	id, branch, headHost, headOwner, headRepo, headBranch string,
@@ -1604,7 +1701,7 @@ func (s *Store) updatePRWatchSearchTargetIfSearching(
 	var probe int // existence probe only; value unused
 	err = tx.QueryRowContext(ctx,
 		`SELECT 1 FROM github_pr_watches
-		 WHERE session_id = ? AND repository_id = ? AND branch = ? AND id <> ?`,
+		 WHERE session_id = ? AND repository_id = ? AND branch = ? COLLATE BINARY AND id <> ?`,
 		sessionID, repositoryID, branch, id).Scan(&probe)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -1613,8 +1710,10 @@ func (s *Store) updatePRWatchSearchTargetIfSearching(
 		return dropSourceAndCommit(ctx, tx, id)
 	}
 
-	updateSQL := `UPDATE github_pr_watches SET branch = ?, updated_at = ? WHERE id = ? AND pr_number = 0`
-	args := []interface{}{branch, time.Now().UTC(), id}
+	updateSQL := `UPDATE github_pr_watches
+		SET branch = ?, head_host = '', head_owner = '', head_repo = '', head_branch = ?, updated_at = ?
+		WHERE id = ? AND pr_number = 0`
+	args := []interface{}{branch, "", time.Now().UTC(), id}
 	if head != nil {
 		updateSQL = `UPDATE github_pr_watches
 			SET branch = ?, head_host = ?, head_owner = ?, head_repo = ?, head_branch = ?, updated_at = ?
@@ -1658,12 +1757,16 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	now := time.Now().UTC()
 	tp.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
+			head_host, head_owner, head_repo, head_repo_id, head_repo_node_id, base_host, base_owner, base_repo, base_repo_id,
+			head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle,
+		tp.HeadHost, tp.HeadOwner, tp.HeadRepo, tp.HeadRepoID, tp.HeadRepoNodeID, tp.BaseHost, tp.BaseOwner, tp.BaseRepo, tp.BaseRepoID,
+		tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt)
@@ -1680,7 +1783,8 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 // are additive and never reverted. Projecting the known columns keeps every
 // read working regardless of what the table has picked up beyond them.
 const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url,
-	pr_title, head_branch, base_branch, author_login, state, review_state, checks_state,
+	pr_title, head_host, head_owner, head_repo, head_repo_id, head_repo_node_id,
+	base_host, base_owner, base_repo, base_repo_id, head_branch, base_branch, author_login, state, review_state, checks_state,
 	mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at`
@@ -1688,7 +1792,8 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
 const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repository_id, gtp.owner, gtp.repo,
-	gtp.pr_number, gtp.pr_url, gtp.pr_title, gtp.head_branch, gtp.base_branch, gtp.author_login,
+	gtp.pr_number, gtp.pr_url, gtp.pr_title, gtp.head_host, gtp.head_owner, gtp.head_repo, gtp.head_repo_id, gtp.head_repo_node_id,
+	gtp.base_host, gtp.base_owner, gtp.base_repo, gtp.base_repo_id, gtp.head_branch, gtp.base_branch, gtp.author_login,
 	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.review_count,
 	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
 	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
@@ -1826,12 +1931,21 @@ func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, 
 	if pr == nil {
 		return nil, errors.New("restore task PR: missing PR data")
 	}
+	headHost, headOwner, headRepo, baseHost, baseOwner, baseRepo := taskPRIdentityFromPR(pr)
 	if _, err := s.db.ExecContext(ctx,
 		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
+			head_host = COALESCE(NULLIF(?, ''), head_host), head_owner = COALESCE(NULLIF(?, ''), head_owner),
+			head_repo = COALESCE(NULLIF(?, ''), head_repo), head_repo_id = CASE WHEN ? <> 0 THEN ? ELSE head_repo_id END,
+			head_repo_node_id = COALESCE(NULLIF(?, ''), head_repo_node_id),
+			base_host = COALESCE(NULLIF(?, ''), base_host), base_owner = COALESCE(NULLIF(?, ''), base_owner),
+			base_repo = COALESCE(NULLIF(?, ''), base_repo), base_repo_id = CASE WHEN ? <> 0 THEN ? ELSE base_repo_id END,
 			head_branch = ?, base_branch = ?, author_login = ?, state = ?, mergeable_state = ?,
 			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?
-		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
-		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, pr.AuthorLogin,
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title,
+		headHost, headOwner, headRepo, pr.HeadRepoID, pr.HeadRepoID, pr.HeadRepoNodeID,
+		baseHost, baseOwner, baseRepo, pr.BaseRepoID, pr.BaseRepoID,
+		pr.HeadBranch, pr.BaseBranch, pr.AuthorLogin,
 		pr.State, pr.MergeableState, pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
 		taskID, repositoryID, pr.Number); err != nil {
 		return nil, err
@@ -1979,12 +2093,16 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
+			head_host, head_owner, head_repo, head_repo_id, head_repo_node_id, base_host, base_owner, base_repo, base_repo_id,
+			head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle,
+		tp.HeadHost, tp.HeadOwner, tp.HeadRepo, tp.HeadRepoID, tp.HeadRepoNodeID, tp.BaseHost, tp.BaseOwner, tp.BaseRepo, tp.BaseRepoID,
+		tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt); err != nil {
@@ -2000,13 +2118,20 @@ func (s *Store) UpdateTaskPR(ctx context.Context, tp *TaskPR) error {
 		UPDATE github_task_prs SET state = ?, review_state = ?, checks_state = ?, mergeable_state = ?,
 			review_count = ?, pending_review_count = ?, required_reviews = ?, comment_count = ?,
 			unresolved_review_threads = ?, checks_total = ?, checks_passing = ?,
-			additions = ?, deletions = ?, pr_title = ?, base_branch = ?,
+			additions = ?, deletions = ?, pr_title = ?, base_branch = COALESCE(NULLIF(?, ''), base_branch),
+			head_host = COALESCE(NULLIF(?, ''), head_host), head_owner = COALESCE(NULLIF(?, ''), head_owner),
+			head_repo = COALESCE(NULLIF(?, ''), head_repo), head_repo_id = CASE WHEN ? <> 0 THEN ? ELSE head_repo_id END,
+			head_repo_node_id = COALESCE(NULLIF(?, ''), head_repo_node_id),
+			base_host = COALESCE(NULLIF(?, ''), base_host), base_owner = COALESCE(NULLIF(?, ''), base_owner),
+			base_repo = COALESCE(NULLIF(?, ''), base_repo), base_repo_id = CASE WHEN ? <> 0 THEN ? ELSE base_repo_id END,
 			merged_at = ?, closed_at = ?, last_synced_at = ?, updated_at = ?
 		WHERE id = ?`,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState,
 		tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing,
 		tp.Additions, tp.Deletions, tp.PRTitle, tp.BaseBranch,
+		tp.HeadHost, tp.HeadOwner, tp.HeadRepo, tp.HeadRepoID, tp.HeadRepoID, tp.HeadRepoNodeID,
+		tp.BaseHost, tp.BaseOwner, tp.BaseRepo, tp.BaseRepoID, tp.BaseRepoID,
 		tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt, tp.ID)
 	return err
 }
