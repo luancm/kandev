@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -50,6 +51,42 @@ func validateRemoteContributions(values map[string]models.RemoteContribution) (m
 			return nil, fmt.Errorf("validate remote contribution %q: %w", key, err)
 		}
 		validated[key] = binding
+	}
+	return validated, nil
+}
+
+func comparisonContextsFromMetadata(metadata map[string]interface{}) (map[string]gitremote.ComparisonContext, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyComparisonContexts]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]gitremote.ComparisonContext); ok {
+		return validateComparisonContexts(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode comparison contexts: %w", err)
+	}
+	var decoded map[string]gitremote.ComparisonContext
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode comparison contexts: %w", err)
+	}
+	return validateComparisonContexts(decoded)
+}
+
+func validateComparisonContexts(values map[string]gitremote.ComparisonContext) (map[string]gitremote.ComparisonContext, error) {
+	if values == nil {
+		return nil, nil
+	}
+	validated := make(map[string]gitremote.ComparisonContext, len(values))
+	for key, value := range values {
+		if err := value.Validate(); err != nil {
+			return nil, fmt.Errorf("validate comparison context %q: %w", key, err)
+		}
+		validated[key] = value.Clone()
 	}
 	return validated, nil
 }
@@ -150,6 +187,7 @@ const (
 	// The empty key "" applies to the root / single-repo tracker.
 	MetadataKeyBaseBranches             = "base_branches"
 	MetadataKeyRemoteContributions      = "remote_contributions"
+	MetadataKeyComparisonContexts       = "comparison_contexts"
 	MetadataKeyContributionDestinations = "contribution_destinations"
 	MetadataKeyIsRemote                 = "is_remote"
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
@@ -244,6 +282,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	MetadataKeyRemoteContributions:      true,
+	MetadataKeyComparisonContexts:       true,
 	MetadataKeyContributionDestinations: true,
 }
 
@@ -401,7 +440,10 @@ type ExecutorCreateRequest struct {
 	// RemoteContributions carries validated, credential-free bindings to the
 	// runtime/agentctl boundary. Keys use the same workspace subpath convention
 	// as BaseBranches; the empty key is the workspace root.
-	RemoteContributions      map[string]models.RemoteContribution
+	RemoteContributions map[string]models.RemoteContribution
+	// ComparisonContexts carries complete backend-owned observations keyed by
+	// deterministic workspace repository subpath.
+	ComparisonContexts       map[string]gitremote.ComparisonContext
 	ContributionDestinations map[string]models.ContributionDestination
 	McpServers               []McpServerConfig
 	AgentConfig              agents.Agent // Agent type info needed by runtimes
@@ -484,7 +526,6 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 
 	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
-		RunID:                req.Env["KANDEV_RUN_ID"],
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,

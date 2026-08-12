@@ -5,8 +5,13 @@ package gitremote
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/securityutil"
 )
 
 // Provider identifies the provider rules used when comparing repository
@@ -31,12 +36,104 @@ type RemoteRepositoryIdentity struct {
 	ProviderRepositoryID string   `json:"provider_repository_id,omitempty"`
 }
 
+// NormalizeHost converts the provider host forms persisted by Kandev and
+// observed in Git configuration into the credential-free host representation
+// used by RemoteRepositoryIdentity. HTTP(S) origins are accepted because
+// provider repository rows retain their configured origin, but paths, query
+// strings, fragments, and userinfo are rejected rather than crossing the
+// identity boundary.
+func NormalizeHost(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("repository host is empty")
+	}
+	withScheme := raw
+	if !strings.Contains(raw, "://") {
+		withScheme = "https://" + raw
+	}
+	parsed, err := url.Parse(withScheme)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return "", fmt.Errorf("repository host is invalid")
+	}
+	if !strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https") {
+		return "", fmt.Errorf("repository host scheme is invalid")
+	}
+	if parsed.Path != "" && parsed.Path != "/" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("repository host must not contain a path or URL suffix")
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	if hostname == "" {
+		return "", fmt.Errorf("repository host is invalid")
+	}
+	port := parsed.Port()
+	if port != "" {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return "", fmt.Errorf("repository host port is invalid")
+		}
+	}
+	if port == "" || (strings.EqualFold(parsed.Scheme, "http") && port == "80") || (strings.EqualFold(parsed.Scheme, "https") && port == "443") {
+		host := RemoteRepositoryIdentity{Host: hostname, RepositoryPath: "placeholder"}
+		if err := host.Validate(); err != nil {
+			return "", err
+		}
+		return hostname, nil
+	}
+	host := hostname
+	if strings.Contains(hostname, ":") {
+		host = net.JoinHostPort(hostname, port)
+	} else {
+		host += ":" + port
+	}
+	identity := RemoteRepositoryIdentity{Host: host, RepositoryPath: "placeholder"}
+	if err := identity.Validate(); err != nil {
+		return "", err
+	}
+	return host, nil
+}
+
 // RemoteRefIdentity combines a repository identity with one literal ref.
 // Ref comparisons are always case-sensitive, even when a provider compares
 // repository paths case-insensitively.
 type RemoteRefIdentity struct {
 	Repository RemoteRepositoryIdentity `json:"repository"`
 	Ref        string                   `json:"ref"`
+}
+
+// Validate checks the credential-free wire representation before it crosses
+// an executor or agentctl boundary. Provider adapters may apply stricter
+// provider-specific rules, but no caller may pass a URL or userinfo here.
+func (id RemoteRepositoryIdentity) Validate() error {
+	if id.Provider != ProviderGeneric && id.Provider != ProviderGitHub && id.Provider != ProviderGitLab && id.Provider != ProviderAzureRepos {
+		return fmt.Errorf("unsupported repository provider %q", id.Provider)
+	}
+	if id.Host == "" || strings.TrimSpace(id.Host) != id.Host || strings.ContainsAny(id.Host, " \r\n\t/\\@?#") || strings.Contains(id.Host, "://") {
+		return fmt.Errorf("repository host is invalid")
+	}
+	if id.RepositoryPath == "" && id.ProviderRepositoryID == "" {
+		return fmt.Errorf("repository path or provider id is required")
+	}
+	if strings.TrimSpace(id.RepositoryPath) != id.RepositoryPath || strings.ContainsAny(id.RepositoryPath, " \r\n\t\\@?") || strings.Contains(id.RepositoryPath, "://") || strings.Contains(id.RepositoryPath, "..") || strings.HasPrefix(id.RepositoryPath, "/") || strings.HasSuffix(id.RepositoryPath, "/") || strings.Contains(id.RepositoryPath, "//") {
+		return fmt.Errorf("repository path is invalid")
+	}
+	if strings.TrimSpace(id.ProviderRepositoryID) != id.ProviderRepositoryID || strings.ContainsAny(id.ProviderRepositoryID, "\r\n\t/@") {
+		return fmt.Errorf("provider repository id is invalid")
+	}
+	return nil
+}
+
+// Validate checks both the repository identity and the literal ref.
+func (id RemoteRefIdentity) Validate() error {
+	if err := id.Repository.Validate(); err != nil {
+		return err
+	}
+	if !securityutil.IsValidBranchName(id.Ref) {
+		return fmt.Errorf("repository ref %q is invalid", id.Ref)
+	}
+	if strings.HasSuffix(id.Ref, "/") || strings.Contains(id.Ref, "//") {
+		return fmt.Errorf("repository ref %q is invalid", id.Ref)
+	}
+	return nil
 }
 
 // EqualRepository compares repository identities using the provider's

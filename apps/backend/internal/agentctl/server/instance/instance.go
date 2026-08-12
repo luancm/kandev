@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/gitremote"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -188,6 +189,7 @@ type CreateRequest struct {
 	RemoteContributions      map[string]models.RemoteContribution      `json:"remote_contributions,omitempty"`
 	ContributionDestinations map[string]models.ContributionDestination `json:"contribution_destinations,omitempty"`
 	WorkspaceSourceRoots     []string                                  `json:"workspace_source_roots,omitempty"`
+	ComparisonContexts       map[string]gitremote.ComparisonContext    `json:"comparison_contexts,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

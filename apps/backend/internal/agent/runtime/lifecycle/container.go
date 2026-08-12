@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -66,6 +67,7 @@ type ContainerConfig struct {
 	// diff stats against the task-recorded base.
 	BaseBranches             map[string]string
 	RemoteContributions      map[string]models.RemoteContribution
+	ComparisonContexts       map[string]gitremote.ComparisonContext
 	ContributionDestinations map[string]models.ContributionDestination
 }
 
@@ -113,6 +115,7 @@ func buildContainerCreateInstanceRequest(
 		StripEnv:                 stripEnv,
 		BaseBranches:             config.BaseBranches,
 		RemoteContributions:      config.RemoteContributions,
+		ComparisonContexts:       config.ComparisonContexts,
 		ContributionDestinations: config.ContributionDestinations,
 	}
 }

@@ -2,6 +2,40 @@ package gitremote
 
 import "testing"
 
+func TestNormalizeHostAcceptsPersistedOriginsWithoutCredentials(t *testing.T) {
+	tests := map[string]string{
+		"https://GitLab.Example.test/": "gitlab.example.test",
+		"gitlab.example.test:8443":     "gitlab.example.test:8443",
+		"https://[::1]:443":            "::1",
+	}
+	for raw, want := range tests {
+		t.Run(raw, func(t *testing.T) {
+			got, err := NormalizeHost(raw)
+			if err != nil {
+				t.Fatalf("NormalizeHost(%q): %v", raw, err)
+			}
+			if got != want {
+				t.Fatalf("NormalizeHost(%q) = %q, want %q", raw, got, want)
+			}
+		})
+	}
+}
+
+func TestNormalizeHostRejectsCredentialsAndPaths(t *testing.T) {
+	for _, raw := range []string{
+		"https://user:secret@example.com",
+		"https://example.com/api",
+		"https://example.com?token=secret",
+		"ssh://example.com",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := NormalizeHost(raw); err == nil {
+				t.Fatalf("NormalizeHost(%q) accepted unsafe host", raw)
+			}
+		})
+	}
+}
+
 func TestRemoteRepositoryIdentityEqualityPreservesProviderRules(t *testing.T) {
 	tests := []struct {
 		name  string

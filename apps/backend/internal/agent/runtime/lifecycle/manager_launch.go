@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
@@ -175,7 +176,50 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	if branches := collectBaseBranches(req); len(branches) > 0 {
 		metadata[MetadataKeyBaseBranches] = branches
 	}
+	if contexts := collectComparisonContexts(req); contexts != nil {
+		metadata[MetadataKeyComparisonContexts] = contexts
+	}
 	return metadata
+}
+
+// collectComparisonContexts projects a complete backend observation into the
+// deterministic worktree keys understood by agentctl. An explicit empty map
+// is retained as a clear observation; nil means that hydration was omitted.
+func collectComparisonContexts(req *LaunchRequest) map[string]gitremote.ComparisonContext {
+	if req == nil {
+		return nil
+	}
+	if req.ComparisonContexts == nil {
+		specs := req.RepoSpecs()
+		if len(specs) == 0 {
+			return nil
+		}
+		out := make(map[string]gitremote.ComparisonContext, len(specs))
+		for index, spec := range specs {
+			if spec.ComparisonContext == nil {
+				continue
+			}
+			key := ""
+			if index > 0 {
+				key = baseBranchMetadataKey(spec)
+			}
+			if err := spec.ComparisonContext.Validate(); err == nil {
+				out[key] = spec.ComparisonContext.Clone()
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	out := make(map[string]gitremote.ComparisonContext, len(req.ComparisonContexts))
+	for key, value := range req.ComparisonContexts {
+		if err := value.Validate(); err != nil {
+			continue
+		}
+		out[key] = value.Clone()
+	}
+	return out
 }
 
 // collectRemoteContributions projects the validated per-repository bindings
@@ -764,6 +808,10 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if len(remoteContributions) > 0 {
 		metadata[MetadataKeyRemoteContributions] = remoteContributions
 	}
+	comparisonContexts := collectComparisonContexts(reqWithWorktree)
+	if comparisonContexts != nil {
+		metadata[MetadataKeyComparisonContexts] = comparisonContexts
+	}
 	contributionDestinations, err := collectContributionDestinations(reqWithWorktree)
 	if err != nil {
 		return nil, nil, nil, err
@@ -803,6 +851,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
+		ComparisonContexts:             comparisonContexts,
 		ContributionDestinations:       contributionDestinations,
 	}
 

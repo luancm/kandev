@@ -114,4 +114,22 @@ Update only this task file's `## Results`. Report the selection precedence, tran
 
 ## Results
 
-Pending.
+Implemented the backend-owned comparison-context contract. Selection is fail-closed and ordered: a unique linked change whose complete source repository/ref exactly matches the writable action head wins; when no linked change competes, a validated remote-contribution target wins; otherwise the attached repository and selected base ref are used. Zero, multiple, missing, or incomplete exact matches remain unresolved rather than falling back by row order, PR number, or branch name.
+
+The transported value is credential-free `gitremote.ComparisonContext`, containing a validated repository/ref target, optional identity-qualified base commit, opaque generation, and presence-aware `replace` or `clear` update. Launch, fresh resume, multi-repository resume, executor metadata, standalone, Docker, SSH, Sprites, agentctl-ready recovery, and live refreshes carry the same deterministic worktree-keyed map. Omitted updates retain existing observations, explicit empty observations clear them, sibling updates remain isolated, and invalid input is rejected atomically.
+
+Provider association, update, and removal events for GitHub, GitLab, and Azure DevOps rehydrate the task-owned selection and push it to every live execution. Base-branch edits share the same live refresh path. Agentctl config and instance creation seed the map before discovery, while the process manager and workspace tracker apply per-worktree changes without exposing raw URLs or credentials.
+
+Changed files cover `internal/common/gitremote`, orchestrator launch/resume projection and provider refresh handlers, task-service selection and live delivery, backend adapters, lifecycle launch/recovery/executor plumbing, agentctl client/config/instance/API/process/workspace transport, and focused comparison-context tests.
+
+RED/GREEN evidence includes exact linked-change uniqueness and fallback selection tests, malformed repository/ref and credential rejection tests, normalized provider-host tests, lifecycle metadata preservation tests, agentctl atomic/sibling/explicit-clear tests, and process-manager race coverage.
+
+Verification results:
+
+- PASS: `(cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor ./internal/task/service ./internal/backendapp ./internal/orchestrator -run 'Test.*ComparisonContext' -count=1)`.
+- PASS: `(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test.*ComparisonContext.*(Launch|Resume|Metadata|Restart|Standalone|Docker|SSH|Sprites)' -count=1)`.
+- PASS: `(cd apps/backend && go test -tags fts5 ./internal/agentctl/server/config ./internal/agentctl/server/instance ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl -run 'Test.*ComparisonContext' -count=1)`.
+- PASS: `go test -race -tags fts5 ./internal/agentctl/server/process -run 'TestManagerUpdateComparisonContexts' -count=1`.
+- PASS: focused common identity, orchestrator executor, backend adapter, and lifecycle comparison-context tests.
+- PASS: `git diff --check`.
+- The complete owned-package command passed for every package except `internal/task/service`, where unrelated existing filesystem tests failed (`TestCreateDirectoryRejectsInvalidOrExistingChild` and `TestServiceInitializeLocalRepository*`) with `parent directory cannot be accessed`; all Task 05 focused gates and changed-package tests passed.

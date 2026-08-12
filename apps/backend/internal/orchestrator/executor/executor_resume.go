@@ -933,6 +933,11 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
+	if contexts, contextErr := comparisonContextsForRepos(allRepos); contextErr != nil {
+		return nil, "", execConfig, nil, nil, contextErr
+	} else {
+		req.ComparisonContexts = contexts
+	}
 	if len(allRepos) > 0 {
 		req.PullBeforeWorktree = allRepos[0].PullBeforeWorktree
 		req.RemoteSyncHandled = allRepos[0].RemoteSyncHandled

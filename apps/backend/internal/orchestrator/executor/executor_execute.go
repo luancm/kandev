@@ -1416,6 +1416,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
 		return nil, execConfig, err
 	}
+	if contexts, contextErr := comparisonContextsForRepos(allRepos); contextErr != nil {
+		return nil, execConfig, contextErr
+	} else {
+		req.ComparisonContexts = contexts
+	}
 
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -1425,6 +1430,10 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.Repositories = buildRepoSpecs(allRepos)
 		for i := range req.Repositories {
 			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+			if context, ok := req.ComparisonContexts[comparisonContextTrackerKey(req.Repositories[i].RepoName, req.Repositories[i].BranchSlug)]; ok {
+				value := context.Clone()
+				req.Repositories[i].ComparisonContext = &value
+			}
 		}
 	}
 	if folders, folderErr := e.repo.ListTaskWorkspaceFolders(ctx, task.ID); folderErr != nil {
@@ -1508,6 +1517,10 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 		if plan, ok := branchPlans[info]; ok {
 			spec.BranchIdentitySlug = plan.identitySlug
 			spec.BranchSlug = plan.pathSlug
+		}
+		if context, ok := comparisonContextsForRepoInfo(info); ok {
+			value := context
+			spec.ComparisonContext = &value
 		}
 		out = append(out, spec)
 	}

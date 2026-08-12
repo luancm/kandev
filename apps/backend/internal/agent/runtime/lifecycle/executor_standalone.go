@@ -114,6 +114,7 @@ func buildStandaloneCreateInstanceRequest(
 		StripEnv:                 stripEnv,
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
+		ComparisonContexts:       req.ComparisonContexts,
 		ContributionDestinations: req.ContributionDestinations,
 		WorkspaceSourceRoots:     req.WorkspaceSourceRoots,
 	}

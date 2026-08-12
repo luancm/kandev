@@ -57,6 +57,9 @@ func (s *Service) subscribeGitLabEvents() {
 	if _, err := s.eventBus.Subscribe(events.GitLabTaskMRUpdated, s.handleGitLabTaskMRUpdated); err != nil {
 		s.logger.Error("subscribe gitlab.task_mr.updated", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.GitLabTaskMRDeleted, s.handleGitLabTaskMRDeleted); err != nil {
+		s.logger.Error("subscribe gitlab.task_mr.deleted", zap.Error(err))
+	}
 	if _, err := s.eventBus.Subscribe(events.GitLabTaskMROptionsUpdated, s.handleGitLabTaskMROptionsUpdated); err != nil {
 		s.logger.Error("subscribe gitlab.task_mr_options.updated", zap.Error(err))
 	}
@@ -76,6 +79,16 @@ func (s *Service) handleGitLabTaskMRUpdated(ctx context.Context, event *bus.Even
 	s.startTaskMRLifecycleAutomationWithObservation(
 		ctx, payload.TaskMR, taskMRReviewerObservationFromEvent(payload),
 	)
+	s.refreshComparisonContext(ctx, payload.TaskID)
+	return nil
+}
+
+func (s *Service) handleGitLabTaskMRDeleted(ctx context.Context, event *bus.Event) error {
+	deleted, ok := event.Data.(*gitlab.TaskMRDeletedEvent)
+	if !ok || deleted == nil {
+		return nil
+	}
+	s.refreshComparisonContext(ctx, deleted.TaskID)
 	return nil
 }
 

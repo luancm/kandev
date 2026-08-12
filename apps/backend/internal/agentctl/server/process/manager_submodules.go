@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -81,6 +82,13 @@ func (m *Manager) configureTracker(tracker *WorkspaceTracker, repositoryName str
 	tracker.SetAllowedSourceRoots(roots)
 	if !tracker.IsSubmodule() {
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), repositoryName))
+	}
+	if context, ok := m.getComparisonContexts()[repositoryName]; ok {
+		if context.Update == gitremote.ComparisonContextClear {
+			tracker.SetComparisonContext(nil)
+		} else {
+			tracker.SetComparisonContext(&context)
+		}
 	}
 }
 
@@ -219,9 +227,10 @@ func syncTrackerConfiguration(target, source *WorkspaceTracker, roots []string) 
 	target.SetAllowedSourceRoots(roots)
 	if source.IsSubmodule() {
 		target.SetComparisonAnchor(source.ComparisonAnchor())
-		return
+	} else {
+		target.SetBaseBranch(source.BaseBranch())
 	}
-	target.SetBaseBranch(source.BaseBranch())
+	target.SetComparisonContext(source.ComparisonContext())
 }
 
 func startAndAttachTracker(ctx context.Context, tracker *WorkspaceTracker, subs []types.WorkspaceStreamSubscriber) {

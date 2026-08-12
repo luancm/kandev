@@ -183,6 +183,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		RemoteContributions:      req.RemoteContributions,
 		ContributionDestinations: req.ContributionDestinations,
 		WorkspaceSourceRoots:     req.WorkspaceSourceRoots,
+		ComparisonContexts:       req.ComparisonContexts,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",

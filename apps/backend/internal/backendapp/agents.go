@@ -30,6 +30,7 @@ func provideLifecycleManager(
 	agentRegistry *registry.Registry,
 	secretStore secrets.SecretStore,
 	baseBranchProvider lifecycle.BaseBranchProvider,
+	comparisonContextProvider lifecycle.ComparisonContextProvider,
 	managedRuntimeSelections managedruntime.SelectionReader,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
@@ -138,6 +139,7 @@ func provideLifecycleManager(
 	// Wire the base-branch provider before Start so recovered executions are
 	// seeded during startup as well as newly-created executions.
 	lifecycleMgr.SetBaseBranchProvider(baseBranchProvider)
+	lifecycleMgr.SetComparisonContextProvider(comparisonContextProvider)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err

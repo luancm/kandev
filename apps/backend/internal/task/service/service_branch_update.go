@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -136,25 +138,28 @@ func (s *Service) applyBaseBranchSideEffects(ctx context.Context, taskID, reposi
 	if task, err := s.tasks.GetTask(ctx, taskID); err == nil && task != nil {
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 	}
-	if s.baseBranchPusher == nil {
-		return
+	if s.baseBranchPusher != nil {
+		branches, mapErr := s.collectTaskBaseBranches(ctx, taskID)
+		if mapErr != nil {
+			s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
+				zap.String("task_id", taskID),
+				zap.Error(mapErr))
+		} else if len(branches) > 0 {
+			// Empty map = task currently has no recorded base_branches. Pushing
+			// nil to agentctl would call Manager.UpdateBaseBranches(nil) and wipe
+			// every tracker's override, including ones the caller didn't touch.
+			// Skip the push instead — the DB row we just updated is the source of
+			// truth for the next session launch.
+			s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
+		}
 	}
-	branches, mapErr := s.collectTaskBaseBranches(ctx, taskID)
-	if mapErr != nil {
-		s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect base branches for live push",
-			zap.String("task_id", taskID),
-			zap.Error(mapErr))
-		return
+	if s.comparisonContextPusher != nil {
+		if contexts, err := s.TaskComparisonContexts(ctx, taskID); err != nil {
+			s.logger.Warn("UpdateRepositoryBaseBranch: failed to collect comparison contexts for live push", zap.String("task_id", taskID), zap.Error(err))
+		} else if contexts != nil {
+			s.comparisonContextPusher.PushComparisonContextsForTask(ctx, taskID, contexts)
+		}
 	}
-	// Empty map = task currently has no recorded base_branches. Pushing
-	// nil to agentctl would call Manager.UpdateBaseBranches(nil) and wipe
-	// every tracker's override, including ones the caller didn't touch.
-	// Skip the push instead — the DB row we just updated is the source of
-	// truth for the next session launch.
-	if len(branches) == 0 {
-		return
-	}
-	s.baseBranchPusher.PushBaseBranchesForTask(ctx, taskID, branches)
 }
 
 // isSafeBaseBranchRef delegates to the shared
@@ -183,6 +188,199 @@ func (s *Service) TaskBaseBranches(ctx context.Context, taskID string) (map[stri
 		return nil, nil
 	}
 	return s.collectTaskBaseBranches(ctx, taskID)
+}
+
+// TaskComparisonContexts hydrates the attached-repository fallback context for
+// every task worktree. Provider event handlers may layer exact linked-change
+// evidence above this value; this method intentionally never guesses from a
+// PR number or branch name alone.
+func (s *Service) TaskComparisonContexts(ctx context.Context, taskID string) (map[string]gitremote.ComparisonContext, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	taskRepos, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task repositories: %w", err)
+	}
+	repos, err := s.resolveBaseBranchRepositories(ctx, taskRepos)
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]worktree.BranchIdentityInput, len(taskRepos))
+	for i, tr := range taskRepos {
+		defaultBranch := ""
+		if repos[i] != nil {
+			defaultBranch = repos[i].DefaultBranch
+		}
+		inputs[i] = worktree.BranchIdentityInput{RepositoryID: tr.RepositoryID, BaseBranch: tr.BaseBranch, CheckoutBranch: tr.CheckoutBranch, DefaultBranch: defaultBranch, PRNumber: taskRepositoryPRNumber(tr.Metadata), Position: tr.Position}
+	}
+	plans := worktree.BuildBranchIdentityPlans(inputs)
+	contexts := make(map[string]gitremote.ComparisonContext, len(taskRepos))
+	for i, tr := range taskRepos {
+		repo := repos[i]
+		if repo == nil {
+			return nil, fmt.Errorf("repository %s is unavailable while hydrating comparison context", tr.RepositoryID)
+		}
+		ref := tr.BaseBranch
+		if ref == "" {
+			ref = repo.DefaultBranch
+		}
+		if ref == "" {
+			return nil, fmt.Errorf("repository %s has no selected base ref", tr.RepositoryID)
+		}
+		identity, err := repositoryRemoteIdentity(repo)
+		if err != nil {
+			return nil, fmt.Errorf("repository %s comparison identity: %w", tr.RepositoryID, err)
+		}
+		target := gitremote.RemoteRefIdentity{Repository: identity, Ref: ref}
+		if binding, present, loadErr := models.LoadRemoteContribution(tr.Metadata); loadErr != nil {
+			return nil, fmt.Errorf("repository %s remote contribution: %w", tr.RepositoryID, loadErr)
+		} else if present {
+			// A contribution binding is authoritative for the target ref while
+			// its attached repository remains the authorization anchor.
+			target.Ref = binding.BaseBranch
+		}
+		context, err := gitremote.NewComparisonContext(target, "", "")
+		if err != nil {
+			return nil, fmt.Errorf("repository %s comparison context: %w", tr.RepositoryID, err)
+		}
+		key := baseBranchTrackerKey(repo.Name, plans[i].PathSlug)
+		contexts[key] = context
+	}
+	if s.comparisonContextLinkProvider != nil {
+		links, linkErr := s.comparisonContextLinkProvider(ctx, taskID)
+		if linkErr != nil {
+			return nil, fmt.Errorf("hydrate linked comparison changes: %w", linkErr)
+		}
+		for i, tr := range taskRepos {
+			candidates := links[tr.RepositoryID]
+			if len(candidates) == 0 && len(taskRepos) == 1 {
+				// Provider rows written before task-repository scoping have an
+				// empty RepositoryID. They are safe to consider only for a
+				// single-repository task; multi-repository rows must remain
+				// unresolved rather than being assigned by list order.
+				candidates = links[""]
+			}
+			if len(candidates) == 0 {
+				continue
+			}
+			// The task repository's stored contribution identity, when present,
+			// is the durable action-head evidence. Otherwise a checkout of the
+			// attached repository supplies the same-repository action identity.
+			// A fork source without either exact identity remains unresolved;
+			// provider rows are never selected by branch name alone.
+			var actionHead *gitremote.RemoteRefIdentity
+			if binding, present, loadErr := models.LoadRemoteContribution(tr.Metadata); loadErr != nil {
+				return nil, fmt.Errorf("repository %s remote contribution: %w", tr.RepositoryID, loadErr)
+			} else if present {
+				identity, identityErr := remoteContributionSourceIdentity(binding)
+				if identityErr != nil {
+					return nil, fmt.Errorf("repository %s action-head identity: %w", tr.RepositoryID, identityErr)
+				}
+				actionHead = &identity
+			} else if tr.CheckoutBranch != "" {
+				identity := gitremote.RemoteRefIdentity{Repository: contexts[baseBranchTrackerKey(repos[i].Name, plans[i].PathSlug)].Target.Repository, Ref: tr.CheckoutBranch}
+				actionHead = &identity
+			}
+			selected := gitremote.SelectComparisonContext(gitremote.ComparisonContextInput{
+				ActionHead:        actionHead,
+				LinkedChanges:     candidates,
+				ContextGeneration: "",
+			})
+			if selected.State != gitremote.ResolutionResolved {
+				return nil, fmt.Errorf("repository %s linked comparison context unresolved: %s", tr.RepositoryID, selected.Reason)
+			}
+			key := baseBranchTrackerKey(repos[i].Name, plans[i].PathSlug)
+			contexts[key] = selected.Context
+			if len(taskRepos) == 1 {
+				contexts[""] = selected.Context.Clone()
+			}
+		}
+	}
+	if len(taskRepos) == 1 {
+		if context, ok := contexts[baseBranchTrackerKey(repos[0].Name, plans[0].PathSlug)]; ok {
+			contexts[""] = context.Clone()
+		}
+	}
+	return contexts, nil
+}
+
+func repositoryRemoteIdentity(repo *models.Repository) (gitremote.RemoteRepositoryIdentity, error) {
+	provider := gitremote.Provider(repo.Provider)
+	if provider == "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
+		provider = gitremote.ProviderGitHub
+	}
+	switch strings.ToLower(string(provider)) {
+	case "github":
+		provider = gitremote.ProviderGitHub
+	case "gitlab":
+		provider = gitremote.ProviderGitLab
+	case "azure", "azuredevops", "azure_repos":
+		provider = gitremote.ProviderAzureRepos
+	case "":
+		provider = gitremote.ProviderGeneric
+	default:
+		return gitremote.RemoteRepositoryIdentity{}, fmt.Errorf("unsupported repository provider %q", repo.Provider)
+	}
+	host := ""
+	if strings.TrimSpace(repo.ProviderHost) != "" {
+		var err error
+		host, err = gitremote.NormalizeHost(repo.ProviderHost)
+		if err != nil {
+			return gitremote.RemoteRepositoryIdentity{}, err
+		}
+	}
+	path := strings.Trim(strings.TrimSpace(repo.ProviderOwner+"/"+repo.ProviderName), "/")
+	if host == "" && repo.RemoteURL != "" {
+		parsed, err := url.Parse(repo.RemoteURL)
+		if err != nil || parsed.User != nil || parsed.Host == "" {
+			return gitremote.RemoteRepositoryIdentity{}, fmt.Errorf("remote URL is not credential-free")
+		}
+		host, err = gitremote.NormalizeHost(parsed.Host)
+		if err != nil {
+			return gitremote.RemoteRepositoryIdentity{}, err
+		}
+		if path == "" {
+			path = strings.Trim(parsed.Path, "/")
+		}
+	}
+	if host == "" {
+		host = "local"
+	}
+	if path == "" {
+		path = repo.Name
+	}
+	identity := gitremote.RemoteRepositoryIdentity{Provider: provider, Host: host, RepositoryPath: path, ProviderRepositoryID: repo.ProviderRepoID}
+	if err := identity.Validate(); err != nil {
+		return gitremote.RemoteRepositoryIdentity{}, err
+	}
+	return identity, nil
+}
+
+func remoteContributionSourceIdentity(binding models.RemoteContribution) (gitremote.RemoteRefIdentity, error) {
+	provider := gitremote.Provider(binding.Provider)
+	switch strings.ToLower(string(provider)) {
+	case models.RemoteContributionProviderGitHub:
+		provider = gitremote.ProviderGitHub
+	case models.RemoteContributionProviderGitLab:
+		provider = gitremote.ProviderGitLab
+	default:
+		return gitremote.RemoteRefIdentity{}, fmt.Errorf("unsupported contribution provider %q", binding.Provider)
+	}
+	host, err := gitremote.NormalizeHost(binding.SourceRepository.Host)
+	if err != nil {
+		return gitremote.RemoteRefIdentity{}, err
+	}
+	identity := gitremote.RemoteRefIdentity{Repository: gitremote.RemoteRepositoryIdentity{
+		Provider:             provider,
+		Host:                 host,
+		RepositoryPath:       binding.SourceRepository.Path,
+		ProviderRepositoryID: binding.SourceRepository.ProviderID,
+	}, Ref: binding.HeadBranch}
+	if err := identity.Validate(); err != nil {
+		return gitremote.RemoteRefIdentity{}, err
+	}
+	return identity, nil
 }
 
 // collectTaskBaseBranches builds the per-worktree {trackerName → base_branch}

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -85,6 +86,10 @@ type CreateInstanceRequest struct {
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
 	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
+	// ComparisonContexts maps deterministic workspace repository subpaths to
+	// backend-owned comparison observations. The empty key addresses the root
+	// or single-repository workspace.
+	ComparisonContexts map[string]gitremote.ComparisonContext `json:"comparison_contexts,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

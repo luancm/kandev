@@ -202,6 +202,16 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 		return nil
 	}
 	s.startTaskPRCIAutomation(ctx, pr)
+	s.refreshComparisonContext(ctx, pr.TaskID)
+	return nil
+}
+
+func (s *Service) handleTaskPRDeleted(ctx context.Context, event *bus.Event) error {
+	deleted, ok := event.Data.(*github.TaskPRDeletedEvent)
+	if !ok || deleted == nil {
+		return nil
+	}
+	s.refreshComparisonContext(ctx, deleted.TaskID)
 	return nil
 }
 
@@ -1454,6 +1464,9 @@ func (s *Service) subscribeGitHubEvents() {
 	}
 	if _, err := s.eventBus.Subscribe(events.GitHubTaskPRUpdated, s.handleTaskPRUpdated); err != nil {
 		s.logger.Error("failed to subscribe to github.task_pr.updated events", zap.Error(err))
+	}
+	if _, err := s.eventBus.Subscribe(events.GitHubTaskPRDeleted, s.handleTaskPRDeleted); err != nil {
+		s.logger.Error("failed to subscribe to github.task_pr.deleted events", zap.Error(err))
 	}
 	if _, err := s.eventBus.Subscribe(events.GitHubTaskCIOptionsUpdated, s.handleTaskCIOptionsUpdated); err != nil {
 		s.logger.Error("failed to subscribe to github.task_ci_options.updated events", zap.Error(err))

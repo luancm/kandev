@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	tools "github.com/kandev/kandev/internal/tools/installer"
@@ -156,6 +157,11 @@ type Manager struct {
 	// publish a new map under repoTrackersMu while a reader walked the
 	// same map under workspaceTrackersMu.
 	baseBranchesMu sync.RWMutex
+
+	// comparisonContextsMu guards the backend-owned per-worktree comparison
+	// observation map. A context update is applied only to the matching
+	// tracker; an omitted sibling never clears a known observation.
+	comparisonContextsMu sync.RWMutex
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -374,6 +380,42 @@ func (m *Manager) setBaseBranches(branches map[string]string) {
 		return
 	}
 	m.cfg.BaseBranches = branches
+}
+
+func (m *Manager) getComparisonContexts() map[string]gitremote.ComparisonContext {
+	m.comparisonContextsMu.RLock()
+	defer m.comparisonContextsMu.RUnlock()
+	if m.cfg == nil || m.cfg.ComparisonContexts == nil {
+		return nil
+	}
+	out := make(map[string]gitremote.ComparisonContext, len(m.cfg.ComparisonContexts))
+	for key, value := range m.cfg.ComparisonContexts {
+		out[key] = value.Clone()
+	}
+	return out
+}
+
+func (m *Manager) setComparisonContexts(contexts map[string]gitremote.ComparisonContext) {
+	m.comparisonContextsMu.Lock()
+	defer m.comparisonContextsMu.Unlock()
+	if m.cfg == nil {
+		return
+	}
+	if contexts == nil {
+		m.cfg.ComparisonContexts = nil
+		return
+	}
+	m.cfg.ComparisonContexts = make(map[string]gitremote.ComparisonContext, len(contexts))
+	for key, value := range contexts {
+		m.cfg.ComparisonContexts[key] = value.Clone()
+	}
+}
+
+// ComparisonContexts returns a defensive snapshot of the contexts currently
+// seeded into this agentctl instance. It is primarily useful to diagnostics
+// and tests; updates should go through UpdateComparisonContexts.
+func (m *Manager) ComparisonContexts() map[string]gitremote.ComparisonContext {
+	return m.getComparisonContexts()
 }
 
 // SetWorkspaceSourceRoots atomically refreshes the canonical durable-source
@@ -642,7 +684,7 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
-	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
+	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -690,6 +732,87 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 		t.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, subpath))
 	}
 	go m.refreshTrackersDetached(root, trackers, bySubpath)
+}
+
+// UpdateComparisonContexts applies a presence-aware observation. A nil map
+// explicitly clears every context. A non-empty map updates only the supplied
+// worktrees, preserving sibling observations while provider hydration is
+// incomplete. The map is validated before any state is changed.
+func (m *Manager) UpdateComparisonContexts(ctx context.Context, contexts map[string]gitremote.ComparisonContext) error {
+	for key, value := range contexts {
+		if err := value.Validate(); err != nil {
+			return fmt.Errorf("comparison context %q: %w", key, err)
+		}
+		if key != "" && (filepath.IsAbs(key) || filepath.Clean(key) != key || key == "." || strings.HasPrefix(key, ".."+string(filepath.Separator)) || strings.ContainsRune(key, '\x00')) {
+			return fmt.Errorf("comparison context %q: worktree key is invalid", key)
+		}
+	}
+
+	previous := m.getComparisonContexts()
+	if contexts == nil {
+		m.setComparisonContexts(nil)
+	} else {
+		if previous == nil {
+			previous = make(map[string]gitremote.ComparisonContext)
+		}
+		if len(contexts) == 0 {
+			previous = make(map[string]gitremote.ComparisonContext)
+		} else {
+			for key, value := range contexts {
+				if value.Update == gitremote.ComparisonContextClear {
+					delete(previous, key)
+					continue
+				}
+				previous[key] = value.Clone()
+			}
+		}
+		m.setComparisonContexts(previous)
+	}
+
+	root, trackers := m.snapshotTrackers()
+	m.workspaceTrackersMu.Lock()
+	bySubpath := make(map[string]*WorkspaceTracker, len(m.workspaceTrackersBySubpath))
+	for key, tracker := range m.workspaceTrackersBySubpath {
+		bySubpath[key] = tracker
+	}
+	m.workspaceTrackersMu.Unlock()
+	if contexts == nil || len(contexts) == 0 {
+		if root != nil {
+			root.SetComparisonContext(nil)
+		}
+		for _, tracker := range trackers {
+			tracker.SetComparisonContext(nil)
+		}
+		for _, tracker := range bySubpath {
+			tracker.SetComparisonContext(nil)
+		}
+	} else {
+		apply := func(tracker *WorkspaceTracker, key string) {
+			if tracker == nil {
+				return
+			}
+			value, ok := contexts[key]
+			if !ok {
+				return
+			}
+			if value.Update == gitremote.ComparisonContextClear {
+				tracker.SetComparisonContext(nil)
+				return
+			}
+			tracker.SetComparisonContext(&value)
+		}
+		if root != nil {
+			apply(root, root.RepositoryName())
+		}
+		for _, tracker := range trackers {
+			apply(tracker, tracker.RepositoryName())
+		}
+		for key, tracker := range bySubpath {
+			apply(tracker, key)
+		}
+	}
+	go m.refreshTrackersDetached(root, trackers, bySubpath)
+	return nil
 }
 
 // refreshTrackersDetached runs RefreshGitStatus on every supplied tracker

@@ -287,6 +287,7 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:            req.RemoteContributions,
+		ComparisonContexts:             req.ComparisonContexts,
 		ContributionDestinations:       req.ContributionDestinations,
 	}, nil
 }
@@ -588,6 +589,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		StripEnv:                 stripEnv,
 		BaseBranches:             getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 		RemoteContributions:      req.RemoteContributions,
+		ComparisonContexts:       req.ComparisonContexts,
 		ContributionDestinations: req.ContributionDestinations,
 	}
 }

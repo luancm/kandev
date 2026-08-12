@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -261,12 +262,19 @@ type InstanceConfig struct {
 
 	// RemoteContributions maps workspace repository subpaths to the
 	// server-authored contribution binding used for source-routed writes.
-	RemoteContributions      map[string]models.RemoteContribution
+	RemoteContributions map[string]models.RemoteContribution
+	// ContributionDestinations maps workspace repository subpaths to the
+	// provider-authored destination binding used for fork-aware writes.
 	ContributionDestinations map[string]models.ContributionDestination
 
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
+
+	// ComparisonContexts maps deterministic workspace repository subpaths to
+	// backend-owned comparison observations. The empty key applies to the root
+	// or single-repository tracker.
+	ComparisonContexts map[string]gitremote.ComparisonContext
 }
 
 // Load loads the configuration from environment variables.
@@ -460,6 +468,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.RemoteContributions) > 0 {
 		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
 	}
+	if overrides.ComparisonContexts != nil {
+		cfg.ComparisonContexts = cloneComparisonContexts(overrides.ComparisonContexts)
+	}
 	if len(overrides.ContributionDestinations) > 0 {
 		cfg.ContributionDestinations = cloneContributionDestinations(overrides.ContributionDestinations)
 	}
@@ -511,6 +522,7 @@ type InstanceOverrides struct {
 	RemoteContributions      map[string]models.RemoteContribution
 	ContributionDestinations map[string]models.ContributionDestination
 	WorkspaceSourceRoots     []string
+	ComparisonContexts       map[string]gitremote.ComparisonContext
 }
 
 func cloneRemoteContributions(values map[string]models.RemoteContribution) map[string]models.RemoteContribution {
@@ -531,6 +543,17 @@ func cloneContributionDestinations(values map[string]models.ContributionDestinat
 	cloned := make(map[string]models.ContributionDestination, len(values))
 	for key, value := range values {
 		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneComparisonContexts(values map[string]gitremote.ComparisonContext) map[string]gitremote.ComparisonContext {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]gitremote.ComparisonContext, len(values))
+	for key, value := range values {
+		cloned[key] = value.Clone()
 	}
 	return cloned
 }

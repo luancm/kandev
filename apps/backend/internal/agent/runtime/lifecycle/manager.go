@@ -118,6 +118,9 @@ type Manager struct {
 	// every workspace can be seeded at agentctl-ready time, not just full
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
+	// comparisonContextProvider hydrates the complete backend-owned target map
+	// for every workspace creation, recovery, and live refresh path.
+	comparisonContextProvider ComparisonContextProvider
 
 	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
 	// Used to persist tokens across backend restarts for remote executor recovery.

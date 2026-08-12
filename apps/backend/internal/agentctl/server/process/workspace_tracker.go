@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -61,6 +62,10 @@ type WorkspaceTracker struct {
 	// Sourced from task_repositories.base_branch on the kandev backend.
 	// Empty for legacy tasks or external branches with no recorded base.
 	baseBranch string
+	// comparisonContext is the backend-owned target for this worktree. It is
+	// kept separate from baseBranch because the target repository may differ
+	// from the attached repository while the branch override remains local.
+	comparisonContext *gitremote.ComparisonContext
 	// comparisonAnchor is set for an initialized submodule. Unlike a branch
 	// name, it must remain pinned to the gitlink commit recorded by the parent
 	// comparison tree, even when the submodule's own default branch moves.
@@ -288,6 +293,30 @@ func (wt *WorkspaceTracker) BaseBranch() string {
 	wt.mu.RLock()
 	defer wt.mu.RUnlock()
 	return wt.baseBranch
+}
+
+// SetComparisonContext applies an already validated comparison observation.
+// A nil value clears this worktree's target.
+func (wt *WorkspaceTracker) SetComparisonContext(value *gitremote.ComparisonContext) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if value == nil {
+		wt.comparisonContext = nil
+		return
+	}
+	clone := value.Clone()
+	wt.comparisonContext = &clone
+}
+
+// ComparisonContext returns a defensive snapshot of this worktree's target.
+func (wt *WorkspaceTracker) ComparisonContext() *gitremote.ComparisonContext {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	if wt.comparisonContext == nil {
+		return nil
+	}
+	clone := wt.comparisonContext.Clone()
+	return &clone
 }
 
 // NewWorkspaceTrackerForRepo creates a tracker scoped to a specific repository

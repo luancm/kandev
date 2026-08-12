@@ -10,6 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -131,6 +132,18 @@ type ProviderDefaultBranchProber interface {
 type AgentBaseBranchPusher interface {
 	PushBaseBranchesForTask(ctx context.Context, taskID string, branches map[string]string)
 }
+
+// AgentComparisonContextPusher delivers a complete backend-owned comparison
+// observation to every live execution of a task. Empty non-nil maps clear
+// stale contexts; providers must return nil on incomplete hydration.
+type AgentComparisonContextPusher interface {
+	PushComparisonContextsForTask(ctx context.Context, taskID string, contexts map[string]gitremote.ComparisonContext)
+}
+
+// ComparisonContextLinkProvider supplies complete provider identities for
+// active linked changes. The task service owns precedence and persistence
+// projection; provider stores only supply observations through this seam.
+type ComparisonContextLinkProvider func(context.Context, string) (map[string][]gitremote.LinkedChange, error)
 
 type BranchMaterializer interface {
 	// MaterializeBranch creates the worktree for a freshly inserted
@@ -342,12 +355,14 @@ type Service struct {
 	// dependencyEdgeMu serializes validate-then-insert for dependency edges so
 	// two concurrent adds cannot each pass a cycle walk that predates the
 	// other's insert and commit a cycle between them.
-	dependencyEdgeMu       sync.Mutex
-	comments               CommentRepository
-	secretStore            secrets.SecretStore
-	workspaceSecretDeleter WorkspaceSecretDeleter
-	baseBranchPusher       AgentBaseBranchPusher
-	runtimeOverridesMu     sync.Mutex
+	dependencyEdgeMu              sync.Mutex
+	comments                      CommentRepository
+	secretStore                   secrets.SecretStore
+	workspaceSecretDeleter        WorkspaceSecretDeleter
+	baseBranchPusher              AgentBaseBranchPusher
+	comparisonContextPusher       AgentComparisonContextPusher
+	comparisonContextLinkProvider ComparisonContextLinkProvider
+	runtimeOverridesMu            sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -491,6 +506,15 @@ func (s *Service) SetWorkspaceSourceProviderRefresher(r WorkspaceSourceProviderR
 // session launch.
 func (s *Service) SetAgentBaseBranchPusher(p AgentBaseBranchPusher) {
 	s.baseBranchPusher = p
+}
+
+// SetAgentComparisonContextPusher wires live comparison-context refreshes.
+func (s *Service) SetAgentComparisonContextPusher(p AgentComparisonContextPusher) {
+	s.comparisonContextPusher = p
+}
+
+func (s *Service) SetComparisonContextLinkProvider(provider ComparisonContextLinkProvider) {
+	s.comparisonContextLinkProvider = provider
 }
 
 // SetProviderDefaultBranchProber wires the synchronous default-branch probe

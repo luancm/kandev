@@ -703,6 +703,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if err != nil {
 		return nil, err
 	}
+	comparisonContexts, err := comparisonContextsFromMetadata(metadata)
 	contributionDestinations, err := contributionDestinationsFromMetadata(metadata)
 	if err != nil {
 		return nil, err
@@ -735,6 +736,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 			RemoteContributions:            remoteContributions,
+			ComparisonContexts:             comparisonContexts,
 			ContributionDestinations:       contributionDestinations,
 		},
 		profileInfo: profileInfo,

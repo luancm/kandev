@@ -16,6 +16,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
@@ -28,11 +29,7 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID string
-	// RunID identifies the Office run that launched this execution. It is
-	// retained after runtime environment cleanup so delayed stop events can
-	// still be attributed to the correct run.
-	RunID             string
+	ID                string
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
@@ -424,9 +421,6 @@ func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
 
 // signalPromptCompletionForStartupGeneration claims the current startup
 // generation and enqueues its completion signal as one ownership operation.
-// A stream can finish its generation check just before recovery advances the
-// execution, so checking and sending under the same mutex prevents an old
-// stream from publishing into the replacement prompt's channel.
 func (e *AgentExecution) signalPromptCompletionForStartupGeneration(
 	startupGeneration uint64,
 	signal PromptCompletionSignal,
@@ -759,6 +753,7 @@ type RepoLaunchSpec struct {
 	CheckoutBranch          string
 	PRNumber                int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
+	ComparisonContext       *gitremote.ComparisonContext
 	WorktreeID              string // Existing worktree ID to reuse (skip creation if set)
 	WorktreeBranchPrefix    string
 	WorktreeBranchTemplate  string
@@ -915,6 +910,10 @@ type LaunchRequest struct {
 	// yet been updated.
 	Repositories     []RepoLaunchSpec
 	WorkspaceFolders []WorkspaceFolderSpec
+	// ComparisonContexts is the presence-aware full observation for the
+	// workspace. Nil means no observation was hydrated; an empty map explicitly
+	// clears stale observations.
+	ComparisonContexts map[string]gitremote.ComparisonContext
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -941,6 +940,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CheckoutBranch:          r.CheckoutBranch,
 		PRNumber:                r.PRNumber,
 		RemoteContribution:      r.RemoteContribution,
+		ComparisonContext:       comparisonContextFromMap(r.ComparisonContexts),
 		ContributionDestination: r.ContributionDestination,
 		WorktreeID:              r.WorktreeID,
 		WorktreeBranchPrefix:    r.WorktreeBranchPrefix,
@@ -952,6 +952,18 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		BranchSlug:              r.BranchSlug,
 		BranchIdentitySlug:      r.BranchIdentitySlug,
 	}}
+}
+
+func comparisonContextFromMap(values map[string]gitremote.ComparisonContext) *gitremote.ComparisonContext {
+	if values == nil {
+		return nil
+	}
+	value, ok := values[""]
+	if !ok {
+		return nil
+	}
+	clone := value.Clone()
+	return &clone
 }
 
 // MessageAttachment represents an image or file attachment for agent prompts.

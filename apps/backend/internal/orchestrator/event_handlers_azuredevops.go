@@ -29,6 +29,30 @@ func (s *Service) subscribeAzureDevOpsEvents() {
 	if _, err := s.eventBus.Subscribe(events.AzureDevOpsPullRequestWatchMatch, s.handleAzureDevOpsPullRequestWatchMatch); err != nil {
 		s.logger.Error("subscribe azure_devops.pull_request_watch.match", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.AzureDevOpsTaskPRUpdated, s.handleAzureDevOpsTaskPRUpdated); err != nil {
+		s.logger.Error("subscribe azure_devops.task_pr.updated", zap.Error(err))
+	}
+	if _, err := s.eventBus.Subscribe(events.AzureDevOpsTaskPRDeleted, s.handleAzureDevOpsTaskPRDeleted); err != nil {
+		s.logger.Error("subscribe azure_devops.task_pr.deleted", zap.Error(err))
+	}
+}
+
+func (s *Service) handleAzureDevOpsTaskPRUpdated(ctx context.Context, event *bus.Event) error {
+	payload, ok := event.Data.(*azuredevops.TaskPRUpdatedEvent)
+	if !ok || payload == nil || payload.TaskPR == nil {
+		return nil
+	}
+	s.refreshComparisonContext(ctx, payload.TaskID)
+	return nil
+}
+
+func (s *Service) handleAzureDevOpsTaskPRDeleted(ctx context.Context, event *bus.Event) error {
+	payload, ok := event.Data.(*azuredevops.TaskPRDeletedEvent)
+	if !ok || payload == nil {
+		return nil
+	}
+	s.refreshComparisonContext(ctx, payload.TaskID)
+	return nil
 }
 
 func (s *Service) handleAzureDevOpsWorkItemWatchMatch(ctx context.Context, event *bus.Event) error {

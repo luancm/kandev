@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -402,6 +403,7 @@ type LaunchAgentRequest struct {
 	PRNumber                int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
 	RemoteContribution      *models.RemoteContribution
 	ContributionDestination *models.ContributionDestination
+	ComparisonContexts      map[string]gitremote.ComparisonContext
 	WorktreeBranchPrefix    string // Branch prefix for worktree branches
 	WorktreeBranchTemplate  string // Branch name template for worktree branches
 	WorktreeBranchTicket    string // External ticket value for branch templates
@@ -466,6 +468,7 @@ type RepoSpec struct {
 	// persisted environment metadata. It may be non-empty even when BranchSlug
 	// is empty so the primary branch can keep the legacy flat path.
 	BranchIdentitySlug string
+	ComparisonContext  *gitremote.ComparisonContext
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP

@@ -128,6 +128,7 @@ func (s *Server) setupRoutes() {
 		// and triggers a fresh git-status emit so the UI updates without
 		// waiting for the next poll tick.
 		api.POST("/workspace/base-branches", s.handleSetBaseBranches)
+		api.POST("/workspace/comparison-contexts", s.handleSetComparisonContexts)
 
 		// Workspace file operations (simple HTTP)
 		api.GET("/workspace/tree", s.handleFileTree)
