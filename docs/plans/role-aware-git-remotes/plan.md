@@ -84,11 +84,11 @@ Wave 0:
 
 Wave 1:
 
-- [ ] [Task 01: Resolve remote roles](task-01-resolve-remote-roles.md) (`in_progress`)
+- [x] [Task 01: Resolve remote roles](task-01-resolve-remote-roles.md) (`completed`)
 
 Wave 2:
 
-- [ ] [Task 02: Repair exact PR discovery](task-02-repair-exact-pr-discovery.md)
+- [ ] [Task 02: Repair exact PR discovery](task-02-repair-exact-pr-discovery.md) (`in_progress`)
 
 Wave 3:
 
