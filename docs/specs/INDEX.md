@@ -53,7 +53,8 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — Voice Mode leaves core](plugins/voice-extraction.md) | shipped |
 | [plugin-nav-sidebar-footer](plugin-nav-sidebar-footer/spec.md) | draft |
 | [semantic-notifications](platform/notifications.md) | shipped |
-| [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [workspace-git-status](platform/workspace-git-status.md) | building |
+| [git-remote-roles](platform/git-remote-roles.md) | draft |
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
@@ -234,7 +235,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [walkthrough-feedback-controls](walkthrough-feedback-controls/spec.md) | shipped |
 | [changes-walkthrough-toolbar-width](changes-walkthrough-toolbar-width/spec.md) | shipped |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
-| [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
+| [external-vcs-file-links](ui/external-vcs-file-links.md) | building |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
 | [sidebar-last-activity-sort](ui/sidebar-last-activity-sort.md) | draft |

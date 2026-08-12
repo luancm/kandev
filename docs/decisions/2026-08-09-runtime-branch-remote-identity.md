@@ -4,6 +4,10 @@
 **Date:** 2026-08-09
 **Area:** backend, protocol, GitHub, security
 
+Extended by
+[ADR-2026-08-12-role-based-git-remotes](2026-08-12-role-based-git-remotes.md), which places this
+attached-repository/runtime-head split inside Kandev's provider-neutral remote-role model.
+
 ## Context
 
 Kandev persists a normalized provider identity for every attached repository.

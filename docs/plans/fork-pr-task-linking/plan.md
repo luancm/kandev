@@ -6,6 +6,10 @@ status: complete
 
 # Implementation Plan: Link fork pull requests to tasks
 
+Review remediation and the provider-neutral remote-role follow-up are tracked in
+[Role-aware Git remotes](../role-aware-git-remotes/plan.md). This completed plan remains the historical
+record for the initial branch implementation.
+
 ## Overview
 
 Make GitHub branch-only PR discovery use the exact repository and remote branch

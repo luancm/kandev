@@ -12,9 +12,8 @@ Users can already see pull request CI/review status above the task chat input,
 but acting on a red PR still requires repeatedly noticing the failure, prompting
 the agent, and deciding when it is safe to merge. A review task can also go
 idle after submitting a review and miss a later re-review request, merge, or
-close. Users and task agents need automation controls that keep a linked PR
-moving throughout its lifecycle, configured independently per linked PR so a
-task with several open PRs does not force the same setting onto all of them.
+close. Users and task agents need one control plane that keeps each linked PR
+moving throughout its lifecycle without conflating state from sibling PRs.
 
 Task-to-PR associations survive restarts and archive/unarchive. Hard deletion
 removes task-owned associations and refresh watches; it is not contribution
@@ -24,29 +23,25 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 (the task-level control plane for the five switches was superseded by per-PR
 scoping; see that ADR's Consequences section).
 
-Decision: [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-08-09-runtime-branch-remote-identity.md).
+The runtime branch and remote identity rules are defined by [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-08-09-runtime-branch-remote-identity.md), extended by [ADR-2026-08-12-role-based-git-remotes](../../decisions/2026-08-12-role-based-git-remotes.md).
 
 ## What
 
-- The PR CI popover above the chat input shows five automation controls,
-  scoped to the selected linked PR:
+- The PR CI popover above the chat input shows five automation controls for the selected linked PR:
   - `Auto-fix CI & address comments`
   - `Auto-merge when ready`
   - `Your review is requested`
   - `PR merged`
   - `PR closed without merging`
-- The automation section states which PR the controls apply to (the PR number,
-  interpolated into localized copy), since a task can have several linked PRs
-  each with independent settings.
 - The automation section includes an info icon or equivalent help affordance that explains what each control watches, how often Kandev checks watched PRs, how feedback snapshots prevent duplicate prompts, and how auto-merge decides readiness.
 - The same controls are available anywhere the task PR CI popover is rendered, including the normal chat input status bar and passthrough toolbar surfaces.
 - The shared desktop popover and mobile drawer keep auto-fix and auto-merge in
   the primary automation list. The three agent lifecycle prompt switches live
-  together in a collapsed `Review follow-up` section.
-- `Review follow-up` is presentation only. Its switches are per-PR like the
-  rest of the automation section and remain reachable on desktop and mobile.
-  When any of its three options is enabled for the selected PR, the section
-  opens so active automation is not concealed.
+  together in a collapsed `PR events` section.
+- `PR events` is presentation only. Its switches retain the selected linked
+  PR's independent state and remain reachable on desktop and mobile. When any
+  of its three options is enabled, the section opens so active automation is
+  not concealed.
 - Lifecycle switches stay compact single-line rows. Their explanations live in
   on-demand help affordances (hover tooltip on fine pointers, tap popover on
   touch) and screen-reader descriptions, not inline copy: the review-request
@@ -145,16 +140,14 @@ Decision: [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-0
 - If a task has no custom auto-fix prompt, Kandev uses a built-in default prompt named `ci-auto-fix`.
 - The default `ci-auto-fix` prompt is editable from Settings > Prompts like other built-in prompts.
 - Emptying or resetting the task prompt override returns the task to the default `ci-auto-fix` prompt.
-- For tasks with multiple linked PRs, each of the five automation switches is
-  scoped per linked PR: `(task_id, repository_id, pr_number)`. Enabling a
-  switch in one PR's tab has no effect on any other linked PR's switches. A
-  `PATCH` that omits PR identity fans the requested change out to every
-  currently linked PR (unchanged behavior for MCP callers that predate
-  per-PR scoping); a newly linked PR always starts with all five switches
-  off. `auto_fix_prompt_override` and `review_reviewer_login` remain
-  task-level — one prompt override and one resolved reviewer identity apply
-  to every linked PR. Dedupe, last-attempt, review-request, and terminal
-  state are tracked per linked PR, as before.
+- For tasks with multiple linked PRs, each automation switch is scoped by
+  `(task_id, repository_id, pr_number)`. Enabling a switch in one PR's tab has
+  no effect on another linked PR. A legacy update that omits PR identity fans
+  the requested switch change out to every currently linked PR; a newly linked
+  PR starts with all five switches off. The auto-fix prompt override and
+  resolved reviewer login remain task-level, while dedupe, last-attempt,
+  review-request, and terminal state remain per linked PR.
+- When a worktree surface needs one selected linked PR, Kandev first matches the worktree's repository/branch context and exact writable-action source identity. Exactly one source match is selected; zero or multiple exact matches leave the worktree-specific selection unresolved. Kandev never chooses by linked-row order, PR number, branch name alone, or canonical base identity. This selection rule does not narrow task automation, which continues to evaluate every linked PR independently.
 - Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. Automation wakeups sync the latest lightweight PR state before evaluating gates. When auto-fix is enabled, Kandev fetches full PR feedback so failing checks, requested changes, unresolved threads, and human PR conversation comments can trigger deduped prompts even when the persisted lightweight row was stale. Auto-fix waits until all PR checks have finished before sending or queueing a prompt, so the agent receives the final check set and current comments in one pass. Bot-authored PR conversation comments without failed checks or unresolved review threads are treated as non-actionable status chatter and do not send an agent prompt.
 - Lightweight PR status sync counts unresolved review threads across every page
   returned by GitHub. A connection's `totalCount` indicates that more threads
@@ -170,29 +163,17 @@ Decision: [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-0
 - Branch-only PR discovery associates PR metadata without fetching unused
   review-thread continuation pages. Once the watch has a PR number, the next
   numbered status sync produces the complete review-thread count.
-- Branch-only PR discovery uses the current branch's configured Git push ref as
-  its exact head identity, falling back to the upstream tracking ref when Git
-  has no distinct push ref. Kandev resolves the referenced remote under its
-  configured name and never assigns behavior to the literal names `origin` or
-  `upstream`.
+- Branch-only PR discovery uses the current branch's writable action head as its exact source identity. The shared remote-role resolver derives that identity from Git's resolved push destination; Kandev does not substitute the tracking upstream or comparison target when the action head cannot be resolved. Kandev never assigns behavior to the literal names `origin` or `upstream`.
 - `origin` for a contributor fork and `upstream` for the main repository remain
   a recommended convention, not a requirement. A user may name either remote
   differently or use another valid Git push/tracking configuration.
-- The task's attached repository remains the authorization and association
-  anchor. Runtime Git configuration supplies only a credential-free observed
-  head repository identity; it never rewrites the persisted repository's
-  provider identity. A discovered PR must connect that attached repository and
-  the exact observed head ref, and its base repository must remain inside the
-  workspace GitHub scope and automation principal's access.
+- The task's attached repository remains the authorization and association anchor. Runtime Git configuration supplies only a credential-free observed head repository identity; it never rewrites the persisted repository's provider identity. A discovered PR must connect that attached repository and the exact observed head ref, and its base repository must remain inside the workspace GitHub scope and automation principal's access. Read-only discovery may use a known action identity even when its remote-head observation is unknown, but no mutation is authorized from unknown evidence.
 - A searching PR watch persists the observed head host, owner, and repository
   so restart and background polling keep the same exact lookup. Once Kandev
   finds an unambiguous PR, it atomically records the PR number and switches the
   watch target to the PR's base repository for numbered status checks while
   retaining the task repository association.
-- When no usable runtime remote identity is available, Kandev falls back to the
-  attached repository as the expected head. A same-named branch in another
-  fork is never enough to select a PR, and multiple eligible PRs remain
-  unlinked as ambiguous.
+- When no usable writable-action identity is available, Kandev falls back to the attached repository and literal local branch only for same-repository read-only discovery. A same-named branch in another fork is never enough to select a PR, multiple eligible PRs remain unlinked as ambiguous, and Push/Create PR remain unavailable until exact action-head evidence exists.
 - Saving PR automation options while any option is enabled immediately
   evaluates the task's current linked PRs instead of waiting for the next PR
   watch poll. Prompt edits do not reset unchanged checkpoints.
@@ -233,7 +214,7 @@ Decision: [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-0
 `github_pr_watches` additions for branch-only discovery
 
 - `head_host` string, default `""`. Normalized host of the current branch's
-  observed push/tracking remote while the watch is searching.
+  observed writable action head while the watch is searching.
 - `head_owner` string, default `""`. Exact observed GitHub head owner.
 - `head_repo` string, default `""`. Exact observed GitHub head repository.
 - `head_branch` string, default `""`. Exact remote branch ref name; the
@@ -243,43 +224,30 @@ Decision: [ADR-2026-08-09-runtime-branch-remote-identity](../../decisions/2026-0
   to authorize discovery. Once a PR is found, they atomically change to the
   PR's base owner and repository with `pr_number` so later numbered status
   checks address the canonical PR location.
+- Branch mutation clears all `head_*` fields atomically before a new head is
+  observed. Terminal reset of the same local branch retains its exact head.
+- Every searching path resolves the attached authorization anchor through
+  `repository_id`; mutable canonical base owner/repository fields are never
+  reused as the anchor after reset.
+- These GitHub-specific columns are the durable projection of a complete provider-neutral writable-source identity. They are written atomically and never populated by combining a tracking branch with the attached or canonical-base repository.
 
 `github_task_ci_options`
 
-- `task_id` string, primary key. References the Kandev task that owns the
-  task-level controls.
+- `task_id` string, primary key. References the Kandev task that owns the controls.
+- `auto_fix_enabled` boolean, default `false`.
+- `auto_merge_enabled` boolean, default `false`.
 - `auto_fix_prompt_override` string nullable. `NULL` or empty means use the default `ci-auto-fix` prompt.
+- `prompt_on_review_requested` boolean, default `false`.
+- `prompt_on_merged` boolean, default `false`.
+- `prompt_on_closed` boolean, default `false`.
 - `review_reviewer_login` string, default `""`. Bound to the current connected
-  GitHub login when review-requested prompting is enabled for any linked PR,
-  and rebound when that authenticated identity changes.
-- `auto_fix_enabled`, `auto_merge_enabled`, `prompt_on_review_requested`,
-  `prompt_on_merged`, `prompt_on_closed` columns remain on this table for
-  migration purposes only: they are read once by the additive
-  `pr_scope_migrated_at`-guarded fan-out into `github_task_pr_automation_options`
-  and are never read or written after that. Their current source of truth is
-  the per-PR table below.
-- `pr_scope_migrated_at` timestamp nullable. Guards the one-time fan-out so it
-  never re-runs and re-enables a switch a user has since turned off for one PR.
+  GitHub login when review-requested prompting is enabled and rebound when that
+  authenticated identity changes.
 - Legacy `review_prompt_override`, `merged_prompt_override`, and
   `closed_prompt_override` nullable columns remain only for additive migration
   compatibility. Startup clears persisted values and runtime ignores them.
 - `created_at` timestamp.
 - `updated_at` timestamp.
-
-`github_task_pr_automation_options`
-
-- Primary key: `task_id`, `repository_id`, `pr_number`. Source of truth for
-  the five automation switches, one row per linked PR.
-- `auto_fix_enabled` boolean, default `false`.
-- `auto_merge_enabled` boolean, default `false`.
-- `prompt_on_review_requested` boolean, default `false`.
-- `prompt_on_merged` boolean, default `false`.
-- `prompt_on_closed` boolean, default `false`.
-- `created_at` timestamp.
-- `updated_at` timestamp.
-- A PR with no row here (never configured) behaves as all-off; the response
-  and UI synthesize an all-off placeholder rather than requiring one row per
-  linked PR to exist up front.
 
 `github_task_ci_pr_state`
 
@@ -350,29 +318,9 @@ Response:
       "last_merge_attempt_at": null,
       "last_error": null
     }
-  ],
-  "pr_options": [
-    {
-      "task_id": "task-123",
-      "repository_id": "repo-123",
-      "pr_number": 42,
-      "auto_fix_enabled": false,
-      "auto_merge_enabled": false,
-      "prompt_on_review_requested": false,
-      "prompt_on_merged": false,
-      "prompt_on_closed": false,
-      "created_at": "2026-06-18T00:00:00Z",
-      "updated_at": "2026-06-18T00:00:00Z"
-    }
   ]
 }
 ```
-
-`pr_options` carries one entry per PR currently linked to the task — the
-per-PR source of truth. The five top-level booleans are an aggregate kept for
-MCP/API read compatibility: `true` only when every linked PR has that switch
-on and at least one PR is linked, so they answer "did my task-wide enable
-take" rather than any one PR's state.
 
 ```http
 PATCH /tasks/:taskId/ci-options
@@ -382,8 +330,6 @@ Request fields are partial:
 
 ```json
 {
-  "repository_id": "repo-123",
-  "pr_number": 42,
   "auto_fix_enabled": true,
   "auto_merge_enabled": false,
   "prompt_on_review_requested": true,
@@ -393,29 +339,17 @@ Request fields are partial:
 }
 ```
 
-`repository_id` and `pr_number` are optional but must both be present or both
-absent. When present, they target the five automation switches at that one
-linked PR only; naming a `(repository_id, pr_number)` pair that is not
-currently linked to the task returns `400` and writes nothing. When absent,
-the five switches fan out to every PR currently linked to the task (unchanged
-behavior for callers written before per-PR scoping). `auto_fix_prompt_override`
-and the resolved reviewer login (set implicitly when
-`prompt_on_review_requested` changes) always apply task-wide regardless of PR
-identity. `auto_fix_prompt_override: null` or an empty string clears the task
-override. The response shape matches `GET`. Lifecycle override fields are
-rejected.
+`auto_fix_prompt_override: null` or an empty string clears the task override.
+The response shape matches `GET`. Lifecycle override fields are rejected.
 
 Task-mode MCP exposes current-task-only tools:
 
 - `get_task_pr_automation_kandev`
 - `update_task_pr_automation_kandev`
 
-The MCP connection supplies the task ID. Update is partial and accepts the
-same optional `repository_id`/`pr_number` PR-identity pair as the HTTP PATCH,
-auto-fix, auto-merge, the three lifecycle booleans, and the auto-fix prompt
-override; it cannot target another task. Omitting PR identity fans the
-switches out to every linked PR, preserving pre-per-PR-scoping agent
-behavior. Lifecycle override fields are rejected.
+The MCP connection supplies the task ID. Update is partial and accepts auto-fix,
+auto-merge, the three lifecycle booleans, and the auto-fix prompt override; it
+cannot target another task. Lifecycle override fields are rejected.
 
 Optional websocket notification:
 
@@ -426,9 +360,9 @@ Optional websocket notification:
 
 ## State machine
 
-Per-PR automation switches (state applies independently to each linked PR):
+Task CI automation options:
 
-- `disabled`: all five automation switches are false for this PR. PR watch events update UI only.
+- `disabled`: all five automation switches are false. PR watch events update UI only.
 - `auto_fix_enabled`: Kandev evaluates actionable PR feedback immediately when enabled, when CI automation options are saved while it remains enabled, and on later PR watch events.
 - `auto_merge_enabled`: Kandev evaluates PR merge readiness immediately when enabled, when CI automation options are saved while it remains enabled, and on later PR watch events.
 - `both_enabled`: Kandev evaluates both paths. Auto-fix does not merge; auto-merge merges only after readiness conditions are satisfied.
@@ -527,8 +461,10 @@ Auto-merge cycle for one task/PR:
 | Dependency / invariant                                                 | Behavior                                                                                                                                                                                                                                                        |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GitHub auth is missing or invalid                                      | Controls remain visible but saving/enabling or automation execution surfaces an error; no auto-fix prompt, lifecycle prompt, or merge is attempted.                                                                                                             |
-| Current branch remote cannot be normalized                             | Keep the attached repository as the expected head, never persist or log a credential-bearing URL, and leave cross-fork candidates unlinked unless the attached exact ref identifies one unambiguous PR.                                                        |
+| Writable action identity cannot be normalized                          | Use the attached repository only for same-repository read-only discovery, never persist or log a credential-bearing URL, leave cross-fork candidates unlinked, and keep source-specific mutations unavailable.                                                  |
+| Writable action ref is authoritatively absent                          | Keep the watch searching without linking an existing PR for that source ref; first Push remains governed by action-head identity, local contribution evidence, and generation-bound mutation authorization.                                                   |
 | Exact head ref has multiple eligible open PRs                          | Leave the task unlinked and retry on a later poll; never choose by result order, remote name, or branch name alone.                                                                                                                                             |
+| Multiple linked PRs have no unique exact source match for the worktree | Leave the worktree-specific selected PR unresolved while continuing task-level automation for each linked PR independently.                                                                                                                                   |
 | Discovered PR base is outside workspace GitHub scope or access         | Reject the candidate and keep the watch searching; a runtime remote cannot expand workspace automation authority.                                                                                                                                              |
 | Workspace GitHub login changes                                         | Kandev atomically rebinds `review_reviewer_login`, resets review-request baselines, and emits no notification for the identity change itself. If identity lookup fails, it preserves the prior login and checkpoints and retries later.                            |
 | PR is closed or merged                                                 | Auto-fix and auto-merge stop. The matching enabled terminal prompt remains eligible exactly once per observed terminal entry.                                                                                                                                   |
@@ -607,10 +543,31 @@ Auto-merge cycle for one task/PR:
   **WHEN** branch-only PR discovery runs with an exact configured head remote,
   **THEN** Kandev ignores the sibling fork's pull request and links only an
   unambiguous pull request from the observed head repository.
-- **GIVEN** the current branch has no usable push or tracking remote identity,
+- **GIVEN** the current branch has no usable writable action identity,
   **WHEN** branch-only PR discovery runs, **THEN** Kandev accepts only an
   unambiguous pull request whose head is the attached repository and does not
   guess among same-named branches in other forks.
+- **GIVEN** the current branch has a tracking upstream but Git resolves no writable action head, **WHEN** branch-only PR discovery and remote controls evaluate it, **THEN** Kandev does not reinterpret the tracking ref as the PR source or Push target; only attached-repository read-only discovery remains eligible.
+- **GIVEN** two searching watches share an attached repository and local branch
+  but have different exact heads, **WHEN** batched discovery runs, **THEN** each
+  watch consumes only the result keyed by its own complete head identity.
+- **GIVEN** more than two sibling forks have open pull requests with the same
+  branch name, **WHEN** the exact eligible head appears after the first result
+  page, **THEN** discovery continues until it can link that one candidate or
+  prove ambiguity.
+- **GIVEN** GitHub changes only the letter casing of an owner or repository,
+  **WHEN** discovery compares identities, **THEN** the repository still matches
+  while a branch-name case difference remains distinct.
+- **GIVEN** push detection observes a writable head and an intervening
+  searching watch appears before retry completion, **WHEN** the PR is still not
+  available, **THEN** Kandev persists the observed head on that watch for later
+  polling and restart.
+- **GIVEN** a searching watch changes local branches, **WHEN** the mutation is
+  committed, **THEN** the prior branch's head identity is cleared atomically;
+  resetting a terminal PR on the same branch retains its exact head.
+- **GIVEN** a watch previously resolved to a PR base different from its
+  attached repository, **WHEN** it returns to searching, **THEN** every direct
+  and batched lookup authorizes through the immutable `repository_id` anchor.
 - **GIVEN** a user is viewing the CI popover automation controls, **WHEN** they activate the info icon, **THEN** they see help text explaining that Kandev uses the existing 1-minute PR watch checks, fetches full feedback only for candidate PRs, snapshots each auto-fix round, and merges only when readiness gates pass.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-fix CI & address comments`, **THEN** the setting persists and remains enabled after page reload.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-merge when ready`, **THEN** the setting persists and remains enabled after page reload.
@@ -647,31 +604,15 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-merge is enabled and the PR has passing checks, required reviews, no unresolved threads, and clean mergeability, **WHEN** the PR watch poll observes the ready state, **THEN** Kandev merges the PR with the existing backend merge-method selection.
 - **GIVEN** auto-merge is enabled but the PR is a draft or has requested changes, pending required review, failing checks, unresolved threads, or dirty mergeability, **WHEN** the PR watch poll observes the state, **THEN** Kandev does not merge.
 - **GIVEN** auto-merge attempted a ready-state merge and GitHub rejected it, **WHEN** the same ready state is observed again, **THEN** Kandev does not retry until the readiness signature changes.
-- **GIVEN** a task has two open linked PRs, **WHEN** the user enables an
-  automation control from the first PR's tab, **THEN** only that PR becomes
-  eligible for automation; the second PR's tab shows the control unchanged,
-  and each PR records its own last-fix and last-merge state.
-- **GIVEN** a task has two linked PRs in different repositories with the same
-  PR number, **WHEN** the user enables a switch for one, **THEN** the other's
-  switch is unaffected, because switch identity is
-  `(task_id, repository_id, pr_number)`.
-- **GIVEN** a task has two linked PRs, **WHEN** an agent calls
-  `update_task_pr_automation_kandev` naming one PR's `repository_id` and
-  `pr_number`, **THEN** only that PR's switches change.
-- **GIVEN** a task has two linked PRs, **WHEN** an agent calls
-  `update_task_pr_automation_kandev` without `repository_id`/`pr_number`,
-  **THEN** the requested switch changes on every currently linked PR.
-- **GIVEN** a task has two linked PRs, **WHEN** the user disables auto-fix on
-  one PR while it stays enabled on the other, **THEN** re-enabling it on the
-  first PR resets only that PR's `auto_fix_round_count`, exhaustion, and fix
-  checkpoint; the second PR's checkpoint is unchanged.
-- **GIVEN** a task's automation was configured before per-PR scoping shipped,
-  **WHEN** the backend boots for the first time after upgrade, **THEN** every
-  PR linked to that task at boot time inherits the legacy task-level values,
-  and a PR linked to the task afterward starts with all five switches off.
-- **GIVEN** a task's automation was already migrated to per-PR scoping and a
-  user has since turned a switch off for one PR, **WHEN** the backend boots
-  again, **THEN** that PR's switch remains off — the migration never replays.
+- **GIVEN** a task has two open linked PRs, **WHEN** the user enables an automation control from the first PR's tab, **THEN** only that PR becomes eligible for automation, the second PR's tab remains unchanged, and each PR records its own last-fix and last-merge state.
+- **GIVEN** a task has two linked PRs in different repositories with the same PR number, **WHEN** the user enables a switch for one, **THEN** the other PR's switch is unaffected because the switch identity includes `(task_id, repository_id, pr_number)`.
+- **GIVEN** a task has two linked PRs, **WHEN** an agent calls `update_task_pr_automation_kandev` naming one PR's `repository_id` and `pr_number`, **THEN** only that PR's switches change.
+- **GIVEN** a task has two linked PRs, **WHEN** an agent calls `update_task_pr_automation_kandev` without `repository_id` or `pr_number`, **THEN** the requested switch changes on every currently linked PR.
+- **GIVEN** a task has two linked PRs, **WHEN** the user disables auto-fix on one PR while it stays enabled on the other, **THEN** re-enabling it on the first PR resets only that PR's round count, exhaustion, and fix checkpoint.
+- **GIVEN** automation was configured before per-PR scoping shipped, **WHEN** the backend boots for the first time after upgrade, **THEN** every PR linked at boot inherits the legacy task-level values, while a PR linked afterward starts with all five switches off.
+- **GIVEN** automation was migrated to per-PR scoping and a user turned a switch off for one PR, **WHEN** the backend boots again, **THEN** that PR's switch remains off and migration is not replayed.
+- **GIVEN** a task has two linked PRs but only one exact source repository/ref matches the current worktree's writable action head, **WHEN** the PR CI surface selects a worktree-specific PR, **THEN** it selects that PR while automation continues to evaluate both.
+- **GIVEN** a task has multiple linked PRs and none or more than one exactly matches the current worktree's writable action head, **WHEN** the PR CI surface needs one worktree-specific PR, **THEN** selection remains unresolved instead of choosing the first association or a same-named branch.
 - **GIVEN** review-request prompting is enabled while the connected GitHub user
   is already requested, **WHEN** Kandev first evaluates the PR, **THEN** it
   records a quiet baseline and does not prompt.
@@ -752,8 +693,6 @@ Auto-merge cycle for one task/PR:
 - Selecting a destination workflow step for a lifecycle event. Lifecycle
   notifications prompt the task in its current workflow step; event-to-step
   routing is a follow-up feature.
-- Per-PR auto-fix **prompt overrides**. `auto_fix_prompt_override` remains
-  task-level; only the five boolean switches are per-PR.
 - Per-user automation preferences.
 - Merge-method selection UI. Auto-merge uses the existing backend default merge-method selection.
 - Team-level review-request matching. The first version tracks the
@@ -761,7 +700,7 @@ Auto-merge cycle for one task/PR:
 - Creating a replacement task session when the existing task has no promptable
   session.
 - Configuring lifecycle prompt text. The lifecycle templates are intentionally
-  immutable and server-owned; only the three per-PR booleans are exposed.
+  immutable and server-owned; only the three task-level booleans are exposed.
 - Streaming CI logs into the chat or popover.
 - Editing GitHub branch protection, review rules, or workflow files directly from the automation controls.
 - Redesigning the branch picker to group, label, or filter branches by remote.

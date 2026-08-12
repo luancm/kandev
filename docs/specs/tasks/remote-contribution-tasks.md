@@ -34,8 +34,9 @@ Kandev must preserve both versions and ask for user intent before one version re
 - The task remains attached to the target repository. A versioned, non-secret contribution binding on
   that task-repository attachment identifies the existing change and its source repository and branch.
 - The prepared checkout starts at the provider-reported head SHA on the contributor's head branch.
-  `origin` continues to mean the target repository. A dedicated contribution remote points at the
-  source repository. Normal pushes target the source branch without force.
+  The target, writable action head, tracking upstream, and comparison target are independent roles;
+  executor-local remote names are implementation details. Normal pushes target the writable action
+  head without force.
 - A same-repository change uses the target remote for both read and write. A fork change is accepted
   only when the provider reports that maintainers may update the source branch.
 - GitHub pull requests and GitLab merge requests are associated with the new task before agent launch,
@@ -45,11 +46,18 @@ Kandev must preserve both versions and ask for user intent before one version re
   description, trusted system context, or initial prompt. The agent receives only structured,
   server-authored contribution identity and branch guidance.
 - Ordinary repository URLs retain their current behavior, including default branch resolution,
-  normal `origin` pushes, and new-PR creation.
+  normal pushes and new-PR creation, but operation routing is derived from resolved remote roles rather
+  than the literal names `origin` or `upstream`.
 - Git status keeps two separate divergence concepts: `ahead`/`behind` compare the checkout with the
   target base branch, while `remote_ahead`/`remote_behind` compare it with its configured upstream.
   Push and pull affordances use the upstream-relative values; review scope and base-branch rebase
   affordances continue to use the base-relative values.
+- Git status keeps action-head observations for Push, tracking-upstream observations for Pull, and
+  comparison-target evidence for review scope, Rebase, and Merge separate. Missing observations are
+  `unknown`, not zero; an explicit absent destination is distinct from a failed observation.
+- Every remote mutation carries the expected role generation, exact role identity, observation state,
+  and applicable remote head. Agentctl re-resolves the roles under the serialized Git-operation lock;
+  a mismatch fails before Git runs and requires fresh status.
 - For an associated contribution, Kandev compares the local HEAD and upstream snapshot with the
   provider's current commit history using commit identity and ancestry evidence. It never infers
   equivalence from commit message, author, timestamp, file statistics, or patch similarity.
@@ -94,7 +102,9 @@ Decisions:
 [ADR-2026-08-10-remote-contribution-head-drift](../../decisions/2026-08-10-remote-contribution-head-drift.md),
 [ADR-2026-08-12-local-first-contribution-replacement](../../decisions/2026-08-12-local-first-contribution-replacement.md),
 and
-[ADR-2026-08-13-provider-history-changes-enrichment](../../decisions/2026-08-13-provider-history-changes-enrichment.md).
+[ADR-2026-08-13-provider-history-changes-enrichment](../../decisions/2026-08-13-provider-history-changes-enrichment.md),
+and
+[ADR-2026-08-12-role-based-git-remotes](../../decisions/2026-08-12-role-based-git-remotes.md).
 
 ## Data model
 
@@ -130,6 +140,13 @@ title/body, or other user-authored remote text.
 The JSON field is versioned so later providers or collaboration attributes can be added without a
 database migration. Unknown versions fail closed during materialization and credential authorization.
 
+At runtime Kandev projects this binding into the provider-neutral `ProviderChangeIdentity` with exact
+source and base `RemoteRefIdentity` values. The target attachment anchors authorization; the source
+identity is the writable action head; an explicit tracking upstream is the only Pull target; and the
+selected base identity is the comparison target. An adapter that cannot construct both sides exactly
+fails closed. The binding never stores executor-local remote names, access tokens, lease IDs, or
+credential-helper state.
+
 ## API surface
 
 The `create_task_kandev` input schema keeps the same property set. The existing field is documented as:
@@ -151,6 +168,10 @@ The user-facing WebSocket API adds two session-scoped actions:
 Both actions return the existing Git operation result. `worktree.use_contribution` also returns the
 recovery branch name after a successful reset. Neither action appears in the agent MCP catalog.
 
+Other Git action requests carry the same generation-bound role identity and observation fields through
+the runtime client and agentctl API. The public task-creation input does not expose remote names,
+expected generations, source/base overrides, or provider credentials.
+
 ## Permissions
 
 - Existing MCP authentication, workspace reachability, workflow, profile, and executor checks still
@@ -164,6 +185,12 @@ recovery branch name after a successful reset. Neither action appears in the age
   non-mutating push preflight with the executor's effective Git credentials before starting the agent.
 - GitLab uses the configured workspace connection for provider validation and the existing executor
   credential policy for Git transport. Self-hosted MR URLs must match the configured origin exactly.
+- Before Push, agentctl must match the request's expected generation, exact writable action identity and
+  ref, observation state, and applicable remote head to a fresh role resolution. The backend must
+  independently match that source to the still-valid contribution binding before granting managed
+  credentials or dispatching provider automation.
+- Runtime remote configuration cannot broaden the attached target, contribution source, collaboration
+  permission, or provider host. A valid Git URL alone is not mutation authority.
 - A user with access to the task can invoke the replacement actions from the task UI. The gateway and
   handler apply the existing session authorization before they access the execution.
 - Agents, MCP callers, and automatic Git operations cannot invoke the managed replacement actions.
@@ -179,6 +206,8 @@ recovery branch name after a successful reset. Neither action appears in the age
 | Fork does not allow maintainer collaboration                                                 | Task creation fails before persistence with provider-specific remediation guidance.                                                      |
 | Task persists but the existing-change association fails                                      | Kandev compensates the newly created task and returns failure; it does not launch an agent.                                              |
 | Checkout SHA no longer matches the source branch during preparation                          | Launch fails without checking out or pushing a different revision; retry resolves fresh provider state.                                  |
+| Writable action identity is unknown or no longer equals the contribution binding                | Push and source-specific provider actions are unavailable; Kandev does not fall back to tracking, comparison, or a literal remote name. |
+| Expected role generation, identity, state, or remote head changes before Push                  | The mutation fails as stale before Git runs; a fresh status is required.                                                               |
 | Provider branch advances after launch and still contains local HEAD                          | Kandev identifies a provider-ahead fast-forward, shows the current provider history, and offers Pull instead of Push.                    |
 | Provider branch is rewritten after launch and no longer contains local HEAD                  | Kandev preserves the task version, shows a compact remote-change status, and offers user-controlled version choices.                     |
 | Provider head changes after the replacement confirmation opens                               | The exact lease fails. Kandev does not change the remote branch and refreshes the shown provider state.                                  |
@@ -193,10 +222,11 @@ recovery branch name after a successful reset. Neither action appears in the age
 ## Persistence guarantees
 
 The contribution binding and GitHub PR or GitLab MR association survive backend restarts. New and reset
-environments reconstruct the target checkout, contribution remote, upstream branch, and push routing
-from the binding. Credential leases and preflight results are ephemeral and are recomputed on each
-launch or resume. A moved or deleted source branch causes a later launch to fail visibly rather than
-silently falling back to the target repository.
+environments reconstruct the target checkout, comparison target, writable action head, optional
+tracking upstream, and push routing from the binding plus current Git configuration. Credential leases,
+role generations, remote observations, and preflight results are ephemeral and are recomputed on each
+launch or resume. A moved or deleted source branch causes a later launch or mutation to fail visibly
+rather than silently falling back to the target repository.
 
 The original contribution `head_sha` remains creation-time provenance. It is not changed after a
 provider rewrite. Live provider commits and Git status remain observed state. Drift detection does not
@@ -218,8 +248,8 @@ existing pull request, and pushes future commits to that head branch
 
 GIVEN an open fork pull request whose author enabled maintainer edits
 WHEN a maintainer creates a task from the pull request URL
-THEN Kandev keeps `origin` on the target repository, configures the fork as the contribution remote,
-authorizes only that validated source repository, and pushes normally to the contributor's head branch
+THEN Kandev keeps the target as the comparison role, configures the fork as the writable action head,
+authorizes only that validated source repository, and pushes normally to the contributor's action ref
 
 ### Reject a non-editable GitHub fork pull request
 
@@ -246,7 +276,7 @@ THEN preparation fails rather than checking out the new head or pushing from the
 GIVEN a running contribution task whose provider branch advances without rewriting local HEAD
 WHEN Kandev loads the current provider commits
 THEN the Changes panel treats the provider as ahead, does not mark the existing commits as local work
-to push, and offers Pull rather than Push
+to push, and offers Pull only when an explicit tracking upstream resolves to that same source ref
 
 ### Keep a rewritten contribution local-first
 
@@ -325,7 +355,8 @@ AND it does not offer Pull when the checkout has no configured upstream
 
 GIVEN an ordinary GitHub, GitLab, or provider-neutral repository URL
 WHEN it is passed as `repository_url`
-THEN Kandev follows the existing repository task path without a contribution binding or source scope
+THEN Kandev follows the existing repository task path without a contribution binding or source scope,
+and resolves remote actions from configured roles rather than a literal remote name
 
 ### Keep the MCP catalog compact
 

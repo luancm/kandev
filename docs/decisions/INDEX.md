@@ -79,6 +79,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-21-workspace-selectable-github-app-registrations | [Select GitHub App Registrations Per Workspace](2026-07-21-workspace-selectable-github-app-registrations.md) | accepted | backend, frontend, security | 2026-07-21 |
 | 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-08-09-runtime-branch-remote-identity | [Separate Runtime Branch Remote Identity From Task Repository Identity](2026-08-09-runtime-branch-remote-identity.md) | accepted | backend, protocol, GitHub, security | 2026-08-09 |
+| 2026-08-12-role-based-git-remotes | [Resolve Git Remotes By Role And Repository Identity](2026-08-12-role-based-git-remotes.md) | accepted | backend, frontend, protocol, GitHub, GitLab, Azure DevOps | 2026-08-12 |
 | 2026-07-21-portable-status-bar-order | [Portable Status Bar Order](2026-07-21-portable-status-bar-order.md) | accepted | backend, frontend, protocol | 2026-07-21 |
 | 2026-07-21-work-item-reference-search | [Backend-normalized work-item references](2026-07-21-work-item-reference-search.md) | accepted | backend, frontend, protocol | 2026-07-21 |
 | 2026-07-22-runtime-mutable-task-workspace-sources | [Runtime-Mutable Task Workspace Sources](2026-07-22-runtime-mutable-task-workspace-sources.md) | accepted (amended by 2026-07-27) | backend, frontend, protocol | 2026-07-22 |
