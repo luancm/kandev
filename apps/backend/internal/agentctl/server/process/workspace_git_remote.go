@@ -181,19 +181,6 @@ func (wt *WorkspaceTracker) gitConfiguredRefs(ctx context.Context, branch string
 	return push, upstream
 }
 
-// gitBranchRemote is kept for package-local compatibility with status code
-// and tests. Its result follows Git's push target first, then upstream.
-func (wt *WorkspaceTracker) gitBranchRemote(ctx context.Context, branch string) (string, string) {
-	push, upstream := wt.gitConfiguredRefs(ctx, branch)
-	if push.RemoteName != "" && push.Branch != "" {
-		return push.RemoteName, push.Branch
-	}
-	if upstream.RemoteName != "" && upstream.Branch != "" {
-		return upstream.RemoteName, upstream.Branch
-	}
-	return "", ""
-}
-
 func (wt *WorkspaceTracker) resolveConfiguredRole(ctx context.Context, role gitremote.RemoteRole, ref configuredGitRef, usePushURL bool) GitRemoteRole {
 	result := GitRemoteRole{Role: role, State: gitremote.ResolutionUnresolved, RemoteName: ref.RemoteName}
 	if ref.RemoteName == "" || ref.Branch == "" {
@@ -224,7 +211,7 @@ func (wt *WorkspaceTracker) resolveConfiguredRole(ctx context.Context, role gitr
 
 func (wt *WorkspaceTracker) resolveComparisonRole(ctx context.Context, target *gitremote.RemoteRefIdentity) GitRemoteRole {
 	result := GitRemoteRole{Role: gitremote.ComparisonTargetRole, State: gitremote.ResolutionUnresolved}
-	if target == nil || target.Ref == "" || target.Repository.Host == "" || (target.Repository.RepositoryPath == "" && target.Repository.ProviderRepositoryID == "") {
+	if !validComparisonTarget(target) {
 		return result
 	}
 
@@ -232,43 +219,59 @@ func (wt *WorkspaceTracker) resolveComparisonRole(ctx context.Context, target *g
 	if err != nil {
 		return result
 	}
+	match, ambiguous := wt.findComparisonRemote(ctx, strings.Fields(string(output)), *target)
+	if ambiguous {
+		return GitRemoteRole{Role: gitremote.ComparisonTargetRole, State: gitremote.ResolutionAmbiguous}
+	}
+	if match.RemoteName == "" {
+		return result
+	}
+	resolved := gitremote.RemoteRefIdentity{Repository: target.Repository, Ref: target.Ref}
+	result.RemoteName = match.RemoteName
+	result.State = gitremote.ResolutionResolved
+	result.Identity = &resolved
+	result.Observation = gitremote.RemoteRefObservation{Identity: &resolved, State: gitremote.ObservationUnknown}
+	return result
+}
+
+func validComparisonTarget(target *gitremote.RemoteRefIdentity) bool {
+	return target != nil && target.Ref != "" && target.Repository.Host != "" &&
+		(target.Repository.RepositoryPath != "" || target.Repository.ProviderRepositoryID != "")
+}
+
+func (wt *WorkspaceTracker) findComparisonRemote(ctx context.Context, names []string, target gitremote.RemoteRefIdentity) (configuredGitRef, bool) {
 	var match configuredGitRef
 	matchCount := 0
-	for _, name := range strings.Fields(string(output)) {
-		urls := wt.gitRemoteConfigValues(ctx, name, "url")
-		if len(urls) == 0 {
-			urls = wt.gitRemoteConfigValues(ctx, name, "pushurl")
+	for _, name := range names {
+		candidate, ambiguous := wt.comparisonRemoteCandidate(ctx, name, target)
+		if ambiguous {
+			return configuredGitRef{}, true
 		}
-		identity, state := parseRemoteRepositoryIdentities(urls)
-		if state == gitremote.ResolutionAmbiguous {
-			// A conflicting URL on a remote that could be the target cannot be
-			// safely ignored. Preserve ambiguity until a fresh configuration is
-			// observed.
-			if remoteIdentityCouldMatch(urls, *target) {
-				return GitRemoteRole{Role: gitremote.ComparisonTargetRole, State: gitremote.ResolutionAmbiguous}
-			}
-			continue
-		}
-		if state != gitremote.ResolutionResolved || !identityMatches(*identity, target.Repository) {
+		if !candidate {
 			continue
 		}
 		matchCount++
 		match = configuredGitRef{RemoteName: name, Branch: target.Ref}
 	}
-
-	switch matchCount {
-	case 0:
-		return result
-	case 1:
-		resolved := gitremote.RemoteRefIdentity{Repository: target.Repository, Ref: target.Ref}
-		result.RemoteName = match.RemoteName
-		result.State = gitremote.ResolutionResolved
-		result.Identity = &resolved
-		result.Observation = gitremote.RemoteRefObservation{Identity: &resolved, State: gitremote.ObservationUnknown}
-		return result
-	default:
-		return GitRemoteRole{Role: gitremote.ComparisonTargetRole, State: gitremote.ResolutionAmbiguous}
+	if matchCount == 1 {
+		return match, false
 	}
+	return configuredGitRef{}, matchCount > 1
+}
+
+func (wt *WorkspaceTracker) comparisonRemoteCandidate(ctx context.Context, name string, target gitremote.RemoteRefIdentity) (bool, bool) {
+	urls := wt.gitRemoteConfigValues(ctx, name, "url")
+	if len(urls) == 0 {
+		urls = wt.gitRemoteConfigValues(ctx, name, "pushurl")
+	}
+	identity, state := parseRemoteRepositoryIdentities(urls)
+	if state == gitremote.ResolutionAmbiguous {
+		// A conflicting URL on a remote that could be the target cannot be
+		// safely ignored. Preserve ambiguity until a fresh configuration is
+		// observed.
+		return false, remoteIdentityCouldMatch(urls, target)
+	}
+	return state == gitremote.ResolutionResolved && identityMatches(*identity, target.Repository), false
 }
 
 func identityMatches(left, right gitremote.RemoteRepositoryIdentity) bool {
@@ -436,18 +439,6 @@ func projectGitHeadRemote(identity *gitremote.RemoteRefIdentity) *types.GitHeadR
 		}
 	}
 	return projected
-}
-
-// parseGitHeadRemote is the compatibility adapter for callers that still
-// receive a normalized GitHub status projection. All URL parsing now goes
-// through the provider-neutral identity resolver above.
-func parseGitHeadRemote(remoteURL, branch string) (*types.GitHeadRemote, bool) {
-	identity, ok := parseRemoteRepositoryIdentity(remoteURL)
-	if !ok || identity.Provider != gitremote.ProviderGitHub {
-		return nil, false
-	}
-	resolved := gitremote.RemoteRefIdentity{Repository: identity, Ref: branch}
-	return projectGitHeadRemote(&resolved), true
 }
 
 func (wt *WorkspaceTracker) gitRemoteConfigValues(ctx context.Context, remoteName, key string) []string {

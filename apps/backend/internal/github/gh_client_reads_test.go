@@ -157,24 +157,25 @@ func TestGHClient_GetPR_UnparseableOutput(t *testing.T) {
 
 func TestGHClient_FindPRByBranch(t *testing.T) {
 	calls := newFakeGH(t, ghResponse{
-		Prefix: "pr list",
-		Stdout: `[{"number":12,"title":"fork PR","url":"https://github.com/acme/widget/pull/12",
+		Prefix: "api graphql",
+		Stdout: `{"data":{"b0":{"pullRequests":{"nodes":[{"number":12,"title":"fork PR","url":"https://github.com/acme/widget/pull/12",
 			"state":"OPEN","headRefName":"feature","headRefOid":"abc123","baseRefName":"main",
 			"author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE",
 			"mergeStateStatus":"CLEAN","additions":3,"deletions":1,
-			"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z"}]`,
+			"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-02T00:00:00Z"}]}}}}`,
 	})
 
 	pr, err := NewGHClient().FindPRByBranch(context.Background(), "acme", "widget", "feature")
 	if err != nil {
 		t.Fatalf("FindPRByBranch: %v", err)
 	}
-	assertGHArgv(t, calls(t), 0, []string{
-		"pr", "list", "--repo", "acme/widget", "--head", "feature", "--state", "open",
-		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft," +
-			"mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
-		"--limit", "1",
-	})
+	argv := calls(t)
+	if len(argv) != 1 || len(argv[0]) < 4 || argv[0][0] != "api" || argv[0][1] != "graphql" || argv[0][2] != "-f" {
+		t.Fatalf("expected one gh GraphQL invocation, got %q", argv)
+	}
+	if !strings.Contains(argv[0][3], `headRefName: "feature"`) || !strings.Contains(argv[0][3], `repository(owner: "acme", name: "widget")`) {
+		t.Fatalf("GraphQL branch query = %q", argv[0][3])
+	}
 	if pr == nil {
 		t.Fatal("pr = nil, want the single listed PR")
 	}
@@ -250,7 +251,7 @@ func TestGHClient_FindPRByHead_ScansAllMatchingBranches(t *testing.T) {
 }
 
 func TestGHClient_FindPRByBranch_NoMatchReturnsNilWithoutError(t *testing.T) {
-	newFakeGH(t, ghResponse{Prefix: "pr list", Stdout: `[]`})
+	newFakeGH(t, ghResponse{Prefix: "api graphql", Stdout: `{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`})
 	pr, err := NewGHClient().FindPRByBranch(context.Background(), "acme", "widget", "feature")
 	if err != nil {
 		t.Fatalf("FindPRByBranch: %v", err)
@@ -262,16 +263,16 @@ func TestGHClient_FindPRByBranch_NoMatchReturnsNilWithoutError(t *testing.T) {
 
 func TestGHClient_FindPRByBranch_Errors(t *testing.T) {
 	t.Run("command failure names the branch", func(t *testing.T) {
-		newFakeGH(t, ghResponse{Prefix: "pr list", Stderr: "boom", Exit: 1})
+		newFakeGH(t, ghResponse{Prefix: "api graphql", Stderr: "boom", Exit: 1})
 		_, err := NewGHClient().FindPRByBranch(context.Background(), "acme", "widget", "feature")
 		if err == nil || !strings.Contains(err.Error(), `find PR by branch "feature"`) {
 			t.Fatalf("err = %v, want the branch named in the wrap", err)
 		}
 	})
 	t.Run("unparseable output", func(t *testing.T) {
-		newFakeGH(t, ghResponse{Prefix: "pr list", Stdout: "{"})
+		newFakeGH(t, ghResponse{Prefix: "api graphql", Stdout: "{"})
 		_, err := NewGHClient().FindPRByBranch(context.Background(), "acme", "widget", "feature")
-		if err == nil || !strings.Contains(err.Error(), "parse PR list") {
+		if err == nil || !strings.Contains(err.Error(), "decode graphql response") {
 			t.Fatalf("err = %v, want a parse failure", err)
 		}
 	})

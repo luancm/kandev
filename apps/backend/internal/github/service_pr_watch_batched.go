@@ -172,9 +172,16 @@ func batchedFetchSingleflightKey(numbered, searching []*PRWatch) string {
 			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.PRNumber))
 	}
 	for _, w := range searching {
-		parts = append(parts, fmt.Sprintf("b:%s/%s@%s|%s/%s/%s",
-			strings.ToLower(w.Owner), strings.ToLower(w.Repo), w.Branch,
-			strings.ToLower(w.HeadHost), strings.ToLower(w.HeadOwner), strings.ToLower(w.HeadRepo)+"/"+w.HeadBranch))
+		attachedKey := strings.ToLower(w.Owner) + "/" + strings.ToLower(w.Repo)
+		if strings.TrimSpace(w.RepositoryID) != "" {
+			attachedKey = "repository:" + w.RepositoryID
+		}
+		headKey := "headless"
+		if w.HeadOwner != "" && w.HeadRepo != "" && w.HeadBranch != "" {
+			headKey = fmt.Sprintf("exact:%s/%s/%s/%s",
+				strings.ToLower(w.HeadHost), strings.ToLower(w.HeadOwner), strings.ToLower(w.HeadRepo), w.HeadBranch)
+		}
+		parts = append(parts, fmt.Sprintf("b:%s@%s|%s", attachedKey, w.Branch, headKey))
 	}
 	sort.Strings(parts)
 	return "batched-fetch:" + strings.Join(parts, "|")
@@ -219,10 +226,14 @@ func (s *Service) fetchBatchedBranchStatuses(
 ) error {
 	refs := make([]graphQLBranchRef, 0, len(searching))
 	for _, w := range searching {
-		if s.isRepoCachedAsMissingForScope(cacheScope, w.Owner, w.Repo) {
+		owner, repo, err := s.resolveAttachedRepositoryForWatch(ctx, w)
+		if err != nil {
+			return fmt.Errorf("resolve searching watch repository: %w", err)
+		}
+		if s.isRepoCachedAsMissingForScope(cacheScope, owner, repo) {
 			continue
 		}
-		ref := graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch}
+		ref := graphQLBranchRef{Owner: owner, Repo: repo, Branch: w.Branch}
 		if w.HeadOwner != "" && w.HeadRepo != "" && w.HeadBranch != "" {
 			ref.Head = &PRHeadRef{Host: w.HeadHost, Owner: w.HeadOwner, Repo: w.HeadRepo, Branch: w.HeadBranch}
 		}
@@ -344,7 +355,7 @@ func (s *Service) applyBatchedNumberedWatch(
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, Changed: changed, SyncFailed: true}
 		}
 		if !hold {
-			if resetErr := s.store.UpdatePRWatchPRNumber(ctx, w.ID, 0); resetErr != nil {
+			if _, resetErr := s.store.ResetPRWatchPRNumberIfCurrent(ctx, w.ID, w.PRNumber); resetErr != nil {
 				s.logger.Error("failed to reset completed PR watch", zap.String("id", w.ID), zap.Error(resetErr))
 			}
 		}
@@ -404,10 +415,19 @@ func (s *Service) applyBatchedSearchingWatch(
 	// paths, so hoist the single call above the branch to make that
 	// invariant obvious.
 	_ = s.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
-	if s.isRepoCachedAsMissingForScope(cacheScope, w.Owner, w.Repo) {
+	owner, repo, err := s.resolveAttachedRepositoryForWatch(ctx, w)
+	if err != nil {
+		s.logger.Debug("failed to resolve searching watch repository", zap.String("watch_id", w.ID), zap.Error(err))
 		return PRWatchSyncResult{Watch: w, SyncFailed: true}
 	}
-	branchKey := graphqlBranchKey(w.Owner, w.Repo, w.Branch)
+	if s.isRepoCachedAsMissingForScope(cacheScope, owner, repo) {
+		return PRWatchSyncResult{Watch: w, SyncFailed: true}
+	}
+	var exactHead *PRHeadRef
+	if w.HeadOwner != "" && w.HeadRepo != "" && w.HeadBranch != "" {
+		exactHead = &PRHeadRef{Host: w.HeadHost, Owner: w.HeadOwner, Repo: w.HeadRepo, Branch: w.HeadBranch}
+	}
+	branchKey := graphqlBranchKey(owner, repo, w.Branch, exactHead)
 	status, ok := statuses.byKey[branchKey]
 	if !ok || status == nil || status.PR == nil {
 		pr, err := s.lookupSearchingWatchPR(ctx, client, cacheScope, w, branchKey, statuses, lastChecked)

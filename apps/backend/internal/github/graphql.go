@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +36,11 @@ const graphQLReviewThreadContinuationChunkSize = 5
 // graphQLBranchProbeLimit fetches two matches so branch lookup can detect
 // ambiguous fork heads instead of linking the first arbitrary PR.
 const graphQLBranchProbeLimit = 2
+
+// Branch discovery is deliberately bounded. A healthy GitHub connection
+// should finish this many pages long before the limit; the cap prevents a
+// malformed cursor response from turning one watch into an unbounded loop.
+const graphQLBranchPageLimit = 100
 
 const graphQLReviewThreadPageSize = 100
 
@@ -205,6 +211,7 @@ type batchedPRResult struct {
 type graphQLRepositoryIdentity struct {
 	Name          string `json:"name"`
 	NameWithOwner string `json:"nameWithOwner"`
+	URL           string `json:"url"`
 	Owner         struct {
 		Login string `json:"login"`
 	} `json:"owner"`
@@ -213,6 +220,35 @@ type graphQLRepositoryIdentity struct {
 type batchedBranchPRNode struct {
 	Number int `json:"number"`
 	batchedPRResult
+}
+
+type batchedBranchConnection struct {
+	Nodes    []batchedBranchPRNode `json:"nodes"`
+	PageInfo graphQLPageInfo       `json:"pageInfo"`
+}
+
+type batchedBranchRepository struct {
+	PullRequests batchedBranchConnection `json:"pullRequests"`
+	Ref          *struct {
+		AssociatedPullRequests batchedBranchConnection `json:"associatedPullRequests"`
+	} `json:"ref"`
+}
+
+// exactBranchLookup accumulates both GitHub representations of an exact
+// head (the attached repository's headRefName search and the ref's
+// associatedPullRequests connection) before applying uniqueness rules.
+// Keeping candidates until all pages are consumed is important: one initial
+// page can look unique while a later page contains a second eligible PR.
+type exactBranchLookup struct {
+	Ref          graphQLBranchRef
+	Candidates   []batchedBranchPRNode
+	PullCursor   string
+	PullHasNext  bool
+	PullSeen     map[string]struct{}
+	AssocCursor  string
+	AssocHasNext bool
+	AssocSeen    map[string]struct{}
+	Remaining    int
 }
 
 // graphQLError mirrors a single entry in a GraphQL response's "errors" array.
@@ -382,8 +418,8 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
 		`headRefName baseRefName headRefOid additions deletions ` +
-		`repository { name nameWithOwner owner { login } } ` +
-		`headRepository { name nameWithOwner owner { login } } ` +
+		`repository { name nameWithOwner url owner { login } } ` +
+		`headRepository { name nameWithOwner url owner { login } } ` +
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
@@ -403,10 +439,10 @@ func buildBatchedBranchQuery(refs []graphQLBranchRef) (string, map[string]any) {
 		if r.Head != nil {
 			branch = r.Head.Branch
 		}
-		fmt.Fprintf(&b, `pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number %s } } `,
+		fmt.Fprintf(&b, `pullRequests(first: %d, states: OPEN, headRefName: %q) { nodes { number %s } pageInfo { hasNextPage endCursor } } `,
 			graphQLBranchProbeLimit, branch, prFieldsBlock())
 		if r.Head != nil {
-			fmt.Fprintf(&b, `ref(qualifiedName: %q) { associatedPullRequests(first: %d, states: OPEN) { nodes { number %s } } } `,
+			fmt.Fprintf(&b, `ref(qualifiedName: %q) { associatedPullRequests(first: %d, states: OPEN) { nodes { number %s } pageInfo { hasNextPage endCursor } } } `,
 				"refs/heads/"+r.Head.Branch, graphQLBranchProbeLimit, prFieldsBlock())
 		}
 		b.WriteString(`} `)
@@ -917,6 +953,7 @@ func runBatchedBranchQuery(
 		Statuses:      make(map[string]*PRStatus, len(refs)),
 		ResolvedEmpty: make(map[string]struct{}, len(refs)),
 	}
+	var exactLookups []exactBranchLookup
 	// Same accumulation pattern as runBatchedPRQuery — see that function
 	// for the rationale (one dead-repo chunk must not drop later chunks).
 	var allMissing []repoRef
@@ -931,11 +968,28 @@ func runBatchedBranchQuery(
 			return branchBatchResult{}, err
 		}
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
-		if err := decodeBatchedBranchChunk(chunk, resp.Data, &out); err != nil {
+		chunkLookups, err := decodeBatchedBranchChunk(chunk, resp.Data, &out)
+		if err != nil {
 			return branchBatchResult{}, err
 		}
+		exactLookups = append(exactLookups, chunkLookups...)
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
+	}
+	completedLookups, err := completeExactBranchLookups(ctx, exec, exactLookups)
+	if err != nil {
+		if len(allMissing) > 0 {
+			return branchBatchResult{}, &batchedMissingReposErr{Repos: allMissing, Inner: err}
+		}
+		return branchBatchResult{}, err
+	}
+	for _, lookup := range completedLookups {
+		node, ok := selectExactBranchPRNode(lookup.Candidates, lookup.Ref)
+		if !ok {
+			continue
+		}
+		status := convertBatchedPRResult(&node.batchedPRResult, lookup.Ref.Owner, lookup.Ref.Repo, node.Number)
+		out.Statuses[graphqlBranchKey(lookup.Ref.Owner, lookup.Ref.Repo, lookup.Ref.Branch, lookup.Ref.Head)] = status
 	}
 	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil)
 	if statuses == nil {
@@ -953,53 +1007,264 @@ func decodeBatchedBranchChunk(
 	refs []graphQLBranchRef,
 	data map[string]json.RawMessage,
 	out *branchBatchResult,
-) error {
+) ([]exactBranchLookup, error) {
+	exactLookups := make([]exactBranchLookup, 0)
 	for i, ref := range refs {
 		alias := fmt.Sprintf("b%d", i)
 		raw, ok := data[alias]
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
-		var inner struct {
-			PullRequests struct {
-				Nodes []batchedBranchPRNode `json:"nodes"`
-			} `json:"pullRequests"`
-			Ref *struct {
-				AssociatedPullRequests struct {
-					Nodes []batchedBranchPRNode `json:"nodes"`
-				} `json:"associatedPullRequests"`
-			} `json:"ref"`
-		}
+		var inner batchedBranchRepository
 		if err := json.Unmarshal(raw, &inner); err != nil {
-			return fmt.Errorf("decode branch alias %s: %w", alias, err)
+			return nil, fmt.Errorf("decode branch alias %s: %w", alias, err)
 		}
 		if ref.Head == nil {
-			node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
+			node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes, ref)
 			if !ok {
+				// Zero nodes is a definitive answer: the repository resolved and
+				// has no open PR on this branch. Two or more is ambiguous and
+				// stays unknown so the caller keeps its per-watch fallback.
+				if len(inner.PullRequests.Nodes) == 0 {
+					out.ResolvedEmpty[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = struct{}{}
+				}
 				continue
 			}
 			status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
-			result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
+			out.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
 			continue
 		}
 		candidates := append([]batchedBranchPRNode(nil), inner.PullRequests.Nodes...)
 		if inner.Ref != nil {
 			candidates = append(candidates, inner.Ref.AssociatedPullRequests.Nodes...)
 		}
-		node, ok := selectExactBranchPRNode(candidates, ref)
-		if !ok {
-			// Zero nodes is a definitive answer: the repository resolved and
-			// has no open PR on this branch. Two or more is ambiguous and
-			// stays unknown so the caller keeps its per-watch fallback.
-			if len(inner.PullRequests.Nodes) == 0 {
-				out.ResolvedEmpty[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = struct{}{}
-			}
-			continue
+		lookup := exactBranchLookup{
+			Ref:        ref,
+			Candidates: candidates,
+			Remaining:  graphQLBranchPageLimit,
 		}
-		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
-		out.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
+		var err error
+		lookup.PullCursor, lookup.PullHasNext, lookup.PullSeen, err = startBranchConnection(inner.PullRequests, ref, "pullRequests")
+		if err != nil {
+			return nil, fmt.Errorf("decode branch alias %s: %w", alias, err)
+		}
+		if inner.Ref != nil {
+			lookup.AssocCursor, lookup.AssocHasNext, lookup.AssocSeen, err = startBranchConnection(inner.Ref.AssociatedPullRequests, ref, "associatedPullRequests")
+			if err != nil {
+				return nil, fmt.Errorf("decode branch alias %s: %w", alias, err)
+			}
+		}
+		exactLookups = append(exactLookups, lookup)
 	}
-	return nil
+	return exactLookups, nil
+}
+
+func startBranchConnection(
+	connection batchedBranchConnection,
+	ref graphQLBranchRef,
+	connectionName string,
+) (string, bool, map[string]struct{}, error) {
+	seen := make(map[string]struct{})
+	if !connection.PageInfo.HasNextPage {
+		return "", false, seen, nil
+	}
+	cursor := connection.PageInfo.EndCursor
+	if cursor == "" {
+		return "", false, nil, fmt.Errorf(
+			"%s pagination for %s/%s@%s returned an empty cursor",
+			connectionName, ref.Owner, ref.Repo, ref.Branch,
+		)
+	}
+	seen[cursor] = struct{}{}
+	return cursor, true, seen, nil
+}
+
+func completeExactBranchLookups(ctx context.Context, exec GraphQLExecutor, lookups []exactBranchLookup) ([]exactBranchLookup, error) {
+	completed := make([]exactBranchLookup, 0, len(lookups))
+	pending := make([]exactBranchLookup, 0, len(lookups))
+	for _, lookup := range lookups {
+		if lookup.PullHasNext || lookup.AssocHasNext {
+			pending = append(pending, lookup)
+		} else {
+			completed = append(completed, lookup)
+		}
+	}
+	for len(pending) > 0 {
+		next := make([]exactBranchLookup, 0, len(lookups))
+		for _, chunk := range chunkRefs(pending, graphQLBatchChunkSize) {
+			chunkNext, chunkCompleted, err := fetchExactBranchPage(ctx, exec, chunk)
+			if err != nil {
+				return nil, err
+			}
+			next = append(next, chunkNext...)
+			completed = append(completed, chunkCompleted...)
+		}
+		pending = next
+	}
+	return completed, nil
+}
+
+func fetchExactBranchPage(
+	ctx context.Context,
+	exec GraphQLExecutor,
+	lookups []exactBranchLookup,
+) ([]exactBranchLookup, []exactBranchLookup, error) {
+	for _, lookup := range lookups {
+		if lookup.Remaining <= 0 {
+			return nil, nil, fmt.Errorf(
+				"exact branch pagination for %s/%s@%s exceeded its page limit",
+				lookup.Ref.Owner, lookup.Ref.Repo, lookup.Ref.Branch,
+			)
+		}
+	}
+	query, vars := buildBatchedBranchContinuationQuery(lookups)
+	var resp struct {
+		Data   map[string]json.RawMessage `json:"data"`
+		Errors []graphQLError             `json:"errors"`
+	}
+	if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
+		return nil, nil, err
+	}
+	if err := graphQLErrorsToErr(resp.Errors); err != nil {
+		return nil, nil, err
+	}
+
+	next := make([]exactBranchLookup, 0, len(lookups))
+	completed := make([]exactBranchLookup, 0, len(lookups))
+	for i, lookup := range lookups {
+		updated, err := applyExactBranchPage(i, lookup, resp.Data)
+		if err != nil {
+			return nil, nil, err
+		}
+		if updated.PullHasNext || updated.AssocHasNext {
+			next = append(next, updated)
+		} else {
+			completed = append(completed, updated)
+		}
+	}
+	return next, completed, nil
+}
+
+func applyExactBranchPage(
+	index int,
+	lookup exactBranchLookup,
+	data map[string]json.RawMessage,
+) (exactBranchLookup, error) {
+	alias := fmt.Sprintf("b%d", index)
+	raw, ok := data[alias]
+	if !ok || isNullGraphQLValue(raw) {
+		return exactBranchLookup{}, fmt.Errorf("exact branch pagination response missing repository alias %s", alias)
+	}
+	var repoBlock map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &repoBlock); err != nil {
+		return exactBranchLookup{}, fmt.Errorf("decode exact branch pagination alias %s: %w", alias, err)
+	}
+	lookup.Remaining--
+	if lookup.PullHasNext {
+		connection, err := decodeBranchContinuationConnection(repoBlock, "pullRequests", lookup.Ref)
+		if err != nil {
+			return exactBranchLookup{}, fmt.Errorf("decode exact branch pagination alias %s: %w", alias, err)
+		}
+		lookup.Candidates = append(lookup.Candidates, connection.Nodes...)
+		var advanceErr error
+		lookup.PullCursor, lookup.PullHasNext, advanceErr = advanceBranchConnection(connection, lookup.PullSeen, lookup.Ref, "pullRequests")
+		if advanceErr != nil {
+			return exactBranchLookup{}, fmt.Errorf("decode exact branch pagination alias %s: %w", alias, advanceErr)
+		}
+	}
+	if lookup.AssocHasNext {
+		refBlock, err := decodeExactBranchRefBlock(repoBlock, lookup.Ref)
+		if err != nil {
+			return exactBranchLookup{}, fmt.Errorf("decode exact branch pagination alias %s: %w", alias, err)
+		}
+		connection, err := decodeBranchContinuationConnection(refBlock, "associatedPullRequests", lookup.Ref)
+		if err != nil {
+			return exactBranchLookup{}, fmt.Errorf("decode exact branch pagination alias %s: %w", alias, err)
+		}
+		lookup.Candidates = append(lookup.Candidates, connection.Nodes...)
+		lookup.AssocCursor, lookup.AssocHasNext, err = advanceBranchConnection(connection, lookup.AssocSeen, lookup.Ref, "associatedPullRequests")
+		if err != nil {
+			return exactBranchLookup{}, fmt.Errorf("decode exact branch pagination alias %s: %w", alias, err)
+		}
+	}
+	return lookup, nil
+}
+
+func decodeExactBranchRefBlock(block map[string]json.RawMessage, ref graphQLBranchRef) (map[string]json.RawMessage, error) {
+	rawRef, ok := block["ref"]
+	if !ok || isNullGraphQLValue(rawRef) {
+		return nil, fmt.Errorf("exact branch pagination response missing ref for %s/%s@%s", ref.Owner, ref.Repo, ref.Branch)
+	}
+	var refBlock map[string]json.RawMessage
+	if err := json.Unmarshal(rawRef, &refBlock); err != nil {
+		return nil, fmt.Errorf("decode exact branch pagination ref: %w", err)
+	}
+	return refBlock, nil
+}
+
+func decodeBranchContinuationConnection(
+	block map[string]json.RawMessage,
+	name string,
+	ref graphQLBranchRef,
+) (batchedBranchConnection, error) {
+	raw, ok := block[name]
+	if !ok || isNullGraphQLValue(raw) {
+		return batchedBranchConnection{}, fmt.Errorf(
+			"pagination response missing %s for %s/%s@%s",
+			name, ref.Owner, ref.Repo, ref.Branch,
+		)
+	}
+	var connection batchedBranchConnection
+	if err := json.Unmarshal(raw, &connection); err != nil {
+		return batchedBranchConnection{}, fmt.Errorf("decode %s: %w", name, err)
+	}
+	return connection, nil
+}
+
+func advanceBranchConnection(
+	connection batchedBranchConnection,
+	seen map[string]struct{},
+	ref graphQLBranchRef,
+	connectionName string,
+) (string, bool, error) {
+	if !connection.PageInfo.HasNextPage {
+		return "", false, nil
+	}
+	cursor := connection.PageInfo.EndCursor
+	if cursor == "" {
+		return "", false, fmt.Errorf(
+			"%s pagination for %s/%s@%s returned an empty cursor",
+			connectionName, ref.Owner, ref.Repo, ref.Branch,
+		)
+	}
+	if _, ok := seen[cursor]; ok {
+		return "", false, fmt.Errorf(
+			"%s pagination for %s/%s@%s repeated cursor %q",
+			connectionName, ref.Owner, ref.Repo, ref.Branch, cursor,
+		)
+	}
+	seen[cursor] = struct{}{}
+	return cursor, true, nil
+}
+
+func buildBatchedBranchContinuationQuery(lookups []exactBranchLookup) (string, map[string]any) {
+	var b strings.Builder
+	b.WriteString("query BranchPages { ")
+	for i, lookup := range lookups {
+		ref := lookup.Ref
+		fmt.Fprintf(&b, `b%d: repository(owner: %q, name: %q) { `, i, ref.Owner, ref.Repo)
+		if lookup.PullHasNext {
+			fmt.Fprintf(&b, `pullRequests(first: %d, after: %q, states: OPEN, headRefName: %q) { nodes { number %s } pageInfo { hasNextPage endCursor } } `,
+				graphQLBranchProbeLimit, lookup.PullCursor, ref.Head.Branch, prFieldsBlock())
+		}
+		if lookup.AssocHasNext {
+			fmt.Fprintf(&b, `ref(qualifiedName: %q) { associatedPullRequests(first: %d, after: %q, states: OPEN) { nodes { number %s } pageInfo { hasNextPage endCursor } } } `,
+				"refs/heads/"+ref.Head.Branch, graphQLBranchProbeLimit, lookup.AssocCursor, prFieldsBlock())
+		}
+		b.WriteString(`} `)
+	}
+	b.WriteString(`rateLimit { limit remaining resetAt cost } }`)
+	return b.String(), nil
 }
 
 func selectExactBranchPRNode(nodes []batchedBranchPRNode, ref graphQLBranchRef) (*batchedBranchPRNode, bool) {
@@ -1009,27 +1274,14 @@ func selectExactBranchPRNode(nodes []batchedBranchPRNode, ref graphQLBranchRef) 
 	unique := make(map[string]*batchedBranchPRNode)
 	for i := range nodes {
 		node := &nodes[i]
-		if node.HeadRefName != ref.Head.Branch {
+		if !matchesExactBranchCandidate(node, ref) {
 			continue
 		}
-		headOwner := node.HeadRepository.Owner.Login
-		headRepo := node.HeadRepository.Name
-		if headOwner == "" || headRepo == "" {
-			parts := strings.SplitN(node.HeadRepository.NameWithOwner, "/", 2)
-			if len(parts) == 2 {
-				headOwner, headRepo = parts[0], parts[1]
-			}
+		baseOwner, baseRepo := repositoryIdentityParts(node.Repository)
+		if baseOwner == "" || baseRepo == "" {
+			baseOwner, baseRepo = ref.Owner, ref.Repo
 		}
-		if headOwner != ref.Head.Owner || headRepo != ref.Head.Repo {
-			continue
-		}
-		baseOwner, baseRepo := ref.Owner, ref.Repo
-		if node.Repository.Owner.Login != "" && node.Repository.Name != "" {
-			baseOwner, baseRepo = node.Repository.Owner.Login, node.Repository.Name
-		} else if parts := strings.SplitN(node.Repository.NameWithOwner, "/", 2); len(parts) == 2 {
-			baseOwner, baseRepo = parts[0], parts[1]
-		}
-		key := fmt.Sprintf("%s/%s#%d", baseOwner, baseRepo, node.Number)
+		key := fmt.Sprintf("%s/%s#%d", strings.ToLower(baseOwner), strings.ToLower(baseRepo), node.Number)
 		unique[key] = node
 	}
 	if len(unique) != 1 {
@@ -1041,17 +1293,78 @@ func selectExactBranchPRNode(nodes []batchedBranchPRNode, ref graphQLBranchRef) 
 	return nil, false
 }
 
-func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNode, bool) {
+func matchesExactBranchCandidate(node *batchedBranchPRNode, ref graphQLBranchRef) bool {
+	if node.HeadRefName != ref.Head.Branch {
+		return false
+	}
+	headOwner, headRepo := repositoryIdentityParts(node.HeadRepository)
+	if !strings.EqualFold(headOwner, ref.Head.Owner) || !strings.EqualFold(headRepo, ref.Head.Repo) {
+		return false
+	}
+	if ref.Head.Host == "" {
+		return true
+	}
+	candidateHost := repositoryIdentityHost(node.HeadRepository.URL)
+	return candidateHost == "" || strings.EqualFold(candidateHost, ref.Head.Host)
+}
+
+func selectBatchedBranchPRNode(nodes []batchedBranchPRNode, ref graphQLBranchRef) (*batchedBranchPRNode, bool) {
 	if len(nodes) != 1 {
 		return nil, false
 	}
-	return &nodes[0], true
+	node := &nodes[0]
+	baseOwner, baseRepo := repositoryIdentityParts(node.Repository)
+	if baseOwner != "" || baseRepo != "" {
+		if !strings.EqualFold(baseOwner, ref.Owner) || !strings.EqualFold(baseRepo, ref.Repo) {
+			return nil, false
+		}
+	}
+	headOwner, headRepo := repositoryIdentityParts(node.HeadRepository)
+	if headOwner != "" || headRepo != "" {
+		if !strings.EqualFold(headOwner, ref.Owner) || !strings.EqualFold(headRepo, ref.Repo) {
+			return nil, false
+		}
+	}
+	return node, true
+}
+
+func repositoryIdentityParts(identity graphQLRepositoryIdentity) (string, string) {
+	owner, repo := identity.Owner.Login, identity.Name
+	if owner != "" && repo != "" {
+		return owner, repo
+	}
+	parts := strings.SplitN(identity.NameWithOwner, "/", 2)
+	if len(parts) != 2 {
+		return owner, repo
+	}
+	if owner == "" {
+		owner = parts[0]
+	}
+	if repo == "" {
+		repo = parts[1]
+	}
+	return owner, repo
+}
+
+func repositoryIdentityHost(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	return strings.ToLower(parsed.Host)
 }
 
 // graphqlBranchKey is the lookup key used in batched-branch result maps.
 // Named graphql* to avoid collision with the mock_client.go branchKey type.
-func graphqlBranchKey(owner, repo, branch string) string {
-	return owner + "/" + repo + "/" + branch
+func graphqlBranchKey(owner, repo, branch string, exactHead ...*PRHeadRef) string {
+	base := strings.ToLower(owner) + "/" + strings.ToLower(repo) + "/" + branch
+	if len(exactHead) == 0 || exactHead[0] == nil {
+		return base
+	}
+	head := exactHead[0]
+	return base + "|head:" +
+		strings.ToLower(head.Host) + "/" + strings.ToLower(head.Owner) + "/" +
+		strings.ToLower(head.Repo) + "/" + head.Branch
 }
 
 // Compile-time assertions that the existing CLI/PAT clients satisfy

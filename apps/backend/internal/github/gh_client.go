@@ -287,28 +287,35 @@ func (c *GHClient) GetIssue(ctx context.Context, owner, repo string, number int)
 }
 
 func (c *GHClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
-	return c.findPRByHead(ctx, owner, repo, branch, branch, "", "")
+	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
+		Owner: owner, Repo: repo, Branch: branch,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
+	}
+	status := statuses.Statuses[graphqlBranchKey(owner, repo, branch)]
+	if status == nil {
+		return nil, nil
+	}
+	return status.PR, nil
 }
 
+// FindPRByHead constrains a branch search to an exact source repository. The
+// GraphQL path above remains the authoritative branch lookup for watch
+// discovery; this CLI path is used by provider-aware fallback callers.
 func (c *GHClient) FindPRByHead(ctx context.Context, owner, repo, headOwner, headRepo, branch string) (*PR, error) {
-	return c.findPRByHead(ctx, owner, repo, branch, branch, headOwner, headRepo)
-}
-
-func (c *GHClient) findPRByHead(ctx context.Context, owner, repo, head, branchForError, headOwner, headRepo string) (*PR, error) {
 	limit := "1"
 	if headOwner != "" {
-		// --head accepts only a branch name. Fetch enough matches to select the
-		// requested fork after gh returns PRs from the whole fork network.
 		limit = "100"
 	}
 	out, err := c.run(ctx, "pr", "list",
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--head", head,
+		"--head", branch,
 		"--state", "open",
 		"--json", "number,title,url,state,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,headRepository,headRepositoryOwner",
 		"--limit", limit)
 	if err != nil {
-		return nil, fmt.Errorf("find PR by branch %q: %w", branchForError, err)
+		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
 	}
 	var prs []ghPR
 	if err := json.Unmarshal([]byte(out), &prs); err != nil {
@@ -334,7 +341,7 @@ func (c *GHClient) FindPRByExactHead(ctx context.Context, attachedOwner, attache
 	if err != nil {
 		return nil, fmt.Errorf("find PR by exact head %s/%s:%s: %w", head.Owner, head.Repo, head.Branch, err)
 	}
-	status := statuses[graphqlBranchKey(attachedOwner, attachedRepo, head.Branch)]
+	status := statuses.Statuses[graphqlBranchKey(attachedOwner, attachedRepo, head.Branch, &head)]
 	if status == nil {
 		return nil, nil
 	}

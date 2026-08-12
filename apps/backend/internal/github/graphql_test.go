@@ -143,6 +143,30 @@ func batchedBranchReviewThreadsResponse(
 	})
 }
 
+func exactBranchNode(
+	number int,
+	title string,
+	baseOwner string,
+	baseRepo string,
+	headOwner string,
+	headRepo string,
+	branch string,
+	headURL string,
+) map[string]any {
+	return map[string]any{
+		"number": number, "state": "OPEN", "title": title, "url": fmt.Sprintf("https://github.com/%s/%d", baseOwner, number),
+		"headRefName": branch, "baseRefName": "main",
+		"repository": map[string]any{
+			"name": baseRepo, "nameWithOwner": baseOwner + "/" + baseRepo,
+			"owner": map[string]any{"login": baseOwner},
+		},
+		"headRepository": map[string]any{
+			"name": headRepo, "nameWithOwner": headOwner + "/" + headRepo,
+			"owner": map[string]any{"login": headOwner}, "url": headURL,
+		},
+	}
+}
+
 func TestBuildBatchedPRQuery_GroupsByRepo(t *testing.T) {
 	q, _ := buildBatchedPRQuery([]graphQLPRRef{
 		{Owner: "octo", Repo: "alpha", Number: 1},
@@ -193,6 +217,16 @@ func TestBuildBatchedBranchQuery_ExactHeadIncludesAssociatedRef(t *testing.T) {
 	}
 	if !strings.Contains(q, `headRepository {`) || !strings.Contains(q, `repository {`) {
 		t.Fatalf("exact-head lookup should request base and head repository identities, got: %s", q)
+	}
+}
+
+func TestBuildBatchedBranchQuery_RequestsPaginationMetadata(t *testing.T) {
+	q, _ := buildBatchedBranchQuery([]graphQLBranchRef{{
+		Owner: "upstream", Repo: "project", Branch: "local",
+		Head: &PRHeadRef{Owner: "fork", Repo: "project", Branch: "feature"},
+	}})
+	if strings.Count(q, "pageInfo { hasNextPage endCursor }") < 2 {
+		t.Fatalf("branch query should request pagination metadata for both connections, got: %s", q)
 	}
 }
 
@@ -689,7 +723,7 @@ func TestRunBatchedBranchQuery_MatchesExactHeadAndDeduplicatesRepresentations(t 
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	status := got[graphqlBranchKey("fork", "project", "local-feature")]
+	status := got[graphqlBranchKey("fork", "project", "local-feature", &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature"})]
 	if status == nil || status.PR == nil {
 		t.Fatalf("exact-head status = %#v, want one PR", status)
 	}
@@ -698,6 +732,142 @@ func TestRunBatchedBranchQuery_MatchesExactHeadAndDeduplicatesRepresentations(t 
 	}
 	if status.PR.HeadRepoOwner != "fork" || status.PR.HeadRepoName != "project" {
 		t.Fatalf("exact-head identity = %+v, want fork/project", status.PR)
+	}
+}
+
+func TestRunBatchedBranchQuery_KeepsDistinctExactHeadsWithTheSameLocalBranch(t *testing.T) {
+	refs := []graphQLBranchRef{
+		{Owner: "upstream", Repo: "project", Branch: "local", Head: &PRHeadRef{Host: "github.com", Owner: "fork-a", Repo: "project", Branch: "review"}},
+		{Owner: "upstream", Repo: "project", Branch: "local", Head: &PRHeadRef{Host: "github.com", Owner: "fork-b", Repo: "project", Branch: "review"}},
+	}
+	exec := &stubGraphQLExecutor{response: mustJSON(t, map[string]any{
+		"data": map[string]any{
+			"b0": map[string]any{"pullRequests": map[string]any{"nodes": []any{
+				exactBranchNode(7, "fork A PR", "upstream", "project", "fork-a", "project", "review", "https://github.com/fork-a/project"),
+			}}},
+			"b1": map[string]any{"pullRequests": map[string]any{"nodes": []any{
+				exactBranchNode(8, "fork B PR", "upstream", "project", "fork-b", "project", "review", "https://github.com/fork-b/project"),
+			}}},
+		},
+	})}
+
+	got, err := runBatchedBranchQuery(context.Background(), exec, refs)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("exact-head results = %#v, want one result per exact head", got)
+	}
+	if got[graphqlBranchKey(refs[0].Owner, refs[0].Repo, refs[0].Branch, refs[0].Head)] == nil ||
+		got[graphqlBranchKey(refs[1].Owner, refs[1].Repo, refs[1].Branch, refs[1].Head)] == nil {
+		t.Fatalf("exact-head results lost one of the distinct heads: %#v", got)
+	}
+}
+
+func TestRunBatchedBranchQuery_PaginatesExactHeadCandidatesBeforeUniqueness(t *testing.T) {
+	ref := graphQLBranchRef{
+		Owner: "upstream", Repo: "project", Branch: "local",
+		Head: &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "feature"},
+	}
+	exec := &stubGraphQLExecutor{responses: []string{
+		mustJSON(t, map[string]any{"data": map[string]any{
+			"b0": map[string]any{
+				"pullRequests": map[string]any{
+					"nodes":    []any{exactBranchNode(7, "first", "upstream", "project", "fork", "project", "feature", "https://github.com/fork/project")},
+					"pageInfo": map[string]any{"hasNextPage": true, "endCursor": "cursor-1"},
+				},
+			},
+		}}),
+		mustJSON(t, map[string]any{"data": map[string]any{
+			"b0": map[string]any{
+				"pullRequests": map[string]any{
+					"nodes":    []any{exactBranchNode(8, "second", "upstream", "project", "fork", "project", "feature", "https://github.com/fork/project")},
+					"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+				},
+			},
+		}}),
+	}}
+
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{ref})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("paginated ambiguous exact-head results = %#v, want no result", got)
+	}
+	if len(exec.queries) != 2 {
+		t.Fatalf("GraphQL query count = %d, want initial query plus continuation", len(exec.queries))
+	}
+}
+
+func TestRunBatchedBranchQuery_HeadlessRejectsSiblingFork(t *testing.T) {
+	exec := &stubGraphQLExecutor{response: mustJSON(t, map[string]any{"data": map[string]any{
+		"b0": map[string]any{"pullRequests": map[string]any{"nodes": []any{
+			exactBranchNode(7, "sibling", "upstream", "project", "sibling", "project", "feature", "https://github.com/sibling/project"),
+		}}},
+	}})}
+
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{{
+		Owner: "upstream", Repo: "project", Branch: "feature",
+	}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("headless sibling-fork result = %#v, want no result", got)
+	}
+}
+
+func TestRunBatchedBranchQuery_PreservesBranchCaseAndRepositoryCaseRules(t *testing.T) {
+	ref := graphQLBranchRef{
+		Owner: "UpStream", Repo: "Project", Branch: "Local",
+		Head: &PRHeadRef{Host: "github.com", Owner: "Fork", Repo: "Project", Branch: "Feature/Review"},
+	}
+	exec := &stubGraphQLExecutor{response: mustJSON(t, map[string]any{"data": map[string]any{
+		"b0": map[string]any{"pullRequests": map[string]any{"nodes": []any{
+			exactBranchNode(7, "case", "upstream", "project", "FORK", "PROJECT", "Feature/Review", "https://github.com/fork/project"),
+		}}},
+	}})}
+
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{ref})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch, ref.Head)] == nil {
+		t.Fatalf("case-insensitive repository identity should match exact head: %#v", got)
+	}
+
+	exec = &stubGraphQLExecutor{response: mustJSON(t, map[string]any{"data": map[string]any{
+		"b0": map[string]any{"pullRequests": map[string]any{"nodes": []any{
+			exactBranchNode(7, "wrong case", "upstream", "project", "fork", "project", "feature/review", "https://github.com/fork/project"),
+		}}},
+	}})}
+	got, err = runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{ref})
+	if err != nil {
+		t.Fatalf("run branch-case mismatch: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("branch-case mismatch = %#v, want no result", got)
+	}
+}
+
+func TestRunBatchedBranchQuery_RejectsForeignHeadHost(t *testing.T) {
+	ref := graphQLBranchRef{
+		Owner: "upstream", Repo: "project", Branch: "local",
+		Head: &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "feature"},
+	}
+	exec := &stubGraphQLExecutor{response: mustJSON(t, map[string]any{"data": map[string]any{
+		"b0": map[string]any{"pullRequests": map[string]any{"nodes": []any{
+			exactBranchNode(7, "foreign", "upstream", "project", "fork", "project", "feature", "https://git.example.com/fork/project"),
+		}}},
+	}})}
+
+	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{ref})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("foreign-host exact-head result = %#v, want no result", got)
 	}
 }
 

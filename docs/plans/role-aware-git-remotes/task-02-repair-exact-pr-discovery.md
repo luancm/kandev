@@ -1,7 +1,7 @@
 ---
 id: "02-repair-exact-pr-discovery"
 title: "Repair exact GitHub PR discovery"
-status: pending
+status: complete
 wave: 2
 depends_on: ["01-resolve-remote-roles"]
 plan: "plan.md"
@@ -59,4 +59,14 @@ Update only this task file's `## Results`. Report discovery-key semantics, pagin
 
 ## Results
 
-Pending.
+Implemented exact-head GitHub discovery across the batched GraphQL path and PAT, `gh`, and mock clients. Discovery keys now normalize attached/head repository identity and host while preserving local and remote branch case, and include an explicit headless/exact-head distinction so same-local-branch watches cannot collide. Headless discovery rejects a known sibling-fork head; exact discovery verifies the requested head repository/ref and filters foreign head hosts when GitHub returns the source repository URL.
+
+Exact branch and associated-ref connections request `pageInfo`, paginate with cursor-loop and page-limit guards, and accumulate candidates before uniqueness selection. Candidates deduplicate by case-insensitive canonical base owner/repository plus PR number; duplicates are tolerated, ambiguity and incomplete traversal fail closed. `GHClient.FindPRByBranch` now uses the same GraphQL matcher as PAT and batched polling rather than attached-base-only `gh pr list` filtering.
+
+RED/GREEN evidence:
+
+- RED: the new tests failed for colliding exact-head keys, missing pagination, headless sibling-fork acceptance, case-sensitive repository matching, and foreign-host acceptance.
+- GREEN: `cd apps/backend && go test -tags fts5 ./internal/github -run 'Test(BuildBatchedBranchQuery_RequestsPaginationMetadata|RunBatchedBranchQuery_(KeepsDistinctExactHeadsWithTheSameLocalBranch|PaginatesExactHeadCandidatesBeforeUniqueness|HeadlessRejectsSiblingFork|PreservesBranchCaseAndRepositoryCaseRules|RejectsForeignHeadHost))' -count=1`
+- GREEN: `cd apps/backend && go test -tags fts5 ./internal/github -count=1`
+
+Changed `graphql.go`, `graphql_test.go`, `service_pr_watch_batched.go`, `pat_client.go`, `gh_client.go`, `gh_client_reads_test.go`, and `mock_client.go`.
