@@ -92,11 +92,11 @@ Wave 2:
 
 Wave 3:
 
-- [ ] [Task 03: Repair watch lifecycle](task-03-repair-watch-lifecycle.md) (`in_progress`)
+- [x] [Task 03: Repair watch lifecycle](task-03-repair-watch-lifecycle.md) (`completed`)
 
 Wave 4:
 
-- [ ] [Task 04: Persist provider source identities](task-04-persist-provider-source-identities.md)
+- [ ] [Task 04: Persist provider source identities](task-04-persist-provider-source-identities.md) (`in_progress`)
 
 Wave 5:
 

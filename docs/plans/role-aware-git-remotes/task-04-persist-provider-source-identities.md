@@ -1,7 +1,7 @@
 ---
 id: "04-persist-provider-source-identities"
 title: "Persist exact provider source and base identities"
-status: pending
+status: in_progress
 wave: 4
 depends_on: ["03-repair-watch-lifecycle"]
 plan: "plan.md"
