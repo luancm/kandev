@@ -81,4 +81,40 @@ describe("getSessionInfoForTask", () => {
     );
     expect(info.sessionState).toBe("WAITING_FOR_INPUT");
   });
+
+  it("uses resolved comparison totals for live sidebar diff stats", () => {
+    const info = getSessionInfoForTask(
+      "t1",
+      { t1: [session({ id: "p", is_primary: true })] },
+      {
+        p: {
+          branch_additions: 99,
+          branch_deletions: 88,
+          comparison: {
+            resolution_state: "resolved",
+            additions: 3,
+            deletions: 2,
+          },
+        },
+      },
+    );
+
+    expect(info.diffStats).toEqual({ additions: 3, deletions: 2 });
+  });
+
+  it("does not fall back to legacy branch totals for unresolved comparison", () => {
+    const info = getSessionInfoForTask(
+      "t1",
+      { t1: [session({ id: "p", is_primary: true })] },
+      {
+        p: {
+          branch_additions: 99,
+          branch_deletions: 88,
+          comparison: { resolution_state: "ambiguous" },
+        },
+      },
+    );
+
+    expect(info.diffStats).toBeUndefined();
+  });
 });

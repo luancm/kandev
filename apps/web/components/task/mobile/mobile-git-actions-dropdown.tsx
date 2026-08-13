@@ -48,6 +48,7 @@ export type GitActionsDropdownProps = {
   onPush: (force?: boolean) => void;
   onRebase: () => void;
   onMerge: () => void;
+  comparisonDisabled?: boolean;
   pushDisabled?: boolean;
   pullDisabled?: boolean;
   pushDisabledReason?: string;
@@ -63,11 +64,13 @@ export type GitActionsDropdownProps = {
 
 function RebaseMergeItems({
   disabled,
+  comparisonDisabled,
   baseBranch,
   onRebase,
   onMerge,
 }: {
   disabled: boolean;
+  comparisonDisabled?: boolean;
   baseBranch: string | undefined;
   onRebase: () => void;
   onMerge: () => void;
@@ -81,7 +84,7 @@ function RebaseMergeItems({
       <DropdownMenuItem
         className="min-h-11 cursor-pointer gap-3"
         onClick={onRebase}
-        disabled={disabled}
+        disabled={disabled || comparisonDisabled}
       >
         <IconGitCherryPick className="h-4 w-4 text-orange-500" />
         <span className="flex-1">{t("task:rebase")}</span>
@@ -90,7 +93,7 @@ function RebaseMergeItems({
       <DropdownMenuItem
         className="min-h-11 cursor-pointer gap-3"
         onClick={onMerge}
-        disabled={disabled}
+        disabled={disabled || comparisonDisabled}
       >
         <IconGitMerge className="h-4 w-4 text-purple-500" />
         <span className="flex-1">{t("task:merge")}</span>
@@ -187,6 +190,7 @@ function GitActionsMenu({
   onPush,
   onRebase,
   onMerge,
+  comparisonDisabled = false,
   pushDisabled = false,
   pullDisabled = false,
   pushDisabledReason,
@@ -248,6 +252,7 @@ function GitActionsMenu({
       <DropdownMenuSeparator />
       <RebaseMergeItems
         disabled={disabled}
+        comparisonDisabled={comparisonDisabled}
         baseBranch={baseBranch}
         onRebase={onRebase}
         onMerge={onMerge}

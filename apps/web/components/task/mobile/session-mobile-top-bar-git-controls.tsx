@@ -20,7 +20,6 @@ import { Label } from "@kandev/ui/label";
 import {
   resolveChangeRequestTerminology,
   useChangeRequestTerminology,
-  useGitOperations,
 } from "@/hooks/use-git-operations";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
@@ -366,12 +365,11 @@ export function useMobileGitActions(
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
   const defaultTerminology = useChangeRequestTerminology(sessionId);
-  // SessionGit's commit fans out per-repo for multi-repo workspaces; the raw
-  // useGitOperations.commit hits the workspace root and fails on multi-repo
-  // tasks. Pull from useGitOperations only what SessionGit doesn't override.
-  const gitOperations = useGitOperations(sessionId ?? null);
-  const { pull, push, rebase, merge, createPR, isLoading: isGitLoading } = gitOperations;
-  const { commit } = useSessionGit(sessionId ?? null);
+  // Use the same derived session model as desktop Changes. This keeps mobile
+  // operations on the repository-scoped fan-out and role-aware expectations
+  // instead of maintaining a second raw-operation path.
+  const git = useSessionGit(sessionId ?? null);
+  const { pull, push, rebase, merge, createPR, commit, isLoading: isGitLoading } = git;
   const handleGitOperation = useGitToast();
 
   // Hoisted out of the two callbacks below so both share one expression.

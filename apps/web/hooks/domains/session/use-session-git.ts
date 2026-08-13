@@ -64,6 +64,13 @@ export type SessionGit = {
   remoteBehind: number;
   pushAhead: number;
   pullBehind: number;
+  actionHeadState: string | null;
+  trackingUpstreamState: string | null;
+  actionHeadCommit: string | null;
+  trackingUpstreamCommit: string | null;
+  actionEvidenceAvailable: boolean;
+  trackingEvidenceAvailable: boolean;
+  comparisonEvidenceAvailable: boolean;
 
   // Files (raw FileInfo from store)
   allFiles: FileInfo[];
@@ -118,6 +125,13 @@ export type SessionGit = {
     pushAhead: number;
     pullBehind: number;
     hasUpstream: boolean;
+    actionHeadState: string | null;
+    trackingUpstreamState: string | null;
+    actionHeadCommit: string | null;
+    trackingUpstreamCommit: string | null;
+    actionEvidenceAvailable: boolean;
+    trackingEvidenceAvailable: boolean;
+    comparisonEvidenceAvailable: boolean;
     hasStaged: boolean;
     hasUnstaged: boolean;
   }>;
@@ -511,7 +525,12 @@ function usePerRepoPendingClear(
 type RemoteOpsArgs = {
   gitOps: ReturnType<typeof useGitOperations>;
   repoNamesForControls: string[];
-  perRepoStatus: Array<{ repository_name: string; pushAhead: number }>;
+  perRepoStatus: Array<{
+    repository_name: string;
+    pushAhead: number;
+    trackingUpstreamState: string | null;
+    trackingEvidenceAvailable: boolean;
+  }>;
 };
 
 /**
@@ -532,14 +551,28 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
     for (const s of perRepoStatus) m.set(s.repository_name, s.pushAhead);
     return m;
   }, [perRepoStatus]);
+  const trackingByRepo = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const s of perRepoStatus) {
+      m.set(
+        s.repository_name,
+        s.trackingEvidenceAvailable && s.trackingUpstreamState === "present",
+      );
+    }
+    return m;
+  }, [perRepoStatus]);
 
   const pull = useCallback(
     async (rebase = false, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.pull(rebase, repo);
-      return fanOutAcrossRepositoryWaves(namedRepos, "pull", (r) => gitOps.pull(rebase, r));
+      const reposWithTracking = namedRepos.filter((r) => trackingByRepo.get(r) === true);
+      if (reposWithTracking.length === 0) {
+        return { success: true, operation: "pull", output: "No tracking upstream available" };
+      }
+      return fanOutAcrossRepositoryWaves(reposWithTracking, "pull", (r) => gitOps.pull(rebase, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
-    [gitOps.pull, isMultiRepo, namedRepos],
+    [gitOps.pull, isMultiRepo, namedRepos, trackingByRepo],
   );
 
   const push = useCallback(

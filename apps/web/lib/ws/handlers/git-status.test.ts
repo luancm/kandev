@@ -22,6 +22,11 @@ vi.mock("@/hooks/domains/session/use-cumulative-diff", () => ({
 const SESSION = "sess-1";
 const STATUS_TIME_1 = "2026-05-28T00:00:01Z";
 const STATUS_TIME_2 = "2026-05-28T00:00:02Z";
+const STATUS_TIME_3 = "2026-05-28T00:00:03Z";
+const FRONTEND_GENERATION = "frontend-generation";
+const BACKEND_GENERATION = "backend-generation";
+const FRONTEND_REPOSITORY = "frontend";
+const BACKEND_REPOSITORY = "backend";
 const MISSING_HANDLER_MESSAGE = "session.git.event handler is missing";
 const invalidateCumulativeDiffCacheMock = vi.mocked(invalidateCumulativeDiffCache);
 
@@ -135,6 +140,7 @@ function seedSessionCommits(store: StoreApi<AppState>) {
   ]);
 }
 
+// eslint-disable-next-line max-lines-per-function -- handler lifecycle cases share one store fixture.
 describe("git-status WS handler — stale-while-revalidate", () => {
   let store: StoreApi<AppState>;
 
@@ -230,6 +236,46 @@ describe("git-status WS handler — stale-while-revalidate", () => {
     });
   });
 
+  it("retains role observations per repository without leaking sibling state", () => {
+    const handler = gitStatusHandler(store);
+    const frontend = repoStatusUpdateEvent(STATUS_TIME_1, FRONTEND_REPOSITORY, "frontend.tsx");
+    frontend.status.remote_roles_generation = FRONTEND_GENERATION;
+    frontend.status.action_head = {
+      observation_state: "present",
+      remote_head_commit: "frontend-action",
+    };
+    frontend.status.tracking_upstream = { observation_state: "absent" };
+    handler(gitEvent(frontend));
+
+    const backend = repoStatusUpdateEvent(STATUS_TIME_2, BACKEND_REPOSITORY, "backend.go");
+    backend.status.remote_roles_generation = BACKEND_GENERATION;
+    backend.status.action_head = {
+      observation_state: "present",
+      remote_head_commit: "backend-action",
+    };
+    backend.status.tracking_upstream = { observation_state: "present" };
+    handler(gitEvent(backend));
+
+    const frontendPartial = repoStatusUpdateEvent(
+      STATUS_TIME_3,
+      FRONTEND_REPOSITORY,
+      "frontend-next.tsx",
+    );
+    handler(gitEvent(frontendPartial));
+
+    const repoMap = store.getState().gitStatus.byEnvironmentRepo[SESSION];
+    expect(repoMap[FRONTEND_REPOSITORY]).toMatchObject({
+      remote_roles_generation: FRONTEND_GENERATION,
+      action_head: frontend.status.action_head,
+      tracking_upstream: frontend.status.tracking_upstream,
+    });
+    expect(repoMap[BACKEND_REPOSITORY]).toMatchObject({
+      remote_roles_generation: BACKEND_GENERATION,
+      action_head: backend.status.action_head,
+      tracking_upstream: backend.status.tracking_upstream,
+    });
+  });
+
   it("invalidates cumulative diff when status diff content changes", () => {
     const handler = gitStatusHandler(store);
 
@@ -247,7 +293,7 @@ describe("git-status WS handler — stale-while-revalidate", () => {
     const envAfterBackend = store.getState().gitStatus.byEnvironmentId[SESSION];
     invalidateCumulativeDiffCacheMock.mockClear();
 
-    handler(gitEvent(repoStatusUpdateEvent("2026-05-28T00:00:03Z", "backend", "backend.go")));
+    handler(gitEvent(repoStatusUpdateEvent(STATUS_TIME_3, "backend", "backend.go")));
 
     expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBe(envAfterBackend);
     expect(invalidateCumulativeDiffCacheMock).not.toHaveBeenCalled();
@@ -287,7 +333,7 @@ describe("git-status WS handler comparison evidence", () => {
     handler(gitEvent(second));
     expect(invalidateCumulativeDiffCacheMock).toHaveBeenCalledTimes(2);
 
-    const partial = statusUpdateEvent("2026-05-28T00:00:03Z");
+    const partial = statusUpdateEvent(STATUS_TIME_3);
     handler(gitEvent(partial));
     expect(store.getState().gitStatus.byEnvironmentId[SESSION].comparison).toEqual(
       second.status.comparison,
@@ -315,7 +361,7 @@ describe("git-status WS handler comparison evidence", () => {
       tracking_upstream: first.status.tracking_upstream,
     });
 
-    const cleared = statusUpdateEvent("2026-05-28T00:00:03Z");
+    const cleared = statusUpdateEvent(STATUS_TIME_3);
     cleared.status.action_head = { observation_state: "absent" };
     handler(gitEvent(cleared));
     expect(store.getState().gitStatus.byEnvironmentId[SESSION].action_head).toEqual(

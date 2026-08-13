@@ -1,7 +1,7 @@
 ---
 id: "08-align-frontend-remote-safety"
 title: "Align frontend status and remote-action safety"
-status: pending
+status: completed
 wave: 8
 depends_on: ["06-compute-comparison-status", "07-route-git-operations"]
 plan: "plan.md"
@@ -75,4 +75,4 @@ Update only this task file's `## Results`. Report state invariants, classifier a
 
 ## Results
 
-Pending.
+Implemented and tested the frontend remote-role safety boundary. Git status derivation now keeps writable action-head, explicit tracking-upstream, comparison target, and remote-role generation evidence independent; unknown, unresolved, ambiguous, absent, missing-head, and missing-generation role observations fail closed for the corresponding controls. Push and provider contribution classification use the writable action head, Pull requires an explicit present tracking upstream, Rebase and Merge require resolved comparison evidence, and comparison-based Changes/review/sidebar counts do not fall back from unresolved comparison snapshots. Omission-retaining WebSocket state and repository-scoped aggregation remain covered, while desktop and mobile Git operations now consume the shared session model and per-repository menus apply the same role gates. Updated the shared relation hooks, session derived/summary models, Changes header/menu, mobile top bar/dropdown, session info comparison totals, and focused tests; `changes-panel-data.tsx` remains the shared production seam. `pnpm install --frozen-lockfile` passed. RED/GREEN evidence is recorded by 81 focused Vitest tests passing across WS hydration, multi-repository isolation, relation/provider drift, derived summaries, comparison/sidebar totals, timeline grouping, and mobile controls; `pnpm run typecheck` passed; `pnpm run i18n:check` and `pnpm run i18n:ratchet` passed. The full web lint command reaches only six existing Task07 warnings in `apps/web/hooks/use-git-operations.ts` (`max-params`, `max-lines-per-function`, `complexity`, and nested ternaries); all Task08-touched files pass targeted ESLint with zero warnings. `git diff --check` passed.

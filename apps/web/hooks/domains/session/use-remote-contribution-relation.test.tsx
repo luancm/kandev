@@ -59,6 +59,7 @@ const baseStatus: Omit<GitStatusEntry, "repository_name" | "head_commit" | "remo
   behind: 0,
   remote_ahead: 0,
   remote_behind: 0,
+  remote_roles_generation: "generation-1",
   files: {},
   timestamp: null,
 };
@@ -191,5 +192,36 @@ describe("useRemoteContributionRelation repository scoping", () => {
 
     expect(result.current.selectedPR).toEqual(currentPR);
     expect(result.current.relation.kind).toBe("aligned");
+  });
+
+  it("passes action and tracking observations without crossing their roles", () => {
+    mocks.statuses = [
+      status("frontend", "local-head", "legacy-tracking-head", {
+        remote_ahead: 0,
+        remote_behind: 3,
+        action_head: {
+          observation_state: "present",
+          remote_head_commit: mocks.providerHead,
+          ahead: 2,
+          behind: 0,
+        },
+        tracking_upstream: {
+          observation_state: "present",
+          remote_head_commit: "legacy-tracking-head",
+          ahead: 0,
+          behind: 3,
+        },
+      }),
+    ];
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({
+      kind: "local_ahead",
+      pushAhead: 2,
+      pullBehind: 3,
+      canPush: true,
+      canPull: true,
+    });
   });
 });

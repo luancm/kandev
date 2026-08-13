@@ -68,6 +68,13 @@ describe("GitActionsDropdown remote safety", () => {
     ).toBe(true);
   });
 
+  it("disables comparison actions when the delivered comparison target is unavailable", () => {
+    render(<GitActionsDropdown {...baseProps} comparisonDisabled />);
+
+    expect(screen.getByRole("button", { name: /Rebase/ })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: /Merge/ })).toHaveProperty("disabled", true);
+  });
+
   it("offers scoped contribution version choices without the generic push submenu", () => {
     const onReplaceContribution = vi.fn();
     const onUseContribution = vi.fn();

@@ -23,6 +23,7 @@ const baseInput: RemoteContributionRelationInput = {
   upstreamHead: PROVIDER_HEAD,
   remoteAhead: 0,
   remoteBehind: 0,
+  remoteRolesGeneration: "generation-1",
   baseAhead: 4,
   hasUpstream: true,
 };
@@ -93,6 +94,7 @@ const unknownCases = [
   { name: "upstream evidence is unavailable", upstreamHead: null, hasUpstream: true },
 ];
 
+// eslint-disable-next-line max-lines-per-function -- provider contribution cases share one fixture vocabulary.
 describe("classifyRemoteContribution", () => {
   it.each(classificationCases)("classifies $name", ({ overrides, expected }) => {
     expect(classifyRemoteContribution(input(overrides))).toMatchObject(expected);
@@ -195,6 +197,87 @@ describe("classifyRemoteContribution", () => {
       kind: "unknown",
       providerHead: REWRITTEN_HEAD,
       action: "unavailable_evidence",
+    });
+  });
+
+  it("uses the writable action head instead of tracking-upstream history", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        actionHead: {
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 2,
+          behind: 0,
+        },
+        trackingUpstream: {
+          observation_state: "present",
+          remote_head_commit: "unrelated-tracking-head",
+          ahead: 0,
+          behind: 4,
+        },
+        upstreamHead: "unrelated-tracking-head",
+        remoteAhead: 0,
+        remoteBehind: 4,
+      }),
+    );
+
+    expect(relation).toMatchObject({
+      kind: "local_ahead",
+      action: "normal_push",
+      pushAhead: 2,
+      pullBehind: 4,
+      canPush: true,
+      canPull: true,
+      actionEvidenceAvailable: true,
+      trackingEvidenceAvailable: true,
+    });
+  });
+
+  it.each(["unknown", "ambiguous", "unresolved"] as const)(
+    "fails closed for an action-head %s observation",
+    (observation_state) => {
+      const relation = classifyRemoteContribution(
+        input({
+          actionHead: { observation_state },
+          trackingUpstream: {
+            observation_state: "present",
+            remote_head_commit: PROVIDER_HEAD,
+            behind: 3,
+          },
+          providerLoading: false,
+          providerCommitsComplete: true,
+        }),
+      );
+
+      expect(relation).toMatchObject({
+        kind: "unknown",
+        action: "unavailable_evidence",
+        canPush: false,
+        canPull: true,
+        actionEvidenceAvailable: false,
+      });
+    },
+  );
+
+  it("does not allow Pull to use comparison/base evidence when tracking is absent", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        hasUpstream: false,
+        upstreamHead: null,
+        actionHead: { observation_state: "absent" },
+        trackingUpstream: { observation_state: "absent" },
+        baseAhead: 4,
+        remoteBehind: 7,
+      }),
+    );
+
+    expect(relation).toMatchObject({
+      kind: "unknown",
+      pushAhead: 4,
+      pullBehind: 0,
+      canPush: true,
+      canPull: false,
+      trackingEvidenceAvailable: true,
     });
   });
 });

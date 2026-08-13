@@ -7,6 +7,7 @@ import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import { usePRReviewRepositoryIdentityResolver } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
 import { useSessionGitStatusByRepo } from "./use-session-git-status";
+import { hasComparisonEvidence } from "./use-session-git-derived";
 import { resolveBranchScopedTaskPRs, selectBranchScopedTaskPR } from "./branch-scoped-task-pr";
 import {
   classifyRemoteContribution,
@@ -75,6 +76,10 @@ export function useRemoteContributionRelation(
         remoteBehind: gitStatus?.remote_behind ?? 0,
         baseAhead: gitStatus?.ahead ?? 0,
         hasUpstream: Boolean(gitStatus?.remote_branch),
+        actionHead: gitStatus?.action_head,
+        trackingUpstream: gitStatus?.tracking_upstream,
+        remoteRolesGeneration: gitStatus?.remote_roles_generation,
+        comparisonEvidenceAvailable: hasComparisonEvidence(gitStatus),
       }),
     [
       selectedPR,

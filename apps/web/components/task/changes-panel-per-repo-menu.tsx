@@ -9,6 +9,14 @@ import {
 import { useTranslation } from "react-i18next";
 import type { PerRepoStatus } from "./changes-panel-header";
 
+function repoActionAvailability(status: PerRepoStatus | undefined) {
+  return {
+    trackingUnavailable:
+      status?.trackingUpstreamState !== undefined && status.trackingUpstreamState !== "present",
+    comparisonUnavailable: status?.comparisonEvidenceAvailable === false,
+  };
+}
+
 export function PerRepoPullMenu({
   repoNames,
   perRepoStatus,
@@ -36,6 +44,7 @@ export function PerRepoPullMenu({
         const s = statusByName.get(repo);
         const behind = s?.pullBehind ?? 0;
         const label = repoDisplayName?.(repo) || repo || t("task:repository2");
+        const { trackingUnavailable, comparisonUnavailable } = repoActionAvailability(s);
         return (
           <div key={repo || "__no_repo__"}>
             {idx > 0 && <DropdownMenuSeparator />}
@@ -50,9 +59,9 @@ export function PerRepoPullMenu({
             <DropdownMenuItem
               onClick={() => onRepoPull(repo)}
               className="cursor-pointer text-xs gap-2"
-              disabled={pullDisabled}
+              disabled={pullDisabled || trackingUnavailable}
               title={
-                pullDisabled
+                pullDisabled || trackingUnavailable
                   ? (pullDisabledReason ?? t("task:divergedActionsUnavailable"))
                   : undefined
               }
@@ -63,6 +72,7 @@ export function PerRepoPullMenu({
             <DropdownMenuItem
               onClick={() => onRepoRebase(repo)}
               className="cursor-pointer text-xs gap-2"
+              disabled={comparisonUnavailable}
             >
               <IconGitCherryPick className="h-3.5 w-3.5 text-muted-foreground" />
               {t("task:rebase")}
@@ -70,6 +80,7 @@ export function PerRepoPullMenu({
             <DropdownMenuItem
               onClick={() => onRepoMerge(repo)}
               className="cursor-pointer text-xs gap-2"
+              disabled={comparisonUnavailable}
             >
               <IconGitMerge className="h-3.5 w-3.5 text-muted-foreground" />
               {t("task:merge")}

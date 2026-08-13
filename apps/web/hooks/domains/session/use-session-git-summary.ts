@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 import { useSessionGitStatusByRepo } from "./use-session-git-status";
+import { deriveRemoteRoleCapabilities, hasComparisonEvidence } from "./use-session-git-derived";
 
 type RepositoryStatus = ReturnType<typeof useSessionGitStatusByRepo>[number];
 
@@ -14,20 +15,32 @@ export type RepositoryStatusSummary = {
   pushAhead: number;
   pullBehind: number;
   hasUpstream: boolean;
+  actionHeadState: string | null;
+  trackingUpstreamState: string | null;
+  actionHeadCommit: string | null;
+  trackingUpstreamCommit: string | null;
+  actionEvidenceAvailable: boolean;
+  trackingEvidenceAvailable: boolean;
+  comparisonEvidenceAvailable: boolean;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
 
 function upstreamCounts(status: RepositoryStatus["status"], ahead: number) {
-  const hasUpstream = Boolean(status?.remote_branch);
-  const remoteAhead = status?.remote_ahead ?? 0;
-  const remoteBehind = status?.remote_behind ?? 0;
+  const roles = deriveRemoteRoleCapabilities(status, ahead);
   return {
-    hasUpstream,
-    remoteAhead,
-    remoteBehind,
-    pushAhead: hasUpstream ? remoteAhead : ahead,
-    pullBehind: hasUpstream ? remoteBehind : 0,
+    hasUpstream: roles.hasUpstream,
+    remoteAhead: status?.remote_ahead ?? 0,
+    remoteBehind: status?.remote_behind ?? 0,
+    pushAhead: roles.pushAhead,
+    pullBehind: roles.pullBehind,
+    actionHeadState: roles.actionHeadState,
+    trackingUpstreamState: roles.trackingUpstreamState,
+    actionHeadCommit: roles.actionHeadCommit,
+    trackingUpstreamCommit: roles.trackingUpstreamCommit,
+    actionEvidenceAvailable: roles.actionEvidenceAvailable,
+    trackingEvidenceAvailable: roles.trackingEvidenceAvailable,
+    comparisonEvidenceAvailable: hasComparisonEvidence(status),
   };
 }
 

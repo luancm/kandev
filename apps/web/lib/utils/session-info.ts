@@ -12,12 +12,36 @@ type GitStatusMap = Record<
     files?: Record<string, { additions?: number; deletions?: number }>;
     branch_additions?: number;
     branch_deletions?: number;
+    comparison?: {
+      resolution_state?: string;
+      additions?: number;
+      deletions?: number;
+    } | null;
   }
 >;
+
+function comparisonDiffStats(
+  comparison: Exclude<GitStatusMap[string]["comparison"], undefined>,
+): { additions: number; deletions: number } | undefined {
+  if (
+    comparison === null ||
+    comparison.resolution_state !== "resolved" ||
+    comparison.additions === undefined ||
+    comparison.deletions === undefined
+  ) {
+    return undefined;
+  }
+  const additions = comparison.additions;
+  const deletions = comparison.deletions;
+  return additions === 0 && deletions === 0 ? undefined : { additions, deletions };
+}
 
 function computeDiffStats(
   gitStatus: GitStatusMap[string],
 ): { additions: number; deletions: number } | undefined {
+  if (gitStatus.comparison !== undefined) {
+    return comparisonDiffStats(gitStatus.comparison);
+  }
   let additions: number;
   let deletions: number;
   if (gitStatus.branch_additions !== undefined || gitStatus.branch_deletions !== undefined) {

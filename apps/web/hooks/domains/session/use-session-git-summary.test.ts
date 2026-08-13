@@ -19,6 +19,7 @@ function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
     renamed: [],
     ahead: 0,
     behind: 0,
+    remote_roles_generation: "generation-1",
     files: {},
     timestamp: null,
     ...overrides,
@@ -33,6 +34,7 @@ function file(repository_name?: string, staged = false): FileInfo {
   return { path: "README.md", status: "modified", staged, repository_name };
 }
 
+// eslint-disable-next-line max-lines-per-function -- multi-repository role cases stay together.
 describe("deriveMultiRepoSummary", () => {
   it("keeps the root control and status beside nested scopes", () => {
     const result = deriveMultiRepoSummary(
@@ -121,6 +123,54 @@ describe("deriveMultiRepoSummary", () => {
         pushAhead: 3,
         pullBehind: 0,
         hasUpstream: false,
+      }),
+    ]);
+  });
+
+  it("keeps action and tracking counts independent per repository", () => {
+    const result = deriveMultiRepoSummary(
+      [
+        repoStatus("frontend", {
+          ahead: 11,
+          remote_ahead: 99,
+          remote_behind: 99,
+          action_head: {
+            observation_state: "present",
+            remote_head_commit: "frontend-action",
+            ahead: 2,
+          },
+          tracking_upstream: {
+            observation_state: "present",
+            remote_head_commit: "frontend-tracking",
+            behind: 4,
+          },
+        }),
+        repoStatus("backend", {
+          ahead: 8,
+          action_head: { observation_state: "unknown" },
+          tracking_upstream: { observation_state: "absent" },
+        }),
+      ],
+      [file("frontend"), file("backend")],
+      ["frontend", "backend"],
+    );
+
+    expect(result.perRepoStatus).toEqual([
+      expect.objectContaining({
+        repository_name: "frontend",
+        pushAhead: 2,
+        pullBehind: 4,
+        hasUpstream: true,
+        actionEvidenceAvailable: true,
+        trackingEvidenceAvailable: true,
+      }),
+      expect.objectContaining({
+        repository_name: "backend",
+        pushAhead: 0,
+        pullBehind: 0,
+        hasUpstream: false,
+        actionEvidenceAvailable: false,
+        trackingEvidenceAvailable: true,
       }),
     ]);
   });

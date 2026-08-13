@@ -1,3 +1,9 @@
+import type {
+  GitRemoteRefObservation,
+  GitStatusEntry,
+} from "@/lib/state/slices/session-runtime/types";
+import { deriveRemoteRoleCapabilities } from "./use-session-git-derived";
+
 export type RemoteContributionRelationKind =
   | "not_applicable"
   | "aligned"
@@ -27,6 +33,10 @@ export type RemoteContributionRelationInput = {
   remoteBehind: number;
   baseAhead: number;
   hasUpstream: boolean;
+  actionHead?: GitRemoteRefObservation | null;
+  trackingUpstream?: GitRemoteRefObservation | null;
+  remoteRolesGeneration?: string;
+  comparisonEvidenceAvailable?: boolean;
 };
 
 export type RemoteContributionRelation = {
@@ -40,6 +50,11 @@ export type RemoteContributionRelation = {
   canPull: boolean;
   canReplaceRemote: boolean;
   canUseRemote: boolean;
+  actionHeadState?: string | null;
+  trackingUpstreamState?: string | null;
+  actionEvidenceAvailable?: boolean;
+  trackingEvidenceAvailable?: boolean;
+  comparisonEvidenceAvailable?: boolean;
 };
 
 export type RemoteContributionActionPolicy = {
@@ -80,11 +95,22 @@ export function remoteContributionActionPolicy(
 ): RemoteContributionActionPolicy {
   const unavailable = relation.action === "unavailable_evidence";
   const diverged = relation.action === "diverged_replace";
+  const actionEvidenceUnavailable = relation.actionEvidenceAvailable === false;
+  const trackingEvidenceUnavailable =
+    relation.trackingEvidenceAvailable === false || relation.trackingUpstreamState === "absent";
   return {
     action: relation.action,
-    pushDisabled: unavailable || diverged || relation.action === "provider_ahead_pull",
+    pushDisabled:
+      unavailable ||
+      diverged ||
+      relation.action === "provider_ahead_pull" ||
+      actionEvidenceUnavailable ||
+      !relation.canPush,
     pullDisabled:
-      unavailable || diverged || (relation.action === "provider_ahead_pull" && !relation.canPull),
+      unavailable ||
+      diverged ||
+      trackingEvidenceUnavailable ||
+      (relation.action === "provider_ahead_pull" && !relation.canPull),
     replaceDisabled: !relation.canReplaceRemote,
     useDisabled: !relation.canUseRemote,
     disabledReason: unavailable ? "provider_evidence_unavailable" : null,
@@ -98,22 +124,42 @@ export function isFullCommitSHA(value: string | null | undefined): boolean {
   );
 }
 
-function nonNegative(value: number): number {
-  return Math.max(0, value);
+function roleCapabilities(input: RemoteContributionRelationInput) {
+  const status: Pick<
+    GitStatusEntry,
+    | "remote_branch"
+    | "remote_head_commit"
+    | "remote_ahead"
+    | "remote_behind"
+    | "remote_roles_generation"
+    | "action_head"
+    | "tracking_upstream"
+  > = {
+    remote_branch: input.hasUpstream ? "legacy/upstream" : null,
+    remote_head_commit: input.upstreamHead ?? undefined,
+    remote_ahead: input.remoteAhead,
+    remote_behind: input.remoteBehind,
+    remote_roles_generation: input.remoteRolesGeneration,
+    action_head: input.actionHead,
+    tracking_upstream: input.trackingUpstream,
+  };
+  return deriveRemoteRoleCapabilities(status, input.baseAhead);
 }
 
 function fallbackCapabilities(input: RemoteContributionRelationInput) {
-  const pushAhead = input.hasUpstream
-    ? nonNegative(input.remoteAhead)
-    : nonNegative(input.baseAhead);
-  const pullBehind = input.hasUpstream ? nonNegative(input.remoteBehind) : 0;
+  const roles = roleCapabilities(input);
   return {
-    pushAhead,
-    pullBehind,
-    canPush: pushAhead > 0,
-    canPull: pullBehind > 0,
+    pushAhead: roles.pushAhead,
+    pullBehind: roles.pullBehind,
+    canPush: roles.actionEvidenceAvailable && roles.pushAhead > 0,
+    canPull: roles.trackingEvidenceAvailable && roles.pullBehind > 0,
     canReplaceRemote: false,
     canUseRemote: false,
+    actionHeadState: roles.actionHeadState,
+    trackingUpstreamState: roles.trackingUpstreamState,
+    actionEvidenceAvailable: roles.actionEvidenceAvailable,
+    trackingEvidenceAvailable: roles.trackingEvidenceAvailable,
+    comparisonEvidenceAvailable: input.comparisonEvidenceAvailable !== false,
   };
 }
 
@@ -133,7 +179,9 @@ function result(
   providerHead: string | null,
   capabilities: ReturnType<typeof fallbackCapabilities>,
 ): RemoteContributionRelation {
-  const action = actionFor(kind, providerHead);
+  const action = !capabilities.actionEvidenceAvailable
+    ? "unavailable_evidence"
+    : actionFor(kind, providerHead);
   return {
     kind,
     presentation: kind === "diverged" ? "separate" : "unified",
@@ -141,6 +189,63 @@ function result(
     providerHead,
     ...capabilities,
   };
+}
+
+function providerEvidenceUnavailable(
+  input: RemoteContributionRelationInput,
+  providerHead: string | null,
+  roles: ReturnType<typeof roleCapabilities>,
+): boolean {
+  return (
+    input.providerLoading ||
+    Boolean(input.providerError) ||
+    !input.providerCommitsComplete ||
+    input.providerCommits.length === 0 ||
+    !providerHead ||
+    !input.localHead ||
+    !roles.actionEvidenceAvailable ||
+    (roles.actionHeadState === "present" && !roles.actionHeadCommit)
+  );
+}
+
+function classifyProviderHeads(
+  input: RemoteContributionRelationInput,
+  providerHead: string,
+  roles: ReturnType<typeof roleCapabilities>,
+  fallback: ReturnType<typeof fallbackCapabilities>,
+): RemoteContributionRelation {
+  if (input.localHead === providerHead) {
+    return result("aligned", providerHead, fallback);
+  }
+
+  if (input.providerCommits.some((commit) => commit.sha === input.localHead)) {
+    return result("provider_ahead", providerHead, {
+      ...fallback,
+      canPush: false,
+      canPull: fallback.canPull,
+    });
+  }
+
+  const actionHead = roles.actionHeadCommit;
+  if (!actionHead) return result("unknown", providerHead, fallback);
+
+  if (actionHead === providerHead && roles.actionAhead > 0 && roles.actionBehind === 0) {
+    return result("local_ahead", providerHead, {
+      ...fallback,
+      pushAhead: roles.actionAhead,
+      canPush: true,
+      canPull: fallback.canPull,
+    });
+  }
+
+  const canResolve = isFullCommitSHA(providerHead);
+  return result("diverged", providerHead, {
+    ...fallback,
+    canPush: false,
+    canPull: false,
+    canReplaceRemote: canResolve,
+    canUseRemote: canResolve,
+  });
 }
 
 export function classifyRemoteContribution(
@@ -154,48 +259,9 @@ export function classifyRemoteContribution(
   // The provider API supplies the head separately because a commit page can
   // be incomplete or ordered independently from the live branch head.
   const providerHead = input.providerHead ?? null;
-  const evidenceUnavailable =
-    input.providerLoading ||
-    Boolean(input.providerError) ||
-    !input.providerCommitsComplete ||
-    input.providerCommits.length === 0 ||
-    !providerHead ||
-    !input.localHead;
-  if (evidenceUnavailable) {
+  const roles = roleCapabilities(input);
+  if (providerEvidenceUnavailable(input, providerHead, roles)) {
     return result("unknown", providerHead, fallback);
   }
-
-  if (input.localHead === providerHead) {
-    return result("aligned", providerHead, fallback);
-  }
-
-  if (input.providerCommits.some((commit) => commit.sha === input.localHead)) {
-    return result("provider_ahead", providerHead, {
-      ...fallback,
-      canPush: false,
-      canPull: input.hasUpstream,
-    });
-  }
-
-  if (!input.upstreamHead) {
-    return result("unknown", providerHead, fallback);
-  }
-
-  if (input.upstreamHead === providerHead && input.remoteAhead > 0 && input.remoteBehind === 0) {
-    return result("local_ahead", providerHead, {
-      ...fallback,
-      pushAhead: input.remoteAhead,
-      canPush: true,
-      canPull: false,
-    });
-  }
-
-  const canResolve = isFullCommitSHA(providerHead);
-  return result("diverged", providerHead, {
-    ...fallback,
-    canPush: false,
-    canPull: false,
-    canReplaceRemote: canResolve,
-    canUseRemote: canResolve,
-  });
+  return classifyProviderHeads(input, providerHead!, roles, fallback);
 }

@@ -46,6 +46,8 @@ export type PerRepoStatus = {
   ahead: number;
   behind: number;
   pullBehind?: number;
+  trackingUpstreamState?: string | null;
+  comparisonEvidenceAvailable?: boolean;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };

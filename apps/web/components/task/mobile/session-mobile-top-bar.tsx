@@ -351,6 +351,7 @@ function MobileTopBarGitActions(props: MobileTopBarGitActionsProps) {
         onPush={props.onPush}
         onRebase={props.onRebase}
         onMerge={props.onMerge}
+        comparisonDisabled={remoteActionPolicy.relation.comparisonEvidenceAvailable === false}
         pushDisabled={remoteActionPolicy.pushDisabled}
         pullDisabled={remoteActionPolicy.pullDisabled}
         pushDisabledReason={pushDisabledReasonKey ? t(pushDisabledReasonKey) : undefined}
