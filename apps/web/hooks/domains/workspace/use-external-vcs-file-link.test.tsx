@@ -6,6 +6,7 @@ import { defaultState } from "@/lib/state/default-state";
 import { repositoryId, sessionId, taskId, workspaceId, type Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
 const loaderMocks = vi.hoisted(() => ({
   github: vi.fn(),
@@ -149,6 +150,7 @@ type InitialOptions = {
     worktree_branch: string;
     session_id: ReturnType<typeof sessionId>;
   }>;
+  gitStatus?: Record<string, unknown>;
 };
 
 function repeatedTaskRepositories() {
@@ -242,6 +244,12 @@ function wrapper(options: InitialOptions = {}) {
     taskMRs: {
       ...defaultState.taskMRs,
       byWorkspaceId: { [WORKSPACE_ID]: { [TASK_ID]: options.mrs ?? [] } },
+    },
+    gitStatus: {
+      ...defaultState.gitStatus,
+      byEnvironmentRepo: options.gitStatus
+        ? { [SESSION_ID]: options.gitStatus as Record<string, GitStatusEntry> }
+        : defaultState.gitStatus.byEnvironmentRepo,
     },
   };
   return ({ children }: { children: ReactNode }) =>
@@ -567,6 +575,150 @@ describe("useExternalVcsFileLink legacy provider identity", () => {
     );
 
     expect(result.current?.revision).toBe("feature/share");
+  });
+});
+
+describe("useExternalVcsFileLink exact provider sides", () => {
+  it("uses a linked GitHub source repository for head-side content and its canonical base for deletes", () => {
+    const pr = githubPR({
+      head_host: "github.com",
+      head_owner: "contributor",
+      head_repo: "web-fork",
+      head_repo_id: 11,
+      base_host: "github.com",
+      base_owner: "acme",
+      base_repo: "web",
+      base_repo_id: 22,
+    });
+    const status = {
+      branch: FIRST_BRANCH,
+      action_head: {
+        observation_state: "present",
+        identity: {
+          repository: {
+            provider: "github",
+            host: "github.com",
+            repository_path: "contributor/web-fork",
+            provider_repository_id: "11",
+          },
+          ref: "feature/share",
+        },
+      },
+      files: {},
+    };
+    const source = renderHook(
+      () =>
+        useExternalVcsFileLink({
+          filePath: "src/new.ts",
+          status: "added",
+          sessionId: SESSION_ID,
+          repositoryId: GITHUB_REPOSITORY_ID,
+        }),
+      { wrapper: wrapper({ prs: [pr], gitStatus: { web: status } }) },
+    );
+    expect(source.result.current).toMatchObject({
+      url: "https://github.com/contributor/web-fork/blob/feature%2Fshare/src/new.ts",
+      revision: "feature/share",
+    });
+    source.unmount();
+
+    const deleted = renderHook(
+      () =>
+        useExternalVcsFileLink({
+          filePath: "src/removed.ts",
+          status: "deleted",
+          sessionId: SESSION_ID,
+          repositoryId: GITHUB_REPOSITORY_ID,
+        }),
+      { wrapper: wrapper({ prs: [pr], gitStatus: { web: status } }) },
+    );
+    expect(deleted.result.current).toMatchObject({
+      url: "https://github.com/acme/web/blob/main/src/removed.ts",
+      revision: "main",
+    });
+  });
+
+  it("fails closed when a complete linked source does not match the action-head identity", () => {
+    const pr = githubPR({
+      head_host: "github.com",
+      head_owner: "contributor",
+      head_repo: "web-fork",
+      head_repo_id: 11,
+      base_host: "github.com",
+      base_owner: "acme",
+      base_repo: "web",
+      base_repo_id: 22,
+    });
+    const { result } = renderHook(
+      () =>
+        useExternalVcsFileLink({
+          filePath: "src/new.ts",
+          status: "modified",
+          sessionId: SESSION_ID,
+          repositoryId: GITHUB_REPOSITORY_ID,
+        }),
+      {
+        wrapper: wrapper({
+          prs: [pr],
+          gitStatus: {
+            web: {
+              branch: FIRST_BRANCH,
+              action_head: {
+                observation_state: "present",
+                identity: {
+                  repository: {
+                    provider: "github",
+                    host: "github.com",
+                    repository_path: "someone-else/web-fork",
+                  },
+                  ref: "feature/share",
+                },
+              },
+              files: {},
+            },
+          },
+        }),
+      },
+    );
+    expect(result.current).toBeNull();
+  });
+
+  it("uses complete comparison evidence for an unlinked base-side file", () => {
+    const { result } = renderHook(
+      () =>
+        useExternalVcsFileLink({
+          filePath: "src/removed.ts",
+          status: "deleted",
+          sessionId: SESSION_ID,
+          repositoryId: GITHUB_REPOSITORY_ID,
+        }),
+      {
+        wrapper: wrapper({
+          prs: [],
+          gitStatus: {
+            web: {
+              branch: FIRST_BRANCH,
+              comparison: {
+                resolution_state: "resolved",
+                target: {
+                  repository: {
+                    provider: "github",
+                    host: "github.com",
+                    repository_path: "acme/web",
+                  },
+                  ref: "release/literal/ref",
+                },
+              },
+              files: {},
+            },
+          },
+        }),
+      },
+    );
+    expect(result.current).toMatchObject({
+      url: "https://github.com/acme/web/blob/release%2Fliteral%2Fref/src/removed.ts",
+      revision: "release/literal/ref",
+    });
   });
 });
 

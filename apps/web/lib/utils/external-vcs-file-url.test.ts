@@ -338,3 +338,106 @@ describe("resolveExternalVcsFileURL SSH identity validation", () => {
     ).toBeNull();
   });
 });
+
+describe("resolveExternalVcsFileURL exact provider sides", () => {
+  const source = {
+    provider: "github",
+    provider_host: "github.com",
+    provider_owner: "contributor",
+    provider_name: "web-fork",
+  };
+  const base = {
+    provider: "github",
+    provider_host: "https://github.com",
+    provider_owner: "acme",
+    provider_name: "web",
+  };
+
+  it("uses the exact source repository for head-side files", () => {
+    expect(
+      resolveExternalVcsFileURL({
+        repository: githubRepository,
+        sourceRepository: source,
+        sourceBranch: "feature/nested/ref",
+        baseRepository: base,
+        baseBranch: "main",
+        path: "src/new.ts",
+        status: "modified",
+      }),
+    ).toMatchObject({
+      url: "https://github.com/contributor/web-fork/blob/feature%2Fnested%2Fref/src/new.ts",
+      revision: "feature/nested/ref",
+    });
+  });
+
+  it("uses the exact canonical base repository for deleted and renamed-old files", () => {
+    const deleted = resolveExternalVcsFileURL({
+      repository: githubRepository,
+      sourceRepository: source,
+      sourceBranch: "feature/nested/ref",
+      baseRepository: base,
+      baseBranch: "main",
+      path: "src/removed.ts",
+      status: "deleted",
+    });
+    const renamed = resolveExternalVcsFileURL({
+      repository: githubRepository,
+      sourceRepository: source,
+      sourceBranch: null,
+      baseRepository: base,
+      baseBranch: "main",
+      path: "src/new.ts",
+      previousPath: "src/old.ts",
+      status: "renamed",
+    });
+    expect(deleted).toMatchObject({
+      url: "https://github.com/acme/web/blob/main/src/removed.ts",
+      revision: "main",
+    });
+    expect(renamed).toMatchObject({
+      url: "https://github.com/acme/web/blob/main/src/old.ts",
+      revision: "main",
+      path: "src/old.ts",
+    });
+  });
+
+  it("fails closed instead of combining a fork branch with the base repository", () => {
+    expect(
+      resolveExternalVcsFileURL({
+        repository: githubRepository,
+        sourceRepository: { ...source, provider_owner: "" },
+        sourceBranch: "feature/fork",
+        baseRepository: base,
+        baseBranch: "main",
+        path: "src/new.ts",
+        status: "added",
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a complete Azure source identity and preserves query semantics", () => {
+    expect(
+      resolveExternalVcsFileURL({
+        repository: {
+          provider: "azure_devops",
+          provider_host: "https://dev.azure.com/acme",
+          provider_owner: "Platform",
+          provider_name: "api",
+          remote_url: "https://dev.azure.com/acme/Platform/_git/api",
+        },
+        sourceRepository: {
+          provider: "azure_devops",
+          provider_host: "https://dev.azure.com/fork-org",
+          provider_organization: "fork-org",
+          provider_project: "Fork Project",
+          provider_name: "api",
+        },
+        sourceBranch: "feature/literal ref",
+        path: "src/app.ts",
+        status: "added",
+      }),
+    ).toMatchObject({
+      url: "https://dev.azure.com/fork-org/Fork%20Project/_git/api?path=%2Fsrc%2Fapp.ts&version=GBfeature%2Fliteral+ref",
+    });
+  });
+});
