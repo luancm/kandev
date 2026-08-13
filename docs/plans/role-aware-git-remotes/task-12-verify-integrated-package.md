@@ -65,4 +65,12 @@ Update only this task file's `## Results`. Report exact commands, environment co
 
 ## Results
 
-Pending.
+Integrated verification completed without production or test edits. The backend focused suite passed with `go test -p 2 -tags fts5 ./internal/common/gitremote ./internal/agentctl/server/config ./internal/agentctl/server/instance ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/backendapp ./internal/orchestrator ./internal/orchestrator/executor ./internal/task/service ./internal/task/statussummary ./internal/github ./internal/gitlab ./internal/azuredevops -count=1`; all listed packages passed. The tagged race suite passed with `go test -p 2 -race -tags fts5 ./internal/agentctl/server/process ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/github ./internal/gitlab ./internal/azuredevops -count=1`.
+
+`pnpm install --frozen-lockfile` passed. The integrated frontend Vitest command passed 16 files and 234 tests. `NODE_OPTIONS=--max-old-space-size=4096 pnpm run typecheck` passed. `pnpm run i18n:check && pnpm run i18n:ratchet` passed; locale parity notices remain advisory. `node --test scripts/validate-public-docs.test.mjs` passed all 61 tests and `node scripts/validate-public-docs.mjs` validated 41 published pages. `git diff --check` passed.
+
+The required `pnpm --filter @kandev/web lint` command failed its repository-wide `--max-warnings 0` budget with 38 warnings and zero errors. Ownership routing: Task 07 owns the existing `use-git-operations.ts` warnings; Task 08 owns the new/expanded Changes, remote-contribution, session-derived, hydration, and status-summary warnings; Task 09 owns external-link resolver/test complexity warnings. Task 12 made no lint or production changes.
+
+The required Chromium run attempted 29 tests and the mobile-chrome run attempted 22 tests; every case failed before browser assertions because Playwright's headless shell cannot load `libnspr4.so`. This is an environment dependency blocker, not an assertion failure; Task 10 owns rerunning those E2E suites in an environment with the library installed.
+
+The ownership/path audit found no missing plan/task links, no unresolved merge markers, no untracked implementation paths, and no task-owned files outside the recorded scopes. The branch was reconciled with `upstream/main` `a13379cf` through merge `cfd9ffd09`; no PR was created. Verification status is partial: backend/frontend unit and static checks pass, web lint requires owner cleanup, and browser E2E requires the missing host library.
