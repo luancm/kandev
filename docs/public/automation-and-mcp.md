@@ -48,7 +48,7 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 7. Choose a schedule and optional GitHub condition, or switch to webhook mode.
 8. Save, use **Run now** on the automation's page, then read what it said before widening credentials or scope.
 
-The form can save an empty agent, executor, or repository selection, but launch still needs a usable agent/executor and a repository. For scheduled, webhook, and manual work, an empty repository falls back to the workspace's first repository. If the workspace has none, the run fails with `no repository available; add a repository to the workspace`. A GitHub pull-request run instead checks out that PR's source branch as the writable action head and uses its base as the comparison target; the executor's remote names remain implementation details.
+The form can save an empty agent, executor, or repository selection, but launch still needs a usable agent/executor and a repository. For scheduled, webhook, and manual work, an empty repository falls back to the workspace's first repository. If the workspace has none, the run fails with `no repository available; add a repository to the workspace`. A GitHub pull-request run uses that PR's base branch as the task's base and comparison context. This trigger behavior does not by itself promise contributor source checkout or a writable action head; those roles require Kandev to materialize and validate the exact source repository and ref.
 
 ### What a firing produces
 

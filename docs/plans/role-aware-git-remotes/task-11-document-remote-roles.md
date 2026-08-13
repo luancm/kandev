@@ -55,10 +55,10 @@ Update only this task file's `## Results`. Report the public behavior documented
 
 Public docs updated:
 
-- `docs/public/git-operations.md` now defines attached repository, writable action head, tracking upstream, and comparison target; routes Push, Pull, Rebase, Merge, and Create PR/MR by role; documents arbitrary remote names, first-push evidence, comparison counts, and fail-closed unresolved/ambiguous behavior.
-- `docs/public/sessions-and-review.md` applies the same roles to Changes, comparison bases, sidebar counts, Push/Pull, external file links, and provider change-request creation without assigning semantic authority to `origin`.
+- `docs/public/git-operations.md` now defines attached repository, writable action head, tracking upstream, and comparison target; routes Push, Pull, Rebase, Merge, and Create PR/MR by role; distinguishes provider PR file lists from sidebar comparison status; documents arbitrary remote names, first-push evidence, explicit comparison requirements, and fail-closed unresolved/ambiguous behavior.
+- `docs/public/sessions-and-review.md` applies the same roles to Changes, comparison bases, sidebar counts versus provider file lists, Push/Pull, source/base external file links, and provider change-request creation without assigning semantic authority to `origin`.
 - `docs/public/automation-and-mcp.md` documents contribution source/target roles and describes target-plus-source remote checkout as one validated materialization strategy, not a universal remote convention.
-- `docs/public/integrations.md` distinguishes provider authorization and defaults from Git remote roles, removes semantic `origin` assumptions from GitHub/GitLab task Git guidance, and links to the Git operations role reference.
+- `docs/public/integrations.md` distinguishes provider authorization from Git remote roles and comparison evidence, removes semantic `origin` and default-branch fallbacks from GitHub/GitLab task Git guidance, and links to the Git operations role reference.
 
 Scoped guidance was not changed: this documentation task changes no package ownership, runtime transport, or frontend state convention. Docs impact: public behavior and user-facing Git terminology changed, so the four existing public guides were updated; no new page or `meta.json` entry was needed. The pages remain how-to/reference guidance and link to the central role reference rather than duplicating it in agent instructions.
 

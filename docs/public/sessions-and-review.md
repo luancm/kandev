@@ -154,20 +154,20 @@ Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kan
 
 Changes are grouped by repository and then by state:
 
-- **PR Changes** for the linked pull-request comparison;
+- **PR Changes** for the provider file list from the linked pull or merge request;
 - **Unstaged** working-tree changes;
 - **Staged** changes selected for the next commit;
 - **Commits** on the task branch.
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
-Changes and **PR Changes** use the task repository's resolved **comparison target** for their merge base and sidebar counts. The **attached repository** identifies the task and its authorization scope; the **writable action head** identifies where Push and Force Push go; and the **tracking upstream** is the only source for Pull. These roles can use different repositories, branches, and arbitrary remote names. Kandev does not assign semantic meaning to `origin`, a provider default branch, or an attached repository's name. If comparison or action evidence is unresolved or ambiguous, Kandev leaves the affected count or control unavailable rather than guessing.
+The Changes sidebar's status and counts use the task repository's resolved **comparison target** for their merge base. **PR Changes** is a provider file list for the linked pull or merge request, separate from sidebar comparison status. The **attached repository** identifies the task and its authorization scope; the **writable action head** identifies where Push and Force Push go; and the **tracking upstream** is the only source for Pull. These roles can use different repositories, branches, and arbitrary remote names. Kandev does not assign semantic meaning to `origin`, a provider default branch, or an attached repository's name. If comparison or action evidence is unresolved or ambiguous, Kandev leaves the affected count or control unavailable rather than guessing.
 
 ### Open a file in its external repository
 
 When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
 
-The link uses the published source branch from a linked pull or merge request for that repository when available; otherwise it uses the comparison target's ref. Added or untracked files do not show the action until they exist on a published source branch. Deleted files open their comparison-target version, while renamed files open the new path on a published source branch or the previous path on the comparison target.
+Source-side files use the published source ref resolved from the writable action head of a linked pull or merge request. Deleted files and the old side of renamed files use the linked change's canonical base, represented by the comparison target. Without an unambiguous source or comparison identity, Kandev hides the action instead of guessing. Added or untracked files do not show the action until they exist on a published source ref.
 
 Kandev hides the action instead of guessing when a repository is local-only, unsupported, incompletely configured, or ambiguous. If a colleague cannot open the resulting page, check their permissions on the external repository; opening a link does not change provider access.
 
@@ -228,10 +228,10 @@ A task stores one walkthrough. Publishing another replaces the current one. Kand
 
 The commit dialog commits staged changes by default. Enter a title and optional body. **Stage all changes before committing** is off by default; enable it only after checking every unstaged file. Utility agents can propose commit text, but you remain responsible for the result.
 
-The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first pushes `HEAD` to the repository's resolved **writable action head**, then creates the change request from that exact source and the selected **comparison target**. It does not select the provider, source, or target from a remote named `origin`:
+The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. A complete, explicit **comparison target** is required. When the writable action-head destination is absent, Kandev first performs a normal Push to that exact destination, then creates the change request from the source and comparison identities. It does not select the provider, source, or target from a remote named `origin`:
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
-- GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, uses the comparison target when one is selected, otherwise resolves the project default, and attempts to link the resulting MR back to the attached task repository.
+- GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, requires the complete comparison target, and attempts to link the resulting MR back to the attached task repository.
 - Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
 - Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 

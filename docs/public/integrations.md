@@ -26,7 +26,7 @@ For GitLab, Kandev resolves only the active task workspace's connection. It prov
 
 A task can therefore display a pull or merge request while its worktree cannot push, or edit a repository while Kandev cannot read provider state. Diagnose the failing credential path separately. An App token redeemed through the broker is minted for that repository. PAT and named-CLI tokens remain bearer credentials with all provider-granted scopes once delivered to the trusted Git or `gh` subprocess; lease matching prevents accidental cross-repository redemption but cannot narrow those tokens at GitHub. GitLab integration tokens are provided only to tasks in their configured workspace and should be treated as credentials that task agents may receive.
 
-Provider connections authorize repository identities; they do not assign meaning to a Git remote name. Task Git actions resolve the **attached repository**, **writable action head**, **tracking upstream**, and **comparison target** independently. A provider default branch is used only when no explicit comparison target is selected, and `origin` is never a universal source or destination. See [Git operations](git-operations.md#remote-roles) for the operation rules and fail-closed behavior.
+Provider connections authorize repository identities; they do not assign meaning to a Git remote name. Task Git actions resolve the **attached repository**, **writable action head**, **tracking upstream**, and **comparison target** independently. Provider default branches do not substitute missing or unresolved comparison evidence, and `origin` is never a universal source or destination. See [Git operations](git-operations.md#remote-roles) for the operation rules and fail-closed behavior.
 
 ## Open integration settings
 
@@ -398,7 +398,7 @@ Both watch types inspect only their first GitLab result page, up to 50 items. Al
 
 ### Create a merge request from a task
 
-When the task's writable action head and comparison target are complete GitLab identities on the workspace's configured host, the Changes surface labels the provider action **Create Merge Request**. Kandev pushes the current branch to the writable action head, uses the comparison target when selected or the GitLab project's default branch when no target is available, supports draft MRs, and creates through an authenticated `glab` when available or the workspace token REST fallback. HTTPS, SSH, `gitlab.com`, and configured self-managed remotes are supported; a remote named `origin` is not required.
+When the task's writable action head and comparison target are complete GitLab identities on the workspace's configured host, the Changes surface labels the provider action **Create Merge Request**. If the writable action-head destination ref is absent, Kandev first performs a normal Push to that exact destination, then creates the MR with the explicit comparison target. It supports draft MRs and creates through an authenticated `glab` when available or the workspace token REST fallback. HTTPS, SSH, `gitlab.com`, and configured self-managed remotes are supported; a remote named `origin` is not required.
 
 A successful create returns the MR URL and asynchronously records it against the originating task repository. If association fails, use the manual link action. Retrying is idempotent for an existing open MR with the same source and target branches. A push can succeed even when MR creation fails; Kandev reports that partial result and leaves the remote branch in place for retry.
 
