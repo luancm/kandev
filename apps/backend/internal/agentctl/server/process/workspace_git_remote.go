@@ -129,15 +129,13 @@ func (wt *WorkspaceTracker) ObserveGitRemoteRef(ctx context.Context, role GitRem
 }
 
 // getGitHeadRemote retains the additive status projection used by older
-// callers. The writable push target wins, with the explicit tracking target
-// as a compatibility fallback when no push target is configured.
+// callers. It reports only the writable action head. A tracking upstream is a
+// separate role and must never be promoted to a writable destination merely
+// because Git could not resolve the action head.
 func (wt *WorkspaceTracker) getGitHeadRemote(ctx context.Context, branch string) *types.GitHeadRemote {
 	roles := wt.ResolveGitRemoteRolesForBranch(ctx, branch, nil)
 	if roles.ActionHead.State == gitremote.ResolutionResolved {
 		return projectGitHeadRemote(roles.ActionHead.Identity)
-	}
-	if roles.TrackingUpstream.State == gitremote.ResolutionResolved {
-		return projectGitHeadRemote(roles.TrackingUpstream.Identity)
 	}
 	return nil
 }

@@ -2,9 +2,11 @@ package process
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/gitremote"
 )
 
@@ -147,6 +149,127 @@ func TestResolveGitRemoteRolesRejectsLocalOnlyRemote(t *testing.T) {
 	roles := tracker.ResolveGitRemoteRoles(context.Background(), nil)
 	if roles.ActionHead.State != gitremote.ResolutionUnresolved {
 		t.Fatalf("action head state = %q, want unresolved: %+v", roles.ActionHead.State, roles.ActionHead)
+	}
+}
+
+func TestGetGitHeadRemoteDoesNotPromoteTrackingUpstream(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	localRemote := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+	runGit(t, repoDir, "config", "url."+localRemote+"/.insteadOf", "https://github.com/acme/widget.git")
+	runGit(t, repoDir, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
+	runGit(t, repoDir, "checkout", "-b", "feature/no-publish")
+	runGit(t, repoDir, "config", "branch.feature/no-publish.remote", "origin")
+	runGit(t, repoDir, "config", "branch.feature/no-publish.merge", "refs/heads/main")
+	runGit(t, repoDir, "remote", "add", "local-only", "/tmp/local-only-repository.git")
+	runGit(t, repoDir, "config", "branch.feature/no-publish.pushRemote", "local-only")
+
+	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	roles := tracker.ResolveGitRemoteRolesForBranch(context.Background(), "feature/no-publish", nil)
+	if roles.ActionHead.State != gitremote.ResolutionUnresolved {
+		t.Fatalf("action head state = %q, want unresolved: %+v", roles.ActionHead.State, roles.ActionHead)
+	}
+	if roles.TrackingUpstream.State != gitremote.ResolutionResolved {
+		t.Fatalf("tracking state = %q, want resolved: %+v", roles.TrackingUpstream.State, roles.TrackingUpstream)
+	}
+	if got := tracker.getGitHeadRemote(context.Background(), "feature/no-publish"); got != nil {
+		t.Fatalf("getGitHeadRemote() = %+v, want nil when writable action head is unresolved", got)
+	}
+	update := streams.GitStatusUpdate{}
+	if err := tracker.getGitBranchInfo(context.Background(), &update); err != nil {
+		t.Fatalf("getGitBranchInfo() = %v", err)
+	}
+	if update.HeadRemote != nil {
+		t.Fatalf("status HeadRemote = %+v, want nil when writable action head is unresolved", update.HeadRemote)
+	}
+}
+
+func TestObserveGitRemoteRefUnknownAndPresent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	localRemote := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+	runGit(t, repoDir, "config", "url."+localRemote+"/.insteadOf", "https://github.com/acme/widget.git")
+	runGit(t, repoDir, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
+	runGit(t, repoDir, "checkout", "-b", "feature/observed")
+	runGit(t, repoDir, "config", "branch.feature/observed.pushRemote", "origin")
+	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	roles := tracker.ResolveGitRemoteRolesForBranch(context.Background(), "feature/observed", nil)
+	if roles.ActionHead.State != gitremote.ResolutionResolved {
+		t.Fatalf("action head state = %q, want resolved: %+v", roles.ActionHead.State, roles.ActionHead)
+	}
+
+	unknownCtx, cancelUnknown := context.WithCancel(context.Background())
+	cancelUnknown()
+	unknown := tracker.ObserveGitRemoteRef(unknownCtx, roles.ActionHead)
+	if unknown.State != gitremote.ObservationUnknown {
+		t.Fatalf("canceled observation state = %q, want unknown: %+v", unknown.State, unknown)
+	}
+	if unknown.Identity == nil || unknown.Identity.Ref != "feature/observed" {
+		t.Fatalf("unknown observation identity = %+v, want resolved action identity", unknown.Identity)
+	}
+	if unknown.RemoteHeadCommit != "" || unknown.Ahead != nil || unknown.Behind != nil {
+		t.Fatalf("unknown observation carried head/count evidence: %+v", unknown)
+	}
+
+	// The setup fixture pushed main but not feature/observed. Make the exact
+	// action ref present so this test exercises the positive state as well.
+	runGit(t, repoDir, "push", "origin", "HEAD:refs/heads/feature/observed")
+	present := tracker.ObserveGitRemoteRef(context.Background(), roles.ActionHead)
+	if present.State != gitremote.ObservationPresent {
+		t.Fatalf("present observation state = %q, want present: %+v", present.State, present)
+	}
+	if present.Identity == nil || !present.Identity.Equal(*roles.ActionHead.Identity) {
+		t.Fatalf("present observation identity = %+v, want %+v", present.Identity, roles.ActionHead.Identity)
+	}
+	if present.RemoteHeadCommit == "" {
+		t.Fatal("present observation omitted remote head commit")
+	}
+}
+
+func TestGitStatusWireCarriesAtomicRemoteRoleObservations(t *testing.T) {
+	actionIdentity := gitremote.RemoteRefIdentity{
+		Repository: gitremote.RemoteRepositoryIdentity{Provider: gitremote.ProviderGitHub, Host: "github.com", RepositoryPath: "acme/widget"},
+		Ref:        "feature/action",
+	}
+	trackingIdentity := gitremote.RemoteRefIdentity{
+		Repository: gitremote.RemoteRepositoryIdentity{Provider: gitremote.ProviderGitHub, Host: "github.com", RepositoryPath: "acme/widget"},
+		Ref:        "feature/tracking",
+	}
+	actionHead := "action-head"
+	actionAhead, actionBehind := 2, 1
+	status := streams.GitStatusUpdate{
+		RemoteRolesGeneration: "generation-1",
+		ActionHead: &gitremote.RemoteRefObservation{
+			Identity:         &actionIdentity,
+			State:            gitremote.ObservationPresent,
+			RemoteHeadCommit: actionHead,
+			Ahead:            &actionAhead,
+			Behind:           &actionBehind,
+		},
+		TrackingUpstream: &gitremote.RemoteRefObservation{
+			Identity: &trackingIdentity,
+			State:    gitremote.ObservationAbsent,
+		},
+	}
+
+	wire, err := json.Marshal(status)
+	if err != nil {
+		t.Fatalf("marshal status: %v", err)
+	}
+	var decoded streams.GitStatusUpdate
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+	if decoded.RemoteRolesGeneration != "generation-1" {
+		t.Fatalf("generation = %q, want generation-1", decoded.RemoteRolesGeneration)
+	}
+	if decoded.ActionHead == nil || decoded.ActionHead.State != gitremote.ObservationPresent || decoded.ActionHead.Identity == nil || decoded.ActionHead.RemoteHeadCommit != actionHead || decoded.ActionHead.Ahead == nil || *decoded.ActionHead.Ahead != actionAhead || decoded.ActionHead.Behind == nil || *decoded.ActionHead.Behind != actionBehind {
+		t.Fatalf("action observation lost atomic evidence: %+v", decoded.ActionHead)
+	}
+	if decoded.TrackingUpstream == nil || decoded.TrackingUpstream.State != gitremote.ObservationAbsent || decoded.TrackingUpstream.Identity == nil || decoded.TrackingUpstream.RemoteHeadCommit != "" || decoded.TrackingUpstream.Ahead != nil || decoded.TrackingUpstream.Behind != nil {
+		t.Fatalf("tracking observation lost absent evidence: %+v", decoded.TrackingUpstream)
 	}
 }
 

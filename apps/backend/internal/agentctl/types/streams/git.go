@@ -75,10 +75,25 @@ type GitStatusUpdate struct {
 	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
 
 	// HeadRemote identifies the repository and remote branch that owns the
-	// current branch's contribution head. It prefers Git's push target and
-	// falls back to the upstream tracking target. This is distinct from
-	// RemoteBranch, which always reports the upstream tracking ref.
+	// current branch's writable contribution head. It is a compatibility
+	// projection of ActionHead and is distinct from RemoteBranch, which always
+	// reports the upstream tracking ref. It is omitted when the action head is
+	// unresolved; the tracking upstream is never substituted.
 	HeadRemote *GitHeadRemote `json:"head_remote,omitempty"`
+
+	// RemoteRolesGeneration binds the role observations in this status
+	// snapshot. Mutations must not reuse observations from a different
+	// generation, even when the repository/ref identities happen to match.
+	RemoteRolesGeneration string `json:"remote_roles_generation,omitempty"`
+
+	// ActionHead is the atomic observation for Git's writable push destination.
+	// Identity, state, remote head, and divergence counts are one observation;
+	// nil means this partial update omitted the role observation.
+	ActionHead *gitremote.RemoteRefObservation `json:"action_head,omitempty"`
+
+	// TrackingUpstream is the atomic observation for the local branch's
+	// explicit @{upstream}. It is independent from ActionHead and Comparison.
+	TrackingUpstream *gitremote.RemoteRefObservation `json:"tracking_upstream,omitempty"`
 
 	// Comparison is the authoritative comparison-target evidence for this
 	// status snapshot. Its structured counts are nullable so an unresolved or
