@@ -713,6 +713,53 @@ describe("useExternalVcsFileLink exact provider sides", () => {
     expect(result.current).toBeNull();
   });
 
+  it("fails closed when any linked candidate has incomplete source identity", () => {
+    const complete = githubPR({
+      head_host: "github.com",
+      head_owner: "contributor",
+      head_repo: "web-fork",
+      head_repo_id: 11,
+      base_host: "github.com",
+      base_owner: "acme",
+      base_repo: "web",
+      base_repo_id: 22,
+    });
+    const incomplete = githubPR({
+      id: "incomplete",
+      head_host: "github.com",
+      head_owner: "contributor",
+      head_repo: undefined,
+      head_repo_id: undefined,
+    });
+    const { result } = renderHook(
+      () => useExternalVcsFileLink({ filePath: "src/new.ts", status: "added", sessionId: SESSION_ID, repositoryId: GITHUB_REPOSITORY_ID }),
+      {
+        wrapper: wrapper({
+          prs: [complete, incomplete],
+          gitStatus: {
+            web: {
+              branch: FIRST_BRANCH,
+              action_head: {
+                observation_state: "present",
+                identity: {
+                  repository: {
+                    provider: "github",
+                    host: "github.com",
+                    repository_path: "contributor/web-fork",
+                    provider_repository_id: "11",
+                  },
+                  ref: "feature/share",
+                },
+              },
+              files: {},
+            },
+          },
+        }),
+      },
+    );
+    expect(result.current).toBeNull();
+  });
+
   it("uses complete comparison evidence for an unlinked base-side file", () => {
     const { result } = renderHook(
       () =>
@@ -846,6 +893,131 @@ describe("useExternalVcsFileLink exact provider sides", () => {
     expect(result.current).toMatchObject({
       url: "https://dev.azure.com/fork-org/Fork%20Project/_git/api?path=%2Fsrc%2Fnew.ts&version=GBfeature%2Fazure",
       revision: "feature/azure",
+    });
+  });
+
+  it("matches Azure SSH action identity to the canonical organization host", () => {
+    const azure = repository({
+      id: repositoryId("repo-azure-ssh"),
+      name: "api",
+      provider: "azure_devops",
+      provider_repo_id: "azure-api",
+      provider_host: "https://dev.azure.com/acme",
+      provider_owner: "Platform",
+      provider_name: "api",
+      remote_url: "https://dev.azure.com/acme/Platform/_git/api",
+    });
+    const pullRequest: AzureDevOpsTaskPullRequest = {
+      id: "azure-pr-ssh",
+      taskId: TASK_ID,
+      repositoryId: azure.id,
+      organizationUrl: "https://dev.azure.com/acme",
+      projectId: "project-1",
+      azureRepositoryId: "repo-1",
+      sourceOrganizationUrl: "https://dev.azure.com/acme",
+      sourceProjectId: "project-1",
+      sourceProjectName: "Platform",
+      sourceRepositoryId: "repo-1",
+      sourceRepositoryName: "api",
+      targetOrganizationUrl: "https://dev.azure.com/acme",
+      targetProjectId: "project-1",
+      targetProjectName: "Platform",
+      targetRepositoryId: "repo-1",
+      targetRepositoryName: "api",
+      pullRequestId: 8,
+      pullRequestUrl: "https://dev.azure.com/acme/Platform/_git/api/pullrequest/8",
+      title: "Azure SSH link",
+      sourceBranch: "feature/azure-ssh",
+      targetBranch: "main",
+      authorId: "ada",
+      authorName: "Ada",
+      status: "active",
+      isDraft: false,
+      createdAt: "",
+      updatedAt: "",
+    };
+    const { result } = renderHook(
+      () => useExternalVcsFileLink({ filePath: "src/new.ts", status: "added", repositoryId: azure.id, sessionId: SESSION_ID }),
+      {
+        wrapper: wrapper({
+          repositories: [azure],
+          taskRepositories: [{ id: "task-repo-azure-ssh", repository_id: azure.id, base_branch: "main", position: 0 }],
+          azurePRs: [pullRequest],
+          gitStatus: {
+            api: {
+              branch: "feature/azure-ssh",
+              action_head: {
+                observation_state: "present",
+                identity: {
+                  repository: {
+                    provider: "azure_devops",
+                    host: "ssh.dev.azure.com/acme",
+                    repository_path: "Platform/api",
+                    provider_repository_id: "repo-1",
+                  },
+                  ref: "feature/azure-ssh",
+                },
+              },
+              files: {},
+            },
+          },
+        }),
+      },
+    );
+    expect(result.current).toMatchObject({
+      url: "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fnew.ts&version=GBfeature%2Fazure-ssh",
+      revision: "feature/azure-ssh",
+    });
+  });
+
+  it("preserves Azure organization and target ref for comparison fallback", () => {
+    const azure = repository({
+      id: repositoryId("repo-azure-comparison"),
+      name: "api",
+      provider: "azure_devops",
+      provider_repo_id: "azure-api",
+      provider_host: "https://dev.azure.com/acme",
+      provider_owner: "Platform",
+      provider_name: "api",
+      remote_url: "https://dev.azure.com/acme/Platform/_git/api",
+    });
+    const { result } = renderHook(
+      () => useExternalVcsFileLink({ filePath: "src/removed.ts", status: "deleted", repositoryId: azure.id, sessionId: SESSION_ID }),
+      {
+        wrapper: wrapper({
+          repositories: [azure],
+          taskRepositories: [{ id: "task-repo-azure-comparison", repository_id: azure.id, base_branch: "main", position: 0 }],
+          gitStatus: {
+            api: {
+              branch: "feature/azure",
+              comparison: {
+                resolution_state: "resolved",
+                context_generation: "generation-azure",
+                resolved_ref: "executor-local-ref",
+                base_commit: "base-commit",
+                ahead: 1,
+                behind: 0,
+                additions: 1,
+                deletions: 1,
+                target: {
+                  repository: {
+                    provider: "azure_devops",
+                    host: "dev.azure.com/acme",
+                    repository_path: "Platform/api",
+                    provider_repository_id: "repo-1",
+                  },
+                  ref: "main",
+                },
+              },
+              files: {},
+            },
+          },
+        }),
+      },
+    );
+    expect(result.current).toMatchObject({
+      url: "https://dev.azure.com/acme/Platform/_git/api?path=%2Fsrc%2Fremoved.ts&version=GBmain",
+      revision: "main",
     });
   });
 });

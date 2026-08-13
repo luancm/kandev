@@ -2,7 +2,11 @@ import type { Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { AzureDevOpsTaskPullRequest } from "@/lib/types/azure-devops";
-import type { ExternalVcsRepositoryRef } from "@/lib/utils/external-vcs-file-url";
+import type { GitRemoteRefObservation } from "@/lib/state/slices/session-runtime/types";
+import type {
+  ExternalVcsRepository,
+  ExternalVcsRepositoryRef,
+} from "@/lib/utils/external-vcs-file-url";
 
 export type LinkCandidate = {
   item: TaskPR | TaskMR | AzureDevOpsTaskPullRequest;
@@ -17,6 +21,68 @@ export type ProviderCandidateSnapshot = {
   gitlabMRs: TaskMR[];
   azurePRs: AzureDevOpsTaskPullRequest[];
 };
+
+function azureIdentityParts(
+  repository: NonNullable<GitRemoteRefObservation["identity"]>["repository"],
+  pathParts: string[],
+): { parts: string[]; owner: string; organization: string; project: string } | null {
+  let hostOrganization: string | undefined;
+  try {
+    const parsed = new URL(
+      repository.host!.includes("://") ? repository.host! : `https://${repository.host}`,
+    );
+    hostOrganization = parsed.pathname.split("/").filter(Boolean)[0];
+  } catch {
+    return null;
+  }
+  const organization = hostOrganization ?? pathParts[0];
+  let repositoryParts: string[];
+  if (hostOrganization && pathParts[0] === hostOrganization) {
+    repositoryParts = pathParts.slice(1);
+  } else if (hostOrganization) {
+    repositoryParts = pathParts;
+  } else {
+    repositoryParts = pathParts.slice(1);
+  }
+  if (!organization || repositoryParts.length !== 2) return null;
+  return {
+    parts: repositoryParts,
+    owner: repositoryParts[0],
+    organization,
+    project: repositoryParts[0],
+  };
+}
+
+function identityRepositoryParts(
+  repository: NonNullable<GitRemoteRefObservation["identity"]>["repository"],
+  provider: string,
+): { parts: string[]; owner: string; organization?: string; project?: string } | null {
+  const parts = repository.repository_path?.split("/").filter(Boolean) ?? [];
+  if (!repository.repository_path) return null;
+  if (provider === "azure_devops") return azureIdentityParts(repository, parts);
+  return { parts, owner: parts.slice(0, -1).join("/") };
+}
+
+export function repositoryFromIdentity(
+  identity: GitRemoteRefObservation["identity"],
+): ExternalVcsRepository | null {
+  if (!identity?.repository.host || !identity.ref) return null;
+  const repository = identity.repository;
+  const provider = repository.provider === "azure_repos" ? "azure_devops" : repository.provider ?? "";
+  const parts = identityRepositoryParts(repository, provider);
+  if (!parts) return null;
+  return {
+    provider,
+    provider_host: parts.organization
+      ? `https://dev.azure.com/${parts.organization}`
+      : repository.host,
+    provider_owner: parts.owner,
+    provider_name: parts.parts.at(-1) ?? "",
+    provider_organization: parts.organization,
+    provider_project: parts.project,
+    provider_repository_id: repository.provider_repository_id,
+  };
+}
 
 function identityFieldsPresent(value: {
   host?: string;

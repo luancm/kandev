@@ -15,12 +15,17 @@ const currentPath = "src/app.ts";
 const featureShareBranch = "feature/share";
 
 function resolve(overrides: Partial<ExternalVcsFileURLInput> = {}) {
-  return resolveExternalVcsFileURL({
+  const input = {
     repository: githubRepository,
     path: currentPath,
     baseBranch: "main",
     ...overrides,
-  });
+  };
+  if (input.publishedBranch && overrides.sourceRepository === undefined) {
+    input.sourceRepository = input.repository;
+    input.sourceBranch = input.publishedBranch;
+  }
+  return resolveExternalVcsFileURL(input);
 }
 
 describe("resolveExternalVcsFileURL provider routes", () => {
@@ -157,7 +162,19 @@ describe("resolveExternalVcsFileURL Azure DevOps clone normalization", () => {
 
 describe("resolveExternalVcsFileURL revision and path selection", () => {
   it("prefers a published review branch for an existing file", () => {
-    expect(resolve({ publishedBranch: "feature/published" })?.revision).toBe("feature/published");
+    expect(resolve({
+      publishedBranch: "feature/published",
+      sourceRepository: githubRepository,
+      sourceBranch: "feature/published",
+    })?.revision).toBe("feature/published");
+  });
+
+  it("fails closed when a published branch has no exact source repository", () => {
+    expect(resolve({
+      publishedBranch: "feature/published",
+      sourceRepository: null,
+      sourceBranch: null,
+    })).toBeNull();
   });
 
   it.each(["added", "untracked"] as const)(
@@ -168,7 +185,12 @@ describe("resolveExternalVcsFileURL revision and path selection", () => {
   );
 
   it("omits a modified file when its exact source repository is unknown", () => {
-    expect(resolve({ status: "modified", publishedBranch: "feature/modified" })).toBeNull();
+    expect(resolve({
+      status: "modified",
+      publishedBranch: "feature/modified",
+      sourceRepository: null,
+      sourceBranch: null,
+    })).toBeNull();
   });
 
   it("does not attach a deleted file to the working repository without a complete base identity", () => {

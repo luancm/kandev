@@ -110,14 +110,11 @@ function selectedTarget(
 }
 
 function selectedHeadTarget(
-  input: ExternalVcsFileURLInput,
   path: string,
   source: RepositorySide | null,
   revision: string,
 ): (ResolvedTarget & TargetRepository) | null {
-  const exact = selectedTarget(path, source, revision);
-  if (exact || !input.publishedBranch) return exact;
-  return selectedTarget(path, { repository: input.repository }, revision);
+  return selectedTarget(path, source, revision);
 }
 
 function invalidSourceIdentity(
@@ -155,7 +152,6 @@ function targetIdentitiesValid(
 }
 
 function renamedTarget({
-  input,
   source,
   baseSide,
   publishedBranch,
@@ -163,7 +159,6 @@ function renamedTarget({
   currentPath,
   previousPath,
 }: {
-  input: ExternalVcsFileURLInput;
   source: RepositorySide | null;
   baseSide: RepositorySide | null;
   publishedBranch: string;
@@ -171,7 +166,7 @@ function renamedTarget({
   currentPath: string;
   previousPath: string;
 }): (ResolvedTarget & TargetRepository) | null {
-  if (publishedBranch) return selectedHeadTarget(input, currentPath, source, publishedBranch);
+  if (publishedBranch) return selectedHeadTarget(currentPath, source, publishedBranch);
   if (!previousPath) return null;
   return selectedTarget(previousPath, baseSide, baseBranch);
 }
@@ -196,7 +191,6 @@ function targetForStatus({
   if (status === "renamed") {
     if (publishedBranch && (!source || !refValue(source))) return null;
     return renamedTarget({
-      input,
       source,
       baseSide,
       publishedBranch,
@@ -211,7 +205,7 @@ function targetForStatus({
   ) {
     return null;
   }
-  if (publishedBranch) return selectedHeadTarget(input, currentPath, source, publishedBranch);
+  if (publishedBranch) return selectedHeadTarget(currentPath, source, publishedBranch);
   return selectedTarget(currentPath, baseSide, baseBranch);
 }
 
