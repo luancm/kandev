@@ -8,7 +8,7 @@ import {
   assertNoDocumentHorizontalOverflow,
 } from "../../helpers/layout-assertions";
 import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR, seedGitLabReview } from "../../helpers/gitlab";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { configureWritableForkRemote, GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { GitLabPage } from "../../pages/gitlab-page";
 import { GitLabSettingsPage } from "../../pages/gitlab-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -374,12 +374,15 @@ test.describe("Mobile GitLab parity", () => {
     if (!branch) throw new Error("Mobile GitLab creation task has no worktree branch");
     if (!checkout) throw new Error("Mobile GitLab creation task has no live session worktree");
     const actionGit = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
-    actionGit.exec(`git remote set-url origin "${backend.baseUrl}/fork/${GITLAB_PROJECT}.git"`);
-    await apiClient.mockGitLabAddMRs(seedData.workspaceId, `fork/${GITLAB_PROJECT}`, [
+    configureWritableForkRemote(
+      actionGit,
+      backend.tmpDir,
+      `${backend.baseUrl}/fork/${GITLAB_PROJECT}.git`,
+    );
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
       gitLabMR(100, "Mobile runtime-created GitLab MR", {
-        project_path: `fork/${GITLAB_PROJECT}`,
-        url: `${backend.baseUrl}/fork/${GITLAB_PROJECT}/-/merge_requests/100`,
-        web_url: `${backend.baseUrl}/fork/${GITLAB_PROJECT}/-/merge_requests/100`,
+        url: `${backend.baseUrl}/${GITLAB_PROJECT}/-/merge_requests/100`,
+        web_url: `${backend.baseUrl}/${GITLAB_PROJECT}/-/merge_requests/100`,
         head_branch: branch,
         source_project_path: "fork/platform/kandev",
         source_project_id: 202,
@@ -427,7 +430,7 @@ test.describe("Mobile GitLab parity", () => {
     const linkedMR = taskMRs.task_mrs?.[task.id]?.find((mr) => mr.mr_iid === 100);
     expect(linkedMR).toMatchObject({
       host: backend.baseUrl,
-      project_path: `fork/${GITLAB_PROJECT}`,
+      project_path: GITLAB_PROJECT,
       source_host: backend.baseUrl,
       source_project_path: "fork/platform/kandev",
       target_host: backend.baseUrl,

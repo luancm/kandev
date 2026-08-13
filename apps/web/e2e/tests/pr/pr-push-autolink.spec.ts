@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { configureWritableForkRemote, GitHelper, makeGitEnv } from "../../helpers/git-helper";
 
 // GitHub twin of gitlab-mr-push-autolink.spec.ts. Covers push-detection
 // auto-link — the feature that discovers a PR opened OUTSIDE Kandev's own
@@ -31,7 +32,7 @@ test.describe("GitHub PR push-detection auto-link", () => {
     // gitlab-mr-push-autolink.spec.ts configures.
     await apiClient.configureGitLabRepositoryRemote(
       seedData.repositoryId,
-      `${backend.baseUrl}/testorg/testrepo.git`,
+      `${backend.baseUrl}/platform/kandev.git`,
     );
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "github",
@@ -73,7 +74,14 @@ test.describe("GitHub PR push-detection auto-link", () => {
     // detection fires can find it, the common real-world case.
     const sessions = await apiClient.listTaskSessions(task.id);
     const branch = sessions.sessions.find((s) => s.id === task.session_id)?.worktree_branch;
+    const checkout = sessions.sessions.find((s) => s.id === task.session_id)?.worktree_path;
     if (!branch) throw new Error("Could not resolve the session's worktree branch");
+    if (!checkout) throw new Error("Could not resolve the session's live worktree");
+    configureWritableForkRemote(
+      new GitHelper(checkout, makeGitEnv(backend.tmpDir)),
+      backend.tmpDir,
+      "https://github.com/reviewer-fork/testrepo.git",
+    );
 
     const prNumber = 77;
     await apiClient.mockGitHubAddPRs([
@@ -86,7 +94,7 @@ test.describe("GitHub PR push-detection auto-link", () => {
         author_login: "test-user",
         repo_owner: "testorg",
         repo_name: "testrepo",
-        head_repo_owner: "testorg",
+        head_repo_owner: "reviewer-fork",
         head_repo_name: "testrepo",
         head_repo_id: 321,
         head_repo_node_id: "R_writable_testrepo",
@@ -142,7 +150,7 @@ test.describe("GitHub PR push-detection auto-link", () => {
       workspace_id: seedData.workspaceId,
       repository_id: seedData.repositoryId,
       head_host: "github.com",
-      head_owner: "testorg",
+      head_owner: "reviewer-fork",
       head_repo: "testrepo",
       head_repo_id: 321,
       head_repo_node_id: "R_writable_testrepo",

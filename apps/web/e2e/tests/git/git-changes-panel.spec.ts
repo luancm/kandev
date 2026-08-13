@@ -1724,6 +1724,8 @@ test.describe("Git Changes Panel", () => {
     const localHead = git.getCurrentSha();
     const providerBranch = "feature/rewritten-contribution";
     const providerHistory = createRewrittenProviderHistory(git, providerBranch);
+    const initialProviderHead = providerHistory.commits.at(-1)?.sha;
+    const movedProviderHead = providerHistory.commits[0]?.sha;
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -1795,9 +1797,11 @@ test.describe("Git Changes Panel", () => {
         author_login: "remote-contributor",
         repo_owner: "testorg",
         repo_name: "testrepo",
-        head_sha: providerHistory.commits[0]?.sha,
+        head_sha: movedProviderHead,
       },
     ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 901, providerHistory.commits);
+    expect(movedProviderHead).not.toBe(initialProviderHead);
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
@@ -1815,6 +1819,13 @@ test.describe("Git Changes Panel", () => {
       .poll(() =>
         providerSection
           .getByTestId(`commit-row-${providerHistory.commits[0].sha.slice(0, 7)}`)
+          .count(),
+      )
+      .toBe(1);
+    await expect
+      .poll(() =>
+        providerSection
+          .getByTestId(`commit-row-${providerHistory.commits.at(-1)!.sha.slice(0, 7)}`)
           .count(),
       )
       .toBe(1);

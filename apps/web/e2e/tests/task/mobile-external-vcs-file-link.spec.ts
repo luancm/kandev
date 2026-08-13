@@ -227,6 +227,10 @@ test.describe("Mobile external VCS file link", () => {
     await renamedNode.tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toContainText(localRenamed);
+    await expect(viewer.getByRole("link", { name: "Open file in GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/testorg/mobile-external-links/blob/main/mobile-base-old.ts",
+    );
     await testPage.getByRole("button", { name: "Files" }).tap();
     await fileNode.tap();
     await expect(viewer).toBeVisible();
