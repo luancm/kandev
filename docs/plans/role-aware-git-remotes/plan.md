@@ -199,4 +199,4 @@ Task 11 updates `docs/public/git-operations.md`, `docs/public/sessions-and-revie
 
 ## Verification results
 
-Task 00 recorded the upstream merge and post-merge path/ownership audit. Tasks 01 through 05 recorded focused RED/GREEN tests, package tests, lint, and `git diff --check` in their task files; Task 05 noted unrelated filesystem-environment failures in broader task/service tests. Task 06 has no final verification or commit yet. Task 12 remains responsible for the integrated audit after the upstream re-audit and all remaining owners have completed their focused evidence.
+Task 00 recorded the upstream merge and post-merge path/ownership audit. Tasks 01 through 11 recorded their focused implementation, documentation, and parity evidence in their task files. Task 12 recorded the integrated backend focused/race passes, frontend 234-test suite, typecheck, i18n, public-doc validation, ownership/path audit, the web lint warning-budget failure routed to Tasks 07–09, and the Playwright `libnspr4.so` environment blocker routed to Task 10. The package is implementation-complete on this branch; no PR has been created.

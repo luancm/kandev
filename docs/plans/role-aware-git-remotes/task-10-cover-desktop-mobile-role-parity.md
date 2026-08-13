@@ -1,7 +1,7 @@
 ---
 id: "10-cover-desktop-mobile-role-parity"
 title: "Cover desktop and mobile remote-role parity"
-status: pending
+status: completed
 wave: 10
 depends_on: ["08-align-frontend-remote-safety", "09-resolve-external-file-links"]
 plan: "plan.md"

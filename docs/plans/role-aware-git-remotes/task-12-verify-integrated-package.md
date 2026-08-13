@@ -1,7 +1,7 @@
 ---
 id: "12-verify-integrated-package"
 title: "Verify the integrated role-aware package"
-status: pending
+status: completed
 wave: 12
 depends_on: ["11-document-remote-roles"]
 plan: "plan.md"
