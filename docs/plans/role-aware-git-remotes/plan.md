@@ -130,7 +130,13 @@ Wave 12:
 
 - [ ] [Task 12: Verify the integrated package](task-12-verify-integrated-package.md)
 
-Implementation is authorized by the Lunaldinho handoff session. Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
+## Current checkpoint
+
+Tasks 00 through 05 are complete and committed through `1afd8243c`; the Task 06 implementation snapshot is committed as `1cee6ccb4`, while its task file still has pending Results and the task remains open for the required upstream re-audit. Its implementation session is waiting for input. Do not resume or discard the checkpoint until the user explicitly continues the work.
+
+The local `upstream/main` ref is now `fa7d88bee`, beyond the `e014f8072` baseline merged by Task 00. Upstream commit `8ca01e0f7` adds local-first contribution resolution and overlaps the pending agentctl Git/API, contribution-relation, Changes-panel, and desktop/mobile E2E seams. Before Task 06 or any later task resumes, reconcile that upstream drift and rerun the required path/ownership audit; do not merge it over the Task 06 checkpoint blindly.
+
+Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
 
 ## Exact test map
 
@@ -195,4 +201,4 @@ Task 11 updates `docs/public/git-operations.md`, `docs/public/sessions-and-revie
 
 ## Verification results
 
-Pending. Task 12 reports the integrated audit to the primary after all owners have completed and recorded their focused evidence.
+Task 00 recorded the upstream merge and post-merge path/ownership audit. Tasks 01 through 05 recorded focused RED/GREEN tests, package tests, lint, and `git diff --check` in their task files; Task 05 noted unrelated filesystem-environment failures in broader task/service tests. Task 06 has no final verification or commit yet. Task 12 remains responsible for the integrated audit after the upstream re-audit and all remaining owners have completed their focused evidence.
