@@ -77,7 +77,6 @@ export function buildSubmitMessage({
   }
   return finalMessage;
 }
-
 /** Resolves the composer placeholder text for the current agent/document/plan state. */
 export function resolveInputPlaceholder(
   isAgentBusy: boolean,

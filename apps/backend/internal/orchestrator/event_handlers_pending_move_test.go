@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -42,7 +43,7 @@ import (
 //     when the workflow first transitioned to Review) and an "In Review" session
 //     (profile-review, currently RUNNING, primary).
 //   - QA called move_task_kandev mid-turn → handleMoveTask set a PendingMove
-//     pointing at "In Progress" and queued the hand-off prompt.
+//     pointing at "In Progress" and queued the legacy hand-off prompt.
 //   - QA's turn ends → agent.ready fires → handleAgentReady is invoked.
 //
 // Expected outcome:
@@ -304,13 +305,41 @@ func TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask(t *testing.T) {
 		t.Fatalf("session state = %q, want unchanged RUNNING", session.State)
 	}
 
-	// Regression: the workflow-mismatch drop must clean up any hand-off prompt
-	// queued by handleMoveTask before the deferred move was applied. Without
-	// this cleanup, the queued prompt (authored for the foreign-workflow
-	// target step) would still be sitting in the queue and could be
-	// misdelivered to the review session's agent on a future turn.
+	// Regression: the workflow-mismatch drop must clean up the legacy hand-off
+	// prompt queued before EntryOptions was introduced. Without this cleanup,
+	// that prompt (authored for the foreign-workflow target step) would still be
+	// sitting in the queue and could be misdelivered on a future turn.
 	if status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID); status.Count != 0 {
 		t.Fatalf("queued message count = %d, want 0 after workflow-mismatch drop", status.Count)
+	}
+}
+
+func TestPendingMoveWithEntryOptionsPreservesUnrelatedQueuedMessageOnFailure(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps["foreign-step"] = &wfmodels.WorkflowStep{
+		ID: "foreign-step", WorkflowID: "wf-other", Name: "Foreign", Position: 1,
+	}
+	if _, err := sc.svc.messageQueue.CancelAll(sc.ctx, sc.reviewSessionID); err != nil {
+		t.Fatalf("clear seeded queue: %v", err)
+	}
+	if _, err := sc.svc.messageQueue.QueueMessage(sc.ctx, sc.reviewSessionID, "task-1", "user follow-up", "", messagequeue.QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue unrelated message: %v", err)
+	}
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "foreign-step",
+		EntryOptions:   &workflowmove.EntryOptions{Instructions: "handoff"},
+	})
+
+	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
+	if status.Count != 1 || status.Entries[0].Content != "user follow-up" {
+		t.Fatalf("queue after failed move = %+v, want unrelated message preserved", status.Entries)
 	}
 }
 
@@ -345,7 +374,7 @@ type pendingMoveScenario struct {
 //   - Task currently at "In Review", with two sessions: an Impl session that
 //     was completed earlier (revivable — has executors_running), and a Review
 //     session that's currently RUNNING and primary.
-//   - PendingMove + hand-off prompt seeded as if the QA agent just called
+//   - PendingMove + legacy hand-off prompt seeded as if the QA agent just called
 //     move_task_kandev mid-turn.
 //   - Mock LaunchAgent that fires the boot signal asynchronously so the
 //     resume path can complete in tests without a real agent process.

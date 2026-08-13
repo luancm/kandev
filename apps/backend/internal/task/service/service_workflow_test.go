@@ -10,8 +10,25 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type recordingMoveEntryStore struct {
+	entries []*workflowmove.Entry
+}
+
+func (s *recordingMoveEntryStore) Save(_ context.Context, entry *workflowmove.Entry) error {
+	copy := *entry
+	s.entries = append(s.entries, &copy)
+	return nil
+}
+
+func (*recordingMoveEntryStore) Load(context.Context, string) (*workflowmove.Entry, error) {
+	return nil, nil
+}
+
+func (*recordingMoveEntryStore) Delete(context.Context, string) error { return nil }
 
 type fakeWorkflowStepGetter struct {
 	steps   map[string]*wfmodels.WorkflowStep
@@ -405,6 +422,118 @@ func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
 	}
 }
 
+func TestService_MoveTaskWithEntryOptionsPersistsPrivateEntryAndPublishesMoveID(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-entry-options", "wf-source", "step-source", nil)
+	createMoveSession(t, ctx, repo, "session-entry-options", "task-entry-options", models.TaskSessionStateWaitingForInput, models.ReviewStatusNone)
+	store := &recordingMoveEntryStore{}
+	svc.SetMoveEntryStore(store)
+	eventBus.ClearEvents()
+
+	moved, err := svc.MoveTaskWithOptions(ctx, "task-entry-options", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		EntryOptions: &workflowmove.EntryOptions{
+			ResetContext:   true,
+			Instructions:   "Create the PR ready for review.",
+			AgentProfileID: "profile-qa",
+			Model:          "gpt-5.6-sol",
+		},
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if moved.MoveID == "" {
+		t.Fatal("MoveID is empty")
+	}
+	if len(store.entries) != 1 || store.entries[0].ID != moved.MoveID || store.entries[0].TaskID != "task-entry-options" {
+		t.Fatalf("saved entries = %+v, want one entry for move %q", store.entries, moved.MoveID)
+	}
+	if store.entries[0].Options.Instructions != "Create the PR ready for review." {
+		t.Fatalf("saved options = %+v", store.entries[0].Options)
+	}
+
+	event := findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskMoved)
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map[string]interface{}", event.Data)
+	}
+	if got := data["move_id"]; got != moved.MoveID {
+		t.Fatalf("event move_id = %v, want %q", got, moved.MoveID)
+	}
+	if _, exposed := data["entry_options"]; exposed {
+		t.Fatal("task.moved event exposed private entry options")
+	}
+}
+
+func TestService_MoveTaskWithEntryOptionsRejectsSessionlessNonAutoStartTarget(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-entry-without-target", "wf-source", "step-source", nil)
+	svc.SetMoveEntryStore(&recordingMoveEntryStore{})
+
+	_, err := svc.MoveTaskWithOptions(ctx, "task-entry-without-target", "wf-source", "step-review-target", 0, MoveTaskOptions{
+		EntryOptions: &workflowmove.EntryOptions{Instructions: "Send this to a target session."},
+	})
+	if !errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
+		t.Fatalf("error = %v, want ErrEntryTargetUnavailable", err)
+	}
+	task, getErr := repo.GetTask(ctx, "task-entry-without-target")
+	if getErr != nil {
+		t.Fatalf("GetTask: %v", getErr)
+	}
+	if task.WorkflowStepID != "step-source" {
+		t.Fatalf("task moved despite unavailable entry target: %s", task.WorkflowStepID)
+	}
+}
+
+func TestService_MoveTaskWithEntryOptionsPreflightFailureLeavesTaskUnchanged(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "profile unavailable", err: workflowmove.ErrProfileUnavailable},
+		{name: "model unavailable", err: workflowmove.ErrModelUnavailable},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			seedMoveWorkflows(t, ctx, repo)
+			seedMoveSteps(svc)
+			taskID := "task-entry-preflight-" + tc.name
+			createMoveTask(t, ctx, repo, taskID, "wf-source", "step-source", nil)
+			createMoveSession(t, ctx, repo, "session-"+taskID, taskID, models.TaskSessionStateWaitingForInput, models.ReviewStatusNone)
+			store := &recordingMoveEntryStore{}
+			svc.SetMoveEntryStore(store)
+			svc.SetMoveEntryPreflightValidator(func(context.Context, *models.Task, *wfmodels.WorkflowStep, *workflowmove.EntryOptions) error {
+				return tc.err
+			})
+
+			_, err := svc.MoveTaskWithOptions(ctx, taskID, "wf-source", "step-review-target", 0, MoveTaskOptions{
+				EntryOptions: &workflowmove.EntryOptions{Instructions: "must not commit"},
+			})
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("error = %v, want %v", err, tc.err)
+			}
+			task, getErr := repo.GetTask(ctx, taskID)
+			if getErr != nil {
+				t.Fatalf("GetTask: %v", getErr)
+			}
+			if task.WorkflowStepID != "step-source" || task.WorkflowID != "wf-source" {
+				t.Fatalf("task moved despite preflight failure: workflow=%q step=%q", task.WorkflowID, task.WorkflowStepID)
+			}
+			if len(store.entries) != 0 {
+				t.Fatalf("private entries = %+v, want none after preflight failure", store.entries)
+			}
+		})
+	}
+}
+
 func TestService_MoveTaskQueuesFullWIPLimitedTarget(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -451,6 +580,46 @@ func TestService_MoveTaskQueuesFullWIPLimitedTarget(t *testing.T) {
 	}
 	if data["queued_at"] == nil {
 		t.Fatal("task.moved event omitted queued_at")
+	}
+}
+
+func TestService_MoveTaskWithEntryOptionsQueuesFullTarget(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-full":   {ID: "step-full", WorkflowID: "wf-source", Name: "Full", Position: 1, WIPLimit: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-entry-queued", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-entry-occupant", "wf-source", "step-full", nil)
+	createMoveSession(t, ctx, repo, "session-entry-queued", "task-entry-queued", models.TaskSessionStateWaitingForInput, models.ReviewStatusNone)
+	store := &recordingMoveEntryStore{}
+	svc.SetMoveEntryStore(store)
+
+	options := &workflowmove.EntryOptions{
+		ResetContext:   true,
+		Instructions:   "Run the focused workflow tests before handoff.",
+		AgentProfileID: "profile-qa",
+		Model:          "gpt-5.6-sol",
+	}
+	moved, err := svc.MoveTaskWithOptions(ctx, "task-entry-queued", "wf-source", "step-full", 0, MoveTaskOptions{
+		EntryOptions: options,
+	})
+	if err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+	if moved.Task.WorkflowStepID != "step-full" || moved.Task.WIPAdmitted {
+		t.Fatalf("moved task placement = step=%q admitted=%v, want step-full/queued", moved.Task.WorkflowStepID, moved.Task.WIPAdmitted)
+	}
+	if moved.Task.QueuedForStepID != "step-full" || moved.Task.QueuedAt == nil {
+		t.Fatalf("moved task queue metadata = destination=%q queued_at=%v, want destination queue", moved.Task.QueuedForStepID, moved.Task.QueuedAt)
+	}
+	if len(store.entries) != 1 || store.entries[0].ID != moved.MoveID {
+		t.Fatalf("saved entries = %+v, want one entry for move %q", store.entries, moved.MoveID)
+	}
+	if store.entries[0].Options != *options {
+		t.Fatalf("saved options = %+v, want %+v", store.entries[0].Options, *options)
 	}
 }
 

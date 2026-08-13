@@ -42,6 +42,7 @@ import (
 	utilitymodels "github.com/kandev/kandev/internal/utility/models"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
@@ -103,6 +104,11 @@ func provideOrchestrator(
 	autoMergeEnabled := queueSettings.AutoMergeEnabled
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	msgQueue.SetMergeEnabled(mergeEnabled)
+	moveEntryStore, err := workflowmove.NewSQLiteEntryStore(pool.Writer(), pool.Reader())
+	if err != nil {
+		return nil, nil, fmt.Errorf("init workflow move entry store: %w", err)
+	}
+	taskSvc.SetMoveEntryStore(moveEntryStore)
 	msgQueue.SetAutoMergeEnabled(autoMergeEnabled)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession),
@@ -122,6 +128,8 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetMoveEntryStore(moveEntryStore)
+	taskSvc.SetMoveEntryPreflightValidator(orchestratorSvc.ValidateWorkflowMoveEntryOptions)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -876,6 +877,25 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	got, err = repo.TakePendingMove(ctx, "s1")
 	if err != nil || got != nil {
 		t.Errorf("expected empty after take, got %+v err=%v", got, err)
+	}
+}
+
+func TestSQLiteRepository_PendingMoveRoundTripsEntryOptions(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	move := &PendingMove{
+		TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-B", Position: 0, MoveID: "move-1",
+		EntryOptions: &workflowmove.EntryOptions{ResetContext: true, Instructions: "ready for review", AgentProfileID: "qa", Model: "sol"},
+	}
+	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
+		t.Fatalf("set pending: %v", err)
+	}
+	got, err := repo.TakePendingMove(ctx, "s1")
+	if err != nil {
+		t.Fatalf("take pending: %v", err)
+	}
+	if got == nil || got.MoveID != move.MoveID || got.EntryOptions == nil || *got.EntryOptions != *move.EntryOptions {
+		t.Fatalf("entry options = %+v, want %+v", got, move.EntryOptions)
 	}
 }
 

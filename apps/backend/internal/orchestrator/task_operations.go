@@ -31,6 +31,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -807,6 +808,14 @@ type startTaskOptions struct {
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// EntryOptions carries one-shot values accepted by a workflow move. The
+	// private payload is consumed only for this launch and never persisted as
+	// task metadata.
+	EntryOptions *workflowmove.EntryOptions
+}
+
+func (s *Service) startTaskWithEntryOptions(ctx context.Context, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, options *workflowmove.EntryOptions) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{EntryOptions: options})
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -909,7 +918,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// The frontend may pass the workspace default profile, but the step may
 	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
 	callerProfileID := agentProfileID
-	if opts.ProfileExplicit && agentProfileID != "" {
+	if opts.EntryOptions != nil && opts.EntryOptions.AgentProfileID != "" {
+		agentProfileID = opts.EntryOptions.AgentProfileID
+	} else if opts.ProfileExplicit && agentProfileID != "" {
 		s.logger.Info("manual agent profile selection takes precedence over workflow step",
 			zap.String("task_id", taskID),
 			zap.String("agent_profile_id", agentProfileID))
@@ -963,6 +974,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// selected profile and before the first prompt, preserving the original
 	// session tab.
 	s.applyWorkflowSessionConfigBeforeLaunchForStep(ctx, taskID, sessionID, workflowSessionConfigStepID)
+	if opts.EntryOptions != nil && opts.EntryOptions.Model != "" {
+		if err := s.persistWorkflowSessionConfigOverride(ctx, sessionID, sessionConfigurationTarget{model: opts.EntryOptions.Model}); err != nil {
+			return nil, fmt.Errorf("persist one-shot workflow move model: %w", err)
+		}
+	}
 	// Surface the newly created session before LaunchPreparedSession performs
 	// potentially slow environment setup (for example, a Docker health check).
 	// The frontend adopts this CREATED session and can render
@@ -999,6 +1015,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
 		planMode, task.IsEphemeral, isPassthrough,
 	)
+	effectivePrompt = appendWorkflowMoveOptions(effectivePrompt, opts.EntryOptions)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -1536,9 +1553,26 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 // The end marker is required so multi-paragraph workflow prompts do not break
 // the frontend split (a first-blank-line heuristic would cut mid-body).
 const (
-	workflowInstructionsHeading = "## Workflow instructions"
-	workflowInstructionsEnd     = "<!-- /workflow-instructions -->"
+	workflowInstructionsHeading  = "## Workflow instructions"
+	workflowInstructionsEnd      = "<!-- /workflow-instructions -->"
+	moveEntryInstructionsHeading = "## One-time workflow move instructions"
+	moveEntryInstructionsEnd     = "<!-- /one-time-workflow-move-instructions -->"
 )
+
+func appendWorkflowMoveInstructions(prompt, instructions string) string {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return strings.TrimSpace(prompt)
+	}
+	return strings.TrimSpace(prompt) + "\n\n" + moveEntryInstructionsHeading + "\n\n" + instructions + "\n\n" + moveEntryInstructionsEnd
+}
+
+func appendWorkflowMoveOptions(prompt string, options *workflowmove.EntryOptions) string {
+	if options == nil {
+		return prompt
+	}
+	return appendWorkflowMoveInstructions(prompt, options.Instructions)
+}
 
 func (s *Service) buildWorkflowPromptWithContext(
 	ctx context.Context,

@@ -1017,12 +1017,13 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription("Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately."),
+			mcp.WithDescription("Move a task to a different workflow step. Optional entry_options apply once when the task enters the destination. Mid-turn moves are deferred to turn-end automatically; idle moves apply immediately. The legacy prompt field is accepted as an alias for entry_options.instructions."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
-			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at the new step. Mid-turn moves are always deferred; include a prompt when the next agent needs context (e.g. QA → review). Omit for self-moves like Work → Done.")),
+			mcp.WithString("prompt", mcp.Description("Legacy alias for entry_options.instructions.")),
+			mcp.WithObject("entry_options", mcp.Description("One-shot destination-entry overrides: reset_context (boolean), instructions (string), agent_profile_id (string), and model (string).")),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)

@@ -1008,7 +1008,12 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 		delete(r.nextPosition, oldSessionID)
 	}
 	if move, ok := r.pendingMoves[oldSessionID]; ok {
-		r.pendingMoves[newSessionID] = move
+		clone := *move
+		if move.EntryOptions != nil {
+			options := *move.EntryOptions
+			clone.EntryOptions = &options
+		}
+		r.pendingMoves[newSessionID] = &clone
 		delete(r.pendingMoves, oldSessionID)
 	}
 	r.autoRun[newSessionID] = destinationAutoRun
@@ -1042,6 +1047,10 @@ func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, e
 		return nil
 	}
 	clone := *pendingMove
+	if pendingMove.EntryOptions != nil {
+		options := *pendingMove.EntryOptions
+		clone.EntryOptions = &options
+	}
 	r.pendingMoves[sessionID] = &clone
 	return nil
 }
@@ -1054,6 +1063,10 @@ func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, m
 		move.QueuedAt = time.Now().UTC()
 	}
 	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
 	r.pendingMoves[sessionID] = &clone
 	return nil
 }
@@ -1067,6 +1080,10 @@ func (r *memoryRepository) GetPendingMove(_ context.Context, sessionID string) (
 		return nil, nil
 	}
 	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
 	return &clone, nil
 }
 
@@ -1079,5 +1096,10 @@ func (r *memoryRepository) TakePendingMove(_ context.Context, sessionID string) 
 		return nil, nil
 	}
 	delete(r.pendingMoves, sessionID)
-	return move, nil
+	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
+	return &clone, nil
 }

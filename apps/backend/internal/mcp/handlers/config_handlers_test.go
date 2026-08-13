@@ -819,6 +819,11 @@ func TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove(t *testing.T) {
 	resp, err := h.handleMoveTask(ctx, msg)
 	require.NoError(t, err)
 	assert.NotEqual(t, ws.MessageTypeError, resp.Type, "active-session move without prompt must not fail")
+	var response dto.MoveTaskResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &response))
+	assert.Equal(t, "deferred", response.Disposition)
+	require.NotNil(t, response.Task)
+	assert.Equal(t, "step-work", response.Task.WorkflowStepID)
 
 	require.Len(t, queue.pendingMoves, 1)
 	assert.Equal(t, "step-done", queue.pendingMoves[0].WorkflowStepID)

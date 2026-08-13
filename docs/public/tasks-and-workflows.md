@@ -27,6 +27,14 @@ A task is the work to deliver. A workflow is the sequence of steps it follows. U
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
+## Move a task with one-time entry options
+
+The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
+
+Available options are **Reset context**, **Instructions**, **Agent profile**, and **Model**. Instructions are appended after the destination step prompt; an explicit profile is used for this entry, and an explicit model is applied to the resulting session. Reset context is additive, so it cannot disable a reset already required by the destination step. On touch devices the same controls open in a bottom Drawer.
+
+Moves keep the existing reachability, authorization, WIP, archive, workspace, and active-session rules. An entry override requires an active target session or a destination step that auto-starts an agent. Pull-request draft versus ready-for-review behavior is not part of these move options; configure that in the PR step's normal automation.
+
 ## Prepare a workspace
 
 A new workspace created from **Settings → Workspaces** automatically receives a **Kanban** workflow

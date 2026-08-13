@@ -706,7 +706,7 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process
 // on_exit/on_enter actions for the new workflow step.
-func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {
+func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string) {
 	if s.eventBus == nil {
 		return
 	}
@@ -733,6 +733,9 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
 	} else {
 		data["queued_at"] = nil
+	}
+	if moveID != "" {
+		data["move_id"] = moveID
 	}
 	event := bus.NewEvent(events.TaskMoved, "task-service", data)
 	if err := s.eventBus.Publish(ctx, events.TaskMoved, event); err != nil {

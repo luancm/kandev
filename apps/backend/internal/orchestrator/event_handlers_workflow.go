@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -24,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -41,6 +43,40 @@ type taskMetadataKeySetter interface {
 
 type lifecycleTaskMetadataLister interface {
 	ListTasksWithMetadataKey(context.Context, string) ([]*models.Task, error)
+}
+
+type workflowMoveEntryContextKey struct{}
+type workflowMoveEntryLockHeldContextKey struct{}
+
+func withWorkflowMoveEntryID(ctx context.Context, moveID string) context.Context {
+	if moveID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowMoveEntryContextKey{}, moveID)
+}
+
+func workflowMoveEntryIDFromContext(ctx context.Context) string {
+	moveID, _ := ctx.Value(workflowMoveEntryContextKey{}).(string)
+	return moveID
+}
+
+func withWorkflowMoveEntryLockHeld(ctx context.Context) context.Context {
+	return context.WithValue(ctx, workflowMoveEntryLockHeldContextKey{}, true)
+}
+
+func workflowMoveEntryLockHeld(ctx context.Context) bool {
+	held, _ := ctx.Value(workflowMoveEntryLockHeldContextKey{}).(bool)
+	return held
+}
+
+func (s *Service) lockWorkflowMoveEntry(moveID string) func() {
+	if moveID == "" {
+		return func() {}
+	}
+	lockValue, _ := s.workflowMoveEntryLocks.LoadOrStore(moveID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
 }
 
 type taskMovedLifecyclePrerequisites struct {
@@ -584,6 +620,25 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 	if data.QueuePromotion && !s.claimTaskEventMetadata(ctx, task, models.MetaKeyQueuePromotionPending) {
 		return
 	}
+	entryOptions := s.loadMoveEntryOptions(ctx, data.MoveID)
+	ctx = withWorkflowMoveEntryID(ctx, data.MoveID)
+	if data.MoveID != "" && entryOptions == nil {
+		// An optioned move must never fall through to ordinary destination
+		// entry when its private payload is temporarily unavailable. Keep the
+		// durable marker for startup/retry recovery instead.
+		s.logger.Warn("task.moved: private workflow move entry unavailable",
+			zap.String("task_id", data.TaskID), zap.String("move_id", data.MoveID))
+		return
+	}
+	// A human move is committed immediately, but entry effects must not race
+	// the source turn. Keep the private payload and durable pending marker in
+	// place until the matching agent.ready path resumes the transition.
+	if entryOptions != nil && prerequisites != nil && prerequisites.session != nil &&
+		(prerequisites.session.State == models.TaskSessionStateRunning || prerequisites.session.State == models.TaskSessionStateStarting) {
+		if _, active := s.activeTurns.Load(prerequisites.session.ID); active {
+			return
+		}
+	}
 
 	if !queued {
 		s.processParentChildrenCompletedForTerminalStepMove(ctx, data.TaskID, data.ToStepID)
@@ -608,18 +663,18 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 			return
 		}
 		if prerequisites != nil && prerequisites.targetStep != nil {
-			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion)
+			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion, entryOptions)
 		} else {
-			s.handleTaskMovedNoSession(ctx, data)
+			s.handleTaskMovedNoSessionWithOptions(ctx, data, entryOptions)
 		}
 		return
 	}
 
 	if prerequisites != nil && prerequisites.session != nil {
-		s.handleTaskMovedWithLoadedSession(ctx, data, prerequisites.session, prerequisites.fromStep, prerequisites.targetStep, manualBarrier)
+		s.handleTaskMovedWithLoadedSession(ctx, data, prerequisites.session, prerequisites.fromStep, prerequisites.targetStep, manualBarrier, entryOptions)
 		return
 	}
-	s.handleTaskMovedWithBarrier(ctx, data, manualBarrier)
+	s.handleTaskMovedWithBarrier(ctx, data, manualBarrier, entryOptions)
 }
 
 func (s *Service) loadTaskMovedLifecyclePrerequisites(
@@ -628,7 +683,7 @@ func (s *Service) loadTaskMovedLifecyclePrerequisites(
 	queued bool,
 	manualBarrier bool,
 ) (*taskMovedLifecyclePrerequisites, bool) {
-	if !queued && !data.QueuePromotion && !manualBarrier {
+	if !queued && !data.QueuePromotion && !manualBarrier && data.MoveID == "" {
 		return nil, true
 	}
 	prerequisites := &taskMovedLifecyclePrerequisites{}
@@ -689,14 +744,169 @@ func (s *Service) loadTaskMovedSessionPrerequisites(
 // handleTaskMovedNoSession handles the case where a task is moved but has no session.
 // If the target step has auto_start_agent, it creates a session and starts the agent
 // using agent/executor profile IDs from the task's metadata.
+func (s *Service) loadMoveEntryOptions(ctx context.Context, moveID string) *workflowmove.EntryOptions {
+	if moveID == "" || s.moveEntryStore == nil {
+		return nil
+	}
+	entry, err := s.moveEntryStore.Load(ctx, moveID)
+	if err != nil {
+		s.logger.Warn("failed to load workflow move entry", zap.String("move_id", moveID), zap.Error(err))
+		return nil
+	}
+	if entry == nil {
+		s.logger.Warn("workflow move entry missing", zap.String("move_id", moveID))
+		return nil
+	}
+	options := entry.Options
+	return &options
+}
+
+func (s *Service) consumeMoveEntry(ctx context.Context, moveID string) {
+	if moveID == "" || s.moveEntryStore == nil {
+		return
+	}
+	entry, loadErr := s.moveEntryStore.Load(ctx, moveID)
+	if loadErr != nil {
+		s.logger.Warn("failed to load consumed workflow move entry", zap.String("move_id", moveID), zap.Error(loadErr))
+		return
+	}
+	if err := s.moveEntryStore.Delete(ctx, moveID); err != nil && !errors.Is(err, workflowmove.ErrEntryNotFound) {
+		s.logger.Warn("failed to delete consumed workflow move entry", zap.String("move_id", moveID), zap.Error(err))
+		return
+	}
+	if entry != nil {
+		s.clearWorkflowMovePending(ctx, entry.TaskID)
+	}
+}
+
+func (s *Service) clearWorkflowMovePending(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	remover, ok := s.repo.(taskMetadataKeyRemover)
+	if !ok {
+		return
+	}
+	if _, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowMovePending); err != nil {
+		s.logger.Warn("failed to clear workflow move pending marker", zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+func queuedMoveEntryID(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	for _, key := range []string{models.MetaKeyWorkflowMovePending, models.MetaKeyQueuePromotionPending, models.MetaKeyQueuedMoveExitCompleted, models.MetaKeyQueuedMoveExitPending} {
+		value, ok := task.Metadata[key]
+		if !ok {
+			continue
+		}
+		if descriptor, ok := value.(map[string]interface{}); ok {
+			if moveID, _ := descriptor["move_id"].(string); moveID != "" {
+				return moveID
+			}
+		}
+	}
+	return ""
+}
+
+func workflowMoveSourceStep(task *models.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	value, ok := task.Metadata[models.MetaKeyWorkflowMovePending]
+	if !ok {
+		return ""
+	}
+	descriptor, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	source, _ := descriptor["from_step_id"].(string)
+	return source
+}
+
+// resumeCommittedWorkflowMoveAfterTurn resumes a human move whose task write
+// committed while the source session still owned a turn. It returns true only
+// when a valid private entry is found and the regular move lifecycle has been
+// scheduled, allowing handleAgentReady to skip on_turn_complete evaluation for
+// the already-requested transition.
+func (s *Service) resumeCommittedWorkflowMoveAfterTurn(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+) bool {
+	if session == nil || taskID == "" || sessionID == "" {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return false
+	}
+	moveID := queuedMoveEntryID(task)
+	if moveID == "" {
+		return false
+	}
+	options := s.loadMoveEntryOptions(ctx, moveID)
+	if options == nil {
+		return false
+	}
+	fromStepID := workflowMoveSourceStep(task)
+	if fromStepID == "" || s.workflowStepGetter == nil {
+		return false
+	}
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, fromStepID)
+	if err != nil || fromStep == nil {
+		s.logger.Warn("workflow move recovery: failed to load source step",
+			zap.String("task_id", taskID), zap.String("step_id", fromStepID), zap.Error(err))
+		return false
+	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || targetStep == nil {
+		s.logger.Warn("workflow move recovery: failed to load target step",
+			zap.String("task_id", taskID), zap.String("step_id", task.WorkflowStepID), zap.Error(err))
+		return false
+	}
+
+	// completeTurnForSession has closed the source turn. Mark the session idle
+	// before launching the entry sequence so reset/configuration cannot observe
+	// the stale RUNNING value held by the ready event's preloaded pointer.
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+	moveCtx := withWorkflowMoveEntryID(context.WithoutCancel(ctx), moveID)
+	if task.QueuedForStepID != "" {
+		// A queued optioned move still runs the source exit only after the
+		// exact source turn ends. Destination entry remains deferred until WIP
+		// promotion, but the durable source-exit barrier must complete now.
+		go s.processQueuedMoveExit(moveCtx, taskID, session, fromStep, fromStepID)
+		return true
+	}
+	go s.processStepExitAndEnterWithSteps(
+		moveCtx, taskID, session, fromStep, targetStep,
+		fromStepID, targetStep.ID, task.Description, false, options,
+	)
+	return true
+}
+
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
-	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved")
+	s.handleTaskMovedNoSessionWithOptions(ctx, data, nil)
+}
+
+func (s *Service) handleTaskMovedNoSessionWithOptions(ctx context.Context, data watcher.TaskMovedEventData, options *workflowmove.EntryOptions) {
+	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved", options)
 }
 
 func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.TaskEventData) {
 	task, err := s.repo.GetTask(ctx, data.TaskID)
 	if err != nil {
 		s.logger.Warn("task.queue_promoted: failed to load task", zap.String("task_id", data.TaskID), zap.Error(err))
+		return
+	}
+	moveID := queuedMoveEntryID(task)
+	entryOptions := s.loadMoveEntryOptions(ctx, moveID)
+	ctx = withWorkflowMoveEntryID(ctx, moveID)
+	if moveID != "" && entryOptions == nil {
+		s.logger.Warn("task.queue_promoted: private workflow move entry unavailable",
+			zap.String("task_id", data.TaskID), zap.String("move_id", moveID))
 		return
 	}
 	if task.QueuedForStepID != "" || !task.WIPAdmitted {
@@ -734,7 +944,7 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 	s.processParentChildrenCompletedForTerminalStepMove(ctx, task.ID, targetStep.ID)
 	if session != nil {
 		go func() {
-			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)); err != nil {
+			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, targetStep, task.Description, targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), entryOptions); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, "task.queue_promoted")
 				return
 			}
@@ -744,7 +954,7 @@ func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.Task
 		}()
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true)
+	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true, entryOptions)
 }
 
 func (s *Service) claimTaskEventMetadata(ctx context.Context, task *models.Task, key string) bool {
@@ -801,6 +1011,12 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list queue promotion tokens for recovery", zap.Error(err))
 		return
 	}
+	workflowMoves, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyWorkflowMovePending)
+	if err != nil {
+		s.logger.Warn("failed to list workflow move entry tokens for recovery", zap.Error(err))
+		return
+	}
+	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(workflowMoves))
 	manualPending, err := lister.ListTasksWithMetadataKey(ctx, models.MetaKeyManualMoveLifecyclePending)
 	if err != nil {
 		s.logger.Warn("failed to list manual move lifecycle tokens for recovery", zap.Error(err))
@@ -811,7 +1027,16 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 		s.logger.Warn("failed to list completed manual move lifecycle tokens for recovery", zap.Error(err))
 		return
 	}
-	jobs := make(map[string]struct{}, len(pending)+len(promotions)+len(manualPending)+len(manualCompleted))
+	for _, task := range manualPending {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
+	for _, task := range manualCompleted {
+		if task != nil {
+			jobs[task.ID] = struct{}{}
+		}
+	}
 	for _, task := range pending {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
@@ -822,12 +1047,7 @@ func (s *Service) reconcileTaskLifecycleTokens(ctx context.Context) {
 			jobs[task.ID] = struct{}{}
 		}
 	}
-	for _, task := range manualPending {
-		if task != nil {
-			jobs[task.ID] = struct{}{}
-		}
-	}
-	for _, task := range manualCompleted {
+	for _, task := range workflowMoves {
 		if task != nil {
 			jobs[task.ID] = struct{}{}
 		}
@@ -901,16 +1121,79 @@ func (s *Service) recoverTaskLifecycleAttempt(ctx context.Context, taskID string
 	if _, pending := task.Metadata[models.MetaKeyQueuePromotionPending]; pending {
 		s.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: taskID})
 	}
+	if _, pending := task.Metadata[models.MetaKeyWorkflowMovePending]; pending && task.QueuedForStepID == "" {
+		s.recoverWorkflowMoveEntry(ctx, task)
+	}
 	latest, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || latest == nil {
 		return false
 	}
-	return queuedMoveExitPending(latest) || manualMoveLifecyclePending(latest) ||
-		manualMoveLifecycleCompleted(latest) || hasQueuePromotionPending(latest)
+	return queuedMoveExitPending(latest) || hasQueuePromotionPending(latest) || workflowMoveEntryPending(latest) ||
+		manualMoveLifecyclePending(latest) || manualMoveLifecycleCompleted(latest)
+}
+
+func workflowMoveEntryPending(task *models.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	_, pending := task.Metadata[models.MetaKeyWorkflowMovePending]
+	return pending
+}
+
+func (s *Service) recoverWorkflowMoveEntry(ctx context.Context, task *models.Task) {
+	if task == nil || task.QueuedForStepID != "" {
+		return
+	}
+	moveID := queuedMoveEntryID(task)
+	if moveID == "" {
+		return
+	}
+	options := s.loadMoveEntryOptions(ctx, moveID)
+	if options == nil || s.workflowStepGetter == nil {
+		return
+	}
+	targetStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || targetStep == nil {
+		return
+	}
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if err != nil {
+		return
+	}
+	if session == nil {
+		// A session-less target can still recover through the same auto-start
+		// path used by task.moved. The call is asynchronous and consumes the
+		// private payload only after the launch accepts it.
+		moveCtx := withWorkflowMoveEntryID(context.WithoutCancel(ctx), moveID)
+		s.autoStartTaskForLoadedStep(moveCtx, task, targetStep, "workflow_move_recovery", false, options)
+		return
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		// The ready handler owns the exact-turn hand-off. Do not reset or switch
+		// a live source session from startup recovery.
+		return
+	}
+	fromStepID := workflowMoveSourceStep(task)
+	if fromStepID == "" {
+		return
+	}
+	fromStep, err := s.workflowStepGetter.GetStep(ctx, fromStepID)
+	if err != nil || fromStep == nil {
+		return
+	}
+	moveCtx := withWorkflowMoveEntryID(context.WithoutCancel(ctx), moveID)
+	s.processStepExitAndEnterWithSteps(moveCtx, task.ID, session, fromStep, targetStep, fromStepID, targetStep.ID, task.Description, false, options)
 }
 
 func (s *Service) recoverQueuedMoveExit(ctx context.Context, task *models.Task) bool {
 	sourceStepID := queuedMoveExitSourceStep(task)
+	if sourceStepID == "" {
+		// Deferred optioned moves bind their source in the private workflow
+		// marker before the transition. Older queued-move rows may still carry
+		// only a boolean queued-exit marker, so use that durable provenance for
+		// restart recovery instead of abandoning the source-exit barrier.
+		sourceStepID = workflowMoveSourceStep(task)
+	}
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
 	if sourceStepID == "" || err != nil || session == nil || s.workflowStepGetter == nil {
 		return false
@@ -953,11 +1236,24 @@ func (s *Service) recoverManualMoveLifecycle(ctx context.Context, task *models.T
 	if err != nil || targetStep == nil {
 		return false
 	}
+	moveID := queuedMoveEntryID(task)
+	var entryOptions *workflowmove.EntryOptions
+	if moveID != "" {
+		entryOptions = s.loadMoveEntryOptions(ctx, moveID)
+		if entryOptions == nil {
+			return false
+		}
+	}
 	// Startup recovery is already bounded by the caller's worker pool. Run the
 	// lifecycle directly so the next attempt observes durable completion.
+	moveCtx := context.WithoutCancel(ctx)
+	if moveID != "" {
+		moveCtx = withWorkflowMoveEntryID(moveCtx, moveID)
+	}
 	s.processManualMoveLifecycleWithFeederBarrier(
-		ctx, task.ID, session, fromStep, targetStep,
+		moveCtx, task.ID, session, fromStep, targetStep,
 		sourceStepID, task.WorkflowStepID, task.Description,
+		entryOptions,
 	)
 	return true
 }
@@ -1024,7 +1320,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 	return nil
 }
 
-func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string) {
+func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string, entryOptions ...*workflowmove.EntryOptions) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn(eventName+": failed to load task for auto-start",
@@ -1054,12 +1350,16 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.Error(err))
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false)
+	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, entryOptions...)
 }
 
-func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool) {
+func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, entryOptions ...*workflowmove.EntryOptions) {
 	if task == nil || task.QueuedForStepID != "" || step == nil {
 		return
+	}
+	var moveOptions *workflowmove.EntryOptions
+	if len(entryOptions) > 0 {
+		moveOptions = entryOptions[0]
 	}
 	if s.launchDeferredTask(ctx, task, eventName) {
 		return
@@ -1073,6 +1373,9 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 
 	workflowAgentProfileID := s.resolveStepAgentProfile(ctx, step)
 	agentProfileID := workflowAgentProfileID
+	if moveOptions != nil && moveOptions.AgentProfileID != "" {
+		agentProfileID = moveOptions.AgentProfileID
+	}
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
 	}
@@ -1087,10 +1390,19 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
 		zap.Bool("plan_mode", planMode))
+	moveID := workflowMoveEntryIDFromContext(ctx)
 
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
+		releaseMoveLock := s.lockWorkflowMoveEntry(moveID)
+		defer releaseMoveLock()
+		if moveID != "" {
+			moveOptions = s.loadMoveEntryOptions(asyncCtx, moveID)
+			if moveOptions == nil {
+				return
+			}
+		}
 
 		// When the task has the permanent auto-start guard marker, it means
 		// both this promotion path and the watcher's synchronous path (autoStartReviewTask)
@@ -1106,10 +1418,13 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 
 		startAgentProfileID := agentProfileID
-		if workflowAgentProfileID != "" {
+		if moveOptions != nil && moveOptions.AgentProfileID != "" {
+			startAgentProfileID = moveOptions.AgentProfileID
+		}
+		if workflowAgentProfileID != "" && (moveOptions == nil || moveOptions.AgentProfileID == "") {
 			startAgentProfileID = ""
 		}
-		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, step.ID, planMode, true, nil)
+		_, err := s.startTaskWithEntryOptions(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, step.ID, planMode, true, nil, moveOptions)
 		if err != nil {
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
@@ -1118,8 +1433,14 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(asyncCtx, task.ID, models.MetaKeyQueuePromotionPending, eventName)
 			}
+			return
 		}
+		s.consumeMoveEntry(asyncCtx, workflowMoveEntryIDFromContext(asyncCtx))
 	}()
+}
+
+func (s *Service) autoStartTaskForStepWithOptions(ctx context.Context, taskID, stepID, eventName string, options *workflowmove.EntryOptions) {
+	s.autoStartTaskForStep(ctx, taskID, stepID, eventName, options)
 }
 
 func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
@@ -1259,7 +1580,11 @@ func (s *Service) handleTaskMovedWithSession(ctx context.Context, data watcher.T
 	s.handleTaskMovedWithBarrier(ctx, data, false)
 }
 
-func (s *Service) handleTaskMovedWithBarrier(ctx context.Context, data watcher.TaskMovedEventData, manualBarrier bool) {
+func (s *Service) handleTaskMovedWithSessionWithOptions(ctx context.Context, data watcher.TaskMovedEventData, options *workflowmove.EntryOptions) {
+	s.handleTaskMovedWithBarrier(ctx, data, false, options)
+}
+
+func (s *Service) handleTaskMovedWithBarrier(ctx context.Context, data watcher.TaskMovedEventData, manualBarrier bool, entryOptions ...*workflowmove.EntryOptions) {
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("task.moved: failed to load session",
@@ -1267,7 +1592,7 @@ func (s *Service) handleTaskMovedWithBarrier(ctx context.Context, data watcher.T
 			zap.Error(err))
 		return
 	}
-	s.fromStepAndTargetForTaskMoved(ctx, data, session, nil, nil, manualBarrier)
+	s.fromStepAndTargetForTaskMoved(ctx, data, session, nil, nil, manualBarrier, entryOptions...)
 }
 
 func (s *Service) handleTaskMovedWithLoadedSession(
@@ -1276,8 +1601,9 @@ func (s *Service) handleTaskMovedWithLoadedSession(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	manualBarrier bool,
+	entryOptions ...*workflowmove.EntryOptions,
 ) {
-	s.fromStepAndTargetForTaskMoved(ctx, data, session, fromStep, targetStep, manualBarrier)
+	s.fromStepAndTargetForTaskMoved(ctx, data, session, fromStep, targetStep, manualBarrier, entryOptions...)
 }
 
 func (s *Service) fromStepAndTargetForTaskMoved(
@@ -1286,6 +1612,7 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	manualBarrier bool,
+	entryOptions ...*workflowmove.EntryOptions,
 ) {
 	if session == nil {
 		return
@@ -1301,12 +1628,13 @@ func (s *Service) fromStepAndTargetForTaskMoved(
 		go s.processManualMoveLifecycleWithFeederBarrier(
 			context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
 			data.FromStepID, data.ToStepID, data.TaskDescription,
+			entryOptions...,
 		)
 		return
 	}
 	go s.processStepExitAndEnterWithSteps(
 		context.WithoutCancel(ctx), data.TaskID, session, fromStep, targetStep,
-		data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion,
+		data.FromStepID, data.ToStepID, data.TaskDescription, data.QueuePromotion, entryOptions...,
 	)
 }
 
@@ -1457,7 +1785,16 @@ func (s *Service) persistQueuedMoveExitCompletion(ctx context.Context, taskID st
 			zap.String("task_id", taskID))
 		return false
 	}
-	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyQueuedMoveExitCompleted, true); err != nil {
+	completionValue := interface{}(true)
+	if task, err := s.repo.GetTask(ctx, taskID); err == nil && task != nil && task.Metadata != nil {
+		if descriptor, ok := task.Metadata[models.MetaKeyQueuedMoveExitPending].(map[string]interface{}); ok {
+			// Preserve move provenance across source-exit completion and queue
+			// promotion. The descriptor is the durable hand-off for one-shot
+			// entry options when the task is WIP-queued.
+			completionValue = descriptor
+		}
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyQueuedMoveExitCompleted, completionValue); err != nil {
 		s.logger.Warn("failed to persist queued move source-exit completion",
 			zap.String("task_id", taskID), zap.Error(err))
 		return false
@@ -1523,6 +1860,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
 	fromStepID, toStepID, taskDescription string,
+	entryOptions ...*workflowmove.EntryOptions,
 ) {
 	lockValue, _ := s.queuedMoveLifecycleLocks.LoadOrStore(taskID, &sync.Mutex{})
 	lock := lockValue.(*sync.Mutex)
@@ -1545,6 +1883,7 @@ func (s *Service) processManualMoveLifecycleWithFeederBarrier(
 	s.processStepExitAndEnterWithSteps(
 		ctx, taskID, session, fromStep, targetStep,
 		fromStepID, toStepID, taskDescription, false,
+		entryOptions...,
 	)
 	if !s.persistManualMoveLifecycleCompletion(ctx, taskID) {
 		return
@@ -1567,9 +1906,9 @@ func (s *Service) continueQueuedMoveLifecycle(ctx context.Context, taskID, vacat
 // processStepExitAndEnter runs the on_exit → clear review → reload session → on_enter
 // sequence for a step transition. Used by handleTaskMovedWithSession (where MoveTask
 // already persisted the step change in the DB).
-func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string) {
+func (s *Service) processStepExitAndEnter(ctx context.Context, taskID string, session *models.TaskSession, fromStepID, toStepID, taskDescription string, entryOptions ...*workflowmove.EntryOptions) {
 	// Process on_exit for the step we're leaving
-	s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false)
+	s.processStepExitAndEnterWithSteps(ctx, taskID, session, nil, nil, fromStepID, toStepID, taskDescription, false, entryOptions...)
 }
 
 func (s *Service) processStepExitAndEnterWithSteps(
@@ -1577,8 +1916,19 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	taskID string,
 	session *models.TaskSession,
 	fromStep, targetStep *wfmodels.WorkflowStep,
-	fromStepID, toStepID, taskDescription string, queuePromotion bool,
+	fromStepID, toStepID, taskDescription string, queuePromotion bool, entryOptions ...*workflowmove.EntryOptions,
 ) {
+	moveID := workflowMoveEntryIDFromContext(ctx)
+	if moveID != "" && !workflowMoveEntryLockHeld(ctx) {
+		releaseMoveLock := s.lockWorkflowMoveEntry(moveID)
+		defer releaseMoveLock()
+		moveOptions := s.loadMoveEntryOptions(ctx, moveID)
+		if moveOptions == nil {
+			return
+		}
+		entryOptions = []*workflowmove.EntryOptions{moveOptions}
+		ctx = withWorkflowMoveEntryLockHeld(ctx)
+	}
 	if fromStep == nil {
 		var err error
 		fromStep, err = s.workflowStepGetter.GetStep(ctx, fromStepID)
@@ -1605,7 +1955,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 	}
 
 	clearReview := targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent)
-	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview); err != nil && queuePromotion {
+	if err := s.finalizeStepEnter(ctx, taskID, session.ID, targetStep, taskDescription, clearReview, entryOptions...); err != nil && queuePromotion {
 		s.restoreTaskLifecycleToken(ctx, taskID, models.MetaKeyQueuePromotionPending, "task.moved")
 	}
 }
@@ -1613,7 +1963,7 @@ func (s *Service) processStepExitAndEnterWithSteps(
 // finalizeStepEnter optionally clears review status, reloads the session, and
 // processes on_enter actions for the target step. Shared by executeStepTransition
 // and processStepExitAndEnter.
-func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool) error {
+func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID string, targetStep *wfmodels.WorkflowStep, taskDescription string, clearReview bool, entryOptions ...*workflowmove.EntryOptions) error {
 	if clearReview {
 		if err := s.repo.UpdateSessionReviewStatus(ctx, sessionID, ""); err != nil {
 			s.logger.Warn("failed to clear session review status",
@@ -1632,7 +1982,7 @@ func (s *Service) finalizeStepEnter(ctx context.Context, taskID, sessionID strin
 		return fmt.Errorf("load session for on_enter: %w", err)
 	}
 
-	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription)
+	s.processOnEnter(ctx, taskID, session, targetStep, taskDescription, entryOptions...)
 	return nil
 }
 
@@ -2049,9 +2399,43 @@ func (s *Service) maybySwitchSessionForProfile(
 }
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.
-func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
+func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string, entryOptions ...*workflowmove.EntryOptions) {
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
+	moveID := workflowMoveEntryIDFromContext(ctx)
+	var moveOptions *workflowmove.EntryOptions
+	if len(entryOptions) > 0 {
+		moveOptions = entryOptions[0]
+	}
+	if moveID != "" && !workflowMoveEntryLockHeld(ctx) {
+		releaseMoveLock := s.lockWorkflowMoveEntry(moveID)
+		defer releaseMoveLock()
+		// Re-read while holding the per-move lock. A duplicate notification may
+		// have loaded the old pointer before the first entry consumed the
+		// private row; it must observe the consumed state and do nothing.
+		moveOptions = s.loadMoveEntryOptions(ctx, moveID)
+		if moveOptions == nil {
+			return
+		}
+	} else if moveID != "" && moveOptions == nil {
+		// The outer transition sequence owns the lock and has already loaded
+		// the private payload. A missing value here indicates a malformed
+		// caller, so fail closed rather than entering without options.
+		return
+	}
+	if moveOptions != nil && session != nil &&
+		(session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
+		if _, active := s.activeTurns.Load(session.ID); active {
+			// Do this before profile switching, reset, or model configuration so
+			// no destination-side mutation can race the source turn.
+			return
+		}
+	}
+	if moveOptions != nil && moveOptions.AgentProfileID != "" && step != nil {
+		stepCopy := *step
+		stepCopy.AgentProfileID = moveOptions.AgentProfileID
+		step = &stepCopy
+	}
 
 	// Switch session if this step requires a different agent profile.
 	var ok bool
@@ -2075,10 +2459,19 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// WAITING_FOR_INPUT and drain its queue; without the pre-flip it would
 	// early-return unchanged, leaving session.State==RUNNING with no drain path.
 	s.flipStaleRunningToWaiting(ctx, taskID, session, isPassthrough)
+	// A committed human move may be delivered while the source turn is still
+	// running. Reset/configure/model operations belong to destination entry and
+	// must wait for that exact turn's ready signal; the ready handler retries
+	// from the durable workflow_move_pending marker.
+	if moveOptions != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
+		if _, active := s.activeTurns.Load(session.ID); active {
+			return
+		}
+	}
 
 	hasPlanMode := s.resolveStepPlanMode(ctx, session, step, isPassthrough)
 
-	if len(step.Events.OnEnter) == 0 && !sessionSwitched {
+	if len(step.Events.OnEnter) == 0 && !sessionSwitched && moveOptions == nil {
 		// Active-turn case (e.g. move_task_kandev mid-turn): the agent is still
 		// running and will fire agent.ready when the turn ends. Don't flip state
 		// to WAITING here — handleAgentReady's RUNNING/STARTING guard would then
@@ -2095,7 +2488,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 
 	// Process reset_agent_context FIRST — must complete before auto_start_agent.
 	// Context reset works for both ACP and passthrough sessions.
-	if step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext) {
+	if step.HasOnEnterAction(wfmodels.OnEnterResetAgentContext) || (moveOptions != nil && moveOptions.ResetContext) {
 		if !s.resetAgentContext(ctx, taskID, session, step.Name) {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
@@ -2108,6 +2501,20 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	// new ACP session receives the workflow-selected settings before any
 	// auto-start prompt is dispatched. It never switches or creates a tab.
 	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+	if moveOptions != nil && moveOptions.Model != "" {
+		if s.agentManager.IsAgentReadyForPrompt(ctx, sessionID) {
+			if err := s.agentManager.SetSessionModelBySessionID(ctx, sessionID, moveOptions.Model); err != nil {
+				s.logger.Warn("failed to apply one-shot workflow move model", zap.String("session_id", sessionID), zap.Error(err))
+				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+				return
+			}
+		}
+		if err := s.persistWorkflowSessionConfigOverride(ctx, sessionID, sessionConfigurationTarget{model: moveOptions.Model}); err != nil {
+			s.logger.Warn("failed to persist one-shot workflow move model", zap.String("session_id", sessionID), zap.Error(err))
+			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+			return
+		}
+	}
 
 	hasAutoStart := false
 	for _, action := range step.Events.OnEnter {
@@ -2131,7 +2538,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
-		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
+		effectivePrompt := appendWorkflowMoveOptions(s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough), moveOptions)
 		if err := s.autoStartPassthroughPrompt(ctx, taskID, session, step.Name, effectivePrompt); err != nil {
 			s.logger.Error("failed to auto-start passthrough agent for step",
 				zap.String("task_id", taskID),
@@ -2140,6 +2547,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		} else {
+			s.consumeMoveEntry(ctx, moveID)
 		}
 
 	case hasAutoStart:
@@ -2147,7 +2556,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// When called from applyEngineTransition (on_turn_complete), processOnEnter
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
-		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
+		effectivePrompt := appendWorkflowMoveOptions(s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough), moveOptions)
 		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
@@ -2156,6 +2565,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		} else {
+			s.consumeMoveEntry(ctx, moveID)
 		}
 
 	default:
@@ -2163,7 +2574,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// has no auto_start_agent, launch the agent anyway — the profile override
 		// implies the user wants this agent to run on this step.
 		if sessionSwitched && step.Prompt != "" {
-			effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
+			effectivePrompt := appendWorkflowMoveOptions(s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough), moveOptions)
 			planMode := hasPlanMode
 			stepID := step.ID
 			s.logger.Info("auto-launching agent after profile switch (no explicit auto_start)",
@@ -2184,9 +2595,22 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, session)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, session)
 					s.drainQueuedMessageForPromptableSession(asyncCtx, sessionID)
+				} else {
+					s.consumeMoveEntry(asyncCtx, moveID)
 				}
 			}()
 			return
+		}
+		if moveOptions != nil && moveOptions.Instructions != "" && s.messageQueue != nil {
+			effectivePrompt := appendWorkflowMoveOptions(s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough), moveOptions)
+			if _, err := s.messageQueue.QueueMessage(ctx, sessionID, taskID, effectivePrompt, moveOptions.Model, messagequeue.QueuedByServer, false, nil); err != nil {
+				s.logger.Warn("failed to queue one-shot workflow move instructions", zap.String("task_id", taskID), zap.Error(err))
+				s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+				return
+			}
+			s.consumeMoveEntry(ctx, moveID)
+		} else if moveOptions != nil {
+			s.consumeMoveEntry(ctx, moveID)
 		}
 		// Same active-turn guard as the no-on_enter branch above: if the agent
 		// is still mid-turn, leave state alone so handleAgentReady can run on
@@ -2214,6 +2638,17 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 // only when the move is already complete or rejected; unrelated queued
 // messages remain available for the normal drain path.
 func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string, session *models.TaskSession, move *messagequeue.PendingMove) {
+	if move == nil {
+		return
+	}
+	moveID := move.MoveID
+	if move.EntryOptions != nil && moveID == "" {
+		// Rows written by older queue versions did not carry a move ID. Assign
+		// one before binding the private payload so the transition remains
+		// recoverable if the process stops after the task commit.
+		moveID = uuid.NewString()
+		move.MoveID = moveID
+	}
 	// reinsertPendingMove restores the move so a future agent.ready can retry.
 	// Used on early failure paths (load errors, config issues) where the state
 	// hasn't been touched yet. NOT used after ApplyTransition has executed —
@@ -2225,6 +2660,17 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			return
 		}
 		s.messageQueue.SetPendingMove(ctx, sessionID, move)
+	}
+	cleanupMoveEntry := func() {
+		if moveID != "" && s.moveEntryStore != nil {
+			if err := s.moveEntryStore.Delete(ctx, moveID); err != nil && !errors.Is(err, workflowmove.ErrEntryNotFound) {
+				s.logger.Warn("failed to clean up deferred workflow move entry",
+					zap.String("task_id", taskID), zap.String("move_id", moveID), zap.Error(err))
+			}
+		}
+		if remover, ok := s.repo.(taskMetadataKeyRemover); ok {
+			_, _ = remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowMovePending)
+		}
 	}
 
 	if s.workflowStepGetter == nil || s.workflowStore == nil {
@@ -2293,6 +2739,39 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		return
 	}
 
+	if move.EntryOptions != nil {
+		if s.moveEntryStore == nil {
+			s.logger.Warn("cannot apply deferred workflow move: private entry store missing",
+				zap.String("task_id", taskID), zap.String("move_id", moveID))
+			reinsertPendingMove()
+			return
+		}
+		if err := s.moveEntryStore.Save(ctx, &workflowmove.Entry{ID: moveID, TaskID: taskID, Options: *move.EntryOptions}); err != nil {
+			s.logger.Warn("failed to persist deferred workflow move entry",
+				zap.String("task_id", taskID), zap.String("move_id", moveID), zap.Error(err))
+			reinsertPendingMove()
+			return
+		}
+		setter, ok := s.repo.(taskMetadataKeySetter)
+		if !ok {
+			s.logger.Warn("cannot apply deferred workflow move: task metadata markers unavailable",
+				zap.String("task_id", taskID), zap.String("move_id", moveID))
+			cleanupMoveEntry()
+			reinsertPendingMove()
+			return
+		}
+		if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowMovePending, map[string]interface{}{
+			"from_step_id": fromStepID,
+			"move_id":      moveID,
+		}); err != nil {
+			s.logger.Warn("failed to persist deferred workflow move marker",
+				zap.String("task_id", taskID), zap.String("move_id", moveID), zap.Error(err))
+			cleanupMoveEntry()
+			reinsertPendingMove()
+			return
+		}
+	}
+
 	// Mark the session WAITING_FOR_INPUT before processOnEnter runs. The agent
 	// just finished its turn; the active-turn guard in processOnEnter would
 	// otherwise see RUNNING and skip the on_enter processing.
@@ -2325,6 +2804,8 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		// Drop the orphan so it can't be misdelivered to the source step's agent
 		// on a future turn (it was authored for the move's *target* step).
 		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		cleanupMoveEntry()
+		reinsertPendingMove()
 		return
 	}
 
@@ -2347,7 +2828,26 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	if stored, loadErr := s.repo.GetTask(ctx, taskID); loadErr == nil && stored != nil && stored.QueuedForStepID == move.WorkflowStepID && !stored.WIPAdmitted {
 		// The destination is visible and queued, but its entry lifecycle is
 		// deferred until promotion. The source exit still runs once now.
-		go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
+		queuedExitMarked := false
+		if setter, ok := s.repo.(taskMetadataKeySetter); ok {
+			if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyQueuedMoveExitPending, map[string]interface{}{
+				"from_step_id": fromStepID,
+				"move_id":      moveID,
+			}); err != nil {
+				s.logger.Warn("failed to persist deferred queued-move exit marker",
+					zap.String("task_id", taskID), zap.String("move_id", moveID), zap.Error(err))
+			} else {
+				queuedExitMarked = true
+			}
+		}
+		if queuedExitMarked {
+			go s.processQueuedMoveExit(context.WithoutCancel(ctx), taskID, session, nil, fromStepID)
+		} else {
+			// Narrow test/legacy repositories may not expose atomic metadata
+			// markers. Preserve their historical behavior as a best effort while
+			// production repositories use the durable barrier above.
+			go s.processStepExit(context.WithoutCancel(ctx), taskID, session, fromStepID)
+		}
 		return
 	}
 
@@ -2361,7 +2861,24 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// for the same session. The DB transition is already persisted above, so
 	// it's safe to defer the rest.
 	taskDescription := task.Description
-	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+	moveCtx := withWorkflowMoveEntryID(context.WithoutCancel(ctx), moveID)
+	go s.processStepExitAndEnter(moveCtx, taskID, session, fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions)
+}
+
+func (s *Service) dropLegacyPendingMoveHandoff(ctx context.Context, sessionID string, move *messagequeue.PendingMove) {
+	if s.messageQueue == nil || move == nil || move.EntryOptions != nil {
+		return
+	}
+	status := s.messageQueue.GetStatus(ctx, sessionID)
+	if status == nil || len(status.Entries) == 0 || status.Entries[0].QueuedBy != "mcp-move-task" {
+		return
+	}
+	if _, ok := s.messageQueue.TakeQueued(ctx, sessionID); ok {
+		s.publishQueueStatusEvent(ctx, sessionID)
+		s.logger.Warn("dropped legacy hand-off prompt after pending-move failure",
+			zap.String("task_id", move.TaskID),
+			zap.String("session_id", sessionID))
+	}
 }
 
 func legacyPendingMoveID(sessionID string, move *messagequeue.PendingMove) string {

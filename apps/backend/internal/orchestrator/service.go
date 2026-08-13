@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -40,6 +41,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -487,6 +489,10 @@ type Service struct {
 	// Message queue service for queueing messages while agent is running
 	messageQueue *messagequeue.Service
 
+	// moveEntryStore holds one-shot workflow entry options separately from the
+	// public task.moved event. The event carries only move_id.
+	moveEntryStore workflowmove.EntryStore
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
@@ -566,6 +572,11 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// workflowMoveEntryLocks serializes destination entry for one-shot move
+	// payloads. The durable private row is reloaded while holding this lock so
+	// duplicate task.moved/promotion deliveries cannot apply reset or prompts
+	// twice after the first delivery consumes the row.
+	workflowMoveEntryLocks sync.Map
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -1516,6 +1527,57 @@ func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
 	s.engineParticipants = store
 	s.engineOptions = append(s.engineOptions, engine.WithParticipantStore(store))
 	s.reinitWorkflowEngine()
+}
+
+// SetMoveEntryStore wires the private one-shot workflow move payload store.
+func (s *Service) SetMoveEntryStore(store workflowmove.EntryStore) {
+	s.moveEntryStore = store
+}
+
+// ValidateWorkflowMoveEntryOptions performs runtime-owned preflight for the
+// task service's optioned move command. Profile resolution is authoritative;
+// model validation is applied when the destination session has an advertised
+// model list. An unknown list is intentionally left to the lifecycle start
+// policy, which can still fail explicitly when the provider rejects the
+// selected model.
+func (s *Service) ValidateWorkflowMoveEntryOptions(
+	ctx context.Context,
+	task *models.Task,
+	_ *wfmodels.WorkflowStep,
+	options *workflowmove.EntryOptions,
+) error {
+	if options == nil {
+		return nil
+	}
+	if options.AgentProfileID != "" {
+		if s.agentManager == nil {
+			return fmt.Errorf("%w: profile resolver is unavailable", workflowmove.ErrProfileUnavailable)
+		}
+		profile, err := s.agentManager.ResolveAgentProfile(ctx, options.AgentProfileID)
+		if err != nil || profile == nil {
+			return fmt.Errorf("%w: profile could not be resolved", workflowmove.ErrProfileUnavailable)
+		}
+	}
+	if options.Model == "" {
+		return nil
+	}
+	if task == nil {
+		return nil
+	}
+	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
+	if err != nil || session == nil || session.Metadata == nil {
+		return nil
+	}
+	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
+	if !ok || len(snapshot.Models) == 0 {
+		return nil
+	}
+	for _, advertised := range snapshot.Models {
+		if advertised.ModelID == options.Model {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: selected model is not advertised by the destination session", workflowmove.ErrModelUnavailable)
 }
 
 // SetEngineDecisionStore wires the engine's DecisionStore.

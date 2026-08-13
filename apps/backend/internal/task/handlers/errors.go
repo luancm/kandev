@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"go.uber.org/zap"
 )
 
@@ -110,6 +111,11 @@ func isValidationError(err error) bool {
 		return true
 	}
 	if errors.Is(err, service.ErrExternalIDInvalid) {
+		return true
+	}
+	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

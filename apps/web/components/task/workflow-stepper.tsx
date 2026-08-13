@@ -4,8 +4,19 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { IconArrowRight } from "@tabler/icons-react";
-import { moveTask } from "@/lib/api";
+import { useWorkflowMove } from "@/hooks/domains/kanban/use-workflow-move";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import { WorkflowMoveOptions } from "./workflow-move-options";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
@@ -77,6 +88,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   const { t } = useTranslation();
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
   const disablePlanMode = useDisablePlanMode();
+  const { move } = useWorkflowMove();
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -86,23 +98,25 @@ const WorkflowStepper = memo(function WorkflowStepper({
   );
 
   const handleMove = useCallback(
-    async (stepId: string) => {
+    async (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => {
       if (!taskId || !workflowId) return;
       disablePlanMode();
       setMovingToStepId(stepId);
       try {
-        await moveTask(taskId, {
+        const result = await move(taskId, {
           workflow_id: workflowId,
           workflow_step_id: stepId,
           position: 0,
+          entry_options: entryOptions,
         });
+        if (result.disposition === "failed") throw result.error;
       } catch (err) {
         console.error("[WorkflowStepper] Failed to move task:", err);
       } finally {
         setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, disablePlanMode],
+    [taskId, workflowId, disablePlanMode, move],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).
@@ -216,6 +230,33 @@ function canMoveToStep(params: {
   return params.isAdjacent || !!params.allowManualMove;
 }
 
+function WorkflowStepTrigger({
+  step,
+  isCurrent,
+  isCompleted,
+}: {
+  step: Step;
+  isCurrent: boolean;
+  isCompleted: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`workflow-step-${step.name}`}
+      aria-current={isCurrent ? "step" : undefined}
+      className={cn(
+        "flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs whitespace-nowrap transition-colors cursor-pointer",
+        isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
+      )}
+    >
+      <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
+      <span className={cn("text-xs leading-none", getStepLabelClass(isCurrent, isCompleted))}>
+        {step.name}
+      </span>
+    </button>
+  );
+}
+
 /** Individual step in the workflow stepper */
 function WorkflowStepItem({
   step,
@@ -234,7 +275,7 @@ function WorkflowStepItem({
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
-  onMove: (stepId: string) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => void;
 }) {
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
@@ -249,33 +290,66 @@ function WorkflowStepItem({
     allowManualMove: step.allow_manual_move,
   });
 
+  const usesTouchDrawer = useTouchDrawer();
+  const [touchDrawerOpen, setTouchDrawerOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const openOptions = useCallback(() => {
+    // The options surface owns its own touch drawer. Close the target picker
+    // first so mobile never stacks two Vaul drawers and traps focus between
+    // them.
+    setTouchDrawerOpen(false);
+    setOptionsOpen(true);
+  }, []);
+  const trigger = (
+    <WorkflowStepTrigger step={step} isCurrent={isCurrent} isCompleted={isCompleted} />
+  );
+
   return (
     <div className="flex items-center">
       {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
-      <HoverCard openDelay={200} closeDelay={100}>
-        <HoverCardTrigger asChild>
-          <div
-            data-testid={`workflow-step-${step.name}`}
-            aria-current={isCurrent ? "step" : undefined}
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default",
-              isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
-            )}
-          >
-            <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
-            <span className={cn("text-xs leading-none", getStepLabelClass(isCurrent, isCompleted))}>
-              {step.name}
-            </span>
-          </div>
-        </HoverCardTrigger>
-        <StepHoverContent
-          step={step}
-          isCurrent={isCurrent}
-          canMove={canMove}
-          isMoving={movingToStepId === step.id}
-          onMove={onMove}
-        />
-      </HoverCard>
+      {usesTouchDrawer ? (
+        <Drawer open={touchDrawerOpen} onOpenChange={setTouchDrawerOpen}>
+          <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+          <DrawerContent>
+            <DrawerHeader className="text-left">
+              <DrawerTitle>{step.name}</DrawerTitle>
+              <DrawerDescription className="sr-only">{step.name}</DrawerDescription>
+            </DrawerHeader>
+            <div className="px-4 pb-5">
+              <StepHoverContent
+                step={step}
+                isCurrent={isCurrent}
+                canMove={canMove}
+                isMoving={movingToStepId === step.id}
+                onMove={onMove}
+                onOpenOptions={openOptions}
+              />
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <HoverCard openDelay={200} closeDelay={100}>
+          <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+          <StepHoverContent
+            step={step}
+            isCurrent={isCurrent}
+            canMove={canMove}
+            isMoving={movingToStepId === step.id}
+            onMove={onMove}
+            onOpenOptions={openOptions}
+          />
+        </HoverCard>
+      )}
+      <WorkflowMoveOptions
+        open={optionsOpen}
+        onOpenChange={setOptionsOpen}
+        targetStepName={step.name}
+        isMoving={movingToStepId === step.id}
+        onSubmit={(options) => {
+          setOptionsOpen(false);
+          onMove(step.id, options);
+        }}
+      />
     </div>
   );
 }
@@ -294,37 +368,58 @@ function StepHoverContent({
   canMove,
   isMoving,
   onMove,
+  onOpenOptions,
 }: {
   step: Step;
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
-  onMove: (stepId: string) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => void;
+  onOpenOptions: () => void;
 }) {
   const { t } = useTranslation();
-  return (
-    <HoverCardContent
-      side="bottom"
-      align="center"
-      className="w-auto min-w-28 p-1.5 flex flex-col items-center gap-1.5"
-    >
+  const usesTouchDrawer = useTouchDrawer();
+  const body = (
+    <div className="w-auto min-w-28 p-1.5 flex flex-col items-center gap-1.5">
       {canMove && (
-        <Button
-          size="sm"
-          variant="default"
-          className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
-          disabled={isMoving}
-          onClick={() => onMove(step.id)}
-        >
-          <IconArrowRight className="h-3 w-3" />
-          {isMoving ? t("task:moving") : t("task:moveHere")}
-        </Button>
+        <>
+          <Button
+            size="sm"
+            variant="default"
+            className="min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
+            disabled={isMoving}
+            onClick={() => onMove(step.id)}
+          >
+            <IconArrowRight className="h-3 w-3" />
+            {isMoving ? t("task:moving") : t("task:moveHere")}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
+            disabled={isMoving}
+            onClick={onOpenOptions}
+          >
+            {t("task:moveWithOptions")}
+          </Button>
+        </>
       )}
       {isCurrent && (
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
-    </HoverCardContent>
+    </div>
+  );
+  return (
+    <>
+      {usesTouchDrawer ? (
+        body
+      ) : (
+        <HoverCardContent side="bottom" align="center">
+          {body}
+        </HoverCardContent>
+      )}
+    </>
   );
 }
 
