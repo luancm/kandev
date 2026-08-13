@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -127,5 +128,43 @@ func TestPublishGitStatus_PropagatesHeadRemote(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for git status event")
+	}
+}
+
+func TestPublishGitStatus_PropagatesComparisonEvidence(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	eventBus := bus.NewMemoryEventBus(log)
+	pub := NewEventPublisher(eventBus, log)
+	received := make(chan *bus.Event, 1)
+	sub, err := eventBus.Subscribe(events.BuildGitEventSubject("sess-comparison"), func(_ context.Context, ev *bus.Event) error {
+		received <- ev
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	pub.PublishGitStatus(&AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "sess-comparison"}, &agentctl.GitStatusUpdate{
+		Timestamp: time.Now(),
+		Comparison: &agentctl.GitComparisonStatus{
+			ContextGeneration: "generation-1",
+			State:             gitremote.ResolutionUnresolved,
+			Reason:            "comparison ref is not available locally",
+			BaseCommit:        "stored-base",
+		},
+	})
+
+	select {
+	case ev := <-received:
+		payload, ok := ev.Data.(*GitEventPayload)
+		if !ok || payload == nil || payload.Status == nil || payload.Status.Comparison == nil {
+			t.Fatalf("comparison evidence dropped: %T", ev.Data)
+		}
+		if payload.Status.Comparison.State != gitremote.ResolutionUnresolved || payload.Status.Comparison.BaseCommit != "stored-base" {
+			t.Fatalf("comparison evidence = %+v", payload.Status.Comparison)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for comparison status event")
 	}
 }

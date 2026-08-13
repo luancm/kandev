@@ -65,7 +65,8 @@ type WorkspaceTracker struct {
 	// comparisonContext is the backend-owned target for this worktree. It is
 	// kept separate from baseBranch because the target repository may differ
 	// from the attached repository while the branch override remains local.
-	comparisonContext *gitremote.ComparisonContext
+	comparisonContext    *gitremote.ComparisonContext
+	comparisonContextSet bool
 	// comparisonAnchor is set for an initialized submodule. Unlike a branch
 	// name, it must remain pinned to the gitlink commit recorded by the parent
 	// comparison tree, even when the submodule's own default branch moves.
@@ -300,12 +301,24 @@ func (wt *WorkspaceTracker) BaseBranch() string {
 func (wt *WorkspaceTracker) SetComparisonContext(value *gitremote.ComparisonContext) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.comparisonContextSet = true
 	if value == nil {
 		wt.comparisonContext = nil
 		return
 	}
 	clone := value.Clone()
 	wt.comparisonContext = &clone
+}
+
+// HasComparisonContext reports whether the backend has delivered a complete
+// comparison observation, including an explicit clear. A nil context alone is
+// ambiguous because legacy agentctl callers may not have sent this additive
+// field yet; the distinction prevents an explicit clear from falling back to
+// origin-based comparison.
+func (wt *WorkspaceTracker) HasComparisonContext() bool {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.comparisonContextSet
 }
 
 // ComparisonContext returns a defensive snapshot of this worktree's target.

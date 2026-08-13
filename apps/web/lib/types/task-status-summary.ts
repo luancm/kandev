@@ -26,6 +26,8 @@ export type TaskStatusSummary = {
     changed_files?: number;
     ahead?: number;
     behind?: number;
+    comparison?: GitComparisonSummary;
+    comparison_by_repository?: Record<string, GitComparisonSummary>;
   } | null;
   pull_request?: {
     count?: number;
@@ -36,4 +38,21 @@ export type TaskStatusSummary = {
     number?: number;
     url?: string;
   } | null;
+};
+
+export type GitComparisonSummary = {
+  context_generation?: string;
+  resolution_state?: string;
+  reason?: string;
+  resolved_ref?: string;
+  base_commit?: string;
+  target?: {
+    repository: {
+      provider?: string;
+      host?: string;
+      repository_path?: string;
+      provider_repository_id?: string;
+    };
+    ref: string;
+  };
 };

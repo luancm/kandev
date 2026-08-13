@@ -230,7 +230,9 @@ func syncTrackerConfiguration(target, source *WorkspaceTracker, roots []string) 
 	} else {
 		target.SetBaseBranch(source.BaseBranch())
 	}
-	target.SetComparisonContext(source.ComparisonContext())
+	if source.HasComparisonContext() {
+		target.SetComparisonContext(source.ComparisonContext())
+	}
 }
 
 func startAndAttachTracker(ctx context.Context, tracker *WorkspaceTracker, subs []types.WorkspaceStreamSubscriber) {

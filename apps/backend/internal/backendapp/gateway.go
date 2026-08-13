@@ -567,6 +567,7 @@ func taskGitObservation(
 	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
 		repository = name
 	}
+	comparison := gitComparisonSummaryFromMetadata(snapshot.Metadata)
 	return statussummary.GitObservation{
 		Repository: repository,
 		Summary: statussummary.GitSummary{
@@ -575,8 +576,24 @@ func taskGitObservation(
 			ChangedFiles: len(snapshot.Files),
 			Ahead:        maxNonNegative(snapshot.Ahead),
 			Behind:       maxNonNegative(snapshot.Behind),
+			Comparison:   comparison,
 		},
 	}, true
+}
+
+func gitComparisonSummaryFromMetadata(metadata map[string]interface{}) *statussummary.GitComparisonSummary {
+	if metadata == nil || metadata["comparison"] == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(metadata["comparison"])
+	if err != nil {
+		return nil
+	}
+	var comparison statussummary.GitComparisonSummary
+	if err := json.Unmarshal(encoded, &comparison); err != nil || comparison.ResolutionState == "" {
+		return nil
+	}
+	return &comparison
 }
 
 func nonNegativeMetadataInt(metadata map[string]interface{}, key string) int {

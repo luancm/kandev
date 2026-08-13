@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -295,6 +296,71 @@ func TestGitReviewEndpointsCorrectStaleBase(t *testing.T) {
 	}
 	if _, ok := diff.Files["parent.txt"]; ok {
 		t.Errorf("cumulative diff includes parent work from stale range: %s", diffResponse.Body.String())
+	}
+}
+
+func TestGitReviewEndpointsUseDeliveredComparisonContext(t *testing.T) {
+	repoDir, cleanup := setupAPITestRepo(t)
+	t.Cleanup(cleanup)
+
+	initial := strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD"))
+	runGitAPI(t, repoDir, "checkout", "-b", "canonical", initial)
+	writeFileAPI(t, repoDir, "canonical.txt", "canonical base\n")
+	runGitAPI(t, repoDir, "add", ".")
+	runGitAPI(t, repoDir, "commit", "-m", "canonical base")
+	canonicalTip := strings.TrimSpace(runGitAPI(t, repoDir, "rev-parse", "HEAD"))
+	runGitAPI(t, repoDir, "checkout", "-b", "feature/context", canonicalTip)
+	writeFileAPI(t, repoDir, "feature.txt", "feature work\n")
+	runGitAPI(t, repoDir, "add", ".")
+	runGitAPI(t, repoDir, "commit", "-m", "feature work")
+	runGitAPI(t, repoDir, "remote", "add", "canonical-remote", "https://github.com/acme/canonical.git")
+	runGitAPI(t, repoDir, "update-ref", "refs/remotes/canonical-remote/main", canonicalTip)
+
+	target := gitremote.RemoteRefIdentity{
+		Repository: gitremote.RemoteRepositoryIdentity{
+			Provider:       gitremote.ProviderGitHub,
+			Host:           "github.com",
+			RepositoryPath: "acme/canonical",
+		},
+		Ref: "main",
+	}
+	comparison, err := gitremote.NewComparisonContext(target, "", "comparison-api")
+	if err != nil {
+		t.Fatalf("comparison context: %v", err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
+	cfg := &config.InstanceConfig{WorkDir: repoDir}
+	mgr := process.NewManager(cfg, log)
+	mgr.GetWorkspaceTracker().SetComparisonContext(&comparison)
+	srv := NewServer(cfg, mgr, nil, nil, log)
+
+	logResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(logResponse, httptest.NewRequest(http.MethodGet, "/api/v1/git/log?limit=100&target_branch=main", nil))
+	if logResponse.Code != http.StatusOK {
+		t.Fatalf("git log status = %d: %s", logResponse.Code, logResponse.Body.String())
+	}
+	var commits process.GitLogResult
+	if err := json.Unmarshal(logResponse.Body.Bytes(), &commits); err != nil {
+		t.Fatalf("decode git log: %v", err)
+	}
+	if len(commits.Commits) != 1 || commits.Commits[0].CommitMessage != "feature work" {
+		t.Fatalf("git log ignored delivered comparison target: %s", logResponse.Body.String())
+	}
+
+	diffResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(diffResponse, httptest.NewRequest(http.MethodGet, "/api/v1/git/cumulative-diff?base="+initial+"&target_branch=main", nil))
+	if diffResponse.Code != http.StatusOK {
+		t.Fatalf("cumulative diff status = %d: %s", diffResponse.Code, diffResponse.Body.String())
+	}
+	var diff process.CumulativeDiffResult
+	if err := json.Unmarshal(diffResponse.Body.Bytes(), &diff); err != nil {
+		t.Fatalf("decode cumulative diff: %v", err)
+	}
+	if diff.BaseCommit != canonicalTip {
+		t.Errorf("cumulative diff base = %q, want comparison merge-base %q", diff.BaseCommit, canonicalTip)
+	}
+	if _, ok := diff.Files["canonical.txt"]; ok {
+		t.Errorf("cumulative diff used origin/integration fallback: %s", diffResponse.Body.String())
 	}
 }
 

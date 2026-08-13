@@ -774,6 +774,26 @@ func (s *Server) computeMergeBase(
 	return gitOp.GetMergeBase(ctx, "HEAD", targetBranch)
 }
 
+// deliveredComparisonForRepo reads the backend-owned comparison context after
+// agentctl has resolved it against this repository's configured remotes. The
+// boolean distinguishes an explicitly delivered context from legacy callers
+// that never sent the additive field; only the latter may use target_branch
+// compatibility behavior.
+func (s *Server) deliveredComparisonForRepo(ctx context.Context, repo string) (*streams.GitComparisonStatus, bool, error) {
+	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
+	if err != nil {
+		return nil, false, err
+	}
+	if tracker == nil || !tracker.HasComparisonContext() {
+		return nil, false, nil
+	}
+	status, err := tracker.GetGitStatus(ctx, true)
+	if err != nil {
+		return nil, true, err
+	}
+	return status.Comparison, true, nil
+}
+
 // runGitLogForRepo runs git log against a single repo subpath. Returns a
 // result-with-error or a non-nil error for transport failures.
 func (s *Server) runGitLogForRepo(
@@ -788,6 +808,18 @@ func (s *Server) runGitLogForRepo(
 	}
 
 	baseCommit := req.Since
+	if comparison, delivered, err := s.deliveredComparisonForRepo(ctx, repo); delivered {
+		if err != nil {
+			return nil, err
+		}
+		// A delivered context is authoritative. Do not let the request's
+		// legacy target_branch or since value reintroduce origin semantics.
+		if comparison == nil || comparison.BaseCommit == "" {
+			return &process.GitLogResult{Success: true, Commits: []*process.GitCommitInfo{}}, nil
+		}
+		baseCommit = comparison.BaseCommit
+		req.TargetBranch = ""
+	}
 	// TargetBranch reaches this handler over HTTP and is interpolated into
 	// `git` arg lists below. Inline the securityutil.IsValidBranchName
 	// allowlist check at the sink call site so CodeQL's taint tracker
@@ -1042,6 +1074,16 @@ func (s *Server) runGitCumulativeDiffForRepo(
 	if gitOpErr != nil {
 		return nil, http.StatusBadRequest, gitOpErr
 	}
+	if comparison, delivered, err := s.deliveredComparisonForRepo(ctx, repo); delivered {
+		if err != nil {
+			return nil, http.StatusInternalServerError, err
+		}
+		if comparison == nil || comparison.BaseCommit == "" {
+			return &process.CumulativeDiffResult{Success: false, Error: "comparison target is unresolved"}, http.StatusOK, nil
+		}
+		base = comparison.BaseCommit
+		targetBranch = ""
+	}
 	if targetBranch != "" {
 		switch mb, err := s.computeMergeBase(ctx, gitOp, targetBranch); {
 		case err != nil:
@@ -1237,6 +1279,13 @@ func (s *Server) resolvePerRepoBaseAndScope(ctx context.Context, repo string) (s
 		return "", false
 	}
 	isSubmodule := tracker.IsSubmodule()
+	if tracker.HasComparisonContext() {
+		status, err := tracker.GetGitStatus(ctx, true)
+		if err != nil || status.Comparison == nil || status.Comparison.BaseCommit == "" {
+			return "", isSubmodule
+		}
+		return status.Comparison.BaseCommit, isSubmodule
+	}
 	base, baseBranch := tracker.ResolveBaseAnchor(ctx)
 	if base == "" || baseBranch == "" {
 		return base, isSubmodule
@@ -1293,28 +1342,29 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string,
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success          bool                   `json:"success"`
-	IsSubmodule      bool                   `json:"is_submodule,omitempty"`
-	Branch           string                 `json:"branch"`
-	RemoteBranch     string                 `json:"remote_branch"`
-	HeadRemote       *streams.GitHeadRemote `json:"head_remote,omitempty"`
-	HeadCommit       string                 `json:"head_commit"`
-	BaseCommit       string                 `json:"base_commit"` // Merge-base with origin branch
-	Ahead            int                    `json:"ahead"`
-	Behind           int                    `json:"behind"`
-	RemoteAhead      int                    `json:"remote_ahead"`
-	RemoteBehind     int                    `json:"remote_behind"`
-	RemoteHeadCommit string                 `json:"remote_head_commit,omitempty"`
-	Modified         []string               `json:"modified"`
-	Added            []string               `json:"added"`
-	Deleted          []string               `json:"deleted"`
-	Untracked        []string               `json:"untracked"`
-	Renamed          []string               `json:"renamed"`
-	Files            map[string]interface{} `json:"files"`
-	Timestamp        string                 `json:"timestamp"`
-	BranchAdditions  int                    `json:"branch_additions,omitempty"`
-	BranchDeletions  int                    `json:"branch_deletions,omitempty"`
-	Error            string                 `json:"error,omitempty"`
+	Success          bool                         `json:"success"`
+	IsSubmodule      bool                         `json:"is_submodule,omitempty"`
+	Branch           string                       `json:"branch"`
+	RemoteBranch     string                       `json:"remote_branch"`
+	HeadRemote       *streams.GitHeadRemote       `json:"head_remote,omitempty"`
+	Comparison       *streams.GitComparisonStatus `json:"comparison,omitempty"`
+	HeadCommit       string                       `json:"head_commit"`
+	BaseCommit       string                       `json:"base_commit"` // Merge-base with origin branch
+	Ahead            int                          `json:"ahead"`
+	Behind           int                          `json:"behind"`
+	RemoteAhead      int                          `json:"remote_ahead"`
+	RemoteBehind     int                          `json:"remote_behind"`
+	RemoteHeadCommit string                       `json:"remote_head_commit,omitempty"`
+	Modified         []string                     `json:"modified"`
+	Added            []string                     `json:"added"`
+	Deleted          []string                     `json:"deleted"`
+	Untracked        []string                     `json:"untracked"`
+	Renamed          []string                     `json:"renamed"`
+	Files            map[string]interface{}       `json:"files"`
+	Timestamp        string                       `json:"timestamp"`
+	BranchAdditions  int                          `json:"branch_additions,omitempty"`
+	BranchDeletions  int                          `json:"branch_deletions,omitempty"`
+	Error            string                       `json:"error,omitempty"`
 }
 
 // PerRepoGitStatus pairs a repository_name with its current status. Used by
@@ -1413,6 +1463,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 			Branch:           status.Branch,
 			RemoteBranch:     status.RemoteBranch,
 			HeadRemote:       status.HeadRemote,
+			Comparison:       status.Comparison,
 			HeadCommit:       status.HeadCommit,
 			BaseCommit:       status.BaseCommit,
 			Ahead:            status.Ahead,
@@ -1476,6 +1527,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		Branch:           status.Branch,
 		RemoteBranch:     status.RemoteBranch,
 		HeadRemote:       status.HeadRemote,
+		Comparison:       status.Comparison,
 		HeadCommit:       status.HeadCommit,
 		BaseCommit:       status.BaseCommit,
 		Ahead:            status.Ahead,

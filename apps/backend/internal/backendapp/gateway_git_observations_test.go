@@ -49,6 +49,26 @@ func TestTaskGitObservationConvertsSnapshotFields(t *testing.T) {
 	}
 }
 
+func TestTaskGitObservationRestoresComparisonEvidence(t *testing.T) {
+	observation, ok := taskGitObservation(
+		&models.TaskSession{ID: "session-comparison"},
+		&models.GitSnapshot{Metadata: map[string]interface{}{
+			"comparison": map[string]interface{}{
+				"context_generation": "generation-1",
+				"resolution_state":   "unresolved",
+				"reason":             "comparison ref is not available locally",
+				"base_commit":        "stored-base",
+			},
+		}},
+	)
+	if !ok || observation.Summary.Comparison == nil {
+		t.Fatalf("comparison observation = %+v, ok=%v", observation, ok)
+	}
+	if observation.Summary.Comparison.ResolutionState != "unresolved" || observation.Summary.Comparison.BaseCommit != "stored-base" {
+		t.Fatalf("comparison evidence = %+v", observation.Summary.Comparison)
+	}
+}
+
 func TestNonNegativeMetadataIntParsesAndNormalizesValues(t *testing.T) {
 	metadata := map[string]interface{}{
 		"number":   json.Number("7"),

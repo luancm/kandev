@@ -1,6 +1,10 @@
 package streams
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/gitremote"
+)
 
 // GitStatusUpdate is the message type streamed via the git status stream.
 // Represents the current git state of the workspace.
@@ -76,6 +80,11 @@ type GitStatusUpdate struct {
 	// RemoteBranch, which always reports the upstream tracking ref.
 	HeadRemote *GitHeadRemote `json:"head_remote,omitempty"`
 
+	// Comparison is the authoritative comparison-target evidence for this
+	// status snapshot. Its structured counts are nullable so an unresolved or
+	// ambiguous target cannot be mistaken for a real zero.
+	Comparison *GitComparisonStatus `json:"comparison,omitempty"`
+
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`
 
@@ -93,6 +102,27 @@ type GitStatusUpdate struct {
 	// this branch compared to the merge-base (committed + staged + unstaged).
 	BranchDeletions int `json:"branch_deletions,omitempty"`
 }
+
+// GitComparisonStatus is the bounded status projection of the backend-owned
+// comparison context and the executor-local ref that resolved it. Target is
+// provider-neutral and credential-free; ResolvedRef is only local evidence
+// used to explain which configured remote ref was observed.
+type GitComparisonStatus struct {
+	ContextGeneration string                       `json:"context_generation,omitempty"`
+	Target            *gitremote.RemoteRefIdentity `json:"target,omitempty"`
+	State             gitremote.ResolutionState    `json:"resolution_state"`
+	Reason            string                       `json:"reason,omitempty"`
+	ResolvedRef       string                       `json:"resolved_ref,omitempty"`
+	BaseCommit        string                       `json:"base_commit,omitempty"`
+	Ahead             *int                         `json:"ahead,omitempty"`
+	Behind            *int                         `json:"behind,omitempty"`
+	Additions         *int                         `json:"additions,omitempty"`
+	Deletions         *int                         `json:"deletions,omitempty"`
+}
+
+// ComparisonStatus is retained as a concise alias for callers that use the
+// domain name without the Git event prefix.
+type ComparisonStatus = GitComparisonStatus
 
 // GitHeadRemote is the normalized, credential-free identity of a branch's
 // configured remote head. It is used by backend contribution discovery and is

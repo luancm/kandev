@@ -671,6 +671,7 @@ const gitStatusBody = `{
 	"head_commit":"head1","base_commit":"base1",
 	"ahead":3,"behind":1,"remote_ahead":4,"remote_behind":2,
 	"remote_head_commit":"remote1",
+	"comparison":{"context_generation":"generation-1","resolution_state":"unresolved","reason":"comparison ref is not available locally","base_commit":"stored-base"},
 	"modified":["m.go"],"added":["a.go"],"deleted":["d.go"],
 	"untracked":["u.go"],"renamed":["r.go"],
 	"files":{"m.go":{"status":"M"}},
@@ -688,6 +689,9 @@ func assertFullGitStatus(t *testing.T, result *GitStatusResult) {
 	}
 	if result.HeadCommit != "head1" || result.BaseCommit != "base1" {
 		t.Errorf("head/base = %q / %q", result.HeadCommit, result.BaseCommit)
+	}
+	if result.Comparison == nil || result.Comparison.State != "unresolved" || result.Comparison.BaseCommit != "stored-base" {
+		t.Errorf("comparison evidence = %+v", result.Comparison)
 	}
 	if result.Ahead != 3 || result.Behind != 1 {
 		t.Errorf("ahead/behind = %d / %d, want 3 / 1", result.Ahead, result.Behind)

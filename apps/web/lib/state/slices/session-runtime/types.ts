@@ -62,6 +62,27 @@ export type FileInfo = {
   is_submodule?: boolean;
 };
 
+export type GitComparisonStatus = {
+  context_generation?: string;
+  target?: {
+    repository: {
+      provider?: string;
+      host?: string;
+      repository_path?: string;
+      provider_repository_id?: string;
+    };
+    ref: string;
+  };
+  resolution_state: "resolved" | "unresolved" | "ambiguous" | string;
+  reason?: string;
+  resolved_ref?: string;
+  base_commit?: string;
+  ahead?: number;
+  behind?: number;
+  additions?: number;
+  deletions?: number;
+};
+
 export type GitStatusEntry = {
   branch: string | null;
   remote_branch: string | null;
@@ -77,6 +98,7 @@ export type GitStatusEntry = {
   remote_ahead?: number;
   remote_behind?: number;
   remote_head_commit?: string;
+  comparison?: GitComparisonStatus;
   files: Record<string, FileInfo>;
   timestamp: string | null;
   branch_additions?: number;

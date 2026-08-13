@@ -766,6 +766,7 @@ func (c *Client) Host() string {
 // These types are defined in the streams subpackage and re-exported through types.
 type (
 	GitStatusUpdate             = types.GitStatusUpdate
+	GitComparisonStatus         = types.GitComparisonStatus
 	GitHeadRemote               = types.GitHeadRemote
 	GitCommitNotification       = types.GitCommitNotification
 	GitResetNotification        = types.GitResetNotification

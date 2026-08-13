@@ -335,6 +335,170 @@ func TestProjectorDerivesBoundedStatusAcrossSources(t *testing.T) {
 	}
 }
 
+func TestProjectorUsesComparisonCountsAndRetainsTypedUnresolvedEvidence(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-comparison-summary"
+	const sessionID = "session-comparison-summary"
+
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "status_update",
+		"status": map[string]interface{}{
+			"repository_name":  "repo-a",
+			"branch_additions": 99,
+			"branch_deletions": 99,
+			"ahead":            99,
+			"behind":           99,
+			"comparison": map[string]interface{}{
+				"context_generation": "generation-a",
+				"resolution_state":   "resolved",
+				"resolved_ref":       "canonical-remote/main",
+				"base_commit":        "base-a",
+				"additions":          4,
+				"deletions":          2,
+				"ahead":              3,
+				"behind":             1,
+				"target": map[string]interface{}{
+					"ref": "main",
+					"repository": map[string]interface{}{
+						"provider":        "github",
+						"host":            "github.com",
+						"repository_path": "acme/canonical",
+					},
+				},
+			},
+		},
+	})
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "status_update",
+		"status": map[string]interface{}{
+			"repository_name":  "repo-b",
+			"branch_additions": 77,
+			"branch_deletions": 77,
+			"ahead":            77,
+			"behind":           77,
+			"comparison": map[string]interface{}{
+				"context_generation": "generation-b",
+				"resolution_state":   "unresolved",
+				"reason":             "comparison ref is not available locally",
+				"base_commit":        "stored-b",
+			},
+		},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.Git == nil {
+		t.Fatalf("comparison summary = %+v", got)
+	}
+	if got.Git.Additions != 4 || got.Git.Deletions != 2 || got.Git.Ahead != 3 || got.Git.Behind != 1 {
+		t.Fatalf("comparison counts borrowed legacy fields or sibling data: %+v", got.Git)
+	}
+	if got.Git.Comparison != nil || got.Git.ComparisonByRepository == nil {
+		t.Fatalf("multi-repo comparison evidence = %+v", got.Git)
+	}
+	comparisons := *got.Git.ComparisonByRepository
+	if comparisons["repo-a"].ResolutionState != "resolved" || comparisons["repo-a"].Target == nil || comparisons["repo-a"].Target.Repository.RepositoryPath != "acme/canonical" {
+		t.Fatalf("resolved comparison evidence = %+v", comparisons["repo-a"])
+	}
+	if comparisons["repo-a"].Additions == nil || *comparisons["repo-a"].Additions != 4 || comparisons["repo-a"].Deletions == nil || *comparisons["repo-a"].Deletions != 2 || comparisons["repo-a"].Ahead == nil || *comparisons["repo-a"].Ahead != 3 || comparisons["repo-a"].Behind == nil || *comparisons["repo-a"].Behind != 1 {
+		t.Fatalf("resolved comparison counts = %+v", comparisons["repo-a"])
+	}
+	if comparisons["repo-b"].ResolutionState != "unresolved" || comparisons["repo-b"].Reason == "" || comparisons["repo-b"].BaseCommit != "stored-b" {
+		t.Fatalf("unresolved comparison evidence = %+v", comparisons["repo-b"])
+	}
+	if comparisons["repo-b"].Additions != nil || comparisons["repo-b"].Deletions != nil || comparisons["repo-b"].Ahead != nil || comparisons["repo-b"].Behind != nil {
+		t.Fatalf("unresolved comparison counts = %+v, want unknown/nil", comparisons["repo-b"])
+	}
+}
+
+func TestProjectorPreservesExplicitComparisonZeroAndDoesNotUseLegacyCountsForUnknown(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-comparison-nullable-counts"
+	const sessionID = "session-comparison-nullable-counts"
+
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id": taskID, "session_id": sessionID, "type": "status_update",
+		"status": map[string]interface{}{
+			"repository_name":  "repo-a",
+			"branch_additions": 99,
+			"branch_deletions": 98,
+			"ahead":            97,
+			"behind":           96,
+			"comparison": map[string]interface{}{
+				"resolution_state": "unresolved",
+				"additions":        nil,
+				"deletions":        nil,
+				"ahead":            nil,
+				"behind":           nil,
+			},
+		},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.Git == nil || got.Git.Comparison == nil {
+		t.Fatalf("nullable comparison summary = %+v", got)
+	}
+	if got.Git.Additions != 0 || got.Git.Deletions != 0 || got.Git.Ahead != 0 || got.Git.Behind != 0 {
+		t.Fatalf("legacy counts leaked into unresolved comparison: %+v", got.Git)
+	}
+	if got.Git.Comparison.Additions != nil || got.Git.Comparison.Deletions != nil || got.Git.Comparison.Ahead != nil || got.Git.Comparison.Behind != nil {
+		t.Fatalf("unresolved count pointers = %+v, want nil", got.Git.Comparison)
+	}
+
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id": taskID, "session_id": sessionID, "type": "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a",
+			"comparison": map[string]interface{}{
+				"resolution_state": "resolved",
+				"additions":        0,
+				"deletions":        0,
+				"ahead":            0,
+				"behind":           0,
+			},
+		},
+	})
+
+	got = store.summary(taskID)
+	if got.Git.Comparison.Additions == nil || *got.Git.Comparison.Additions != 0 || got.Git.Comparison.Deletions == nil || *got.Git.Comparison.Deletions != 0 || got.Git.Comparison.Ahead == nil || *got.Git.Comparison.Ahead != 0 || got.Git.Comparison.Behind == nil || *got.Git.Comparison.Behind != 0 {
+		t.Fatalf("explicit zero comparison counts = %+v", got.Git.Comparison)
+	}
+}
+
+func TestProjectorRetainsComparisonWhenStatusOmitsIt(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-comparison-partial"
+	const sessionID = "session-comparison-partial"
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id": taskID, "session_id": sessionID, "type": "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a",
+			"comparison": map[string]interface{}{
+				"resolution_state": "resolved", "base_commit": "base-a",
+				"additions": 4, "deletions": 2, "ahead": 3, "behind": 1,
+			},
+		},
+	})
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id": taskID, "session_id": sessionID, "type": "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a", "branch_additions": 99,
+			"branch_deletions": 99, "ahead": 99, "behind": 99,
+		},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.Git == nil || got.Git.Comparison == nil {
+		t.Fatalf("partial comparison summary = %+v", got)
+	}
+	if got.Git.Additions != 4 || got.Git.Deletions != 2 || got.Git.Ahead != 3 || got.Git.Behind != 1 {
+		t.Fatalf("partial status replaced comparison counts: %+v", got.Git)
+	}
+}
+
 func TestProjectorLastActivityTracksBoundedSourcesMonotonically(t *testing.T) {
 	_, store, eventBus, _, _ := newProjectorTest(t)
 	const taskID = "task-last-activity-projector"

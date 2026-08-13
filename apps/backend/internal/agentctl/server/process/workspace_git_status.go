@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
@@ -256,7 +257,15 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 		return update, err
 	}
 
-	wt.getAheadBehindCounts(ctx, &update, prior)
+	comparisonRef := ""
+	if update.Comparison != nil && update.Comparison.State == gitremote.ResolutionResolved {
+		comparisonRef = update.Comparison.ResolvedRef
+	}
+	if wt.HasComparisonContext() {
+		wt.getAheadBehindCountsForRef(ctx, &update, prior, comparisonRef)
+	} else {
+		wt.getAheadBehindCounts(ctx, &update, prior)
+	}
 	if err := ctx.Err(); err != nil {
 		return update, err
 	}
@@ -288,6 +297,7 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	if err := ctx.Err(); err != nil {
 		return update, err
 	}
+	wt.finalizeComparisonStatus(&update)
 
 	return update, nil
 }
@@ -331,7 +341,14 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	// which the agentctl git-log handler used to silently translate into
 	// "last N commits of HEAD" (the symptom in the no-merge-base repro:
 	// `+1 -0` on the card vs. 100 unrelated commits in the panel).
-	update.BaseCommit = wt.ResolveBaseCommit(ctx)
+	if wt.HasComparisonContext() {
+		resolution := wt.resolveComparisonStatus(ctx, update.Branch, update.HeadCommit)
+		wt.applyComparisonStatus(update, resolution)
+	} else {
+		// Legacy callers that have not delivered the additive comparison context
+		// retain the existing origin/base-branch behavior during rollout.
+		update.BaseCommit = wt.ResolveBaseCommit(ctx)
+	}
 
 	return nil
 }
@@ -427,6 +444,14 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	// branch (origin/<feature-branch>) gives wrong counts after rebase
 	// because rebased commits have new SHAs.
 	compareRef := wt.resolveAheadBehindRef(ctx)
+	wt.getAheadBehindCountsForRef(ctx, update, prior, compareRef)
+}
+
+// getAheadBehindCountsForRef computes comparison divergence against an
+// already-resolved executor-local ref. When comparison context is present the
+// caller must pass only the exact resolved target; an empty ref means the
+// counts are unresolved and must not fall back to origin.
+func (wt *WorkspaceTracker) getAheadBehindCountsForRef(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate, compareRef string) {
 	// Inline regex allowlist so the sanitiser barrier sits in the same
 	// function as the `git rev-list` invocation below.
 	rest, hasOriginPrefix := strings.CutPrefix(compareRef, "origin/")

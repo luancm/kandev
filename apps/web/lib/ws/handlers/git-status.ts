@@ -43,6 +43,7 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
     remote_ahead: event.status.remote_ahead,
     remote_behind: event.status.remote_behind,
     remote_head_commit: event.status.remote_head_commit,
+    comparison: event.status.comparison,
     files: event.status.files,
     timestamp: event.timestamp,
     branch_additions: event.status.branch_additions,

@@ -61,6 +61,36 @@ type GitSummary struct {
 	ChangedFiles int `json:"changed_files,omitempty"`
 	Ahead        int `json:"ahead,omitempty"`
 	Behind       int `json:"behind,omitempty"`
+	// Comparison is the single-repository comparison evidence. Multi-repo
+	// summaries use ComparisonByRepository so one sibling cannot overwrite
+	// another sibling's unresolved/resolved state.
+	Comparison             *GitComparisonSummary            `json:"comparison,omitempty"`
+	ComparisonByRepository *map[string]GitComparisonSummary `json:"comparison_by_repository,omitempty"`
+}
+
+// GitComparisonSummary is a bounded, provider-neutral projection of the
+// comparison evidence carried by a Git status update. Counts remain in the
+// aggregate legacy fields; unresolved evidence is represented explicitly by
+// ResolutionState and Reason instead of being mistaken for zero counts.
+type GitComparisonSummary struct {
+	ContextGeneration string               `json:"context_generation,omitempty"`
+	ResolutionState   string               `json:"resolution_state,omitempty"`
+	Reason            string               `json:"reason,omitempty"`
+	ResolvedRef       string               `json:"resolved_ref,omitempty"`
+	BaseCommit        string               `json:"base_commit,omitempty"`
+	Target            *GitComparisonTarget `json:"target,omitempty"`
+}
+
+type GitComparisonTarget struct {
+	Repository GitComparisonRepository `json:"repository"`
+	Ref        string                  `json:"ref"`
+}
+
+type GitComparisonRepository struct {
+	Provider             string `json:"provider,omitempty"`
+	Host                 string `json:"host,omitempty"`
+	RepositoryPath       string `json:"repository_path,omitempty"`
+	ProviderRepositoryID string `json:"provider_repository_id,omitempty"`
 }
 
 // PullRequestSummary is intentionally an aggregate plus one representative

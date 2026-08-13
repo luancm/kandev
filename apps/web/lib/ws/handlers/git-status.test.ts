@@ -253,3 +253,38 @@ describe("git-status WS handler — stale-while-revalidate", () => {
     expect(invalidateCumulativeDiffCacheMock).not.toHaveBeenCalled();
   });
 });
+
+describe("git-status WS handler comparison evidence", () => {
+  let store: StoreApi<AppState>;
+
+  beforeEach(() => {
+    invalidateCumulativeDiffCacheMock.mockClear();
+    store = makeStore();
+    seedSessionCommits(store);
+  });
+
+  it("retains comparison evidence and invalidates when its resolution changes", () => {
+    const handler = gitStatusHandler(store);
+    const first = statusUpdateEvent(STATUS_TIME_1);
+    first.status.comparison = {
+      context_generation: "generation-1",
+      resolution_state: "unresolved",
+      reason: "comparison ref is not available locally",
+      base_commit: "stored-base",
+    };
+    handler(gitEvent(first));
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION].comparison).toEqual(
+      first.status.comparison,
+    );
+
+    const second = statusUpdateEvent(STATUS_TIME_2);
+    second.status.comparison = {
+      ...first.status.comparison,
+      resolution_state: "resolved",
+      resolved_ref: "canonical-remote/main",
+    };
+    handler(gitEvent(second));
+    expect(invalidateCumulativeDiffCacheMock).toHaveBeenCalledTimes(2);
+  });
+});

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -108,6 +109,9 @@ func gitStatusHash(s *lifecycle.GitStatusData) string {
 	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%d|%d|%d|%d",
 		s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
+	if comparison, err := json.Marshal(s.Comparison); err == nil {
+		_, _ = h.Write(comparison)
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -208,6 +212,9 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			"renamed":          st.Renamed,
 			"timestamp":        data.Timestamp,
 		},
+	}
+	if st.Comparison != nil {
+		snapshot.Metadata["comparison"] = st.Comparison
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Debug("failed to persist live git snapshot",

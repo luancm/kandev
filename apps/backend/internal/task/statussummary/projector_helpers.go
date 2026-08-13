@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -278,6 +279,40 @@ func changedFileCount(data map[string]interface{}) int {
 	return count
 }
 
+func gitComparisonFromStatus(status map[string]interface{}) (*GitComparisonSummary, bool) {
+	raw, present := status["comparison"]
+	if !present {
+		return nil, false
+	}
+	data, ok := raw.(map[string]interface{})
+	if !ok {
+		return &GitComparisonSummary{
+			ResolutionState: "unresolved",
+			Reason:          "malformed comparison evidence",
+		}, true
+	}
+	summary := &GitComparisonSummary{
+		ContextGeneration: truncateString(stringField(data, "context_generation"), maxSessionIDBytes),
+		ResolutionState:   truncateString(firstString(data, "resolution_state", "state"), maxPendingActionBytes),
+		Reason:            truncateString(stringField(data, "reason"), MaxActiveErrorPreviewBytes),
+		ResolvedRef:       truncateString(stringField(data, "resolved_ref"), maxPendingActionBytes),
+		BaseCommit:        truncateString(stringField(data, "base_commit"), maxSessionIDBytes),
+	}
+	if targetData, ok := data["target"].(map[string]interface{}); ok {
+		target := &GitComparisonTarget{Ref: truncateString(stringField(targetData, "ref"), maxPendingActionBytes)}
+		if repository, ok := targetData["repository"].(map[string]interface{}); ok {
+			target.Repository = GitComparisonRepository{
+				Provider:             truncateString(stringField(repository, "provider"), maxPendingActionBytes),
+				Host:                 truncateString(stringField(repository, "host"), maxSessionIDBytes),
+				RepositoryPath:       truncateString(stringField(repository, "repository_path"), maxSessionIDBytes),
+				ProviderRepositoryID: truncateString(stringField(repository, "provider_repository_id"), maxSessionIDBytes),
+			}
+		}
+		summary.Target = target
+	}
+	return summary, true
+}
+
 func timeValue(value interface{}) time.Time {
 	switch value := value.(type) {
 	case time.Time:
@@ -322,7 +357,7 @@ func maxInt(value, minimum int) int {
 	return value
 }
 
-func equalGitSummary(a, b GitSummary) bool { return a == b }
+func equalGitSummary(a, b GitSummary) bool { return reflect.DeepEqual(a, b) }
 
 func cloneSummary(summary *TaskStatusSummary) *TaskStatusSummary {
 	if summary == nil {

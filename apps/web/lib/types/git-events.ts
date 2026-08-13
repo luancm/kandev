@@ -1,4 +1,4 @@
-import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
+import type { FileInfo, GitComparisonStatus } from "@/lib/state/slices/session-runtime/types";
 
 // Base payload with discriminator
 type GitEventBase = {
@@ -15,6 +15,7 @@ export type GitStatusData = {
   head_commit?: string;
   base_commit?: string;
   remote_head_commit?: string;
+  comparison?: GitComparisonStatus;
   modified: string[];
   added: string[];
   deleted: string[];
