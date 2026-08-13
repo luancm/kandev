@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/gitremote"
 )
 
 // GitOperationResult represents the result of a git operation.
@@ -528,29 +529,32 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success          bool                         `json:"success"`
-	IsSubmodule      bool                         `json:"is_submodule,omitempty"`
-	Branch           string                       `json:"branch"`
-	RemoteBranch     string                       `json:"remote_branch"`
-	HeadRemote       *streams.GitHeadRemote       `json:"head_remote,omitempty"`
-	Comparison       *streams.GitComparisonStatus `json:"comparison,omitempty"`
-	HeadCommit       string                       `json:"head_commit"`
-	BaseCommit       string                       `json:"base_commit"` // Merge-base with origin branch
-	Ahead            int                          `json:"ahead"`
-	Behind           int                          `json:"behind"`
-	RemoteAhead      int                          `json:"remote_ahead"`
-	RemoteBehind     int                          `json:"remote_behind"`
-	RemoteHeadCommit string                       `json:"remote_head_commit,omitempty"`
-	Modified         []string                     `json:"modified"`
-	Added            []string                     `json:"added"`
-	Deleted          []string                     `json:"deleted"`
-	Untracked        []string                     `json:"untracked"`
-	Renamed          []string                     `json:"renamed"`
-	Files            map[string]interface{}       `json:"files"`
-	Timestamp        string                       `json:"timestamp"`
-	BranchAdditions  int                          `json:"branch_additions,omitempty"`
-	BranchDeletions  int                          `json:"branch_deletions,omitempty"`
-	Error            string                       `json:"error,omitempty"`
+	Success               bool                            `json:"success"`
+	IsSubmodule           bool                            `json:"is_submodule,omitempty"`
+	Branch                string                          `json:"branch"`
+	RemoteBranch          string                          `json:"remote_branch"`
+	HeadRemote            *streams.GitHeadRemote          `json:"head_remote,omitempty"`
+	RemoteRolesGeneration string                          `json:"remote_roles_generation,omitempty"`
+	ActionHead            *gitremote.RemoteRefObservation `json:"action_head,omitempty"`
+	TrackingUpstream      *gitremote.RemoteRefObservation `json:"tracking_upstream,omitempty"`
+	Comparison            *streams.GitComparisonStatus    `json:"comparison,omitempty"`
+	HeadCommit            string                          `json:"head_commit"`
+	BaseCommit            string                          `json:"base_commit"` // Merge-base with origin branch
+	Ahead                 int                             `json:"ahead"`
+	Behind                int                             `json:"behind"`
+	RemoteAhead           int                             `json:"remote_ahead"`
+	RemoteBehind          int                             `json:"remote_behind"`
+	RemoteHeadCommit      string                          `json:"remote_head_commit,omitempty"`
+	Modified              []string                        `json:"modified"`
+	Added                 []string                        `json:"added"`
+	Deleted               []string                        `json:"deleted"`
+	Untracked             []string                        `json:"untracked"`
+	Renamed               []string                        `json:"renamed"`
+	Files                 map[string]interface{}          `json:"files"`
+	Timestamp             string                          `json:"timestamp"`
+	BranchAdditions       int                             `json:"branch_additions,omitempty"`
+	BranchDeletions       int                             `json:"branch_deletions,omitempty"`
+	Error                 string                          `json:"error,omitempty"`
 }
 
 // fetchJSONResult performs a GET against `path` and decodes the response into

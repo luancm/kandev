@@ -97,8 +97,11 @@ func TestPublishGitStatus_PropagatesHeadRemote(t *testing.T) {
 
 	exec := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "sess-head"}
 	pub.PublishGitStatus(exec, &agentctl.GitStatusUpdate{
-		Timestamp: time.Now(),
-		Branch:    "feature/x",
+		Timestamp:             time.Now(),
+		Branch:                "feature/x",
+		RemoteRolesGeneration: "generation-1",
+		ActionHead:            &gitremote.RemoteRefObservation{State: gitremote.ObservationUnknown},
+		TrackingUpstream:      &gitremote.RemoteRefObservation{State: gitremote.ObservationAbsent},
 		HeadRemote: &agentctl.GitHeadRemote{
 			Provider: "github",
 			Host:     "github.com",
@@ -125,6 +128,15 @@ func TestPublishGitStatus_PropagatesHeadRemote(t *testing.T) {
 		head, ok := status["head_remote"].(map[string]any)
 		if !ok || head["owner"] != "fork" || head["repo"] != "project" {
 			t.Fatalf("head_remote = %v, want propagated fork/project identity", status["head_remote"])
+		}
+		if status["remote_roles_generation"] != "generation-1" {
+			t.Fatalf("remote roles generation = %v, want generation-1", status["remote_roles_generation"])
+		}
+		if action, ok := status["action_head"].(map[string]any); !ok || action["observation_state"] != string(gitremote.ObservationUnknown) {
+			t.Fatalf("action_head = %v, want unknown observation", status["action_head"])
+		}
+		if tracking, ok := status["tracking_upstream"].(map[string]any); !ok || tracking["observation_state"] != string(gitremote.ObservationAbsent) {
+			t.Fatalf("tracking_upstream = %v, want absent observation", status["tracking_upstream"])
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for git status event")

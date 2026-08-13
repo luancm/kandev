@@ -104,7 +104,7 @@ Wave 5:
 
 Wave 6:
 
-- [ ] [Task 06: Compute comparison status and counts](task-06-compute-comparison-status.md) (`in_progress`)
+- [x] [Task 06: Compute comparison status and counts](task-06-compute-comparison-status.md) (`completed`)
 
 Wave 7:
 
@@ -132,9 +132,7 @@ Wave 12:
 
 ## Current checkpoint
 
-Tasks 00 through 05 are complete and committed. The Task 06 implementation and comparison-retention remediation are committed as `1cee6ccb4` and `442cffb5c`. The branch is now reconciled with the current local `upstream/main` ref `fa7d88bee` by merge commit `191ed4a0d`; the five content conflicts were resolved while retaining both role-aware comparison transport and upstream's local-first contribution behavior. Focused backend and frontend checks passed after the merge, and the worktree is ready for the next implementation wave.
-
-Task 06 remains open for a post-merge audit of upstream-overlapping status and Changes-panel paths. Its task file Results are intentionally pending until that audit is complete. Do not mark Task 06 complete or release Task 07 until current upstream behavior has been compared against the role-aware contract and any required adjustments are tested.
+Tasks 00 through 06 are complete and committed. Task 06 implementation and comparison-retention remediation are committed as `1cee6ccb4`, `442cffb5c`, `e94c70bde`, and `12f48a185`; the final status propagation and plan checkpoint are in the current working commit. The branch is reconciled with current `upstream/main` `6aeaf4ad2` through merge commits `191ed4a0d` and `aa1f79e15`; the latest merge incorporated upstream provider-history Changes enrichment and its desktop/mobile tests. The Task 06 post-merge audit, repository-scoped persistence remediation, and focused backend/frontend evidence are recorded in its task file. Task 07 is the next implementation wave.
 
 Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
 

@@ -274,6 +274,7 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	if err := ctx.Err(); err != nil {
 		return update, err
 	}
+	wt.attachTrackingDivergence(&update)
 
 	if err := wt.parseGitStatusOutput(ctx, &update); err != nil {
 		return update, err
@@ -302,6 +303,15 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	return update, nil
 }
 
+func (wt *WorkspaceTracker) attachTrackingDivergence(update *types.GitStatusUpdate) {
+	if update == nil || update.TrackingUpstream == nil || update.TrackingUpstream.State != gitremote.ObservationPresent {
+		return
+	}
+	ahead, behind := update.RemoteAhead, update.RemoteBehind
+	update.TrackingUpstream.Ahead = &ahead
+	update.TrackingUpstream.Behind = &behind
+}
+
 // getGitBranchInfo populates branch, remote branch, head commit, and base commit fields.
 // Each command runs under a per-command timeout via the runGit* helpers so a
 // single wedged git invocation cannot pin the shared throttle slot.
@@ -319,7 +329,13 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	if remoteOut, err := wt.runGitOutput(ctx, "rev-parse", "--abbrev-ref", "@{upstream}"); err == nil {
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
-	update.HeadRemote = wt.getGitHeadRemote(ctx, update.Branch)
+	roles := wt.ResolveGitRemoteRolesForBranch(ctx, update.Branch, nil)
+	update.RemoteRolesGeneration = roles.Generation
+	update.ActionHead = wt.observeLocalRemoteRole(ctx, roles.ActionHead)
+	update.TrackingUpstream = wt.observeLocalRemoteRole(ctx, roles.TrackingUpstream)
+	if roles.ActionHead.State == gitremote.ResolutionResolved {
+		update.HeadRemote = projectGitHeadRemote(roles.ActionHead.Identity)
+	}
 
 	// Get current HEAD commit SHA
 	if headOut, err := wt.runGitOutput(ctx, "rev-parse", "HEAD"); err == nil {
@@ -351,6 +367,40 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	}
 
 	return nil
+}
+
+// observeLocalRemoteRole records only checkout-local evidence. Status polling
+// must remain read-only and credential-free, so it does not call ls-remote;
+// an unavailable remote-tracking ref remains unknown rather than proving the
+// provider ref absent. Network-backed absence/presence is an explicit
+// ObserveGitRemoteRef operation used by callers that opt into it.
+func (wt *WorkspaceTracker) observeLocalRemoteRole(ctx context.Context, role GitRemoteRole) *gitremote.RemoteRefObservation {
+	if role.Identity == nil || role.State != gitremote.ResolutionResolved {
+		return nil
+	}
+	identity := *role.Identity
+	observation := role.Observation
+	observation.Identity = &identity
+	observation.State = gitremote.ObservationUnknown
+	observation.RemoteHeadCommit = ""
+	observation.Ahead = nil
+	observation.Behind = nil
+	if role.RemoteName == "" || identity.Ref == "" {
+		return &observation
+	}
+	ref := role.RemoteName + "/" + identity.Ref
+	if !safeBranchRefPattern.MatchString(ref) || strings.Contains(ref, "..") || strings.HasSuffix(ref, ".lock") {
+		return &observation
+	}
+	remoteHead, err := wt.runGitOutput(ctx, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil {
+		return &observation
+	}
+	if head := strings.TrimSpace(string(remoteHead)); head != "" {
+		observation.State = gitremote.ObservationPresent
+		observation.RemoteHeadCommit = head
+	}
+	return &observation
 }
 
 // computeBaseCommit resolves the SHA the workspace_git_diff numstat command

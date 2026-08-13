@@ -83,6 +83,22 @@ export type GitComparisonStatus = {
   deletions?: number;
 };
 
+export type GitRemoteRefObservation = {
+  identity?: {
+    repository: {
+      provider?: string;
+      host?: string;
+      repository_path?: string;
+      provider_repository_id?: string;
+    };
+    ref: string;
+  };
+  observation_state: "unknown" | "absent" | "present" | string;
+  remote_head_commit?: string;
+  ahead?: number;
+  behind?: number;
+};
+
 export type GitStatusEntry = {
   branch: string | null;
   remote_branch: string | null;
@@ -98,6 +114,9 @@ export type GitStatusEntry = {
   remote_ahead?: number;
   remote_behind?: number;
   remote_head_commit?: string;
+  remote_roles_generation?: string;
+  action_head?: GitRemoteRefObservation | null;
+  tracking_upstream?: GitRemoteRefObservation | null;
   comparison?: GitComparisonStatus | null;
   files: Record<string, FileInfo>;
   timestamp: string | null;

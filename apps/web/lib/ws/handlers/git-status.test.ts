@@ -293,4 +293,33 @@ describe("git-status WS handler comparison evidence", () => {
       second.status.comparison,
     );
   });
+
+  it("retains omitted role observations but replaces an explicit atomic observation", () => {
+    const handler = gitStatusHandler(store);
+    const first = statusUpdateEvent(STATUS_TIME_1);
+    first.status.remote_roles_generation = "generation-1";
+    first.status.action_head = {
+      observation_state: "present",
+      remote_head_commit: "action-head",
+      ahead: 2,
+      behind: 1,
+    };
+    first.status.tracking_upstream = { observation_state: "unknown" };
+    handler(gitEvent(first));
+
+    const partial = statusUpdateEvent(STATUS_TIME_2);
+    handler(gitEvent(partial));
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toMatchObject({
+      remote_roles_generation: "generation-1",
+      action_head: first.status.action_head,
+      tracking_upstream: first.status.tracking_upstream,
+    });
+
+    const cleared = statusUpdateEvent("2026-05-28T00:00:03Z");
+    cleared.status.action_head = { observation_state: "absent" };
+    handler(gitEvent(cleared));
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION].action_head).toEqual(
+      cleared.status.action_head,
+    );
+  });
 });

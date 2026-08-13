@@ -565,9 +565,14 @@ func taskGitObservation(
 	if session == nil || snapshot == nil {
 		return statussummary.GitObservation{}, false
 	}
-	repository := session.ID
-	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
-		repository = name
+	repository := snapshot.RepositoryName
+	if repository == "" {
+		if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
+			repository = name
+		}
+	}
+	if repository == "" {
+		repository = session.ID
 	}
 	comparison := gitComparisonSummaryFromMetadata(snapshot.Metadata)
 	return statussummary.GitObservation{

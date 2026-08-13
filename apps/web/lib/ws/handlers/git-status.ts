@@ -43,6 +43,9 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
     remote_ahead: event.status.remote_ahead,
     remote_behind: event.status.remote_behind,
     remote_head_commit: event.status.remote_head_commit,
+    remote_roles_generation: event.status.remote_roles_generation,
+    action_head: event.status.action_head,
+    tracking_upstream: event.status.tracking_upstream,
     comparison: event.status.comparison,
     files: event.status.files,
     timestamp: event.timestamp,
@@ -53,6 +56,27 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
     repository_name: event.status.repository_name,
     is_submodule: event.status.is_submodule,
   };
+}
+
+function retainOmittedRemoteObservations(
+  store: StoreApi<AppState>,
+  event: GitStatusUpdateEvent,
+  entry: GitStatusEntry,
+): GitStatusEntry {
+  const envKey = resolveEnvKey(store, event.session_id);
+  const repositoryName = event.status.repository_name ?? "";
+  const existing = store.getState().gitStatus.byEnvironmentRepo[envKey]?.[repositoryName];
+  if (!existing) return entry;
+  if (!Object.prototype.hasOwnProperty.call(event.status, "remote_roles_generation")) {
+    entry.remote_roles_generation = existing.remote_roles_generation;
+  }
+  if (!Object.prototype.hasOwnProperty.call(event.status, "action_head")) {
+    entry.action_head = existing.action_head;
+  }
+  if (!Object.prototype.hasOwnProperty.call(event.status, "tracking_upstream")) {
+    entry.tracking_upstream = existing.tracking_upstream;
+  }
+  return entry;
 }
 
 function retainOmittedComparison(
@@ -74,7 +98,11 @@ function retainOmittedComparison(
 
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
-    const gitStatus = retainOmittedComparison(store, event, buildGitStatusEntry(event));
+    const gitStatus = retainOmittedRemoteObservations(
+      store,
+      event,
+      retainOmittedComparison(store, event, buildGitStatusEntry(event)),
+    );
     // setGitStatus performs the deep change comparison once and reports back
     // whether anything changed; reuse that instead of comparing again here.
     // Under a massive rebase the comparison is the dominant CPU cost.
