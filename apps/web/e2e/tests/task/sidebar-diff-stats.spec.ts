@@ -4,6 +4,7 @@ import {
   GitHelper,
   configureTriangularRemoteFixture,
   makeGitEnv,
+  makeTriangularRemoteFixtureInput,
 } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -72,11 +73,12 @@ test.describe("Task sidebar diff stats", () => {
     seedData,
     backend,
   }) => {
+    const fixtureInput = makeTriangularRemoteFixtureInput();
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "github",
       provider_host: "https://github.com",
-      provider_owner: "testorg",
-      provider_name: "sidebar-comparison",
+      provider_owner: fixtureInput.canonicalOwner,
+      provider_name: fixtureInput.canonicalName,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -96,17 +98,17 @@ test.describe("Task sidebar diff stats", () => {
     await session.waitForChatIdle();
     const sessions = await apiClient.listTaskSessions(task.id);
     const checkout =
-      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
-      sessions.sessions[0]?.worktree_path;
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path || sessions.sessions[0]?.worktree_path;
     if (!checkout) throw new Error("Sidebar comparison task has no checkout");
     const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
-    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir);
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir, fixtureInput);
 
     await expect
       .poll(
         async () => {
           const response = await apiClient.listTasks(seedData.workspaceId);
-          const gitSummary = response.tasks.find((item) => item.id === task.id)?.status_summary?.git;
+          const gitSummary = response.tasks.find((item) => item.id === task.id)?.status_summary
+            ?.git;
           return { additions: gitSummary?.additions ?? 0, deletions: gitSummary?.deletions ?? 0 };
         },
         { timeout: 60_000 },

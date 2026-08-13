@@ -82,7 +82,11 @@ test.describe("External VCS file links", () => {
     backend,
   }) => {
     const repositoryPath = initializeRepository(backend, `external-link-pr-${Date.now()}`);
-    const repository = await createGitHubRepository(apiClient, seedData.workspaceId, repositoryPath);
+    const repository = await createGitHubRepository(
+      apiClient,
+      seedData.workspaceId,
+      repositoryPath,
+    );
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("reviewer");
     await apiClient.mockGitHubAddPRs([
@@ -169,9 +173,8 @@ test.describe("External VCS file links", () => {
     await session.waitForChatIdle();
     const sessions = await apiClient.listTaskSessions(task.id);
     const checkout =
-      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
-      sessions.sessions[0]?.worktree_path ||
-      repositoryPath;
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path || sessions.sessions[0]?.worktree_path;
+    if (!checkout) throw new Error("external-link PR task has no live session worktree");
     const actionGit = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
     actionGit.exec(`git checkout -B ${checkoutBranch}`);
     const writableFork = configureWritableForkRemote(
@@ -195,9 +198,7 @@ test.describe("External VCS file links", () => {
     await expect(link).toHaveAttribute("target", "_blank");
     await openExternalLink(testPage, link, expectedURL);
 
-    const addedHeader = review
-      .getByTestId("review-file-header")
-      .filter({ hasText: ADDED_FILE });
+    const addedHeader = review.getByTestId("review-file-header").filter({ hasText: ADDED_FILE });
     await expect(addedHeader.getByRole("link", { name: "Open file in GitHub" })).toHaveAttribute(
       "href",
       `https://github.com/reviewer-fork/external-file-links/blob/${encodeURIComponent(checkoutBranch)}/${ADDED_FILE}`,
@@ -245,9 +246,8 @@ test.describe("External VCS file links", () => {
     await session.waitForChatIdle();
     const sessions = await apiClient.listTaskSessions(task.id);
     const taskCheckout =
-      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
-      sessions.sessions[0]?.worktree_path ||
-      repositoryPath;
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path || sessions.sessions[0]?.worktree_path;
+    if (!taskCheckout) throw new Error("external-link base task has no live session worktree");
     fs.writeFileSync(path.join(taskCheckout, UNTRACKED_FILE), "export const local = true;\n");
     fs.writeFileSync(path.join(taskCheckout, RENAMED_OLD_FILE), "export const oldName = true;\n");
     execFileSync("git", ["mv", RENAMED_OLD_FILE, RENAMED_FILE], {
@@ -264,9 +264,7 @@ test.describe("External VCS file links", () => {
     const renamedHeader = renameReview
       .getByTestId("review-file-header")
       .filter({ hasText: RENAMED_FILE });
-    await expect(
-      renamedHeader.getByRole("link", { name: "Open file in GitHub" }),
-    ).toHaveAttribute(
+    await expect(renamedHeader.getByRole("link", { name: "Open file in GitHub" })).toHaveAttribute(
       "href",
       `https://github.com/testorg/${BASE_GITHUB_REPOSITORY}/blob/main/${RENAMED_OLD_FILE}`,
     );

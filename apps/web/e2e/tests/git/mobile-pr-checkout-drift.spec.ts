@@ -32,7 +32,6 @@ function createRewrittenProviderHistory(
   git: GitHelper,
   branch: string,
 ): {
-  head: string;
   commits: Array<{
     sha: string;
     message: string;
@@ -64,7 +63,7 @@ function createRewrittenProviderHistory(
   }
   git.exec(`git push --force origin HEAD:refs/heads/${branch}`);
   git.exec("git checkout -f main");
-  return { head: commits[commits.length - 1].sha, commits };
+  return { commits };
 }
 
 async function swipeUpOnElement(page: Page, element: Locator): Promise<void> {
@@ -140,7 +139,7 @@ test.describe("Mobile rewritten contribution history", () => {
         author_login: "mobile-remote-contributor",
         repo_owner: "testorg",
         repo_name: "testrepo",
-        head_sha: providerHistory.head,
+        head_sha: providerHistory.commits.at(-1)?.sha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 902, providerHistory.commits);
@@ -176,8 +175,6 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toContainText("PR #902 version");
-    const initialProviderHead = providerHistory.head;
-    expect(initialProviderHead).toBe(providerHistory.commits.at(-1)?.sha);
     await apiClient.mockGitHubAddPRs([
       {
         number: 902,
@@ -207,6 +204,13 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
     await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").tap();
+    await expect
+      .poll(() =>
+        providerSection
+          .getByTestId(`commit-row-${providerHistory.commits[0].sha.slice(0, 7)}`)
+          .count(),
+      )
+      .toBe(1);
     await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
     await expect(
       providerSection.locator('[data-commit-provenance="current_pr"]').first(),
@@ -253,7 +257,7 @@ test.describe("Mobile rewritten contribution history", () => {
     await openMenu.getByTestId("mobile-replace-pr-branch").tap();
     const drawer = testPage.getByTestId("mobile-remote-contribution-drawer");
     await expect(drawer).toBeVisible();
-    await expect(drawer).toContainText(providerHistory.head);
+    await expect(drawer).toContainText(providerHistory.commits[0].sha);
     await expect(testPage.getByTestId("mobile-remote-contribution-confirm")).toHaveClass(/h-11/);
     await drawer.getByRole("button", { name: "Cancel" }).tap();
 
@@ -364,7 +368,12 @@ test.describe("Mobile rewritten contribution history", () => {
           resolution_state: "resolved",
           additions: 1,
           deletions: 0,
-          target: { repository: { repository_path: /testorg\/canonical-/ }, ref: "main" },
+          target: {
+            repository: {
+              repository_path: `${fixtureInput.canonicalOwner}/${fixtureInput.canonicalName}`,
+            },
+            ref: "main",
+          },
         },
       });
 

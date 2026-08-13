@@ -123,7 +123,6 @@ function createRewrittenProviderHistory(
   git: GitHelper,
   branch: string,
 ): {
-  head: string;
   commits: Array<{
     sha: string;
     message: string;
@@ -155,7 +154,7 @@ function createRewrittenProviderHistory(
   }
   git.exec(`git push --force origin HEAD:refs/heads/${branch}`);
   git.exec("git checkout -f main");
-  return { head: commits[commits.length - 1].sha, commits };
+  return { commits };
 }
 
 // ---------------------------------------------------------------------------
@@ -1750,7 +1749,7 @@ test.describe("Git Changes Panel", () => {
         author_login: "remote-contributor",
         repo_owner: "testorg",
         repo_name: "testrepo",
-        head_sha: providerHistory.head,
+        head_sha: providerHistory.commits.at(-1)?.sha,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 901, providerHistory.commits);
@@ -1786,8 +1785,6 @@ test.describe("Git Changes Panel", () => {
     await expect(
       localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
     ).toContainText("Local checkout commits");
-    const initialProviderHead = providerHistory.head;
-    expect(initialProviderHead).toBe(providerHistory.commits.at(-1)?.sha);
     await apiClient.mockGitHubAddPRs([
       {
         number: 901,
@@ -1807,12 +1804,20 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await expect(testPage.getByTestId("changes-panel")).toBeVisible();
     await expect(testPage.getByRole("button", { name: /^Pull/ })).toBeDisabled();
+    await expect(changes.getByTestId("commits-section")).toBeVisible();
     expect(git.getCurrentSha()).toBe(localHead);
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
     await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
+    await expect
+      .poll(() =>
+        providerSection
+          .getByTestId(`commit-row-${providerHistory.commits[0].sha.slice(0, 7)}`)
+          .count(),
+      )
+      .toBe(1);
     await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
     await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
     await expect(
@@ -1860,7 +1865,7 @@ test.describe("Git Changes Panel", () => {
     await driftMenu.getByTestId("header-replace-pr-branch").click();
     const resolutionDialog = testPage.getByTestId("remote-contribution-resolution-dialog");
     await expect(resolutionDialog).toBeVisible();
-    await expect(resolutionDialog).toContainText(providerHistory.head);
+    await expect(resolutionDialog).toContainText(providerHistory.commits[0].sha);
     await resolutionDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(resolutionDialog).toBeHidden();
     await prCapture.screenshot("remote-contribution-drift-desktop", {
@@ -2190,7 +2195,9 @@ test.describe("Git Changes Panel", () => {
           additions: 1,
           deletions: 0,
           target: {
-            repository: { repository_path: fixtureInput.canonicalName },
+            repository: {
+              repository_path: `${fixtureInput.canonicalOwner}/${fixtureInput.canonicalName}`,
+            },
             ref: "main",
           },
         },

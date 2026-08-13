@@ -31,7 +31,7 @@ test.describe("GitHub PR push-detection auto-link", () => {
     // gitlab-mr-push-autolink.spec.ts configures.
     await apiClient.configureGitLabRepositoryRemote(
       seedData.repositoryId,
-      `${backend.baseUrl}/platform/kandev.git`,
+      `${backend.baseUrl}/testorg/testrepo.git`,
     );
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "github",
@@ -86,6 +86,13 @@ test.describe("GitHub PR push-detection auto-link", () => {
         author_login: "test-user",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_repo_owner: "testorg",
+        head_repo_name: "testrepo",
+        head_repo_id: 321,
+        head_repo_node_id: "R_writable_testrepo",
+        base_repo_owner: "testorg",
+        base_repo_name: "testrepo",
+        base_repo_id: 654,
         additions: 5,
         deletions: 1,
       },
@@ -124,6 +131,27 @@ test.describe("GitHub PR push-detection auto-link", () => {
     await testPage.reload();
     await expect(session.prTopbarButton()).toHaveAttribute("data-pr-number", String(prNumber), {
       timeout: 30_000,
+    });
+    const persistedResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/task-prs/${encodeURIComponent(task.id)}`,
+    );
+    expect(persistedResponse.ok).toBe(true);
+    const persisted = (await persistedResponse.json()) as Record<string, unknown>;
+    expect(persisted).toMatchObject({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      head_host: "github.com",
+      head_owner: "testorg",
+      head_repo: "testrepo",
+      head_repo_id: 321,
+      head_repo_node_id: "R_writable_testrepo",
+      head_branch: branch,
+      base_host: "github.com",
+      base_owner: "testorg",
+      base_repo: "testrepo",
+      base_repo_id: 654,
+      base_branch: "main",
     });
   });
 });

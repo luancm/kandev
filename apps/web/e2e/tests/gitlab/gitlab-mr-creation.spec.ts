@@ -7,6 +7,7 @@ import {
 } from "../../helpers/layout-assertions";
 import { GitLabPage } from "../../pages/gitlab-page";
 import { SessionPage } from "../../pages/session-page";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 
 test.describe("GitLab merge request creation", () => {
   test("creates an MR through the runtime and automatically persists the task link", async ({
@@ -48,6 +49,25 @@ test.describe("GitLab merge request creation", () => {
     ).toBeVisible({
       timeout: 45_000,
     });
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const branch = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_branch;
+    const checkout = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_path;
+    if (!branch) throw new Error("GitLab creation task has no worktree branch");
+    if (!checkout) throw new Error("GitLab creation task has no live session worktree");
+    const actionGit = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
+    actionGit.exec(`git remote set-url origin "${backend.baseUrl}/fork/${GITLAB_PROJECT}.git"`);
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      gitLabMR(100, "Runtime-created GitLab MR", {
+        project_path: `fork/${GITLAB_PROJECT}`,
+        url: `${backend.baseUrl}/fork/${GITLAB_PROJECT}/-/merge_requests/100`,
+        web_url: `${backend.baseUrl}/fork/${GITLAB_PROJECT}/-/merge_requests/100`,
+        head_branch: branch,
+        source_project_path: "fork/platform/kandev",
+        source_project_id: 202,
+        target_project_path: GITLAB_PROJECT,
+        target_project_id: 101,
+      }),
+    ]);
 
     await openChangesTab(testPage);
     const create = testPage.getByTestId("commits-repo-create-pr").first();
@@ -79,19 +99,6 @@ test.describe("GitLab merge request creation", () => {
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveAttribute("data-mr-iid", "100", {
       timeout: 120_000,
     });
-    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
-      gitLabMR(100, "Runtime-created GitLab MR", {
-        source_project_path: "fork/platform/kandev",
-        source_project_id: 202,
-        target_project_path: GITLAB_PROJECT,
-        target_project_id: 101,
-      }),
-    ]);
-    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
-      task_id: task.id,
-      repository_id: seedData.repositoryId,
-      mr_url: `${backend.baseUrl}/${GITLAB_PROJECT}/-/merge_requests/100`,
-    });
     await gitlab.openLinkedMR(100);
     await expect(
       testPage.getByTestId("mr-detail-panel").last().getByText("Runtime-created GitLab MR"),
@@ -108,7 +115,7 @@ test.describe("GitLab merge request creation", () => {
     const linkedMR = taskMRs.task_mrs?.[task.id]?.find((mr) => mr.mr_iid === 100);
     expect(linkedMR).toMatchObject({
       host: backend.baseUrl,
-      project_path: GITLAB_PROJECT,
+      project_path: `fork/${GITLAB_PROJECT}`,
       source_host: backend.baseUrl,
       source_project_path: "fork/platform/kandev",
       target_host: backend.baseUrl,

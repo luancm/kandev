@@ -54,6 +54,13 @@ export type MockPR = {
   author_login: string;
   repo_owner: string;
   repo_name: string;
+  head_repo_owner?: string;
+  head_repo_name?: string;
+  head_repo_id?: number;
+  head_repo_node_id?: string;
+  base_repo_owner?: string;
+  base_repo_name?: string;
+  base_repo_id?: number;
   html_url?: string;
   url?: string;
   body?: string;

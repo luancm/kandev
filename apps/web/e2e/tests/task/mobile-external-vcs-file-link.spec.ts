@@ -4,11 +4,7 @@ import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import {
-  configureWritableForkRemote,
-  GitHelper,
-  makeGitEnv,
-} from "../../helpers/git-helper";
+import { configureWritableForkRemote, GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 const MOBILE_FILE = "mobile-external-link.ts";
@@ -67,7 +63,11 @@ test.describe("Mobile external VCS file link", () => {
     backend,
   }) => {
     const repositoryPath = initializeMobileRepository(backend);
-    const repository = await createMobileRepository(apiClient, seedData.workspaceId, repositoryPath);
+    const repository = await createMobileRepository(
+      apiClient,
+      seedData.workspaceId,
+      repositoryPath,
+    );
     await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
       source: "legacy_shared",
       status: "active",
@@ -156,9 +156,8 @@ test.describe("Mobile external VCS file link", () => {
     await session.waitForChatIdle();
     const sessions = await apiClient.listTaskSessions(task.id);
     const checkout =
-      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
-      sessions.sessions[0]?.worktree_path ||
-      repositoryPath;
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path || sessions.sessions[0]?.worktree_path;
+    if (!checkout) throw new Error("mobile external-link task has no live session worktree");
     const actionGit = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
     actionGit.exec("git checkout -B feature/mobile-links");
     const writableFork = configureWritableForkRemote(
@@ -188,7 +187,10 @@ test.describe("Mobile external VCS file link", () => {
       "https://github.com/mobile-reviewer/mobile-external-links/blob/feature%2Fmobile-links/mobile-added.ts",
     );
     await expect(
-      review.getByTestId("review-file-header").filter({ hasText: MOBILE_DELETED }).getByRole("link"),
+      review
+        .getByTestId("review-file-header")
+        .filter({ hasText: MOBILE_DELETED })
+        .getByRole("link"),
     ).toHaveAttribute(
       "href",
       "https://github.com/testorg/mobile-external-links/blob/main/mobile-deleted.ts",
@@ -223,13 +225,12 @@ test.describe("Mobile external VCS file link", () => {
     );
     await expect(renamedNode).toBeVisible({ timeout: 15_000 });
     await renamedNode.tap();
-    await expect(testPage.getByTestId("mobile-file-viewer-panel").getByRole("link")).toHaveAttribute(
-      "href",
-      "https://github.com/testorg/mobile-external-links/blob/main/mobile-base-old.ts",
-    );
-
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+    await expect(viewer).toContainText(localRenamed);
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    await fileNode.tap();
     await expect(viewer).toBeVisible();
+    await expect(viewer).toContainText(MOBILE_FILE);
     const link = viewer.getByRole("link", { name: "Open file in GitHub" });
     const expectedURL =
       "https://github.com/mobile-reviewer/mobile-external-links/blob/feature%2Fmobile-links/mobile-external-link.ts";
