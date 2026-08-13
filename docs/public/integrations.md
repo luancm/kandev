@@ -26,6 +26,8 @@ For GitLab, Kandev resolves only the active task workspace's connection. It prov
 
 A task can therefore display a pull or merge request while its worktree cannot push, or edit a repository while Kandev cannot read provider state. Diagnose the failing credential path separately. An App token redeemed through the broker is minted for that repository. PAT and named-CLI tokens remain bearer credentials with all provider-granted scopes once delivered to the trusted Git or `gh` subprocess; lease matching prevents accidental cross-repository redemption but cannot narrow those tokens at GitHub. GitLab integration tokens are provided only to tasks in their configured workspace and should be treated as credentials that task agents may receive.
 
+Provider connections authorize repository identities; they do not assign meaning to a Git remote name. Task Git actions resolve the **attached repository**, **writable action head**, **tracking upstream**, and **comparison target** independently. A provider default branch is used only when no explicit comparison target is selected, and `origin` is never a universal source or destination. See [Git operations](git-operations.md#remote-roles) for the operation rules and fail-closed behavior.
+
 ## Open integration settings
 
 Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a provider. The direct routes are:
@@ -136,10 +138,12 @@ option remains available.
   install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).
   Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
-  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
-  host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
-  match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
-  origin. Repositories you registered from an existing local checkout are never rewritten.
+  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates the checkout's
+  configured Git remote URL to the host's selected `gh` clone protocol. Selecting SSH therefore
+  lets Git conditional includes that match `remote.*.url` apply; switching back to managed
+  credentials restores the canonical HTTPS URL. Repositories you registered from an existing local
+  checkout are never rewritten. The remote name remains executor-local and does not become a
+  writable, tracking, or comparison role merely because it is commonly named `origin`.
 
 If Git rejects a managed checkout with **detected dubious ownership**, the Kandev service account
 and the checkout owner do not match. Repository preparation stops and the session error identifies
@@ -394,7 +398,7 @@ Both watch types inspect only their first GitLab result page, up to 50 items. Al
 
 ### Create a merge request from a task
 
-For a task repository whose `origin` matches the workspace's GitLab host, the Changes surface labels the provider action **Create Merge Request**. Kandev pushes the current branch, uses an explicit target branch or resolves the GitLab project's default branch, supports draft MRs, and creates through an authenticated `glab` when available or the workspace token REST fallback. HTTPS, SSH, `gitlab.com`, and configured self-managed remotes are supported.
+When the task's writable action head and comparison target are complete GitLab identities on the workspace's configured host, the Changes surface labels the provider action **Create Merge Request**. Kandev pushes the current branch to the writable action head, uses the comparison target when selected or the GitLab project's default branch when no target is available, supports draft MRs, and creates through an authenticated `glab` when available or the workspace token REST fallback. HTTPS, SSH, `gitlab.com`, and configured self-managed remotes are supported; a remote named `origin` is not required.
 
 A successful create returns the MR URL and asynchronously records it against the originating task repository. If association fails, use the manual link action. Retrying is idempotent for an existing open MR with the same source and target branches. A push can succeed even when MR creation fails; Kandev reports that partial result and leaves the remote branch in place for retry.
 
@@ -618,7 +622,7 @@ Issue bodies, pull-request comments, commit messages, and incident details are u
 - **Cleared token but connection remains:** for GitHub, a higher-priority CLI or environment credential may still be active. Clearing GitLab from its workspace settings removes that workspace connection.
 - **Repository, project, or team is missing:** confirm the connected identity can see it and check workspace filters/defaults.
 - **Kandev can read but cannot write:** add only the specific provider write scope needed, then repeat the test.
-- **Task cannot fetch or push:** inspect the selected executor's Git/SSH credentials and repository remote. For GitHub, inspect any explicit profile `GITHUB_TOKEN`/`GH_TOKEN`; otherwise verify the workspace automation connection, repository scope, broker reachability, and App Contents permission. For GitLab HTTP remotes, confirm the task workspace connection host exactly matches the remote and its token can access the project. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. Jira, Linear, and Sentry integration credentials are not task Git credentials.
+- **Task cannot fetch or push:** inspect the selected executor's Git/SSH credentials and the resolved writable action head, tracking upstream, or comparison target rather than assuming a remote named `origin`. For GitHub, inspect any explicit profile `GITHUB_TOKEN`/`GH_TOKEN`; otherwise verify the workspace automation connection, repository scope, broker reachability, and App Contents permission. For GitLab HTTP remotes, confirm the task workspace connection host exactly matches the source or comparison identity and its token can access the project. The Azure PAT can authenticate the backend's initial managed clone/fetch but is not exposed to the task for later pushes. Jira, Linear, and Sentry integration credentials are not task Git credentials.
 - **A watch still runs after disabling the provider:** the Enabled switch is browser-local. Pause/delete the watch, or remove the backend configuration.
 - **Unexpected work is created:** pause the watch or automation, inspect its query, last-polled/status fields, and created-task list, then narrow provider filters before resetting or polling again. Watch tables do not provide a separate run/import history.
 

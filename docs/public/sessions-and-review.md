@@ -161,11 +161,13 @@ Changes are grouped by repository and then by state:
 
 From this panel you can stage or unstage files, discard working-tree changes, commit, amend, reset or revert commits, pull, rebase, merge, push, force-push, rename the task branch, choose a base branch, and create or open a pull request or merge request. Operations apply to the selected repository. Discarding a file is permanent, and history-changing operations can lose work or invalidate review; read [Git operations](git-operations.md) before using them.
 
+Changes and **PR Changes** use the task repository's resolved **comparison target** for their merge base and sidebar counts. The **attached repository** identifies the task and its authorization scope; the **writable action head** identifies where Push and Force Push go; and the **tracking upstream** is the only source for Pull. These roles can use different repositories, branches, and arbitrary remote names. Kandev does not assign semantic meaning to `origin`, a provider default branch, or an attached repository's name. If comparison or action evidence is unresolved or ambiguous, Kandev leaves the affected count or control unavailable rather than guessing.
+
 ### Open a file in its external repository
 
 When Kandev has unambiguous repository context, file toolbars in Changes, Review, built-in viewers and editors, and their mobile layouts show **Open file in GitHub**, **Open file in GitLab**, or **Open file in Azure DevOps**. The action opens the provider page in a new browser tab. GitLab links support both `gitlab.com` and configured self-managed hosts.
 
-The link uses the published source branch from a linked pull or merge request for that repository when available; otherwise it uses the task repository's base branch. Added or untracked files do not show the action until they exist on a published source branch. Deleted files open their base-branch version, while renamed files open the new path on a published source branch or the previous path on the base branch.
+The link uses the published source branch from a linked pull or merge request for that repository when available; otherwise it uses the comparison target's ref. Added or untracked files do not show the action until they exist on a published source branch. Deleted files open their comparison-target version, while renamed files open the new path on a published source branch or the previous path on the comparison target.
 
 Kandev hides the action instead of guessing when a repository is local-only, unsupported, incompletely configured, or ambiguous. If a colleague cannot open the resulting page, check their permissions on the external repository; opening a link does not change provider access.
 
@@ -226,10 +228,10 @@ A task stores one walkthrough. Publishing another replaces the current one. Kand
 
 The commit dialog commits staged changes by default. Enter a title and optional body. **Stage all changes before committing** is off by default; enable it only after checking every unstaged file. Utility agents can propose commit text, but you remain responsible for the result.
 
-The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first runs `git push --set-upstream origin HEAD`, then selects the provider from the repository's `origin`:
+The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first pushes `HEAD` to the repository's resolved **writable action head**, then creates the change request from that exact source and the selected **comparison target**. It does not select the provider, source, or target from a remote named `origin`:
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
-- GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, resolves an omitted target from the project default, and attempts to link the resulting MR back to the task repository.
+- GitLab uses `glab mr create` when available or the matching workspace connection's token through GitLab REST. It supports `gitlab.com` and configured self-managed HTTPS or SSH remotes, uses the comparison target when one is selected, otherwise resolves the project default, and attempts to link the resulting MR back to the attached task repository.
 - Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
 - Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 

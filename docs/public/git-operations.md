@@ -18,7 +18,7 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 
 ## Prerequisites and trust boundary
 
-The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, Rebase, Merge, or change-request creation.
+The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Configure the checkout's remotes and credentials before relying on Pull, Push, Rebase, Merge, or change-request creation. Remote names are local Git configuration, not Kandev roles; a remote named `origin` has no special meaning.
 
 Managed Improve Kandev tasks are the exception to the ordinary single-remote push description. The
 canonical `origin` still identifies `kdlbs/kandev` for pulls, base comparisons, issue lookup, and
@@ -54,7 +54,7 @@ feature/{title}-{suffix}
 
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev best-effort fetches the base branch before creating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, or timeout failure can fall back to an available local or remote-tracking ref with a visible warning; a base branch that cannot be resolved, including its configured fallback, stops creation.
 
-When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
+When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the recorded source branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
 
 Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when
 **Settings → General → Task Actions → Agent-generated task titles** is enabled. After the owning
@@ -70,12 +70,25 @@ After creation, Kandev copies any repository-configured files and runs its setup
 
 All operations below run in the selected repository workspace.
 
+### Remote roles
+
+Kandev resolves four independent roles from the attached repository, the current Git configuration, and the selected comparison context:
+
+- **Attached repository** is the persisted repository identity for authorization, workspace scope, and task association. It is not necessarily the repository that receives a Push.
+- **Writable action head** is Git's resolved push destination for the current checkout and branch. Push, Force Push, source-history checks, and provider source identity use this role.
+- **Tracking upstream** is the explicit Git `@{upstream}` for the current local branch. Pull and tracking-divergence evidence use this role only.
+- **Comparison target** is the linked change's base, a validated remote-contribution target, or the attached repository plus selected base ref. Changes counts, Cumulative Diff, Rebase, Merge, and change-request target selection use this role.
+
+The roles can point to the same repository and ref, but one role never implies another. Kandev maps identities to whatever executor-local remote names are configured, including arbitrary names and triangular Push/Tracking/Comparison layouts. It never treats `origin`, `upstream`, or a provider's default branch as a universal source, destination, or comparison target. If a role is missing, ambiguous, stale, or unresolved, the affected operation is unavailable rather than guessed.
+
+The Changes sidebar's status and counts are measured against the comparison target's merge base. **PR Changes** is a provider change file list for the linked pull or merge request, not a second sidebar comparison status. Kandev does not substitute an unrelated remote or publish fresh sidebar counts when comparison evidence is ambiguous. A stored base commit is used only when it is qualified to the exact comparison repository and ref.
+
 | UI operation | Effective Git behavior | Important consequence |
 |--------------|------------------------|-----------------------|
-| Pull | `git pull origin BRANCH`, optionally with `--rebase`. | Uses the current branch when any upstream exists. With no upstream it falls back to `origin/main`, then `origin/master`, then the current branch. It does not parse an upstream that points to a differently named remote branch. |
-| Push | `git push origin CURRENT_BRANCH`; adds `--set-upstream` when requested or no upstream exists. | Force Push uses `--force-with-lease`, not unconditional `--force`. It still rewrites remote history when the lease is valid. Managed Improve Kandev tasks use the branch's prepared fork push remote instead of `origin`. |
-| Rebase | Fetches `origin BASE`, then rebases onto `origin/BASE`. | Rewrites local commits. If conflict files are detected from Git output, Kandev attempts `git rebase --abort` automatically and returns the file list. |
-| Merge | Fetches `origin BASE`, then merges `origin/BASE`. | Conflicts are deliberately left in the worktree. Resolve and commit them, or use Abort Merge. |
+| Pull | Fetches and integrates the explicit tracking upstream, optionally with `--rebase`. | Pull is unavailable when tracking is missing or its observation is unknown. It never falls back to the comparison target, attached repository, or a named remote. |
+| Push | Pushes the current branch to the writable action head; adds `--set-upstream` only when explicitly requested. | Force Push uses `--force-with-lease`, not unconditional `--force`. A first Push is enabled only when Kandev has verified the exact destination identity and proved its ref is absent, with local contribution evidence. Managed Improve Kandev tasks use the branch's prepared fork push remote instead of `origin`. |
+| Rebase | Fetches and rebases onto the comparison target ref. | Rewrites local commits. An unresolved or ambiguous comparison target disables the action. If conflict files are detected from Git output, Kandev attempts `git rebase --abort` automatically and returns the file list. |
+| Merge | Fetches and merges the comparison target ref. | An unresolved or ambiguous comparison target disables the action. Conflicts are deliberately left in the worktree. Resolve and commit them, or use Abort Merge. |
 | Abort | Runs `git merge --abort` or `git rebase --abort`. | Fails when that operation is not in progress or the repository cannot be restored. |
 | Stage | With paths, `git add -- PATHS`; with an empty path list, `git add -A`. | Empty means all changes, including deletions. |
 | Unstage | With paths, `git reset HEAD -- PATHS`; with an empty path list, `git reset HEAD`. | Keeps working-tree content. |
@@ -113,29 +126,29 @@ Do not reset or amend commits already consumed by other users unless you intend 
 
 ## Create a pull request or merge request
 
-For an ordinary task, **Create PR** first runs:
+**Create PR/MR** requires a normal first Push to the writable action head when its destination ref is absent, then dispatches the provider adapter. If the destination already exists, Kandev still validates the writable action head before creation:
+
+For a managed Improve Kandev task, the prepared branch push remote replaces `origin` for this push. Keep `origin` canonical and create the GitHub pull request with the explicit fork head shown below.
 
 ```bash
-git push --set-upstream origin HEAD
+git push <writable-remote> HEAD:<writable-ref>
 ```
 
-For a managed Improve Kandev task, the prepared branch push remote replaces
-`origin` for this push. Keep `origin` canonical and create the GitHub pull
-request with the explicit fork head shown below.
+Creation requires a complete writable source identity and an explicit comparison target identity. It does not select a provider or target from a remote name. The attached provider connection and workspace scope must authorize both identities.
 
-It then selects a provider from the `origin` hostname:
+It then selects a provider from the canonical provider identity, not from a remote name.
 
 | Provider | Required runtime tools | Creation behavior |
 |----------|------------------------|-------------------|
-| GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current head, optional base, and optional `--draft`. Managed Improve Kandev uses `--repo kdlbs/kandev` and an explicit `<fork-owner>:<branch>` head. |
-| GitLab | Authenticated `glab` CLI or the active workspace's matching GitLab PAT | Reuses an existing open MR for the same source/target or creates one with title, description, current source, explicit or project-default target, and optional draft state. The configured GitLab origin must match the HTTPS or SSH `origin`. |
-| Azure Repos | Authenticated `az` CLI plus the `azure-devops` extension | `az repos pr create` with parsed organization, project, repository, source, optional target, and optional draft. |
+| GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current writable source, explicit comparison target, and optional `--draft`. Managed Improve Kandev uses `--repo kdlbs/kandev` and an explicit `<fork-owner>:<branch>` head. |
+| GitLab | Authenticated `glab` CLI or the active workspace's matching GitLab PAT | Reuses an existing open MR for the same source/target or creates one with title, description, current writable source, explicit comparison target, and optional draft state. The configured GitLab host must match the source and target identities. |
+| Azure Repos | Authenticated `az` CLI plus the `azure-devops` extension | `az repos pr create` with parsed organization, project, repository, writable source, explicit comparison target, and optional draft. |
 
 Other remote providers are rejected by this action. A normal Git push can still work with another provider. A returned GitHub PR or GitLab MR is asynchronously associated with the originating task repository. Azure creation returns a URL but does not create a provider review association.
 
-For GitHub branch-only association, Kandev follows the current local branch's configured push target and remote branch, falling back to its upstream tracking target when no distinct push target is configured. Remote names are not special: `origin` for a contributor fork and `upstream` for the main repository are a recommended convention only. Kandev links only one unambiguous open PR whose head matches that exact remote repository and branch and whose base remains within the workspace's GitHub scope and automation access; same-named branches in another fork, ambiguous matches, or inaccessible bases remain unlinked.
+For GitHub branch-only association, Kandev follows the current local branch's resolved writable action head and remote ref. It does not substitute the tracking upstream when the writable action head is missing or differs. Remote names are not special: `origin` for a contributor fork and `upstream` for the main repository are conventions only. Kandev links only one unambiguous open PR whose head matches that exact source repository and ref and whose base remains within the workspace's GitHub scope and automation access; same-named branches in another fork, ambiguous matches, or inaccessible bases remain unlinked.
 
-Title is required. Body and base branch may be empty. GitHub and Azure delegate an empty base to their provider CLI; GitLab resolves the project default branch before creation. The web UI defaults new change requests to draft and waits up to 120 seconds. Provider credentials and remote push permission must exist in the executor, and Git hooks or branch policies can still reject the push or change request.
+Title is required. Body may be empty, but an explicit, complete comparison target is required. The web UI defaults new change requests to draft and waits up to 120 seconds. Provider credentials and writable-action push permission must exist in the executor, and Git hooks or branch policies can still reject the push or change request. Incomplete, conflicting, or ambiguous source/target identities fail closed before provider creation.
 
 For GitLab, Kandev preserves a self-managed connection's scheme and never retries against another host. It prefers `glab` when installed and uses the workspace-injected `GITLAB_TOKEN` REST path when the CLI is absent or its create command fails. The successful WebSocket payload keeps the compatibility field name `pr_url` and adds `provider:"gitlab"`. Association runs after that response; use **Link GitLab merge request** if the MR was created but the link is missing.
 
@@ -210,8 +223,8 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 ## Troubleshooting
 
 - **No agent/client available:** launch or prepare the session and confirm its executor is healthy. Workspace Git actions can reconstruct runtime control after a backend restart, but still need a valid task environment.
-- **Remote/authentication error:** test `git fetch origin` inside the same executor workspace. Verify SSH agent forwarding, token/credential helper availability, remote URL, DNS, and firewall access there.
-- **Pull fetched the wrong branch:** Kandev always uses `origin` and, once any upstream exists, the current local branch name. Align local and remote branch names or use an explicit terminal command.
+- **Remote/authentication error:** inspect the resolved writable action head, tracking upstream, or comparison target named in the operation, then test the corresponding configured remote inside the same executor workspace. Verify SSH agent forwarding, token/credential helper availability, remote URL, DNS, and firewall access there.
+- **Pull is unavailable or fetched an unexpected branch:** inspect the current branch's explicit tracking upstream. Kandev does not fall back to a comparison target or a remote named `origin`; configure the intended upstream and refresh status.
 - **Rebase failed but no rebase remains:** detected rebase conflicts are auto-aborted. Use the returned `conflict_files`, resolve with a manual workflow, or merge instead.
 - **Merge remains conflicted:** this is expected. Resolve and commit, or choose Abort Merge. Do not start another Git operation until the repository is consistent.
 - **Change-request creation failed after push:** the branch may already be remote. Fix `gh`, `glab`, GitLab workspace-token, or `az` authentication as applicable, then retry without assuming the push was rolled back. GitLab retries reuse an existing open MR with the same source and target.
