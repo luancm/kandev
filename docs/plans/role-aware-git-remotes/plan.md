@@ -132,9 +132,9 @@ Wave 12:
 
 ## Current checkpoint
 
-Tasks 00 through 05 are complete and committed through `1afd8243c`; the Task 06 implementation and comparison-retention remediation are committed as `1cee6ccb4` and `442cffb5c`. The latest plan checkpoint is `9bf6bf952`. Its task file still has pending Results and the task remains open for the required upstream re-audit. Its implementation session is waiting for input. Do not resume or discard the checkpoint until the user explicitly continues the work.
+Tasks 00 through 05 are complete and committed. The Task 06 implementation and comparison-retention remediation are committed as `1cee6ccb4` and `442cffb5c`. The branch is now reconciled with the current local `upstream/main` ref `fa7d88bee` by merge commit `191ed4a0d`; the five content conflicts were resolved while retaining both role-aware comparison transport and upstream's local-first contribution behavior. Focused backend and frontend checks passed after the merge, and the worktree is ready for the next implementation wave.
 
-The local `upstream/main` ref is now `fa7d88bee`, beyond the `e014f8072` baseline merged by Task 00. Upstream commit `8ca01e0f7` adds local-first contribution resolution and overlaps the pending agentctl Git/API, contribution-relation, Changes-panel, and desktop/mobile E2E seams. Before Task 06 or any later task resumes, reconcile that upstream drift and rerun the required path/ownership audit; do not merge it over the Task 06 checkpoint blindly.
+Task 06 remains open for a post-merge audit of upstream-overlapping status and Changes-panel paths. Its task file Results are intentionally pending until that audit is complete. Do not mark Task 06 complete or release Task 07 until current upstream behavior has been compared against the role-aware contract and any required adjustments are tested.
 
 Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
 
