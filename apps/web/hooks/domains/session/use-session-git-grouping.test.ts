@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { groupPathsByRepoName, repositoryScopesForMutation } from "./use-session-git";
+import {
+  groupPathsByRepoName,
+  hasComparisonForRepository,
+  repositoryScopesForMutation,
+} from "./use-session-git";
 
 describe("groupPathsByRepoName", () => {
   it("splits paths by repository_name, preserving insertion order per bucket", () => {
@@ -51,5 +55,27 @@ describe("repositoryScopesForMutation", () => {
 
   it("preserves the legacy root fallback without per-repo status", () => {
     expect(repositoryScopesForMutation([{ repository_name: undefined }], [])).toEqual([""]);
+  });
+});
+
+describe("hasComparisonForRepository", () => {
+  const statuses = [
+    {
+      repository_name: "frontend",
+      comparisonEvidenceAvailable: true,
+    },
+    {
+      repository_name: "backend",
+      comparisonEvidenceAvailable: false,
+    },
+  ];
+
+  it("keeps Rebase and Merge scoped to repositories with comparison evidence", () => {
+    expect(hasComparisonForRepository(statuses, "frontend")).toBe(true);
+    expect(hasComparisonForRepository(statuses, "backend")).toBe(false);
+    expect(hasComparisonForRepository(statuses, "missing")).toBe(false);
+    expect(hasComparisonForRepository(statuses, undefined)).toBe(true);
+    expect(hasComparisonForRepository([], undefined, true)).toBe(true);
+    expect(hasComparisonForRepository([], undefined, false)).toBe(false);
   });
 });

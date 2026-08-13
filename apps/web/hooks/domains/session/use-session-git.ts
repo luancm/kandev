@@ -21,7 +21,7 @@ import {
   runRepositoryScopeWaves,
 } from "./use-session-git-repository-order";
 import { useMultiRepoSummary } from "./use-session-git-summary";
-import { deriveSessionGitValues } from "./use-session-git-derived";
+import { deriveSessionGitValues, hasComparisonEvidence } from "./use-session-git-derived";
 import { useScopedStageOperations } from "./use-scoped-stage-operations";
 
 /**
@@ -103,7 +103,8 @@ export type SessionGit = {
   // Actions. The optional `repo` param scopes the op to a single repo
   // subpath in multi-repo workspaces; omit for single-repo.
   // When `repo` is omitted in multi-repo mode, these fan out across every repo
-  // (push gates on ahead > 0; pull/rebase/merge/abort hit every repo).
+  // (push gates on action-head ahead; pull gates on tracking evidence; rebase
+  // and merge gate on comparison evidence; abort reaches every repo).
   pull: (rebase?: boolean, repo?: string) => Promise<GitOperationResult>;
   push: (
     options?: { force?: boolean; setUpstream?: boolean },
@@ -525,13 +526,32 @@ function usePerRepoPendingClear(
 type RemoteOpsArgs = {
   gitOps: ReturnType<typeof useGitOperations>;
   repoNamesForControls: string[];
+  legacyComparisonEvidenceAvailable: boolean;
   perRepoStatus: Array<{
     repository_name: string;
     pushAhead: number;
     trackingUpstreamState: string | null;
     trackingEvidenceAvailable: boolean;
+    comparisonEvidenceAvailable: boolean;
   }>;
 };
+
+export function hasComparisonForRepository(
+  perRepoStatus: Array<
+    Pick<RemoteOpsArgs["perRepoStatus"][number], "repository_name" | "comparisonEvidenceAvailable">
+  >,
+  repo: string | undefined,
+  legacyComparisonEvidenceAvailable = false,
+): boolean {
+  if (repo !== undefined) {
+    return perRepoStatus.some(
+      (status) => status.repository_name === repo && status.comparisonEvidenceAvailable,
+    );
+  }
+  return perRepoStatus.length > 0
+    ? perRepoStatus.some((status) => status.comparisonEvidenceAvailable)
+    : legacyComparisonEvidenceAvailable;
+}
 
 /**
  * Fan-out wrappers for push/pull/rebase/merge/abort so the top-bar buttons
@@ -540,10 +560,16 @@ type RemoteOpsArgs = {
  * workspace root (Bug 1). Single-repo workspaces and explicit-repo callers
  * fall through to the underlying `gitOps` directly.
  *
- * Push gates on `ahead > 0` per repo so we don't push repos with nothing to
- * push. Pull/Rebase/Merge/Abort fan out across every repo unconditionally.
+ * Push gates on action-head ahead per repo so we don't push repos with nothing
+ * to push. Pull uses only tracking-capable repos, Rebase/Merge use only repos
+ * with resolved comparison evidence, and Abort fans out across every repo.
  */
-function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: RemoteOpsArgs) {
+function useRemoteOpsFanOut({
+  gitOps,
+  repoNamesForControls,
+  perRepoStatus,
+  legacyComparisonEvidenceAvailable,
+}: RemoteOpsArgs) {
   const namedRepos = useMemo(() => repoNamesForControls, [repoNamesForControls]);
   const isMultiRepo = repoNamesForControls.length > 1;
   const aheadByRepo = useMemo(() => {
@@ -559,6 +585,11 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
         s.trackingEvidenceAvailable && s.trackingUpstreamState === "present",
       );
     }
+    return m;
+  }, [perRepoStatus]);
+  const comparisonByRepo = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const s of perRepoStatus) m.set(s.repository_name, s.comparisonEvidenceAvailable);
     return m;
   }, [perRepoStatus]);
 
@@ -593,20 +624,56 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
 
   const rebase = useCallback(
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
-      if (repo !== undefined || !isMultiRepo) return gitOps.rebase(baseBranch, repo);
-      return fanOutAcrossRepositoryWaves(namedRepos, "rebase", (r) => gitOps.rebase(baseBranch, r));
+      if (repo !== undefined) {
+        if (!hasComparisonForRepository(perRepoStatus, repo, legacyComparisonEvidenceAvailable)) {
+          return { success: true, operation: "rebase", output: "" };
+        }
+        return gitOps.rebase(baseBranch, repo);
+      }
+      if (!isMultiRepo) {
+        if (
+          !hasComparisonForRepository(perRepoStatus, undefined, legacyComparisonEvidenceAvailable)
+        ) {
+          return { success: true, operation: "rebase", output: "" };
+        }
+        return gitOps.rebase(baseBranch, repo);
+      }
+      const reposWithComparison = namedRepos.filter((r) => comparisonByRepo.get(r) === true);
+      if (reposWithComparison.length === 0)
+        return { success: true, operation: "rebase", output: "" };
+      return fanOutAcrossRepositoryWaves(reposWithComparison, "rebase", (r) =>
+        gitOps.rebase(baseBranch, r),
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
-    [gitOps.rebase, isMultiRepo, namedRepos],
+    [gitOps.rebase, isMultiRepo, namedRepos, comparisonByRepo, perRepoStatus],
   );
 
   const merge = useCallback(
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
-      if (repo !== undefined || !isMultiRepo) return gitOps.merge(baseBranch, repo);
-      return fanOutAcrossRepositoryWaves(namedRepos, "merge", (r) => gitOps.merge(baseBranch, r));
+      if (repo !== undefined) {
+        if (!hasComparisonForRepository(perRepoStatus, repo, legacyComparisonEvidenceAvailable)) {
+          return { success: true, operation: "merge", output: "" };
+        }
+        return gitOps.merge(baseBranch, repo);
+      }
+      if (!isMultiRepo) {
+        if (
+          !hasComparisonForRepository(perRepoStatus, undefined, legacyComparisonEvidenceAvailable)
+        ) {
+          return { success: true, operation: "merge", output: "" };
+        }
+        return gitOps.merge(baseBranch, repo);
+      }
+      const reposWithComparison = namedRepos.filter((r) => comparisonByRepo.get(r) === true);
+      if (reposWithComparison.length === 0)
+        return { success: true, operation: "merge", output: "" };
+      return fanOutAcrossRepositoryWaves(reposWithComparison, "merge", (r) =>
+        gitOps.merge(baseBranch, r),
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
-    [gitOps.merge, isMultiRepo, namedRepos],
+    [gitOps.merge, isMultiRepo, namedRepos, comparisonByRepo, perRepoStatus],
   );
 
   const abort = useCallback(
@@ -715,6 +782,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     gitOps,
     repoNamesForControls,
     perRepoStatus,
+    legacyComparisonEvidenceAvailable: Boolean(gitStatus) && hasComparisonEvidence(gitStatus),
   });
   const scopedStageOperations = useScopedStageOperations(
     gitOps,

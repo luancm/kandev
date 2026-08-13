@@ -116,6 +116,7 @@ function useRecentTaskBuildContext(): RecentTaskBuildContext {
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
   const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
+  const gitStatusByEnvRepo = useAppStore((state) => state.gitStatus.byEnvironmentRepo);
   const environmentIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
 
   return useMemo(
@@ -130,6 +131,7 @@ function useRecentTaskBuildContext(): RecentTaskBuildContext {
       repositoriesByWorkspace,
       sessionsByTaskId,
       gitStatusByEnvId,
+      gitStatusByEnvRepo,
       environmentIdBySessionId,
     }),
     [
@@ -143,6 +145,7 @@ function useRecentTaskBuildContext(): RecentTaskBuildContext {
       repositoriesByWorkspace,
       sessionsByTaskId,
       gitStatusByEnvId,
+      gitStatusByEnvRepo,
       environmentIdBySessionId,
     ],
   );

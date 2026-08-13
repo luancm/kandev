@@ -32,7 +32,7 @@ import { BaseBranchPicker } from "./base-branch-picker";
 import type { GitCredentialDisplay } from "./changes-git-credential-display";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
-import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
+import { PerRepoPullMenu, repoActionAvailability } from "./changes-panel-per-repo-menu";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
 import {
   type RemoteContributionResolutionTarget,
@@ -47,6 +47,7 @@ export type PerRepoStatus = {
   behind: number;
   pullBehind?: number;
   trackingUpstreamState?: string | null;
+  trackingEvidenceAvailable?: boolean;
   comparisonEvidenceAvailable?: boolean;
   hasStaged: boolean;
   hasUnstaged: boolean;
@@ -356,10 +357,12 @@ export function PullDropdown({
   onRepoMerge,
   repoDisplayName,
   pullDisabledReason,
+  pullDisabledRepositoryName,
 }: {
   behindCount: number;
   pullDisabled?: boolean;
   pullDisabledReason?: string;
+  pullDisabledRepositoryName?: string;
   isLoading: boolean;
   loadingOperation: string | null;
   /** Always non-empty (single-repo includes the empty-name entry). */
@@ -381,12 +384,20 @@ export function PullDropdown({
     perRepoStatus.length > 0
       ? Math.max(behindCount, ...perRepoStatus.map((s) => s.pullBehind ?? 0))
       : behindCount;
+  const hasSafeRepository = perRepoStatus.some((status) => {
+    const { trackingUnavailable } = repoActionAvailability(status);
+    const contributionBlocksRepo =
+      pullDisabled &&
+      (!pullDisabledRepositoryName || pullDisabledRepositoryName === status.repository_name);
+    return !trackingUnavailable && !contributionBlocksRepo;
+  });
+  const triggerDisabled = isLoading || (pullDisabled === true && !hasSafeRepository);
   const pullButton = (
     <Button
       size="sm"
       variant="ghost"
       className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-      disabled={isLoading || pullDisabled}
+      disabled={triggerDisabled}
     >
       <PullTriggerContent
         behindCount={triggerBehind}
@@ -395,7 +406,7 @@ export function PullDropdown({
       />
     </Button>
   );
-  if (pullDisabled) {
+  if (pullDisabled && !hasSafeRepository) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
@@ -421,6 +432,7 @@ export function PullDropdown({
           onRepoMerge={onRepoMerge}
           pullDisabled={pullDisabled}
           pullDisabledReason={pullDisabledReason}
+          pullDisabledRepositoryName={pullDisabledRepositoryName}
           repoDisplayName={repoDisplayName}
         />
       </DropdownMenuContent>
@@ -519,6 +531,7 @@ type ChangesPanelHeaderProps = {
   behindCount: number;
   pullDisabled?: boolean;
   pullDisabledReason?: string;
+  pullDisabledRepositoryName?: string;
   isLoading: boolean;
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
@@ -556,6 +569,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     behindCount,
     pullDisabled,
     pullDisabledReason,
+    pullDisabledRepositoryName,
     isLoading,
     loadingOperation,
     onOpenDiffAll,
@@ -619,6 +633,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
             behindCount={behindCount}
             pullDisabled={pullDisabled}
             pullDisabledReason={pullDisabledReason}
+            pullDisabledRepositoryName={pullDisabledRepositoryName}
             isLoading={isLoading}
             loadingOperation={loadingOperation}
             repoNames={repoNames}

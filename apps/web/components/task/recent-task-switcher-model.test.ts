@@ -121,6 +121,7 @@ function buildContext(): RecentTaskBuildContext {
     repositoriesByWorkspace: { [WORKSPACE_ID]: [repository] },
     sessionsByTaskId: { [CURRENT_TASK_ID]: [session(CURRENT_TASK_ID, "RUNNING")] },
     gitStatusByEnvId: {},
+    gitStatusByEnvRepo: {},
     environmentIdBySessionId: {},
   };
 }

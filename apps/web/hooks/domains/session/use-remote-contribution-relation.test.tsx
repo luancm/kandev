@@ -59,7 +59,6 @@ const baseStatus: Omit<GitStatusEntry, "repository_name" | "head_commit" | "remo
   behind: 0,
   remote_ahead: 0,
   remote_behind: 0,
-  remote_roles_generation: "generation-1",
   files: {},
   timestamp: null,
 };
@@ -71,6 +70,10 @@ function taskPR(overrides: Partial<TaskPR> = {}): TaskPR {
     repository_id: "repo-frontend",
     owner: "acme",
     repo: "frontend",
+    head_host: "github.com",
+    head_owner: "acme",
+    head_repo: "frontend",
+    head_repo_id: 11,
     pr_number: 2,
     pr_url: "https://github.com/acme/frontend/pull/2",
     pr_title: "Current contribution",
@@ -199,17 +202,34 @@ describe("useRemoteContributionRelation repository scoping", () => {
       status("frontend", "local-head", "legacy-tracking-head", {
         remote_ahead: 0,
         remote_behind: 3,
+        remote_roles_generation: "generation-1",
         action_head: {
           observation_state: "present",
           remote_head_commit: mocks.providerHead,
           ahead: 2,
           behind: 0,
+          identity: {
+            repository: {
+              provider: "github",
+              host: "github.com",
+              repository_path: "acme/frontend",
+            },
+            ref: "feature",
+          },
         },
         tracking_upstream: {
           observation_state: "present",
           remote_head_commit: "legacy-tracking-head",
           ahead: 0,
           behind: 3,
+          identity: {
+            repository: {
+              provider: "github",
+              host: "github.com",
+              repository_path: "acme/frontend",
+            },
+            ref: "feature",
+          },
         },
       }),
     ];
@@ -222,6 +242,47 @@ describe("useRemoteContributionRelation repository scoping", () => {
       pullBehind: 3,
       canPush: true,
       canPull: true,
+    });
+  });
+
+  it("uses the TaskPR head repository identity for action matching", () => {
+    const crossRepositoryPR = taskPR({
+      owner: "acme",
+      repo: "base",
+      head_host: "github.com",
+      head_owner: "fork",
+      head_repo: "contribution",
+      head_repo_id: 99,
+    });
+    mocks.selectedPR = crossRepositoryPR;
+    mocks.prs = [crossRepositoryPR];
+    mocks.statuses = [
+      status("frontend", "local-head", mocks.providerHead, {
+        remote_roles_generation: "generation-1",
+        action_head: {
+          observation_state: "present",
+          remote_head_commit: mocks.providerHead,
+          ahead: 2,
+          behind: 0,
+          identity: {
+            repository: {
+              provider: "github",
+              host: "github.com",
+              repository_path: "fork/contribution",
+              provider_repository_id: "99",
+            },
+            ref: "feature",
+          },
+        },
+      }),
+    ];
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({
+      kind: "local_ahead",
+      canPush: true,
+      pushAhead: 2,
     });
   });
 });

@@ -7,6 +7,10 @@ const ROOT_SCOPE = "";
 const OUTER_SCOPE = "vendor/outer";
 const INNER_SCOPE = "vendor/outer/vendor/inner";
 const NEW_BRANCH = "new-branch";
+const ROLE_IDENTITY = {
+  repository: { provider: "github", host: "github.com", repository_path: "acme/widget" },
+  ref: "feature",
+};
 
 function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
   return {
@@ -19,7 +23,6 @@ function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
     renamed: [],
     ahead: 0,
     behind: 0,
-    remote_roles_generation: "generation-1",
     files: {},
     timestamp: null,
     ...overrides,
@@ -134,21 +137,27 @@ describe("deriveMultiRepoSummary", () => {
           ahead: 11,
           remote_ahead: 99,
           remote_behind: 99,
+          remote_roles_generation: "generation-1",
           action_head: {
+            identity: ROLE_IDENTITY,
             observation_state: "present",
             remote_head_commit: "frontend-action",
             ahead: 2,
+            behind: 0,
           },
           tracking_upstream: {
+            identity: ROLE_IDENTITY,
             observation_state: "present",
             remote_head_commit: "frontend-tracking",
+            ahead: 0,
             behind: 4,
           },
         }),
         repoStatus("backend", {
           ahead: 8,
+          remote_roles_generation: "generation-1",
           action_head: { observation_state: "unknown" },
-          tracking_upstream: { observation_state: "absent" },
+          tracking_upstream: { identity: ROLE_IDENTITY, observation_state: "absent" },
         }),
       ],
       [file("frontend"), file("backend")],

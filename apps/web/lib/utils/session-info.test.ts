@@ -117,4 +117,44 @@ describe("getSessionInfoForTask", () => {
 
     expect(info.diffStats).toBeUndefined();
   });
+
+  it("aggregates resolved comparison totals from repository-scoped status", () => {
+    const info = getSessionInfoForTask(
+      "t1",
+      { t1: [session({ id: "p", is_primary: true })] },
+      { p: { branch_additions: 99, branch_deletions: 88 } },
+      {},
+      {
+        p: {
+          frontend: {
+            comparison: { resolution_state: "resolved", additions: 3, deletions: 2 },
+          },
+          backend: {
+            comparison: { resolution_state: "resolved", additions: 5, deletions: 1 },
+          },
+        },
+      },
+    );
+
+    expect(info.diffStats).toEqual({ additions: 8, deletions: 3 });
+  });
+
+  it("fails closed when one repository comparison is unresolved", () => {
+    const info = getSessionInfoForTask(
+      "t1",
+      { t1: [session({ id: "p", is_primary: true })] },
+      {},
+      {},
+      {
+        p: {
+          frontend: {
+            comparison: { resolution_state: "resolved", additions: 3, deletions: 2 },
+          },
+          backend: { comparison: { resolution_state: "ambiguous" } },
+        },
+      },
+    );
+
+    expect(info.diffStats).toBeUndefined();
+  });
 });

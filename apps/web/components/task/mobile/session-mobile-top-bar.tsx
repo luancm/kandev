@@ -6,7 +6,10 @@ import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icon
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { LineStat } from "@/components/diff-stat";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import {
+  useSessionGitStatus,
+  useSessionGitStatusByRepo,
+} from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
 import {
@@ -18,6 +21,7 @@ import {
   PRDialog,
   GitActionsDropdown,
   computeUncommittedStats,
+  computeMobileGitStats,
   useMobileGitActions,
 } from "./session-mobile-top-bar-git-controls";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
@@ -139,8 +143,9 @@ function useMobileGitMetrics(
   baseBranch: string | undefined,
 ) {
   const gitStatus = useSessionGitStatus(sessionId ?? null);
+  const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
   const { commits } = useSessionCommits(sessionId ?? null);
-  const stats = computeUncommittedStats(gitStatus?.files);
+  const stats = computeMobileGitStats(statusByRepo, gitStatus, commits);
 
   return {
     commits,
@@ -148,8 +153,8 @@ function useMobileGitMetrics(
     uncommittedAdditions: stats.additions,
     uncommittedDeletions: stats.deletions,
     uncommittedCount: stats.count,
-    totalAdditions: stats.additions + commits.reduce((sum, commit) => sum + commit.insertions, 0),
-    totalDeletions: stats.deletions + commits.reduce((sum, commit) => sum + commit.deletions, 0),
+    totalAdditions: stats.additions + stats.commitAdditions,
+    totalDeletions: stats.deletions + stats.commitDeletions,
   };
 }
 

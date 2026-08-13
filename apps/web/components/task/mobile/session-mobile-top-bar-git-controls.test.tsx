@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { GitActionsDropdown } from "./session-mobile-top-bar-git-controls";
+import { GitActionsDropdown, computeMobileGitStats } from "./session-mobile-top-bar-git-controls";
 
 vi.mock("@/hooks/use-git-operations", () => ({
   useChangeRequestTerminology: () => ({ shortName: "PR" }),
@@ -44,6 +44,37 @@ const baseProps = {
 };
 
 describe("GitActionsDropdown remote safety", () => {
+  it("aggregates uncommitted files across repository-scoped statuses", () => {
+    const result = computeMobileGitStats(
+      [
+        {
+          status: {
+            files: {
+              "frontend.tsx": { additions: 2, deletions: 1 },
+            },
+          } as never,
+        },
+        {
+          status: {
+            files: {
+              "backend.go": { additions: 4, deletions: 3 },
+            },
+          } as never,
+        },
+      ],
+      undefined,
+      [{ insertions: 5, deletions: 2 }],
+    );
+
+    expect(result).toMatchObject({
+      additions: 6,
+      deletions: 4,
+      count: 2,
+      commitAdditions: 5,
+      commitDeletions: 2,
+    });
+  });
+
   it("keeps Commit available while disabling Pull and both Push variants", () => {
     render(<GitActionsDropdown {...baseProps} pushDisabled pullDisabled />);
 

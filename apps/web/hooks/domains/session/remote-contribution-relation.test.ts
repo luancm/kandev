@@ -11,6 +11,10 @@ const PROVIDER_BASE = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const PROVIDER_HEAD = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const REWRITTEN_BASE = "cccccccccccccccccccccccccccccccccccccccc";
 const REWRITTEN_HEAD = "dddddddddddddddddddddddddddddddddddddddd";
+const SOURCE_IDENTITY = {
+  repository: { provider: "github", host: "github.com", repository_path: "acme/widget" },
+  ref: "feature",
+};
 
 const baseInput: RemoteContributionRelationInput = {
   hasSelectedPR: true,
@@ -23,13 +27,19 @@ const baseInput: RemoteContributionRelationInput = {
   upstreamHead: PROVIDER_HEAD,
   remoteAhead: 0,
   remoteBehind: 0,
-  remoteRolesGeneration: "generation-1",
   baseAhead: 4,
   hasUpstream: true,
 };
 
 function input(overrides: Partial<RemoteContributionRelationInput> = {}) {
-  return { ...baseInput, ...overrides };
+  const merged = { ...baseInput, ...overrides };
+  if (
+    !("remoteRolesGeneration" in overrides) &&
+    ("actionHead" in overrides || "trackingUpstream" in overrides)
+  ) {
+    merged.remoteRolesGeneration = "generation-1";
+  }
+  return merged;
 }
 
 const classificationCases = [
@@ -54,6 +64,14 @@ const classificationCases = [
       providerCommits: [{ sha: PROVIDER_BASE }, { sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
       upstreamHead: PROVIDER_HEAD,
       remoteBehind: 1,
+      providerSourceIdentity: SOURCE_IDENTITY,
+      trackingUpstream: {
+        identity: SOURCE_IDENTITY,
+        observation_state: "present",
+        remote_head_commit: PROVIDER_HEAD,
+        ahead: 0,
+        behind: 1,
+      },
     },
     expected: { kind: "provider_ahead", canPush: false, canPull: true },
   },
@@ -204,12 +222,14 @@ describe("classifyRemoteContribution", () => {
     const relation = classifyRemoteContribution(
       input({
         actionHead: {
+          identity: SOURCE_IDENTITY,
           observation_state: "present",
           remote_head_commit: PROVIDER_HEAD,
           ahead: 2,
           behind: 0,
         },
         trackingUpstream: {
+          identity: SOURCE_IDENTITY,
           observation_state: "present",
           remote_head_commit: "unrelated-tracking-head",
           ahead: 0,
@@ -218,6 +238,7 @@ describe("classifyRemoteContribution", () => {
         upstreamHead: "unrelated-tracking-head",
         remoteAhead: 0,
         remoteBehind: 4,
+        providerSourceIdentity: SOURCE_IDENTITY,
       }),
     );
 
@@ -240,12 +261,15 @@ describe("classifyRemoteContribution", () => {
         input({
           actionHead: { observation_state },
           trackingUpstream: {
+            identity: SOURCE_IDENTITY,
             observation_state: "present",
             remote_head_commit: PROVIDER_HEAD,
+            ahead: 0,
             behind: 3,
           },
           providerLoading: false,
           providerCommitsComplete: true,
+          providerSourceIdentity: SOURCE_IDENTITY,
         }),
       );
 
@@ -264,8 +288,10 @@ describe("classifyRemoteContribution", () => {
       input({
         hasUpstream: false,
         upstreamHead: null,
-        actionHead: { observation_state: "absent" },
-        trackingUpstream: { observation_state: "absent" },
+        actionHead: { identity: SOURCE_IDENTITY, observation_state: "absent" },
+        trackingUpstream: { identity: SOURCE_IDENTITY, observation_state: "absent" },
+        providerSourceIdentity: SOURCE_IDENTITY,
+        comparisonEvidenceAvailable: true,
         baseAhead: 4,
         remoteBehind: 7,
       }),
@@ -308,6 +334,14 @@ describe("remoteContributionActionPolicy", () => {
       input({
         providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
         remoteBehind: 1,
+        providerSourceIdentity: SOURCE_IDENTITY,
+        trackingUpstream: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 0,
+          behind: 1,
+        },
       }),
     );
 
@@ -326,6 +360,14 @@ describe("remoteContributionActionPolicy", () => {
       input({
         providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
         remoteBehind: 1,
+        providerSourceIdentity: SOURCE_IDENTITY,
+        trackingUpstream: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 0,
+          behind: 1,
+        },
       }),
     );
 
@@ -338,6 +380,7 @@ describe("remoteContributionActionPolicy", () => {
         providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
         upstreamHead: null,
         hasUpstream: false,
+        providerSourceIdentity: SOURCE_IDENTITY,
       }),
     );
 
@@ -346,6 +389,70 @@ describe("remoteContributionActionPolicy", () => {
       pushDisabled: true,
       pullDisabled: true,
     });
+  });
+
+  it("requires the exact provider source identity for provider-ahead Pull", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        remoteBehind: 1,
+        providerSourceIdentity: SOURCE_IDENTITY,
+        trackingUpstream: {
+          identity: {
+            ...SOURCE_IDENTITY,
+            repository: { ...SOURCE_IDENTITY.repository, repository_path: "acme/other" },
+          },
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 0,
+          behind: 1,
+        },
+      }),
+    );
+
+    expect(relation).toMatchObject({
+      kind: "provider_ahead",
+      canPush: false,
+      canPull: false,
+    });
+  });
+
+  it("fails closed when provider-ahead tracking counts are unknown", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        remoteBehind: 1,
+        providerSourceIdentity: SOURCE_IDENTITY,
+        trackingUpstream: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          behind: 1,
+        },
+      }),
+    );
+
+    expect(relation).toMatchObject({ kind: "provider_ahead", canPull: false });
+  });
+
+  it("fails closed for provider-ahead Pull without a role generation", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        remoteRolesGeneration: undefined,
+        providerCommits: [{ sha: LOCAL_HEAD }, { sha: PROVIDER_HEAD }],
+        remoteBehind: 1,
+        providerSourceIdentity: SOURCE_IDENTITY,
+        trackingUpstream: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 0,
+          behind: 1,
+        },
+      }),
+    );
+
+    expect(relation).toMatchObject({ kind: "provider_ahead", canPull: false });
   });
 
   it("keeps normal push behavior for local-ahead history", () => {

@@ -35,6 +35,7 @@ export type RemoteContributionRelationInput = {
   hasUpstream: boolean;
   actionHead?: GitRemoteRefObservation | null;
   trackingUpstream?: GitRemoteRefObservation | null;
+  providerSourceIdentity?: GitRemoteRefObservation["identity"];
   remoteRolesGeneration?: string;
   comparisonEvidenceAvailable?: boolean;
 };
@@ -55,6 +56,7 @@ export type RemoteContributionRelation = {
   actionEvidenceAvailable?: boolean;
   trackingEvidenceAvailable?: boolean;
   comparisonEvidenceAvailable?: boolean;
+  providerEvidenceAvailable?: boolean;
 };
 
 export type RemoteContributionActionPolicy = {
@@ -76,7 +78,9 @@ export function remoteContributionActionReasonKey(
   relation: RemoteContributionRelation,
   action: "push" | "pull",
 ): RemoteContributionActionReasonKey | null {
-  if (relation.action === "unavailable_evidence") return "task:providerUnavailable";
+  if (relation.action === "unavailable_evidence" && relation.providerEvidenceAvailable === false) {
+    return "task:providerUnavailable";
+  }
   if (relation.action === "provider_ahead_pull") {
     if (action === "push") return "task:providerAheadPushDisabled";
     if (!relation.canPull) return "task:providerAheadPullRequiresUpstream";
@@ -93,27 +97,27 @@ export function remoteContributionActionReasonKey(
 export function remoteContributionActionPolicy(
   relation: RemoteContributionRelation,
 ): RemoteContributionActionPolicy {
-  const unavailable = relation.action === "unavailable_evidence";
+  const providerUnavailable = relation.providerEvidenceAvailable === false;
   const diverged = relation.action === "diverged_replace";
-  const actionEvidenceUnavailable = relation.actionEvidenceAvailable === false;
+  const actionEvidenceUnavailable = relation.actionEvidenceAvailable !== true;
   const trackingEvidenceUnavailable =
-    relation.trackingEvidenceAvailable === false || relation.trackingUpstreamState === "absent";
+    relation.trackingEvidenceAvailable !== true || relation.trackingUpstreamState !== "present";
   return {
     action: relation.action,
     pushDisabled:
-      unavailable ||
+      providerUnavailable ||
       diverged ||
       relation.action === "provider_ahead_pull" ||
       actionEvidenceUnavailable ||
       !relation.canPush,
     pullDisabled:
-      unavailable ||
+      providerUnavailable ||
       diverged ||
       trackingEvidenceUnavailable ||
       (relation.action === "provider_ahead_pull" && !relation.canPull),
     replaceDisabled: !relation.canReplaceRemote,
     useDisabled: !relation.canUseRemote,
-    disabledReason: unavailable ? "provider_evidence_unavailable" : null,
+    disabledReason: providerUnavailable ? "provider_evidence_unavailable" : null,
   };
 }
 
@@ -143,7 +147,74 @@ function roleCapabilities(input: RemoteContributionRelationInput) {
     action_head: input.actionHead,
     tracking_upstream: input.trackingUpstream,
   };
-  return deriveRemoteRoleCapabilities(status, input.baseAhead);
+  return deriveRemoteRoleCapabilities(status, input.baseAhead, input.comparisonEvidenceAvailable);
+}
+
+function sameRemoteIdentity(
+  left: GitRemoteRefObservation["identity"],
+  right: GitRemoteRefObservation["identity"],
+): boolean {
+  if (!left || !right || !left.ref || left.ref !== right.ref) return false;
+  const leftRepository = left.repository;
+  const rightRepository = right.repository;
+  if (
+    !leftRepository.host ||
+    !rightRepository.host ||
+    (leftRepository.provider ?? "") !== (rightRepository.provider ?? "") ||
+    leftRepository.host.toLowerCase() !== rightRepository.host.toLowerCase()
+  ) {
+    return false;
+  }
+  if (
+    leftRepository.provider_repository_id &&
+    rightRepository.provider_repository_id &&
+    leftRepository.provider_repository_id !== rightRepository.provider_repository_id
+  ) {
+    return false;
+  }
+  if (leftRepository.repository_path && rightRepository.repository_path) {
+    const provider = leftRepository.provider ?? "";
+    return ["github", "gitlab", "azure_repos"].includes(provider)
+      ? leftRepository.repository_path.toLowerCase() ===
+          rightRepository.repository_path.toLowerCase()
+      : leftRepository.repository_path === rightRepository.repository_path;
+  }
+  return Boolean(
+    leftRepository.provider_repository_id &&
+    rightRepository.provider_repository_id &&
+    leftRepository.provider_repository_id === rightRepository.provider_repository_id,
+  );
+}
+
+function provesProviderAheadAncestry(
+  input: RemoteContributionRelationInput,
+  providerHead: string,
+): boolean {
+  if (!input.providerCommitsComplete || !input.localHead) return false;
+  const localIndex = input.providerCommits.findIndex((commit) => commit.sha === input.localHead);
+  const providerIndex = input.providerCommits.findIndex((commit) => commit.sha === providerHead);
+  return localIndex >= 0 && providerIndex > localIndex;
+}
+
+function canPullProviderAhead(
+  input: RemoteContributionRelationInput,
+  providerHead: string,
+): boolean {
+  const tracking = input.trackingUpstream;
+  return Boolean(
+    Boolean(input.remoteRolesGeneration) &&
+    provesProviderAheadAncestry(input, providerHead) &&
+    input.providerSourceIdentity &&
+    tracking?.observation_state === "present" &&
+    tracking.remote_head_commit === providerHead &&
+    tracking.ahead !== undefined &&
+    Number.isFinite(tracking.ahead) &&
+    tracking.ahead >= 0 &&
+    tracking.behind !== undefined &&
+    Number.isFinite(tracking.behind) &&
+    tracking.behind > 0 &&
+    sameRemoteIdentity(tracking.identity, input.providerSourceIdentity),
+  );
 }
 
 function fallbackCapabilities(input: RemoteContributionRelationInput) {
@@ -159,7 +230,9 @@ function fallbackCapabilities(input: RemoteContributionRelationInput) {
     trackingUpstreamState: roles.trackingUpstreamState,
     actionEvidenceAvailable: roles.actionEvidenceAvailable,
     trackingEvidenceAvailable: roles.trackingEvidenceAvailable,
-    comparisonEvidenceAvailable: input.comparisonEvidenceAvailable !== false,
+    comparisonEvidenceAvailable:
+      input.comparisonEvidenceAvailable ?? input.remoteRolesGeneration === undefined,
+    providerEvidenceAvailable: true,
   };
 }
 
@@ -178,23 +251,22 @@ function result(
   kind: RemoteContributionRelationKind,
   providerHead: string | null,
   capabilities: ReturnType<typeof fallbackCapabilities>,
+  providerEvidenceAvailable = true,
 ): RemoteContributionRelation {
-  const action = !capabilities.actionEvidenceAvailable
-    ? "unavailable_evidence"
-    : actionFor(kind, providerHead);
+  const action = actionFor(kind, providerHead);
   return {
     kind,
     presentation: kind === "diverged" ? "separate" : "unified",
     action,
     providerHead,
     ...capabilities,
+    providerEvidenceAvailable,
   };
 }
 
 function providerEvidenceUnavailable(
   input: RemoteContributionRelationInput,
   providerHead: string | null,
-  roles: ReturnType<typeof roleCapabilities>,
 ): boolean {
   return (
     input.providerLoading ||
@@ -202,9 +274,7 @@ function providerEvidenceUnavailable(
     !input.providerCommitsComplete ||
     input.providerCommits.length === 0 ||
     !providerHead ||
-    !input.localHead ||
-    !roles.actionEvidenceAvailable ||
-    (roles.actionHeadState === "present" && !roles.actionHeadCommit)
+    !input.localHead
   );
 }
 
@@ -218,22 +288,30 @@ function classifyProviderHeads(
     return result("aligned", providerHead, fallback);
   }
 
-  if (input.providerCommits.some((commit) => commit.sha === input.localHead)) {
+  if (provesProviderAheadAncestry(input, providerHead)) {
     return result("provider_ahead", providerHead, {
       ...fallback,
       canPush: false,
-      canPull: fallback.canPull,
+      canPull: canPullProviderAhead(input, providerHead),
     });
   }
 
   const actionHead = roles.actionHeadCommit;
   if (!actionHead) return result("unknown", providerHead, fallback);
 
-  if (actionHead === providerHead && roles.actionAhead > 0 && roles.actionBehind === 0) {
+  const actionMatchesProvider =
+    !input.providerSourceIdentity ||
+    sameRemoteIdentity(input.actionHead?.identity, input.providerSourceIdentity);
+  if (
+    actionMatchesProvider &&
+    actionHead === providerHead &&
+    roles.actionAhead > 0 &&
+    roles.actionBehind === 0
+  ) {
     return result("local_ahead", providerHead, {
       ...fallback,
       pushAhead: roles.actionAhead,
-      canPush: true,
+      canPush: fallback.canPush,
       canPull: fallback.canPull,
     });
   }
@@ -260,8 +338,8 @@ export function classifyRemoteContribution(
   // be incomplete or ordered independently from the live branch head.
   const providerHead = input.providerHead ?? null;
   const roles = roleCapabilities(input);
-  if (providerEvidenceUnavailable(input, providerHead, roles)) {
-    return result("unknown", providerHead, fallback);
+  if (providerEvidenceUnavailable(input, providerHead)) {
+    return result("unknown", providerHead, fallback, false);
   }
   return classifyProviderHeads(input, providerHead!, roles, fallback);
 }

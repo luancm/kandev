@@ -25,6 +25,22 @@ export type RecentTaskBuildContext = {
       branch_deletions?: number;
     }
   >;
+  gitStatusByEnvRepo: Record<
+    string,
+    Record<
+      string,
+      {
+        files?: Record<string, { additions?: number; deletions?: number }>;
+        branch_additions?: number;
+        branch_deletions?: number;
+        comparison?: {
+          resolution_state?: string;
+          additions?: number;
+          deletions?: number;
+        } | null;
+      }
+    >
+  >;
   environmentIdBySessionId: Record<string, string>;
 };
 
@@ -135,6 +151,7 @@ function getResolvedSessionState(
     ctx.sessionsByTaskId,
     ctx.gitStatusByEnvId,
     ctx.environmentIdBySessionId,
+    ctx.gitStatusByEnvRepo,
   );
   return (
     sessionInfo.sessionState ??

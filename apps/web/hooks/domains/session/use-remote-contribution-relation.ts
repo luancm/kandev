@@ -3,6 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { PRCommitInfo, TaskPR } from "@/lib/types/github";
+import type { GitRemoteRefObservation } from "@/lib/state/slices/session-runtime/types";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
 import { usePRReviewRepositoryIdentityResolver } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
@@ -13,6 +14,33 @@ import {
   classifyRemoteContribution,
   type RemoteContributionRelation,
 } from "./remote-contribution-relation";
+
+function taskPRHeadIdentity(pr: TaskPR | null): GitRemoteRefObservation["identity"] {
+  if (!pr?.head_branch) return undefined;
+  const hasCrossRepositoryFields =
+    pr.head_host !== undefined ||
+    pr.head_owner !== undefined ||
+    pr.head_repo !== undefined ||
+    pr.head_repo_id !== undefined ||
+    pr.head_repo_node_id !== undefined;
+  if (hasCrossRepositoryFields && (!pr.head_host || !pr.head_owner || !pr.head_repo)) {
+    return undefined;
+  }
+  const host = hasCrossRepositoryFields ? pr.head_host : (pr.base_host ?? "github.com");
+  const owner = hasCrossRepositoryFields ? pr.head_owner : (pr.base_owner ?? pr.owner);
+  const repo = hasCrossRepositoryFields ? pr.head_repo : (pr.base_repo ?? pr.repo);
+  if (!host || !owner || !repo) return undefined;
+  return {
+    repository: {
+      provider: "github",
+      host,
+      repository_path: `${owner}/${repo}`,
+      provider_repository_id:
+        pr.head_repo_id !== undefined ? String(pr.head_repo_id) : pr.head_repo_node_id,
+    },
+    ref: pr.head_branch,
+  };
+}
 
 export type RemoteContributionRelationState = {
   prs: TaskPR[];
@@ -78,6 +106,7 @@ export function useRemoteContributionRelation(
         hasUpstream: Boolean(gitStatus?.remote_branch),
         actionHead: gitStatus?.action_head,
         trackingUpstream: gitStatus?.tracking_upstream,
+        providerSourceIdentity: taskPRHeadIdentity(selectedPR),
         remoteRolesGeneration: gitStatus?.remote_roles_generation,
         comparisonEvidenceAvailable: hasComparisonEvidence(gitStatus),
       }),

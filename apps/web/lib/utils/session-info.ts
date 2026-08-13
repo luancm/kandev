@@ -6,7 +6,7 @@ export type SessionInfo = {
   sessionState: TaskSessionState | undefined;
 };
 
-type GitStatusMap = Record<
+export type GitStatusMap = Record<
   string,
   {
     files?: Record<string, { additions?: number; deletions?: number }>;
@@ -58,6 +58,33 @@ function computeDiffStats(
   return additions === 0 && deletions === 0 ? undefined : { additions, deletions };
 }
 
+function computeAggregateDiffStats(
+  statuses: GitStatusMap[string][],
+): { additions: number; deletions: number } | undefined {
+  let additions = 0;
+  let deletions = 0;
+  for (const status of statuses) {
+    if (status.comparison !== undefined) {
+      const comparison = status.comparison;
+      if (
+        comparison === null ||
+        comparison.resolution_state !== "resolved" ||
+        comparison.additions === undefined ||
+        comparison.deletions === undefined
+      ) {
+        return undefined;
+      }
+      additions += comparison.additions;
+      deletions += comparison.deletions;
+      continue;
+    }
+    const legacy = computeDiffStats(status);
+    additions += legacy?.additions ?? 0;
+    deletions += legacy?.deletions ?? 0;
+  }
+  return additions === 0 && deletions === 0 ? undefined : { additions, deletions };
+}
+
 // Activity ranking for the sidebar's status indicator. The primary session
 // drives diff stats and updatedAt (those reflect the task's "default" view),
 // but the sidebar's state badge should reflect whatever session is most
@@ -96,6 +123,7 @@ export function getSessionInfoForTask(
   sessionsByTaskId: Record<string, TaskSession[]>,
   gitStatusByEnvId: GitStatusMap,
   environmentIdBySessionId?: Record<string, string>,
+  gitStatusByEnvRepo?: Record<string, GitStatusMap>,
 ): SessionInfo {
   const sessions = sessionsByTaskId[taskId] ?? [];
   if (sessions.length === 0) {
@@ -112,6 +140,11 @@ export function getSessionInfoForTask(
   const mostActive = pickMostActiveSession(sessions);
   const sessionState = mostActive?.state as TaskSessionState | undefined;
   const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
+  const gitStatusesByRepo = gitStatusByEnvRepo?.[envKey];
+  if (gitStatusesByRepo && Object.keys(gitStatusesByRepo).length > 0) {
+    const diffStats = computeAggregateDiffStats(Object.values(gitStatusesByRepo));
+    return { diffStats, updatedAt, sessionState };
+  }
   const gitStatus = gitStatusByEnvId[envKey];
   if (!gitStatus) return { diffStats: undefined, updatedAt, sessionState };
 

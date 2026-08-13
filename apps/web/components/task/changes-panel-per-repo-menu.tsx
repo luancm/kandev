@@ -9,11 +9,17 @@ import {
 import { useTranslation } from "react-i18next";
 import type { PerRepoStatus } from "./changes-panel-header";
 
-function repoActionAvailability(status: PerRepoStatus | undefined) {
+export function repoActionAvailability(status: PerRepoStatus | undefined) {
   return {
     trackingUnavailable:
-      status?.trackingUpstreamState !== undefined && status.trackingUpstreamState !== "present",
-    comparisonUnavailable: status?.comparisonEvidenceAvailable === false,
+      !status ||
+      status.trackingUpstreamState === undefined ||
+      status.trackingUpstreamState !== "present" ||
+      status.trackingEvidenceAvailable !== true ||
+      typeof status.pullBehind !== "number" ||
+      !Number.isFinite(status.pullBehind) ||
+      status.pullBehind < 0,
+    comparisonUnavailable: !status || status.comparisonEvidenceAvailable !== true,
   };
 }
 
@@ -25,6 +31,7 @@ export function PerRepoPullMenu({
   onRepoMerge,
   pullDisabled,
   pullDisabledReason,
+  pullDisabledRepositoryName,
   repoDisplayName,
 }: {
   repoNames: string[];
@@ -34,6 +41,7 @@ export function PerRepoPullMenu({
   onRepoMerge: (repo: string) => void;
   pullDisabled?: boolean;
   pullDisabledReason?: string;
+  pullDisabledRepositoryName?: string;
   repoDisplayName?: (repositoryName: string) => string | undefined;
 }) {
   const { t } = useTranslation();
@@ -45,6 +53,9 @@ export function PerRepoPullMenu({
         const behind = s?.pullBehind ?? 0;
         const label = repoDisplayName?.(repo) || repo || t("task:repository2");
         const { trackingUnavailable, comparisonUnavailable } = repoActionAvailability(s);
+        const contributionPullDisabled =
+          pullDisabled &&
+          (!pullDisabledRepositoryName || pullDisabledRepositoryName === repo || !s);
         return (
           <div key={repo || "__no_repo__"}>
             {idx > 0 && <DropdownMenuSeparator />}
@@ -59,9 +70,9 @@ export function PerRepoPullMenu({
             <DropdownMenuItem
               onClick={() => onRepoPull(repo)}
               className="cursor-pointer text-xs gap-2"
-              disabled={pullDisabled || trackingUnavailable}
+              disabled={contributionPullDisabled || trackingUnavailable}
               title={
-                pullDisabled || trackingUnavailable
+                contributionPullDisabled || trackingUnavailable
                   ? (pullDisabledReason ?? t("task:divergedActionsUnavailable"))
                   : undefined
               }

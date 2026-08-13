@@ -23,6 +23,7 @@ import {
 } from "@/hooks/use-git-operations";
 import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
+import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { openExternalLink } from "@/lib/desktop/external-links";
@@ -47,6 +48,31 @@ export function computeUncommittedStats(files: Record<string, FileInfo> | undefi
     }
   }
   return { additions, deletions, count: files ? Object.keys(files).length : 0 };
+}
+
+export function computeMobileGitStats(
+  statuses: Array<{ status: GitStatusEntry }> = [],
+  fallbackStatus: GitStatusEntry | undefined,
+  commits: Array<{ insertions: number; deletions: number }>,
+) {
+  const filesByRepository =
+    statuses.length > 0 ? statuses.map(({ status }) => status.files) : [fallbackStatus?.files];
+  let additions = 0;
+  let deletions = 0;
+  let count = 0;
+  for (const files of filesByRepository) {
+    const stats = computeUncommittedStats(files);
+    additions += stats.additions;
+    deletions += stats.deletions;
+    count += stats.count;
+  }
+  return {
+    additions,
+    deletions,
+    count,
+    commitAdditions: commits.reduce((sum, commit) => sum + commit.insertions, 0),
+    commitDeletions: commits.reduce((sum, commit) => sum + commit.deletions, 0),
+  };
 }
 
 type GitOperationRunner = () => Promise<{ success: boolean; output: string; error?: string }>;
