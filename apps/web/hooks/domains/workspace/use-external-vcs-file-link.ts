@@ -18,6 +18,8 @@ import { useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAzureDevOpsTaskPullRequests } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
 import { useSessionGitStatusByRepo } from "@/hooks/domains/session/use-session-git-status";
+import { hasComparisonEvidence } from "@/hooks/domains/session/use-session-git-derived";
+import { providerCandidates, type LinkCandidate } from "./use-external-vcs-file-link-candidates";
 import type { GitRemoteRefObservation, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
 export type UseExternalVcsFileLinkInput = {
@@ -56,28 +58,65 @@ function providerHost(value: string | undefined): string {
   if (!trimmed) return "";
   try {
     const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    return parsed.host.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function repositoryHost(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
     return `${parsed.host}${parsed.pathname.replace(/\/+$/, "")}`.toLowerCase();
   } catch {
     return "";
   }
 }
 
+function azureIdentityHost(host: string, organization: string): string {
+  try {
+    const parsed = new URL(host.includes("://") ? host : `https://${host}`);
+    return `${parsed.origin}/${organization}`;
+  } catch {
+    return `https://dev.azure.com/${organization}`;
+  }
+}
+
+function identityRepositoryParts(
+  repository: NonNullable<GitRemoteRefObservation["identity"]>["repository"],
+  provider: string,
+): { parts: string[]; owner: string; organization?: string; project?: string } | null {
+  const parts = repository.repository_path?.split("/") ?? [];
+  if (!repository.repository_path && !repository.provider_repository_id) return null;
+  const isAzure = provider === "azure_devops";
+  return {
+    parts,
+    owner: isAzure ? parts.at(-2) ?? "" : parts.slice(0, -1).join("/"),
+    organization: isAzure ? parts[0] : undefined,
+    project: isAzure ? parts.at(-2) : undefined,
+  };
+}
+
 function repositoryFromIdentity(
   identity: GitRemoteRefObservation["identity"],
 ): ExternalVcsRepository | null {
-  if (!identity?.repository?.host || !identity.ref) return null;
+  if (!identity?.repository.host || !identity.ref) return null;
   const repository = identity.repository;
-  const parts = repository.repository_path?.split("/") ?? [];
-  if (!repository.repository_path && !repository.provider_repository_id) return null;
   const provider = repository.provider === "azure_repos" ? "azure_devops" : repository.provider ?? "";
-  const isAzure = provider === "azure_devops";
+  const parts = identityRepositoryParts(repository, provider);
+  if (!parts) return null;
+  const providerHostValue = parts.organization
+    ? azureIdentityHost(repository.host!, parts.organization)
+    : repository.host;
   return {
     provider,
-    provider_host: repository.host,
-    provider_owner: isAzure ? parts.at(-2) ?? "" : parts.slice(0, -1).join("/"),
-    provider_name: parts.at(-1) ?? "",
-    provider_organization: isAzure ? parts[0] : undefined,
-    provider_project: isAzure ? parts.at(-2) : undefined,
+    provider_host: providerHostValue,
+    provider_owner: parts.owner,
+    provider_name: parts.parts.at(-1) ?? "",
+    provider_organization: parts.organization,
+    provider_project: parts.project,
     provider_repository_id: repository.provider_repository_id,
   };
 }
@@ -90,121 +129,13 @@ function remoteRefFromObservation(
   return repository && ref ? { repository, ref } : null;
 }
 
-function identityFieldsPresent(value: {
-  host?: string;
-  owner?: string;
-  repo?: string;
-  id?: number;
-  node?: string;
-}): boolean {
-  return value.host !== undefined || value.owner !== undefined || value.repo !== undefined || value.id !== undefined || value.node !== undefined;
-}
-
-function githubSource(pr: TaskPR): ExternalVcsRepositoryRef | null {
-  const hasFields = identityFieldsPresent({ host: pr.head_host, owner: pr.head_owner, repo: pr.head_repo, id: pr.head_repo_id, node: pr.head_repo_node_id });
-  if (hasFields && (!pr.head_host || !pr.head_owner || !pr.head_repo)) return null;
-  if (!hasFields) return null;
-  return {
-    repository: {
-      provider: "github",
-      provider_host: pr.head_host,
-      provider_owner: pr.head_owner,
-      provider_name: pr.head_repo,
-      provider_repository_id: pr.head_repo_id !== undefined ? String(pr.head_repo_id) : pr.head_repo_node_id,
-    },
-    ref: pr.head_branch,
-  };
-}
-
-function githubBase(pr: TaskPR): ExternalVcsRepositoryRef | null {
-  const hasFields = identityFieldsPresent({ host: pr.base_host, owner: pr.base_owner, repo: pr.base_repo, id: pr.base_repo_id });
-  if (hasFields && (!pr.base_host || !pr.base_owner || !pr.base_repo)) return null;
-  if (!hasFields) return null;
-  return {
-    repository: {
-      provider: "github",
-      provider_host: pr.base_host,
-      provider_owner: pr.base_owner,
-      provider_name: pr.base_repo,
-      provider_repository_id: pr.base_repo_id !== undefined ? String(pr.base_repo_id) : undefined,
-    },
-    ref: pr.base_branch,
-  };
-}
-
-function gitlabSource(mr: TaskMR): ExternalVcsRepositoryRef | null {
-  const hasFields = mr.source_host !== undefined || mr.source_project_path !== undefined || mr.source_project_id !== undefined;
-  if (hasFields && (!mr.source_host || !mr.source_project_path)) return null;
-  if (!hasFields) return null;
-  const parts = mr.source_project_path!.split("/");
-  return {
-    repository: {
-      provider: "gitlab",
-      provider_host: mr.source_host,
-      provider_owner: parts.slice(0, -1).join("/"),
-      provider_name: parts.at(-1) ?? "",
-      provider_repository_id: mr.source_project_id !== undefined ? String(mr.source_project_id) : undefined,
-    },
-    ref: mr.head_branch,
-  };
-}
-
-function gitlabBase(mr: TaskMR): ExternalVcsRepositoryRef | null {
-  const hasFields = mr.target_host !== undefined || mr.target_project_path !== undefined || mr.target_project_id !== undefined;
-  if (hasFields && (!mr.target_host || !mr.target_project_path)) return null;
-  if (!hasFields) return null;
-  const parts = mr.target_project_path!.split("/");
-  return {
-    repository: {
-      provider: "gitlab",
-      provider_host: mr.target_host,
-      provider_owner: parts.slice(0, -1).join("/"),
-      provider_name: parts.at(-1) ?? "",
-      provider_repository_id: mr.target_project_id !== undefined ? String(mr.target_project_id) : undefined,
-    },
-    ref: mr.base_branch,
-  };
-}
-
-function azureSource(pr: AzureDevOpsTaskPullRequest): ExternalVcsRepositoryRef | null {
-  const hasFields = pr.sourceOrganizationUrl !== undefined || pr.sourceProjectId !== undefined || pr.sourceProjectName !== undefined || pr.sourceRepositoryId !== undefined || pr.sourceRepositoryName !== undefined;
-  if (hasFields && (!pr.sourceOrganizationUrl || !pr.sourceProjectName || !pr.sourceRepositoryName)) return null;
-  if (!hasFields) return null;
-  return {
-    repository: {
-      provider: "azure_devops",
-      provider_host: pr.sourceOrganizationUrl,
-      provider_project: pr.sourceProjectName,
-      provider_name: pr.sourceRepositoryName,
-      provider_repository_id: pr.sourceRepositoryId,
-    },
-    ref: pr.sourceBranch,
-  };
-}
-
-function azureBase(pr: AzureDevOpsTaskPullRequest): ExternalVcsRepositoryRef | null {
-  const hasFields = pr.targetOrganizationUrl !== undefined || pr.targetProjectId !== undefined || pr.targetProjectName !== undefined || pr.targetRepositoryId !== undefined || pr.targetRepositoryName !== undefined;
-  if (hasFields && (!pr.targetOrganizationUrl || !pr.targetProjectName || !pr.targetRepositoryName)) return null;
-  if (!hasFields) return null;
-  return {
-    repository: {
-      provider: "azure_devops",
-      provider_host: pr.targetOrganizationUrl,
-      provider_project: pr.targetProjectName,
-      provider_name: pr.targetRepositoryName,
-      provider_repository_id: pr.targetRepositoryId,
-    },
-    ref: pr.targetBranch,
-  };
-}
-
 function sameRepositoryIdentity(left: ExternalVcsRepository, right: ExternalVcsRepository): boolean {
   const leftProvider = left.provider.toLowerCase() === "azure_repos" ? "azure_devops" : left.provider.toLowerCase();
   const rightProvider = right.provider.toLowerCase() === "azure_repos" ? "azure_devops" : right.provider.toLowerCase();
   if (leftProvider !== rightProvider) return false;
-  if (providerHost(left.provider_host) !== providerHost(right.provider_host)) return false;
+  if (repositoryHost(left.provider_host) !== repositoryHost(right.provider_host)) return false;
   if (left.provider_repository_id && right.provider_repository_id) {
-    return left.provider_repository_id === right.provider_repository_id;
+    if (left.provider_repository_id !== right.provider_repository_id) return false;
   }
   return Boolean(
     left.provider_owner && right.provider_owner && left.provider_name && right.provider_name &&
@@ -215,6 +146,198 @@ function sameRepositoryIdentity(left: ExternalVcsRepository, right: ExternalVcsR
 
 function sameRefIdentity(left: ExternalVcsRepositoryRef | null, right: ExternalVcsRepositoryRef | null): boolean {
   return Boolean(left && right && left.ref === right.ref && sameRepositoryIdentity(left.repository, right.repository));
+}
+
+function statusForInput(
+  input: UseExternalVcsFileLinkInput,
+  statuses: LinkSnapshot["gitStatuses"],
+): GitStatusEntry | null {
+  if (input.repositoryName) {
+    return statuses.find((entry) => entry.repository_name === input.repositoryName)?.status ?? null;
+  }
+  return statuses.length === 1 ? statuses[0].status : null;
+}
+
+function comparisonFromStatus(status: GitStatusEntry | null): ExternalVcsRepositoryRef | null {
+  const target = status?.comparison?.target;
+  if (!status || !hasComparisonEvidence(status) || !target?.ref || !status.comparison?.resolved_ref) {
+    return null;
+  }
+  const repository = repositoryFromIdentity({
+    repository: target.repository,
+    ref: target.ref,
+  } as GitRemoteRefObservation["identity"]);
+  return repository ? { repository, ref: status.comparison.resolved_ref } : null;
+}
+
+function selectLinkedCandidate(
+  candidates: LinkCandidate[],
+  action: ExternalVcsRepositoryRef | null,
+): LinkCandidate | null | undefined {
+  const identityAware = candidates.filter((candidate) => candidate.sourceFields);
+  if (identityAware.length > 0) {
+    const exact = action
+      ? identityAware.filter((candidate) => sameRefIdentity(candidate.source, action))
+      : identityAware;
+    return exact.length === 1 ? exact[0] : undefined;
+  }
+  return candidates.length > 0 ? undefined : null;
+}
+
+function linkedCandidateInvalid(candidate: LinkCandidate | null): boolean {
+  return Boolean(candidate && ((candidate.sourceFields && !candidate.source) || (candidate.baseFields && !candidate.base)));
+}
+
+function chooseLinkedCandidate(
+  candidates: LinkCandidate[],
+  action: ExternalVcsRepositoryRef | null,
+): LinkCandidate | null | false {
+  const linked = selectLinkedCandidate(candidates, action);
+  if (linked === undefined || (candidates.length > 1 && !linked)) return false;
+  return linkedCandidateInvalid(linked) ? false : linked;
+}
+
+function linkedSidesCrossHosts(candidate: LinkCandidate | null | false): boolean {
+  if (!candidate || !candidate.source || !candidate.base) return false;
+  return providerHost(candidate.source.repository.provider_host) !== providerHost(candidate.base.repository.provider_host);
+}
+
+function resolvedBaseBranch(
+  input: UseExternalVcsFileLinkInput,
+  linked: LinkCandidate | null,
+  comparison: ExternalVcsRepositoryRef | null,
+  status: GitStatusEntry | null,
+  taskRepository: TaskRepositoryLink,
+): string | null {
+  if (linked?.base?.ref) return linked.base.ref;
+  if (!linked && comparison?.ref) return comparison.ref;
+  if (!linked && input.baseBranch) return input.baseBranch;
+  if (!linked && (!status || status.comparison === undefined)) return taskRepository.base_branch;
+  return null;
+}
+
+type LinkSides = {
+  publishedBranch: string | null;
+  sourceRepository: ExternalVcsRepository | null;
+  baseRepository: ExternalVcsRepository | null;
+  baseBranch: string | null;
+  comparisonRepository: ExternalVcsRepository | null;
+  comparisonBranch: string | null;
+};
+
+type LinkContext = {
+  status: GitStatusEntry | null;
+  action: ExternalVcsRepositoryRef | null;
+  comparison: ExternalVcsRepositoryRef | null;
+  linked: LinkCandidate | null | false;
+};
+
+function resolveLinkContext(
+  input: UseExternalVcsFileLinkInput,
+  snapshot: LinkSnapshot,
+  repository: Repository,
+): LinkContext {
+  const status = statusForInput(input, snapshot.gitStatuses);
+  const action = remoteRefFromObservation(status?.action_head);
+  const comparison = comparisonFromStatus(status);
+  const linked = chooseLinkedCandidate(
+    providerCandidates(repository, snapshot),
+    action,
+  );
+  return { status, action, comparison, linked };
+}
+
+function linkSource(context: LinkContext): ExternalVcsRepositoryRef | null {
+  const linked = linkedCandidate(context);
+  if (linked) return linked.source;
+  return context.linked === null ? context.action : null;
+}
+
+function linkedCandidate(context: LinkContext): LinkCandidate | null {
+  if (context.linked === false || !context.linked) return null;
+  return context.linked;
+}
+
+function linkPublishedBranch(
+  context: LinkContext,
+  input: UseExternalVcsFileLinkInput,
+  repository: Repository,
+  activeBranch: string | null,
+  snapshot: LinkSnapshot,
+): string | null {
+  const linked = linkedCandidate(context);
+  if (linked?.source?.ref) return linked.source.ref;
+  if (context.action?.ref) return context.action.ref;
+  if (context.linked) return null;
+  return resolvePublishedBranch(input, repository, activeBranch, snapshot);
+}
+
+function sourceRequired(status: string | null | undefined): boolean {
+  return status === "added" || status === "untracked" || status === "modified";
+}
+
+function sourceMissing(
+  status: string | null | undefined,
+  source: ExternalVcsRepositoryRef | null,
+  publishedBranch: string | null,
+): boolean {
+  return sourceRequired(status) && (!source || !publishedBranch);
+}
+
+function buildLinkSides({
+  context,
+  input,
+  repository,
+  activeBranch,
+  snapshot,
+  taskRepository,
+}: {
+  context: LinkContext;
+  input: UseExternalVcsFileLinkInput;
+  repository: Repository;
+  activeBranch: string | null;
+  snapshot: LinkSnapshot;
+  taskRepository: TaskRepositoryLink;
+}): LinkSides | null {
+  const source = linkSource(context);
+  const publishedBranch = linkPublishedBranch(
+    context,
+    input,
+    repository,
+    activeBranch,
+    snapshot,
+  );
+  const fileStatus = input.status?.trim().toLowerCase();
+  if (sourceMissing(fileStatus, source, publishedBranch)) return null;
+  const linkedBase = linkedCandidate(context)?.base;
+  return {
+    publishedBranch,
+    sourceRepository: source?.repository ?? null,
+    baseRepository:
+      linkedBase?.repository ??
+      (context.linked === null ? context.comparison?.repository ?? null : null),
+    baseBranch: resolvedBaseBranch(
+      input,
+      linkedCandidate(context),
+      context.comparison,
+      context.status,
+      taskRepository,
+    ),
+    comparisonRepository: context.comparison?.repository ?? null,
+    comparisonBranch: context.comparison?.ref ?? null,
+  };
+}
+
+function resolveLinkSides(
+  input: UseExternalVcsFileLinkInput,
+  snapshot: LinkSnapshot,
+  repository: Repository,
+  activeBranch: string | null,
+  taskRepository: TaskRepositoryLink,
+): LinkSides | null {
+  const context = resolveLinkContext(input, snapshot, repository);
+  if (context.linked === false || linkedSidesCrossHosts(context.linked)) return null;
+  return buildLinkSides({ context, input, repository, activeBranch, snapshot, taskRepository });
 }
 
 function sanitizedRepositoryName(value: string): string {
@@ -424,105 +547,20 @@ function resolveLink(
   const taskRepository = resolveTaskRepositoryLink(repository, activeBranch, snapshot);
   if (!taskRepository) return null;
 
-  const statusEntry = input.repositoryName
-    ? snapshot.gitStatuses.find((entry) => entry.repository_name === input.repositoryName)?.status
-    : snapshot.gitStatuses.length === 1
-      ? snapshot.gitStatuses[0].status
-      : null;
-  const action = remoteRefFromObservation(statusEntry?.action_head);
-  const comparisonTarget = statusEntry?.comparison?.target;
-  const comparison =
-    statusEntry?.comparison?.resolution_state === "resolved" && comparisonTarget?.ref
-      ? repositoryFromIdentity({
-          repository: comparisonTarget.repository,
-          ref: comparisonTarget.ref,
-        } as GitRemoteRefObservation["identity"])
-        ? {
-            repository: repositoryFromIdentity({
-              repository: comparisonTarget.repository,
-              ref: comparisonTarget.ref,
-            } as GitRemoteRefObservation["identity"])!,
-            ref: comparisonTarget.ref,
-          }
-        : null
-      : null;
-
-  const candidates =
-    repository.provider === "github"
-      ? snapshot.githubPRs.filter((pr) => githubPRMatches(pr, repository)).map((pr) => ({
-          item: pr,
-          source: githubSource(pr),
-          base: githubBase(pr),
-          sourceFields: identityFieldsPresent({ host: pr.head_host, owner: pr.head_owner, repo: pr.head_repo, id: pr.head_repo_id, node: pr.head_repo_node_id }),
-          baseFields: identityFieldsPresent({ host: pr.base_host, owner: pr.base_owner, repo: pr.base_repo, id: pr.base_repo_id }),
-        }))
-      : repository.provider === "gitlab"
-        ? snapshot.gitlabMRs.filter((mr) => gitlabMRMatches(mr, repository)).map((mr) => ({
-            item: mr,
-            source: gitlabSource(mr),
-            base: gitlabBase(mr),
-            sourceFields: mr.source_host !== undefined || mr.source_project_path !== undefined || mr.source_project_id !== undefined,
-            baseFields: mr.target_host !== undefined || mr.target_project_path !== undefined || mr.target_project_id !== undefined,
-          }))
-        : snapshot.azurePRs.filter((pr) => pr.repositoryId === repository.id).map((pr) => ({
-            item: pr,
-            source: azureSource(pr),
-            base: azureBase(pr),
-            sourceFields: pr.sourceOrganizationUrl !== undefined || pr.sourceProjectId !== undefined || pr.sourceProjectName !== undefined || pr.sourceRepositoryId !== undefined || pr.sourceRepositoryName !== undefined,
-            baseFields: pr.targetOrganizationUrl !== undefined || pr.targetProjectId !== undefined || pr.targetProjectName !== undefined || pr.targetRepositoryId !== undefined || pr.targetRepositoryName !== undefined,
-          }));
-
-  const identityAware = candidates.filter((candidate) => candidate.sourceFields);
-  const exact = action ? identityAware.filter((candidate) => sameRefIdentity(candidate.source, action)) : [];
-  if (identityAware.length > 0 && exact.length !== 1) return null;
-  const legacyCandidates = candidates.filter((candidate) => {
-    const branch = candidate.source?.ref ??
-      ("head_branch" in candidate.item ? candidate.item.head_branch : candidate.item.sourceBranch);
-    return !activeBranch || branch === activeBranch;
-  });
-  const linked =
-    identityAware.length > 0
-      ? exact[0]
-      : legacyCandidates.length === 1
-        ? legacyCandidates[0]
-        : candidates.length === 1
-          ? candidates[0]
-          : null;
-  if (candidates.length > 1 && !linked) return null;
-  if (linked && (linked.sourceFields && !linked.source || linked.baseFields && !linked.base)) return null;
-  if (
-    linked?.source &&
-    linked.base &&
-    providerHost(linked.source.repository.provider_host) !== providerHost(linked.base.repository.provider_host)
-  ) {
-    return null;
-  }
-
-  const publishedBranch = input.publishedBranch || linked?.source?.ref || (!linked ? action?.ref : resolvePublishedBranch(input, repository, activeBranch, snapshot));
-  const fileStatus = input.status?.trim().toLowerCase();
-  if (["added", "untracked", "modified"].includes(fileStatus ?? "") && !publishedBranch) {
-    return null;
-  }
-  const sourceRepository = linked?.source?.repository ?? (action && !linked ? action.repository : null);
-  const linkedBase = linked?.base;
-  const baseRepository = linkedBase?.repository ?? (!linked ? comparison?.repository : null);
-  const allowLegacyComparisonFallback = !statusEntry || statusEntry.comparison === undefined;
-  const baseBranch =
-    input.baseBranch ||
-    linkedBase?.ref ||
-    (!linked ? comparison?.ref ?? (allowLegacyComparisonFallback ? taskRepository.base_branch : null) : taskRepository.base_branch);
+  const sides = resolveLinkSides(input, snapshot, repository, activeBranch, taskRepository);
+  if (!sides) return null;
   return resolveExternalVcsFileURL({
     repository,
     path: input.filePath,
     previousPath: input.previousPath,
     status: input.status,
-    publishedBranch,
-    sourceRepository,
-    sourceBranch: publishedBranch,
-    baseRepository,
-    baseBranch,
-    comparisonRepository: comparison?.repository,
-    comparisonBranch: comparison?.ref,
+    publishedBranch: sides.publishedBranch,
+    sourceRepository: sides.sourceRepository,
+    sourceBranch: sides.publishedBranch,
+    baseRepository: sides.baseRepository,
+    baseBranch: sides.baseBranch,
+    comparisonRepository: sides.comparisonRepository,
+    comparisonBranch: sides.comparisonBranch,
   });
 }
 

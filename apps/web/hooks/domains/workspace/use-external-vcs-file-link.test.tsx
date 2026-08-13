@@ -6,6 +6,7 @@ import { defaultState } from "@/lib/state/default-state";
 import { repositoryId, sessionId, taskId, workspaceId, type Repository } from "@/lib/types/http";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { AzureDevOpsTaskPullRequest } from "@/lib/types/azure-devops";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
 const loaderMocks = vi.hoisted(() => ({
@@ -76,6 +77,14 @@ function githubPR(overrides: Partial<TaskPR> = {}): TaskPR {
     pr_title: "Share links",
     head_branch: "feature/share",
     base_branch: "main",
+    head_host: "github.com",
+    head_owner: "acme",
+    head_repo: "web",
+    head_repo_id: 11,
+    base_host: "github.com",
+    base_owner: "acme",
+    base_repo: "web",
+    base_repo_id: 11,
     author_login: "ada",
     state: "open",
     review_state: "",
@@ -110,6 +119,12 @@ function gitlabMR(overrides: Partial<TaskMR> = {}): TaskMR {
     mr_title: "Share links",
     head_branch: "feature/gitlab",
     base_branch: "trunk",
+    source_host: "https://gitlab.example.com",
+    source_project_path: "platform/api",
+    source_project_id: 11,
+    target_host: "https://gitlab.example.com",
+    target_project_path: "platform/api",
+    target_project_id: 11,
     author_username: "ada",
     state: "open",
     approval_state: "",
@@ -140,6 +155,7 @@ type InitialOptions = {
   }>;
   prs?: TaskPR[];
   mrs?: TaskMR[];
+  azurePRs?: AzureDevOpsTaskPullRequest[];
   sessionRepositoryId?: string;
   sessionWorktrees?: Array<{
     id: string;
@@ -244,6 +260,10 @@ function wrapper(options: InitialOptions = {}) {
     taskMRs: {
       ...defaultState.taskMRs,
       byWorkspaceId: { [WORKSPACE_ID]: { [TASK_ID]: options.mrs ?? [] } },
+    },
+    azureDevOpsTaskPullRequests: {
+      ...defaultState.azureDevOpsTaskPullRequests,
+      byTaskId: { [TASK_ID]: options.azurePRs ?? [] },
     },
     gitStatus: {
       ...defaultState.gitStatus,
@@ -376,7 +396,7 @@ describe("useExternalVcsFileLink GitHub published revisions", () => {
 });
 
 describe("useExternalVcsFileLink repeated repository matching", () => {
-  it("matches a repeated repository through the named worktree's active branch", () => {
+  it("fails closed when repeated linked changes have no exact action identity", () => {
     const { result } = renderHook(
       () =>
         useExternalVcsFileLink({
@@ -402,7 +422,7 @@ describe("useExternalVcsFileLink repeated repository matching", () => {
       },
     );
 
-    expect(result.current).toMatchObject({ revision: SECOND_BRANCH });
+    expect(result.current).toBeNull();
   });
 
   it("does not reuse a sibling worktree's published branch", () => {
@@ -423,10 +443,10 @@ describe("useExternalVcsFileLink repeated repository matching", () => {
       },
     );
 
-    expect(result.current?.revision).toBe("release");
+    expect(result.current?.revision).toBe(FIRST_BRANCH);
   });
 
-  it("resolves a production-shaped named worktree before repository metadata", () => {
+  it("fails closed for an ambiguous production-shaped named worktree", () => {
     const { result } = renderHook(
       () =>
         useExternalVcsFileLink({
@@ -451,11 +471,7 @@ describe("useExternalVcsFileLink repeated repository matching", () => {
       },
     );
 
-    expect(result.current).toMatchObject({
-      provider: "github",
-      revision: SECOND_BRANCH,
-      url: "https://github.com/acme/web/blob/feature%2Ftwo/src/editor.ts",
-    });
+    expect(result.current).toBeNull();
   });
 });
 
@@ -563,7 +579,7 @@ describe("useExternalVcsFileLink named worktree ambiguity", () => {
 });
 
 describe("useExternalVcsFileLink legacy provider identity", () => {
-  it("accepts a legacy GitHub association only when provider identity matches", () => {
+  it("fails closed when a linked GitHub association has no exact source identity", () => {
     const { result } = renderHook(
       () =>
         useExternalVcsFileLink({
@@ -571,10 +587,24 @@ describe("useExternalVcsFileLink legacy provider identity", () => {
           sessionId: SESSION_ID,
           repositoryId: GITHUB_REPOSITORY_ID,
         }),
-      { wrapper: wrapper({ prs: [githubPR({ repository_id: undefined })] }) },
+      {
+        wrapper: wrapper({
+          prs: [githubPR({
+            repository_id: undefined,
+            head_host: undefined,
+            head_owner: undefined,
+            head_repo: undefined,
+            head_repo_id: undefined,
+            base_host: undefined,
+            base_owner: undefined,
+            base_repo: undefined,
+            base_repo_id: undefined,
+          })],
+        }),
+      },
     );
 
-    expect(result.current?.revision).toBe("feature/share");
+    expect(result.current).toBeNull();
   });
 });
 
@@ -700,6 +730,13 @@ describe("useExternalVcsFileLink exact provider sides", () => {
               branch: FIRST_BRANCH,
               comparison: {
                 resolution_state: "resolved",
+                context_generation: "generation-1",
+                resolved_ref: "release/literal/ref",
+                base_commit: "base-commit",
+                ahead: 1,
+                behind: 0,
+                additions: 1,
+                deletions: 1,
                 target: {
                   repository: {
                     provider: "github",
@@ -718,6 +755,97 @@ describe("useExternalVcsFileLink exact provider sides", () => {
     expect(result.current).toMatchObject({
       url: "https://github.com/acme/web/blob/release%2Fliteral%2Fref/src/removed.ts",
       revision: "release/literal/ref",
+    });
+  });
+
+  it("matches GitLab source and canonical base identities exactly", () => {
+    const gitlab = repository({
+      id: repositoryId(GITLAB_REPOSITORY_ID),
+      name: "api",
+      provider: "gitlab",
+      provider_repo_id: "gitlab-api",
+      provider_host: "https://gitlab.example.com",
+      provider_owner: "platform",
+      provider_name: "api",
+      remote_url: "https://gitlab.example.com/platform/api.git",
+    });
+    const mr = gitlabMR({
+      source_host: "https://gitlab.example.com",
+      source_project_path: "fork/api",
+      source_project_id: 12,
+      target_host: "https://gitlab.example.com",
+      target_project_path: "platform/api",
+      target_project_id: 11,
+    });
+    const { result } = renderHook(
+      () => useExternalVcsFileLink({ filePath: "src/new.ts", status: "untracked", repositoryId: GITLAB_REPOSITORY_ID }),
+      {
+        wrapper: wrapper({
+          repositories: [gitlab],
+          taskRepositories: [{ id: "task-repo-gitlab", repository_id: GITLAB_REPOSITORY_ID, base_branch: "trunk", position: 0 }],
+          mrs: [mr],
+        }),
+      },
+    );
+    expect(result.current).toMatchObject({
+      url: "https://gitlab.example.com/fork/api/-/blob/feature%2Fgitlab/src/new.ts",
+      revision: "feature/gitlab",
+    });
+  });
+
+  it("normalizes Azure sourceOrganizationUrl to the action-head identity shape", () => {
+    const azure = repository({
+      id: repositoryId("repo-azure"),
+      name: "api",
+      provider: "azure_devops",
+      provider_repo_id: "azure-api",
+      provider_host: "https://dev.azure.com/acme",
+      provider_owner: "Platform",
+      provider_name: "api",
+      remote_url: "https://dev.azure.com/acme/Platform/_git/api",
+    });
+    const pullRequest: AzureDevOpsTaskPullRequest = {
+      id: "azure-pr-1",
+      taskId: TASK_ID,
+      repositoryId: azure.id,
+      organizationUrl: "https://dev.azure.com/acme",
+      projectId: "project-1",
+      azureRepositoryId: "repo-1",
+      sourceOrganizationUrl: "https://dev.azure.com/fork-org",
+      sourceProjectId: "project-fork",
+      sourceProjectName: "Fork Project",
+      sourceRepositoryId: "repo-fork",
+      sourceRepositoryName: "api",
+      targetOrganizationUrl: "https://dev.azure.com/acme",
+      targetProjectId: "project-1",
+      targetProjectName: "Platform",
+      targetRepositoryId: "repo-1",
+      targetRepositoryName: "api",
+      pullRequestId: 7,
+      pullRequestUrl: "https://dev.azure.com/acme/Platform/_git/api/pullrequest/7",
+      title: "Azure link",
+      sourceBranch: "feature/azure",
+      targetBranch: "main",
+      authorId: "ada",
+      authorName: "Ada",
+      status: "active",
+      isDraft: false,
+      createdAt: "",
+      updatedAt: "",
+    };
+    const { result } = renderHook(
+      () => useExternalVcsFileLink({ filePath: "src/new.ts", status: "added", repositoryId: azure.id }),
+      {
+        wrapper: wrapper({
+          repositories: [azure],
+          taskRepositories: [{ id: "task-repo-azure", repository_id: azure.id, base_branch: "main", position: 0 }],
+          azurePRs: [pullRequest],
+        }),
+      },
+    );
+    expect(result.current).toMatchObject({
+      url: "https://dev.azure.com/fork-org/Fork%20Project/_git/api?path=%2Fsrc%2Fnew.ts&version=GBfeature%2Fazure",
+      revision: "feature/azure",
     });
   });
 });

@@ -167,8 +167,20 @@ describe("resolveExternalVcsFileURL revision and path selection", () => {
     },
   );
 
+  it("omits a modified file when its exact source repository is unknown", () => {
+    expect(resolve({ status: "modified", publishedBranch: "feature/modified" })).toBeNull();
+  });
+
+  it("does not attach a deleted file to the working repository without a complete base identity", () => {
+    expect(resolve({ status: "deleted", publishedBranch: "feature/deleted" })).toBeNull();
+  });
+
   it("targets a deleted file on the base branch", () => {
-    expect(resolve({ status: "deleted", publishedBranch: "feature/deleted" })).toMatchObject({
+    expect(resolve({
+      status: "deleted",
+      publishedBranch: "feature/deleted",
+      baseRepository: githubRepository,
+    })).toMatchObject({
       revision: "main",
       path: currentPath,
     });
@@ -181,13 +193,20 @@ describe("resolveExternalVcsFileURL revision and path selection", () => {
         path: renamedPath,
         previousPath: previousRenamedPath,
         publishedBranch: "feature/rename",
+        sourceRepository: githubRepository,
+        sourceBranch: "feature/rename",
       }),
     ).toMatchObject({ revision: "feature/rename", path: renamedPath });
   });
 
   it("targets a renamed file's previous path on the base branch", () => {
     expect(
-      resolve({ status: "renamed", path: renamedPath, previousPath: previousRenamedPath }),
+      resolve({
+        status: "renamed",
+        path: renamedPath,
+        previousPath: previousRenamedPath,
+        baseRepository: githubRepository,
+      }),
     ).toMatchObject({ revision: "main", path: previousRenamedPath });
   });
 
@@ -208,6 +227,7 @@ describe("resolveExternalVcsFileURL revision and path selection", () => {
         status: "renamed",
         path: renamedPath,
         previousPath: " src/old.ts ",
+        baseRepository: githubRepository,
       }),
     ).toMatchObject({
       path: " src/old.ts ",
@@ -440,4 +460,49 @@ describe("resolveExternalVcsFileURL exact provider sides", () => {
       url: "https://dev.azure.com/fork-org/Fork%20Project/_git/api?path=%2Fsrc%2Fapp.ts&version=GBfeature%2Fliteral+ref",
     });
   });
+
+  it("selects exact GitLab source and base repositories atomically", () => {
+    const source = {
+      provider: "gitlab",
+      provider_host: "https://gitlab.example.com",
+      provider_owner: "fork/tools",
+      provider_name: "api",
+    };
+    const base = {
+      provider: "gitlab",
+      provider_host: "https://gitlab.example.com",
+      provider_owner: "platform/tools",
+      provider_name: "api",
+    };
+    expect(resolveExternalVcsFileURL({
+      repository: {
+        provider: "gitlab",
+        provider_host: "https://gitlab.example.com",
+        provider_owner: "platform/tools",
+        provider_name: "api",
+        remote_url: "https://gitlab.example.com/platform/tools/api.git",
+      },
+      sourceRepository: source,
+      sourceBranch: "feature/nested/ref",
+      baseRepository: base,
+      baseBranch: "main",
+      path: "src/new.ts",
+      status: "modified",
+    })).toMatchObject({
+      url: "https://gitlab.example.com/fork/tools/api/-/blob/feature%2Fnested%2Fref/src/new.ts",
+      revision: "feature/nested/ref",
+    });
+  });
+
+  it.each(["added", "modified", "untracked", "renamed"] as const)(
+    "requires exact source identity for %s content",
+    (status) => {
+      expect(resolveExternalVcsFileURL({
+        repository: githubRepository,
+        path: currentPath,
+        status,
+        publishedBranch: "feature/legacy",
+      })).toBeNull();
+    },
+  );
 });

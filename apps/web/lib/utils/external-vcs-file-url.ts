@@ -56,6 +56,9 @@ type TargetRepository = {
   revision: string;
 };
 
+type RepositorySide = ExternalVcsRepositoryRef;
+const GITHUB_ORIGIN = "https://github.com";
+
 function cleanValue(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
@@ -82,69 +85,157 @@ function isSafeRepositoryPath(value: string): boolean {
   return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
 }
 
-function selectTarget(input: ExternalVcsFileURLInput): (ResolvedTarget & TargetRepository) | null {
-  const refValue = (value: ExternalVcsRepositoryRef | null): string => value?.ref ?? value?.revision ?? "";
-  const status = cleanValue(input.status).toLowerCase();
-  const source = input.source ??
-    (input.sourceRepository && (input.sourceBranch || input.sourceRef)
-      ? { repository: input.sourceRepository, ref: input.sourceBranch || input.sourceRef || undefined }
-      : null);
-  const base = input.base ??
-    (input.baseRepository && (input.baseBranch || input.baseRef)
-      ? { repository: input.baseRepository, ref: input.baseBranch || input.baseRef || undefined }
-      : null);
-  const comparison = input.comparison ??
-    (input.comparisonRepository && (input.comparisonBranch || input.comparisonRef)
-      ? { repository: input.comparisonRepository, ref: input.comparisonBranch || input.comparisonRef || undefined }
-      : null);
+function refValue(value: RepositorySide | null): string {
+  return value?.ref ?? value?.revision ?? "";
+}
+
+function inputSide(
+  side: ExternalVcsRepositoryRef | null | undefined,
+  repository: ExternalVcsRepository | null | undefined,
+  ref: string | null | undefined,
+  aliasRef: string | null | undefined,
+): RepositorySide | null {
+  if (side != null) return side;
+  if (repository == null || !(ref || aliasRef)) return null;
+  return { repository, ref: ref || aliasRef || undefined };
+}
+
+function selectedTarget(
+  path: string,
+  side: RepositorySide | null,
+  revision: string,
+): (ResolvedTarget & TargetRepository) | null {
+  if (!side || !revision) return null;
+  return { path, revision, repository: side.repository };
+}
+
+function selectedHeadTarget(
+  input: ExternalVcsFileURLInput,
+  path: string,
+  source: RepositorySide | null,
+  revision: string,
+): (ResolvedTarget & TargetRepository) | null {
+  const exact = selectedTarget(path, source, revision);
+  if (exact || !input.publishedBranch) return exact;
+  return selectedTarget(path, { repository: input.repository }, revision);
+}
+
+function invalidSourceIdentity(
+  input: ExternalVcsFileURLInput,
+  source: RepositorySide | null,
+  status: string,
+): boolean {
+  const supplied = input.source != null || input.sourceRepository != null;
+  if (!supplied || source) return false;
+  return status !== "deleted" && !(status === "renamed" && !refValue(source));
+}
+
+function invalidBaseIdentity(
+  input: ExternalVcsFileURLInput,
+  base: RepositorySide | null,
+  source: RepositorySide | null,
+  status: string,
+): boolean {
+  const supplied = input.base != null || input.baseRepository != null;
+  if (!supplied || base) return false;
+  return status === "deleted" || status === "renamed" || !source;
+}
+
+function targetIdentitiesValid(
+  input: ExternalVcsFileURLInput,
+  source: RepositorySide | null,
+  base: RepositorySide | null,
+  comparison: RepositorySide | null,
+  status: string,
+): boolean {
+  if (invalidSourceIdentity(input, source, status)) return false;
+  if (invalidBaseIdentity(input, base, source, status)) return false;
+  if ((input.comparison != null || input.comparisonRepository != null) && !comparison) return false;
+  return true;
+}
+
+function renamedTarget({
+  input,
+  source,
+  baseSide,
+  publishedBranch,
+  baseBranch,
+  currentPath,
+  previousPath,
+}: {
+  input: ExternalVcsFileURLInput;
+  source: RepositorySide | null;
+  baseSide: RepositorySide | null;
+  publishedBranch: string;
+  baseBranch: string;
+  currentPath: string;
+  previousPath: string;
+}): (ResolvedTarget & TargetRepository) | null {
+  if (publishedBranch) return selectedHeadTarget(input, currentPath, source, publishedBranch);
+  if (!previousPath) return null;
+  return selectedTarget(previousPath, baseSide, baseBranch);
+}
+
+function targetForStatus({
+  input,
+  status,
+  source,
+  baseSide,
+  publishedBranch,
+  baseBranch,
+}: {
+  input: ExternalVcsFileURLInput;
+  status: string;
+  source: RepositorySide | null;
+  baseSide: RepositorySide | null;
+  publishedBranch: string;
+  baseBranch: string;
+}): (ResolvedTarget & TargetRepository) | null {
+  const currentPath = input.path;
+  if (status === "deleted") return selectedTarget(currentPath, baseSide, baseBranch);
+  if (status === "renamed") {
+    if (publishedBranch && (!source || !refValue(source))) return null;
+    return renamedTarget({
+      input,
+      source,
+      baseSide,
+      publishedBranch,
+      baseBranch,
+      currentPath,
+      previousPath: input.previousPath ?? "",
+    });
+  }
   if (
-    (input.source != null || input.sourceRepository != null) &&
-    !source &&
-    status !== "deleted" &&
-    !(status === "renamed" && !refValue(source))
-  ) return null;
-  if ((input.base != null || input.baseRepository != null) && !base && (status === "deleted" || status === "renamed" || !source)) return null;
-  if ((input.comparison != null || input.comparisonRepository != null) && !comparison) {
-    // A caller explicitly supplied an incomplete comparison identity. Do not
-    // silently fall back to the attached repository.
+    ["added", "untracked", "modified"].includes(status) &&
+    (!publishedBranch || !source || !refValue(source))
+  ) {
     return null;
   }
-  const legacyBase =
-    !base && !comparison && input.baseBranch
-      ? { repository: input.repository, ref: input.baseBranch }
-      : null;
-  const publishedBranch = cleanValue(refValue(source) || input.publishedBranch);
-  const baseBranch = cleanValue(refValue(base) || refValue(comparison) || input.baseBranch || input.baseRef);
-  const currentPath = input.path;
-  const previousPath = input.previousPath ?? "";
-  if (status === "deleted") {
-    const target = base ?? comparison ?? legacyBase;
-    return target && baseBranch
-      ? { path: currentPath, revision: baseBranch, repository: target.repository }
-      : null;
-  }
-  if (status === "renamed") {
-    if (publishedBranch) {
-      return source
-        ? { path: currentPath, revision: publishedBranch, repository: source.repository }
-        : input.publishedBranch
-          ? { path: currentPath, revision: publishedBranch, repository: input.repository }
-          : null;
-    }
-    const target = base ?? comparison ?? legacyBase;
-    return baseBranch && previousPath && target
-      ? { path: previousPath, revision: baseBranch, repository: target.repository }
-      : null;
-  }
-  if ((status === "added" || status === "untracked") && !publishedBranch) return null;
-  if (publishedBranch) {
-    const target = source ?? (input.publishedBranch ? { repository: input.repository, ref: publishedBranch } : null);
-    return target ? { path: currentPath, revision: publishedBranch, repository: target.repository } : null;
-  }
-  const target = base ?? comparison ?? legacyBase;
-  return target && baseBranch
-    ? { path: currentPath, revision: baseBranch, repository: target.repository }
+  if (publishedBranch) return selectedHeadTarget(input, currentPath, source, publishedBranch);
+  return selectedTarget(currentPath, baseSide, baseBranch);
+}
+
+function selectTarget(input: ExternalVcsFileURLInput): (ResolvedTarget & TargetRepository) | null {
+  const status = cleanValue(input.status).toLowerCase();
+  const source = inputSide(input.source, input.sourceRepository, input.sourceBranch, input.sourceRef);
+  const base = inputSide(input.base, input.baseRepository, input.baseBranch, input.baseRef);
+  const comparison = inputSide(
+    input.comparison,
+    input.comparisonRepository,
+    input.comparisonBranch,
+    input.comparisonRef,
+  );
+  if (!targetIdentitiesValid(input, source, base, comparison, status)) return null;
+
+  const legacyBase = !base && !comparison && !["deleted", "renamed"].includes(status) && input.baseBranch
+    ? { repository: input.repository, ref: input.baseBranch }
     : null;
+  const publishedBranch = cleanValue(refValue(source) || input.publishedBranch);
+  const baseBranch = cleanValue(
+    refValue(base) || refValue(comparison) || input.baseBranch || input.baseRef,
+  );
+  const baseSide = base ?? comparison ?? legacyBase;
+  return targetForStatus({ input, status, source, baseSide, publishedBranch, baseBranch });
 }
 
 function parseHTTPSRemote(rawRemoteURL: string | undefined): URL | null {
@@ -315,48 +406,47 @@ function repositoryPathMatches(parts: string[], owner: string, name: string): bo
   );
 }
 
+function sshGitHubURL(repository: ExternalVcsRepository, identity: SSHCloneIdentity): URL | null {
+  if (
+    identity.hostname !== "github.com" ||
+    !repository.provider_owner ||
+    !repository.provider_name ||
+    !repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
+  ) return null;
+  return new URL(
+    `${GITHUB_ORIGIN}/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
+  );
+}
+
+function sshGitLabURL(repository: ExternalVcsRepository, identity: SSHCloneIdentity): URL | null {
+  const origin = parseProviderOrigin(repository.provider_host);
+  if (!origin || !repository.provider_owner || !repository.provider_name) return null;
+  if (identity.hostname !== new URL(origin).hostname.toLowerCase()) return null;
+  if (!repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)) return null;
+  return new URL(`${origin}/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`);
+}
+
+function sshAzureURL(repository: ExternalVcsRepository, identity: SSHCloneIdentity): URL | null {
+  if (
+    identity.hostname !== "ssh.dev.azure.com" ||
+    identity.parts.length !== 4 ||
+    identity.parts[0] !== "v3" ||
+    identity.parts[2] !== repository.provider_owner ||
+    identity.parts[3] !== repository.provider_name
+  ) return null;
+  const organization = encodeURIComponent(identity.parts[1]);
+  const project = encodeURIComponent(repository.provider_owner ?? "");
+  const name = encodeURIComponent(repository.provider_name ?? "");
+  return new URL(`https://dev.azure.com/${organization}/${project}/_git/${name}`);
+}
+
 function sshRemoteForRepository(repository: ExternalVcsRepository): URL | null {
   const identity = parseSSHCloneIdentity(repository.remote_url);
-  if (!identity) return null;
-  if (!repository.provider_owner || !repository.provider_name) return null;
+  if (!identity || !repository.provider_owner || !repository.provider_name) return null;
   const provider = normalizedProvider(repository.provider);
-
-  if (
-    provider === "github" &&
-    identity.hostname === "github.com" &&
-    repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
-  ) {
-    return new URL(
-      `https://github.com/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
-    );
-  }
-
-  if (provider === "gitlab") {
-    const origin = parseProviderOrigin(repository.provider_host);
-    if (
-      origin &&
-      identity.hostname === new URL(origin).hostname.toLowerCase() &&
-      repositoryPathMatches(identity.parts, repository.provider_owner, repository.provider_name)
-    ) {
-      return new URL(
-        `${origin}/${encodeRepositoryPath(repository.provider_owner, repository.provider_name)}`,
-      );
-    }
-  }
-
-  if (
-    provider === "azure_devops" &&
-    identity.hostname === "ssh.dev.azure.com" &&
-    identity.parts.length === 4 &&
-    identity.parts[0] === "v3" &&
-    identity.parts[2] === repository.provider_owner &&
-    identity.parts[3] === repository.provider_name
-  ) {
-    const organization = encodeURIComponent(identity.parts[1]);
-    const project = encodeURIComponent(repository.provider_owner);
-    const name = encodeURIComponent(repository.provider_name);
-    return new URL(`https://dev.azure.com/${organization}/${project}/_git/${name}`);
-  }
+  if (provider === "github") return sshGitHubURL(repository, identity);
+  if (provider === "gitlab") return sshGitLabURL(repository, identity);
+  if (provider === "azure_devops") return sshAzureURL(repository, identity);
   return null;
 }
 
@@ -370,10 +460,10 @@ function githubRemoteMatches(
   parts: string[],
 ): boolean {
   if (!repository.provider_owner || !repository.provider_name) return false;
-  const origin = parseProviderOrigin(repository.provider_host) ?? "https://github.com";
+  const origin = parseProviderOrigin(repository.provider_host) ?? GITHUB_ORIGIN;
   return (
     remote.origin === origin &&
-    origin === "https://github.com" &&
+    origin === GITHUB_ORIGIN &&
     repositoryPathMatches(parts, repository.provider_owner, repository.provider_name)
   );
 }
@@ -430,8 +520,8 @@ function metadataWebURL(
   const provider = normalizedProvider(repository.provider);
   if (!providerMetadataComplete(repository)) return null;
   if (provider === "github") {
-    const origin = parseProviderOrigin(repository.provider_host) ?? "https://github.com";
-    if (origin !== "https://github.com") return null;
+    const origin = parseProviderOrigin(repository.provider_host) ?? GITHUB_ORIGIN;
+    if (origin !== GITHUB_ORIGIN) return null;
     return {
       provider: "github",
       webURL: new URL(`${origin}/${encodeRepositoryPath(repository.provider_owner!, repository.provider_name!)}`),
@@ -486,19 +576,21 @@ function buildFileURL(
   return `${remote.origin}/${repositoryPath}/${route}/${encodeURIComponent(target.revision)}/${filePath}`;
 }
 
+function resolveWebTarget(
+  target: (ResolvedTarget & TargetRepository) | null,
+): { provider: ExternalVcsProvider | null; webURL: URL } | null {
+  if (!target) return null;
+  if (!target.repository.remote_url) return metadataWebURL(target.repository);
+  const remote = parseRepositoryRemote(target.repository);
+  if (!remote) return null;
+  return { provider: resolveProvider(target.repository, remote), webURL: remote };
+}
+
 export function resolveExternalVcsFileURL(
   input: ExternalVcsFileURLInput,
 ): ExternalVcsFileURL | null {
   const target = selectTarget(input);
-  const hasRemote = Boolean(target?.repository.remote_url);
-  const remote = target && hasRemote ? parseRepositoryRemote(target.repository) : null;
-  const resolved: { provider: ExternalVcsProvider | null; webURL: URL } | null = hasRemote
-    ? remote
-      ? { provider: resolveProvider(target!.repository, remote), webURL: remote }
-      : null
-    : target
-      ? metadataWebURL(target.repository)
-      : null;
+  const resolved = resolveWebTarget(target);
   if (
     !resolved ||
     !resolved.provider ||
