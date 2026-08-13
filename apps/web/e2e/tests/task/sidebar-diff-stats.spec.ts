@@ -1,5 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import {
+  GitHelper,
+  configureTriangularRemoteFixture,
+  makeGitEnv,
+} from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 type GitSnapshotResponse = {
@@ -61,6 +66,58 @@ async function waitForPersistedTaskDiffSummary(
  * still shows its +N/-N badge from the persisted task summary.
  */
 test.describe("Task sidebar diff stats", () => {
+  test("counts only commits beyond the canonical comparison head", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "github",
+      provider_host: "https://github.com",
+      provider_owner: "testorg",
+      provider_name: "sidebar-comparison",
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Sidebar comparison count",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const checkout =
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
+      sessions.sessions[0]?.worktree_path;
+    if (!checkout) throw new Error("Sidebar comparison task has no checkout");
+    const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
+    const fixture = configureTriangularRemoteFixture(git, checkout);
+
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.listTasks(seedData.workspaceId);
+          const gitSummary = response.tasks.find((item) => item.id === task.id)?.status_summary?.git;
+          return { additions: gitSummary?.additions ?? 0, deletions: gitSummary?.deletions ?? 0 };
+        },
+        { timeout: 60_000 },
+      )
+      .toEqual({ additions: 1, deletions: 0 });
+
+    const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+    await expect(row.getByTestId("sidebar-task-diff-stats")).toHaveText("+1 -0");
+    expect(fixture.localHead).not.toBe(fixture.comparisonHead);
+  });
+
   test("badges survive backend restart for non-active tasks", async ({
     testPage,
     apiClient,

@@ -1646,6 +1646,15 @@ export class ApiClient {
     checks_total?: number;
     checks_passing?: number;
     unresolved_review_threads?: number;
+    head_host?: string;
+    head_owner?: string;
+    head_repo?: string;
+    head_repo_id?: number;
+    head_repo_node_id?: string;
+    base_host?: string;
+    base_owner?: string;
+    base_repo?: string;
+    base_repo_id?: number;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
   }

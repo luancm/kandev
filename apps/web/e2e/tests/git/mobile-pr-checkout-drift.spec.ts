@@ -1,6 +1,10 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import {
+  configureTriangularRemoteFixture,
+  GitHelper,
+  makeGitEnv,
+} from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
@@ -237,5 +241,116 @@ test.describe("Mobile rewritten contribution history", () => {
     await prCapture.screenshot("remote-contribution-drift-mobile", {
       caption: "Pixel 5 preserves the local checkout and offers explicit provider version choices",
     });
+  });
+
+  test("keeps mobile actions scoped to triangular remote roles", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "github",
+      provider_host: "https://github.com",
+      provider_owner: "testorg",
+      provider_name: "canonical",
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile triangular remote roles",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("mobile triangular remote task did not return a session");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const checkout = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_path;
+    if (!checkout) throw new Error("mobile triangular remote task has no worktree path");
+    const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir);
+
+    type StoreWindow = Window & {
+      __KANDEV_E2E_STORE__?: {
+        getState: () => {
+          environmentIdBySessionId: Record<string, string>;
+          gitStatus: {
+            byEnvironmentId: Record<
+              string,
+              | {
+                  branch?: string | null;
+                  remote_branch?: string | null;
+                  remote_behind?: number;
+                  action_head?: {
+                    observation_state?: string;
+                    identity?: { repository?: { repository_path?: string }; ref?: string };
+                  } | null;
+                  tracking_upstream?: {
+                    observation_state?: string;
+                    behind?: number;
+                    identity?: { repository?: { repository_path?: string }; ref?: string };
+                  } | null;
+                  comparison?: {
+                    resolution_state?: string;
+                    additions?: number;
+                    deletions?: number;
+                    target?: { repository?: { repository_path?: string }; ref?: string };
+                  } | null;
+                }
+              | undefined
+            >;
+          };
+        };
+      };
+    };
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate((sid) => {
+            const state = (window as StoreWindow).__KANDEV_E2E_STORE__?.getState();
+            const env = state?.environmentIdBySessionId[sid] ?? sid;
+            return state?.gitStatus.byEnvironmentId[env] ?? null;
+          }, task.session_id!),
+        { timeout: 45_000 },
+      )
+      .toMatchObject({
+        branch: fixture.branch,
+        remote_branch: "tracking/main",
+        remote_behind: 1,
+        action_head: {
+          observation_state: "present",
+          identity: { repository: { repository_path: /testorg\/fork-/ }, ref: fixture.branch },
+        },
+        tracking_upstream: {
+          observation_state: "present",
+          behind: 1,
+          identity: { repository: { repository_path: /testorg\/tracking-/ }, ref: "main" },
+        },
+        comparison: {
+          resolution_state: "resolved",
+          additions: 1,
+          deletions: 0,
+          target: { repository: { repository_path: /testorg\/canonical-/ }, ref: "main" },
+        },
+      });
+
+    const changes = testPage.getByRole("button", { name: "Changes", exact: true });
+    await changes.tap();
+    await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 20_000 });
+    const actions = testPage.getByTestId("mobile-git-actions");
+    await actions.tap();
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeDisabled();
+    expect(git.getCurrentSha()).toBe(fixture.localHead);
   });
 });

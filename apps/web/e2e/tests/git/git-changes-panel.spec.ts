@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { configureTriangularRemoteFixture } from "../../helpers/git-helper";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -71,6 +72,14 @@ class GitHelper {
 
   getCurrentSha(): string {
     return this.exec("git rev-parse HEAD").trim();
+  }
+
+  getRepoDir(): string {
+    return this.repoDir;
+  }
+
+  getEnv(): NodeJS.ProcessEnv {
+    return this.env;
   }
 }
 
@@ -2050,5 +2059,121 @@ test.describe("Git Changes Panel", () => {
     ).not.toHaveAttribute("aria-disabled", "true");
     expect(git.getCurrentSha()).toBe(localHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");
+  });
+
+  test("uses independent writable, tracking, and comparison remotes", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "github",
+      provider_host: "https://github.com",
+      provider_owner: "testorg",
+      provider_name: "canonical",
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git triangular remote roles",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("triangular remote task did not return a session");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const checkout = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_path;
+    if (!checkout) throw new Error("triangular remote task has no worktree path");
+    const git = new GitHelper(checkout, {
+      ...process.env,
+      HOME: backend.tmpDir,
+      GIT_AUTHOR_NAME: "E2E Test",
+      GIT_AUTHOR_EMAIL: "e2e@test.local",
+      GIT_COMMITTER_NAME: "E2E Test",
+      GIT_COMMITTER_EMAIL: "e2e@test.local",
+    });
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir);
+
+    type RoleSnapshot = {
+      branch?: string | null;
+      remote_branch?: string | null;
+      remote_ahead?: number;
+      remote_behind?: number;
+      action_head?: {
+        observation_state?: string;
+        identity?: { repository?: { repository_path?: string }; ref?: string };
+      } | null;
+      tracking_upstream?: {
+        observation_state?: string;
+        behind?: number;
+        identity?: { repository?: { repository_path?: string }; ref?: string };
+      } | null;
+      comparison?: {
+        resolution_state?: string;
+        additions?: number;
+        deletions?: number;
+        target?: { repository?: { repository_path?: string }; ref?: string };
+      } | null;
+    };
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate((sid) => {
+            type StoreWindow = Window & {
+              __KANDEV_E2E_STORE__?: {
+                getState: () => {
+                  environmentIdBySessionId: Record<string, string>;
+                  gitStatus: { byEnvironmentId: Record<string, RoleSnapshot | undefined> };
+                };
+              };
+            };
+            const state = (window as StoreWindow).__KANDEV_E2E_STORE__?.getState();
+            const env = state?.environmentIdBySessionId[sid] ?? sid;
+            return state?.gitStatus.byEnvironmentId[env] ?? null;
+          }, task.session_id!),
+        { timeout: 45_000 },
+      )
+      .toMatchObject({
+        branch: fixture.branch,
+        remote_branch: "tracking/main",
+        remote_behind: 1,
+        action_head: {
+          observation_state: "present",
+          identity: { repository: { repository_path: /testorg\/fork-/ }, ref: fixture.branch },
+        },
+        tracking_upstream: {
+          observation_state: "present",
+          behind: 1,
+          identity: { repository: { repository_path: /testorg\/tracking-/ }, ref: "main" },
+        },
+        comparison: {
+          resolution_state: "resolved",
+          additions: 1,
+          deletions: 0,
+          target: { repository: { repository_path: /testorg\/canonical-/ }, ref: "main" },
+        },
+      });
+
+    await session.clickTab("Changes");
+    const changes = testPage.getByTestId("changes-panel");
+    await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 20_000 });
+    await expect(changes.getByText("Local contribution on writable branch")).toBeVisible();
+    await changes.getByRole("button", { name: "Open VCS options" }).click();
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeDisabled();
+    expect(git.getCurrentSha()).toBe(fixture.localHead);
   });
 });

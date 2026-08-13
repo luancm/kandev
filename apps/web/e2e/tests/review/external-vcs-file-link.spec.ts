@@ -12,6 +12,11 @@ const GITHUB_OWNER = "testorg";
 const GITHUB_REPOSITORY = "external-file-links";
 const BASE_GITHUB_REPOSITORY = "external-file-links-base";
 const PUBLISHED_FILE = "published-link.ts";
+const ADDED_FILE = "added-link.ts";
+const DELETED_FILE = "deleted-link.ts";
+const RENAMED_FILE = "renamed-link.ts";
+const RENAMED_OLD_FILE = "old-renamed-link.ts";
+const BASE_RENAME_PR = 82;
 const EXISTING_FILE = "base-link.ts";
 const UNTRACKED_FILE = "local-only-link.ts";
 
@@ -101,6 +106,28 @@ test.describe("External VCS file links", () => {
         deletions: 1,
         patch: "@@ -1 +1 @@\n-export const published = false;\n+export const published = true;",
       },
+      {
+        filename: ADDED_FILE,
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const added = true;",
+      },
+      {
+        filename: DELETED_FILE,
+        status: "deleted",
+        additions: 0,
+        deletions: 1,
+        patch: "@@ -1 +0,0 @@\n-export const deleted = true;",
+      },
+      {
+        filename: RENAMED_FILE,
+        old_path: RENAMED_OLD_FILE,
+        status: "renamed",
+        additions: 1,
+        deletions: 1,
+        patch: "@@ -1 +1 @@\n-export const renamed = false;\n+export const renamed = true;",
+      },
     ]);
 
     const checkoutBranch = "main";
@@ -125,6 +152,14 @@ test.describe("External VCS file links", () => {
       head_branch: checkoutBranch,
       base_branch: "main",
       author_login: "reviewer",
+      head_host: "https://github.com",
+      head_owner: "reviewer-fork",
+      head_repo: GITHUB_REPOSITORY,
+      head_repo_id: 881,
+      base_host: "https://github.com",
+      base_owner: GITHUB_OWNER,
+      base_repo: GITHUB_REPOSITORY,
+      base_repo_id: 882,
     });
 
     await testPage.goto(`/t/${task.id}`);
@@ -141,10 +176,25 @@ test.describe("External VCS file links", () => {
     await expect(review).toBeVisible();
     const fileHeader = review.getByTestId("review-file-header").filter({ hasText: PUBLISHED_FILE });
     const link = fileHeader.getByRole("link", { name: "Open file in GitHub" });
-    const expectedURL = `https://github.com/testorg/external-file-links/blob/${encodeURIComponent(checkoutBranch)}/published-link.ts`;
+    const expectedURL = `https://github.com/reviewer-fork/external-file-links/blob/${encodeURIComponent(checkoutBranch)}/published-link.ts`;
     await expect(link).toHaveAttribute("href", expectedURL);
     await expect(link).toHaveAttribute("target", "_blank");
     await openExternalLink(testPage, link, expectedURL);
+
+    const addedHeader = review
+      .getByTestId("review-file-header")
+      .filter({ hasText: ADDED_FILE });
+    await expect(addedHeader.getByRole("link", { name: "Open file in GitHub" })).toHaveAttribute(
+      "href",
+      `https://github.com/reviewer-fork/external-file-links/blob/${encodeURIComponent(checkoutBranch)}/${ADDED_FILE}`,
+    );
+    const deletedHeader = review
+      .getByTestId("review-file-header")
+      .filter({ hasText: DELETED_FILE });
+    await expect(deletedHeader.getByRole("link", { name: "Open file in GitHub" })).toHaveAttribute(
+      "href",
+      `https://github.com/testorg/external-file-links/blob/main/${DELETED_FILE}`,
+    );
   });
 
   test("uses the base branch for an existing file and omits an unpublished untracked file", async ({
@@ -164,6 +214,30 @@ test.describe("External VCS file links", () => {
       source: "legacy_shared",
       status: "active",
     });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("reviewer");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: BASE_RENAME_PR,
+        title: "Canonical rename link",
+        state: "open",
+        head_branch: "",
+        base_branch: "main",
+        author_login: "reviewer",
+        repo_owner: GITHUB_OWNER,
+        repo_name: BASE_GITHUB_REPOSITORY,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRFiles(GITHUB_OWNER, BASE_GITHUB_REPOSITORY, BASE_RENAME_PR, [
+      {
+        filename: RENAMED_FILE,
+        old_path: RENAMED_OLD_FILE,
+        status: "renamed",
+        additions: 1,
+        deletions: 1,
+        patch: "@@ -1 +1 @@\n-export const oldName = false;\n+export const newName = true;",
+      },
+    ]);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Base external file link",
@@ -175,11 +249,46 @@ test.describe("External VCS file links", () => {
         repositories: [trustedGitHubTaskRepository(BASE_GITHUB_REPOSITORY)],
       },
     );
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: GITHUB_OWNER,
+      repo: BASE_GITHUB_REPOSITORY,
+      pr_number: BASE_RENAME_PR,
+      pr_url: `https://github.com/${GITHUB_OWNER}/${BASE_GITHUB_REPOSITORY}/pull/${BASE_RENAME_PR}`,
+      pr_title: "Canonical rename link",
+      head_branch: "",
+      base_branch: "main",
+      author_login: "reviewer",
+      head_host: "https://github.com",
+      head_owner: "reviewer-fork",
+      head_repo: BASE_GITHUB_REPOSITORY,
+      head_repo_id: 883,
+      base_host: "https://github.com",
+      base_owner: GITHUB_OWNER,
+      base_repo: BASE_GITHUB_REPOSITORY,
+      base_repo_id: 884,
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
+    await session.clickTab("Changes");
+    await expect(session.changes.getByRole("button", { name: "Review", exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await session.changes.getByRole("button", { name: "Review", exact: true }).click();
+    const renameReview = testPage.getByRole("dialog", { name: "Review Changes" });
+    const renamedHeader = renameReview
+      .getByTestId("review-file-header")
+      .filter({ hasText: RENAMED_FILE });
+    await expect(
+      renamedHeader.getByRole("link", { name: "Open file in GitHub" }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/testorg/${BASE_GITHUB_REPOSITORY}/blob/main/${RENAMED_OLD_FILE}`,
+    );
+    await renameReview.getByRole("button", { name: "Close review" }).click();
     const sessions = await apiClient.listTaskSessions(task.id);
     const taskCheckout =
       sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||

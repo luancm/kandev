@@ -9,6 +9,7 @@ import { SessionPage } from "../../pages/session-page";
 
 const MOBILE_FILE = "mobile-external-link.ts";
 const MOBILE_REMOTE = "https://github.com/testorg/mobile-external-links.git";
+const MOBILE_PR = 91;
 function initializeMobileRepository(backend: BackendContext): string {
   const repositoryPath = path.join(backend.tmpDir, "repos", `mobile-link-${Date.now()}`);
   fs.mkdirSync(repositoryPath, { recursive: true });
@@ -63,6 +64,29 @@ test.describe("Mobile external VCS file link", () => {
       source: "legacy_shared",
       status: "active",
     });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("reviewer");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: MOBILE_PR,
+        title: "Mobile fork external link",
+        state: "open",
+        head_branch: "feature/mobile-links",
+        base_branch: "main",
+        author_login: "reviewer",
+        repo_owner: "testorg",
+        repo_name: "mobile-external-links",
+      },
+    ]);
+    await apiClient.mockGitHubAddPRFiles("testorg", "mobile-external-links", MOBILE_PR, [
+      {
+        filename: MOBILE_FILE,
+        status: "modified",
+        additions: 1,
+        deletions: 1,
+        patch: "@@ -1 +1 @@\n-export const mobile = false;\n+export const mobile = true;",
+      },
+    ]);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile external file link",
@@ -74,11 +98,36 @@ test.describe("Mobile external VCS file link", () => {
         repositories: [trustedMobileTaskRepository()],
       },
     );
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "mobile-external-links",
+      pr_number: MOBILE_PR,
+      pr_url: `https://github.com/testorg/mobile-external-links/pull/${MOBILE_PR}`,
+      pr_title: "Mobile fork external link",
+      head_branch: "feature/mobile-links",
+      base_branch: "main",
+      author_login: "reviewer",
+      head_host: "https://github.com",
+      head_owner: "mobile-reviewer",
+      head_repo: "mobile-external-links",
+      head_repo_id: 991,
+      base_host: "https://github.com",
+      base_owner: "testorg",
+      base_repo: "mobile-external-links",
+      base_repo_id: 992,
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const taskCheckout =
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
+      sessions.sessions[0]?.worktree_path ||
+      repositoryPath;
+    fs.writeFileSync(path.join(taskCheckout, MOBILE_FILE), "export const mobile = false;\n");
     await testPage.getByRole("button", { name: "Files" }).tap();
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${MOBILE_FILE}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
@@ -88,7 +137,7 @@ test.describe("Mobile external VCS file link", () => {
     await expect(viewer).toBeVisible();
     const link = viewer.getByRole("link", { name: "Open file in GitHub" });
     const expectedURL =
-      "https://github.com/testorg/mobile-external-links/blob/main/mobile-external-link.ts";
+      "https://github.com/mobile-reviewer/mobile-external-links/blob/feature%2Fmobile-links/mobile-external-link.ts";
     await expect(link).toHaveAttribute("href", expectedURL);
 
     const bounds = await link.boundingBox();

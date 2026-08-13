@@ -2,8 +2,13 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import {
+  GitHelper,
+  configureTriangularRemoteFixture,
+  makeGitEnv,
+  makeTriangularRemoteFixtureInput,
+} from "../../helpers/git-helper";
 import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/clarification";
-import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -389,6 +394,62 @@ test.describe("Mobile sidebar task actions", () => {
     await archiveItem.scrollIntoViewIfNeeded();
     await expect(archiveItem).toBeInViewport();
     await expect(diffStats).toBeVisible();
+  });
+
+  test("shows comparison-only diff totals in the phone task drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const fixtureInput = makeTriangularRemoteFixtureInput();
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "github",
+      provider_host: "https://github.com",
+      provider_owner: fixtureInput.canonicalOwner,
+      provider_name: fixtureInput.canonicalName,
+    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile sidebar comparison count",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const checkout =
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path || sessions.sessions[0]?.worktree_path;
+    if (!checkout) throw new Error("Mobile sidebar comparison task has no checkout");
+    const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir, fixtureInput);
+
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.listTasks(seedData.workspaceId);
+          const gitSummary = response.tasks.find((item) => item.id === task.id)?.status_summary
+            ?.git;
+          return { additions: gitSummary?.additions ?? 0, deletions: gitSummary?.deletions ?? 0 };
+        },
+        { timeout: 60_000 },
+      )
+      .toEqual({ additions: 1, deletions: 0 });
+
+    await testPage.getByTestId("mobile-session-menu").tap();
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
+    await expect(row.getByTestId("sidebar-task-diff-stats")).toHaveText("+1 -0");
+    expect(fixture.localHead).not.toBe(fixture.comparisonHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
   });
 
   test("edits a started task from the phone drawer and closes the drawer", async ({

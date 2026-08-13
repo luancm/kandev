@@ -397,6 +397,25 @@ test.describe("Mobile GitLab parity", () => {
     const mrButton = testPage.getByTestId("mr-topbar-button");
     await expect(mrButton).toHaveAttribute("data-mr-iid", "100", { timeout: 120_000 });
     await expectTouchTarget(mrButton, "mobile auto-linked MR");
+    const taskMRsResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/gitlab/workspaces/${encodeURIComponent(seedData.workspaceId)}/task-mrs`,
+    );
+    expect(taskMRsResponse.ok).toBe(true);
+    const taskMRs = (await taskMRsResponse.json()) as {
+      task_mrs?: Record<string, Array<Record<string, unknown>>>;
+    };
+    const linkedMR = taskMRs.task_mrs?.[task.id]?.find((mr) => mr.mr_iid === 100);
+    expect(linkedMR).toMatchObject({
+      host: backend.baseUrl,
+      project_path: GITLAB_PROJECT,
+      source_host: backend.baseUrl,
+      source_project_path: GITLAB_PROJECT,
+      target_host: backend.baseUrl,
+      target_project_path: GITLAB_PROJECT,
+      head_branch: expect.any(String),
+      base_branch: "main",
+    });
     await testPage.reload();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveAttribute("data-mr-iid", "100", {
       timeout: 60_000,
