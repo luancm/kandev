@@ -124,15 +124,15 @@ Wave 10:
 
 Wave 11:
 
-- [ ] [Task 11: Document remote roles](task-11-document-remote-roles.md) (`in_progress`)
+- [x] [Task 11: Document remote roles](task-11-document-remote-roles.md) (`completed`)
 
 Wave 12:
 
-- [ ] [Task 12: Verify the integrated package](task-12-verify-integrated-package.md)
+- [ ] [Task 12: Verify the integrated package](task-12-verify-integrated-package.md) (`in_progress`)
 
 ## Current checkpoint
 
-Tasks 00 through 07 are complete and committed as `1cee6ccb4`, `442cffb5c`, `e94c70bde`, `12f48a185`, `fd0433328`, and `eaa876f76`. Task 08 is complete through `403f06502`, `848652ff4`, `ca54472e7`, `2518ff013`, and `561a0e140`; Task 09 is complete through `10eb926f9`, `8d19f438f`, and `ba9b0263`, with exact provider-side file-link selection, fail-closed identity handling, and 121 focused tests passing. Task 10 is complete through `747a231ee`, `80e96e2ac`, `58b55a8dd`, and `12b0d051e`; production-shaped desktop/mobile fixtures, static checks, and production build pass, while Playwright execution is blocked by missing `libnspr4.so`. The branch is reconciled with upstream `a13379cf` through merge `cfd9ffd09`; Task 11 is now in progress for public/scoped remote-role documentation. No PR has been created.
+Tasks 00 through 07 are complete and committed as `1cee6ccb4`, `442cffb5c`, `e94c70bde`, `12f48a185`, `fd0433328`, and `eaa876f76`. Task 08 is complete through `403f06502`, `848652ff4`, `ca54472e7`, `2518ff013`, and `561a0e140`; Task 09 is complete through `10eb926f9`, `8d19f438f`, and `ba9b0263`, with exact provider-side file-link selection, fail-closed identity handling, and 121 focused tests passing. Task 10 is complete through `747a231ee`, `80e96e2ac`, `58b55a8dd`, and `12b0d051e`; production-shaped desktop/mobile fixtures, static checks, and production build pass, while Playwright execution is blocked by missing `libnspr4.so`. Task 11 is complete through `96858ad00` and `210b02feb`; public role-aware guides pass 61 tests and 41-page validation. The branch is reconciled with upstream `a13379cf` through merge `cfd9ffd09`; Task 12 is now in progress for integrated verification. No PR has been created.
 
 Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
 
