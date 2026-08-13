@@ -53,10 +53,21 @@ function hasCompleteComparisonIdentity(
 /** Comparison is a separate delivered target. Legacy statuses have no
  * structured comparison and remain compatible until the next refresh. */
 export function hasComparisonEvidence(
-  gitStatus: Pick<GitStatusEntry, "comparison" | "remote_roles_generation"> | undefined,
+  gitStatus:
+    | Pick<
+        GitStatusEntry,
+        "comparison" | "remote_roles_generation" | "action_head" | "tracking_upstream"
+      >
+    | undefined,
 ): boolean {
   if (!gitStatus) return true;
-  if (gitStatus.comparison === undefined) return gitStatus.remote_roles_generation === undefined;
+  if (gitStatus.comparison === undefined) {
+    return (
+      gitStatus.remote_roles_generation === undefined &&
+      gitStatus.action_head === undefined &&
+      gitStatus.tracking_upstream === undefined
+    );
+  }
   const comparison = gitStatus.comparison;
   return Boolean(
     comparison &&

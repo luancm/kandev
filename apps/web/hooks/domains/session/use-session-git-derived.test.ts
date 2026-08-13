@@ -253,6 +253,11 @@ describe("deriveSessionGitValues", () => {
         status({ comparison: { ...COMPARISON, target: undefined, additions: undefined } }),
       ),
     ).toBe(false);
+    expect(
+      hasComparisonEvidence(
+        status({ action_head: { identity: ROLE_IDENTITY, observation_state: "absent" } }),
+      ),
+    ).toBe(false);
   });
 
   it("requires source and comparison evidence before creating a PR", () => {
