@@ -48,14 +48,59 @@ func sortCommitsByCommittedAtDesc(commits []*process.GitCommitInfo) {
 // All git request structs below embed this field via the standard `repo` JSON
 // key (or `repo` form key for GET endpoints).
 
+// GitMutationExpectationRequest carries role evidence returned by the status
+// stream. The action-head aliases are accepted during the additive wire
+// rollout; the server normalizes them into one process-layer expectation.
+type GitMutationExpectationRequest struct {
+	ExpectedRemoteRolesGeneration       string                       `json:"expected_remote_roles_generation,omitempty"`
+	ExpectedTarget                      *gitremote.RemoteRefIdentity `json:"expected_target,omitempty"`
+	ExpectedObservationState            gitremote.ObservationState   `json:"expected_observation_state,omitempty"`
+	ExpectedRemoteHeadCommit            string                       `json:"expected_remote_head_commit,omitempty"`
+	ExpectedActionHeadState             gitremote.ObservationState   `json:"expected_action_head_state,omitempty"`
+	ExpectedActionHeadCommit            string                       `json:"expected_action_head_commit,omitempty"`
+	ExpectedTrackingUpstreamState       gitremote.ObservationState   `json:"expected_tracking_upstream_state,omitempty"`
+	ExpectedTrackingUpstreamCommit      string                       `json:"expected_tracking_upstream_commit,omitempty"`
+	ExpectedComparisonContextGeneration string                       `json:"expected_comparison_context_generation,omitempty"`
+	ExpectedSource                      *gitremote.RemoteRefIdentity `json:"expected_source,omitempty"`
+	ExpectedBase                        *gitremote.RemoteRefIdentity `json:"expected_base,omitempty"`
+}
+
+func (r GitMutationExpectationRequest) mutationExpectation() process.GitMutationExpectation {
+	state := r.ExpectedObservationState
+	if state == "" {
+		state = r.ExpectedActionHeadState
+	}
+	if state == "" {
+		state = r.ExpectedTrackingUpstreamState
+	}
+	head := r.ExpectedRemoteHeadCommit
+	if head == "" {
+		head = r.ExpectedActionHeadCommit
+	}
+	if head == "" {
+		head = r.ExpectedTrackingUpstreamCommit
+	}
+	return process.GitMutationExpectation{
+		RemoteRolesGeneration:        r.ExpectedRemoteRolesGeneration,
+		ExpectedTarget:               r.ExpectedTarget,
+		ExpectedObservationState:     state,
+		ExpectedRemoteHeadCommit:     head,
+		ExpectedComparisonGeneration: r.ExpectedComparisonContextGeneration,
+		ExpectedSource:               r.ExpectedSource,
+		ExpectedBase:                 r.ExpectedBase,
+	}
+}
+
 // GitPullRequest for POST /api/v1/git/pull
 type GitPullRequest struct {
+	GitMutationExpectationRequest
 	Rebase bool   `json:"rebase"`
 	Repo   string `json:"repo,omitempty"`
 }
 
 // GitPushRequest for POST /api/v1/git/push
 type GitPushRequest struct {
+	GitMutationExpectationRequest
 	Force       bool   `json:"force"`
 	SetUpstream bool   `json:"set_upstream"`
 	Repo        string `json:"repo,omitempty"`
@@ -75,12 +120,14 @@ type GitContributionRequest struct {
 
 // GitRebaseRequest for POST /api/v1/git/rebase
 type GitRebaseRequest struct {
+	GitMutationExpectationRequest
 	BaseBranch string `json:"base_branch"`
 	Repo       string `json:"repo,omitempty"`
 }
 
 // GitMergeRequest for POST /api/v1/git/merge
 type GitMergeRequest struct {
+	GitMutationExpectationRequest
 	BaseBranch string `json:"base_branch"`
 	Repo       string `json:"repo,omitempty"`
 }
@@ -136,6 +183,7 @@ type GitRevertCommitRequest struct {
 
 // GitCreatePRRequest for POST /api/v1/git/create-pr
 type GitCreatePRRequest struct {
+	GitMutationExpectationRequest
 	Title      string `json:"title"`
 	Body       string `json:"body"`
 	BaseBranch string `json:"base_branch"`
@@ -197,7 +245,7 @@ func (s *Server) handleGitPull(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Pull(c.Request.Context(), req.Rebase)
+	result, err := gitOp.PullWithExpectation(c.Request.Context(), req.Rebase, req.mutationExpectation())
 	if err != nil {
 		s.handleGitError(c, "pull", err)
 		return
@@ -222,7 +270,7 @@ func (s *Server) handleGitPush(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Push(c.Request.Context(), req.Force, req.SetUpstream)
+	result, err := gitOp.PushWithExpectation(c.Request.Context(), req.Force, req.SetUpstream, req.mutationExpectation())
 	if err != nil {
 		s.handleGitError(c, "push", err)
 		return
@@ -315,7 +363,7 @@ func (s *Server) handleGitRebase(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Rebase(c.Request.Context(), req.BaseBranch)
+	result, err := gitOp.RebaseWithExpectation(c.Request.Context(), req.BaseBranch, req.mutationExpectation())
 	if err != nil {
 		s.handleGitError(c, "rebase", err)
 		return
@@ -349,7 +397,7 @@ func (s *Server) handleGitMerge(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Merge(c.Request.Context(), req.BaseBranch)
+	result, err := gitOp.MergeWithExpectation(c.Request.Context(), req.BaseBranch, req.mutationExpectation())
 	if err != nil {
 		s.handleGitError(c, "merge", err)
 		return
@@ -571,7 +619,7 @@ func (s *Server) handleGitCreatePR(c *gin.Context) {
 		})
 		return
 	}
-	result, err := gitOp.CreatePR(c.Request.Context(), req.Title, req.Body, req.BaseBranch, req.Draft)
+	result, err := gitOp.CreatePRWithExpectation(c.Request.Context(), req.Title, req.Body, req.BaseBranch, req.Draft, req.mutationExpectation())
 	if err != nil {
 		if errors.Is(err, process.ErrOperationInProgress) {
 			c.JSON(http.StatusConflict, process.PRCreateResult{

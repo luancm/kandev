@@ -1,3 +1,4 @@
+//revive:disable:file-length-limit // Provider adapters remain grouped by CLI/REST seam.
 package process
 
 import (
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -432,15 +434,42 @@ func (g *GitOperator) runRepositoryCommand(ctx context.Context, name string, arg
 	return stdoutOutput, stderrOutput, nil
 }
 
+func githubOwnerRepository(identity *gitremote.RemoteRefIdentity) (string, string, error) {
+	if identity == nil || identity.Repository.Provider != gitremote.ProviderGitHub {
+		return "", "", errors.New("GitHub source or target identity is incomplete")
+	}
+	parts := strings.Split(strings.Trim(identity.Repository.RepositoryPath, "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", errors.New("GitHub source or target identity has an invalid repository path")
+	}
+	return parts[0], parts[1], nil
+}
+
 func (g *GitOperator) createGitHubPR(
 	ctx context.Context,
 	result *PRCreateResult,
 	branch, title, body, baseBranch string,
 	draft bool,
+	route *gitProviderRoute,
 ) (*PRCreateResult, error) {
 	head := branch
 	args := []string{"pr", prCreateSubcommand, repositoryFlagTitle, title, repositoryFlagBody, body}
-	if g.contributionDestination != nil {
+	if route != nil {
+		sourceOwner, _, sourceErr := githubOwnerRepository(route.Source)
+		_, targetRepo, targetErr := githubOwnerRepository(route.Base)
+		if sourceErr != nil || targetErr != nil {
+			if sourceErr != nil {
+				result.Error = sourceErr.Error()
+			} else {
+				result.Error = targetErr.Error()
+			}
+			return result, nil
+		}
+		head = sourceOwner + ":" + route.Source.Ref
+		args = []string{"pr", prCreateSubcommand, repositoryFlagTitle, title, repositoryFlagBody, body, repositoryFlagHead, head}
+		args = append(args, "--repo", route.Base.Repository.RepositoryPath)
+		_ = targetRepo
+	} else if g.contributionDestination != nil {
 		parts := strings.Split(g.contributionDestination.TargetRepository.Path, "/")
 		if len(parts) == 2 {
 			head = parts[0] + ":" + branch
@@ -474,7 +503,16 @@ func (g *GitOperator) createGitLabPR(
 	info *gitLabRepoInfo,
 	branch, title, body, baseBranch string,
 	draft bool,
+	route *gitProviderRoute,
 ) (*PRCreateResult, error) {
+	if route != nil {
+		if route.Source == nil || route.Base == nil || route.Source.Repository.Provider != gitremote.ProviderGitLab || route.Base.Repository.Provider != gitremote.ProviderGitLab {
+			result.Error = "GitLab source or target identity is incomplete"
+			return result, nil
+		}
+		branch = route.Source.Ref
+		baseBranch = route.Base.Ref
+	}
 	targetBranch, err := g.resolveGitLabTargetBranch(ctx, info, baseBranch)
 	if err != nil {
 		result.Error = err.Error()
@@ -482,7 +520,7 @@ func (g *GitOperator) createGitLabPR(
 	}
 
 	if _, lookupErr := exec.LookPath("glab"); lookupErr != nil {
-		return g.createGitLabPRWithREST(ctx, result, info, branch, title, body, targetBranch, draft)
+		return g.createGitLabPRWithREST(ctx, result, info, branch, title, body, targetBranch, draft, route)
 	}
 	if existingURL := g.findExistingGitLabMRWithGLab(ctx, info, branch, targetBranch); existingURL != "" {
 		result.PRURL = existingURL
@@ -493,6 +531,9 @@ func (g *GitOperator) createGitLabPR(
 
 	args := []string{"mr", "create", repositoryFlagTitle, title, repositoryFlagDescription, body, "--source-branch", branch}
 	args = append(args, "--target-branch", targetBranch)
+	if route != nil && !route.Source.Repository.EqualRepository(route.Base.Repository) {
+		args = append(args, "--source-project", route.Source.Repository.RepositoryPath)
+	}
 	if draft {
 		args = append(args, "--draft")
 	}
@@ -502,7 +543,7 @@ func (g *GitOperator) createGitLabPR(
 	result.Output = g.sanitizePRFailure(combineCommandOutput(stdoutOutput, stderrOutput), title, body)
 	if err != nil {
 		if g.environmentValue(gitLabTokenEnv) != "" {
-			return g.createGitLabPRWithREST(ctx, result, info, branch, title, body, targetBranch, draft)
+			return g.createGitLabPRWithREST(ctx, result, info, branch, title, body, targetBranch, draft, route)
 		}
 		result.Error = "GitLab merge request creation failed; authenticate glab for the configured host"
 		return result, nil
@@ -700,6 +741,7 @@ func (g *GitOperator) createGitLabPRWithREST(
 	info *gitLabRepoInfo,
 	branch, title, body, targetBranch string,
 	draft bool,
+	route *gitProviderRoute,
 ) (*PRCreateResult, error) {
 	token := strings.TrimSpace(g.environmentValue(gitLabTokenEnv))
 	if token == "" {
@@ -730,11 +772,19 @@ func (g *GitOperator) createGitLabPRWithREST(
 		title = "Draft: " + title
 	}
 	payload := struct {
-		SourceBranch string `json:"source_branch"`
-		TargetBranch string `json:"target_branch"`
-		Title        string `json:"title"`
-		Description  string `json:"description"`
+		SourceBranch  string `json:"source_branch"`
+		TargetBranch  string `json:"target_branch"`
+		Title         string `json:"title"`
+		Description   string `json:"description"`
+		SourceProject string `json:"source_project,omitempty"`
 	}{SourceBranch: branch, TargetBranch: targetBranch, Title: title, Description: body}
+	if route != nil {
+		if route.Source == nil || route.Base == nil {
+			result.Error = "GitLab source or target identity is incomplete"
+			return result, nil
+		}
+		payload.SourceProject = route.Source.Repository.RepositoryPath
+	}
 	var created gitLabMRResponse
 	if err := gitLabAPIJSON(ctx, client, token, http.MethodPost, projectEndpoint+"/merge_requests", payload, &created); err != nil {
 		result.Error = err.Error()
@@ -805,6 +855,7 @@ func (g *GitOperator) createAzureReposPR(
 	result *PRCreateResult,
 	remoteURL, branch, title, body, baseBranch string,
 	draft bool,
+	route *gitProviderRoute,
 ) (*PRCreateResult, error) {
 	if err := ensureAzureDevOpsCLI(ctx); err != nil {
 		result.Error = err.Error()
@@ -816,6 +867,25 @@ func (g *GitOperator) createAzureReposPR(
 		result.Error = err.Error()
 		return result, nil
 	}
+	if route != nil {
+		if route.Source == nil || route.Base == nil || route.Source.Repository.Provider != gitremote.ProviderAzureRepos || route.Base.Repository.Provider != gitremote.ProviderAzureRepos {
+			result.Error = "Azure Repos source or target identity is incomplete"
+			return result, nil
+		}
+		branch = route.Source.Ref
+		baseBranch = route.Base.Ref
+		parts := strings.Split(strings.Trim(route.Base.Repository.RepositoryPath, "/"), "/")
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			result.Error = "Azure Repos target identity has an invalid repository path"
+			return result, nil
+		}
+		if !strings.EqualFold(azureOrganizationFromURL(info.OrganizationURL), parts[0]) {
+			result.Error = "Azure Repos source and target organizations do not match"
+			return result, nil
+		}
+		info.Project = parts[1]
+		info.Repository = parts[2]
+	}
 
 	args := []string{
 		"repos", "pr", prCreateSubcommand,
@@ -826,6 +896,14 @@ func (g *GitOperator) createAzureReposPR(
 	}
 	if cleanBase := cleanBaseBranch(baseBranch); cleanBase != "" {
 		args = append(args, "--target-branch", cleanBase)
+	}
+	if route != nil && !route.Source.Repository.EqualRepository(route.Base.Repository) {
+		parts := strings.Split(strings.Trim(route.Source.Repository.RepositoryPath, "/"), "/")
+		if len(parts) != 3 || parts[2] == "" {
+			result.Error = "Azure Repos source identity has an invalid repository path"
+			return result, nil
+		}
+		args = append(args, "--source-repository", parts[2])
 	}
 	args = append(args,
 		repositoryFlagTitle, title,
@@ -857,4 +935,16 @@ func (g *GitOperator) createAzureReposPR(
 	result.Success = true
 	g.logger.Info("PR created", zap.String("url", result.PRURL))
 	return result, nil
+}
+
+func azureOrganizationFromURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "dev.azure.com" {
+		return strings.Trim(strings.Split(strings.Trim(parsed.Path, "/"), "/")[0], "/")
+	}
+	return strings.TrimSuffix(host, ".visualstudio.com")
 }

@@ -1,7 +1,7 @@
 ---
 id: "07-route-git-operations"
 title: "Route Git operations by remote role"
-status: pending
+status: completed
 wave: 7
 depends_on: ["05-transport-comparison-context", "06-compute-comparison-status"]
 plan: "plan.md"
@@ -61,4 +61,4 @@ Update only this task file's `## Results`. Report routing semantics per operatio
 
 ## Results
 
-Pending.
+Implemented role-aware Git mutation routing across agentctl process, HTTP/API and ACP runtime transport, websocket handlers, and the web operation hook. Push resolves the exact writable action remote and configured destination refspec, including first-push absent evidence and triangular push URLs; Pull requires the explicit tracking upstream and never falls back to comparison; Rebase and Merge use the delivered comparison identity/ref. Mutations validate role generation, identity, observation state, remote head, and comparison generation while holding the serialized Git-operation lock, failing closed for stale, ambiguous, unresolved, unknown, or absent evidence. Create PR/MR routes exact provider-neutral source/base identities through GitHub, GitLab, and Azure adapters without reconstructing either side from origin, while preserving provider credential scope, contribution force-push restrictions, literal branch case, and repository scoping. RED/GREEN coverage includes triangular remotes, configured destination refspec case, missing tracking, stale tracking head, stale generation, and first-push observation. Verification passed: `(cd apps/backend && go test -tags fts5 ./internal/agentctl/server/process -run 'Test.*(Push|Pull|Rebase|Merge|CreatePR|CreateMR|Azure|FirstPush|Ambiguous)' -count=1)`, `(cd apps/backend && go test -tags fts5 ./internal/agentctl/server/api ./internal/agent/runtime/agentctl -run 'Test.*(Generation|ExpectedTarget|Pull|Push)' -count=1)`, `(cd apps/backend && go test -tags fts5 ./internal/agentctl/server/process -count=1)`, full affected API/handler/runtime packages, focused web hook Vitest (5 tests), web TypeScript check, scoped golangci-lint, Prettier check, and `git diff --check`.

@@ -376,8 +376,16 @@ func (g *GitOperator) parseConflictFiles(output string) []string {
 	return conflicts
 }
 
-// Pull performs a git pull operation.
+// Pull performs a git pull operation. When a workspace tracker is attached,
+// only the explicit tracking-upstream role is eligible; the comparison role
+// is never used as a fallback.
 func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResult, error) {
+	return g.PullWithExpectation(ctx, rebase, GitMutationExpectation{})
+}
+
+// PullWithExpectation performs Pull after validating the caller's tracking
+// role observation and generation when supplied.
+func (g *GitOperator) PullWithExpectation(ctx context.Context, rebase bool, expected GitMutationExpectation) (*GitOperationResult, error) {
 	if !g.tryLock("pull") {
 		return nil, ErrOperationInProgress
 	}
@@ -393,8 +401,6 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 		return result, nil
 	}
 
-	remote := "origin"
-	pullBranch := branch
 	if g.remoteContributionErr != nil {
 		result.Error = g.remoteContributionErr.Error()
 		return result, nil
@@ -403,18 +409,10 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 		result.Error = g.contributionDestinationErr.Error()
 		return result, nil
 	}
-	if g.remoteContribution != nil {
-		if err := g.validateContributionRemote(ctx); err != nil {
-			result.Error = err.Error()
-			return result, nil
-		}
-		remote = g.remoteContribution.ContributionRemoteName()
-		pullBranch = g.remoteContribution.HeadBranch
-	} else if upstream := g.getUpstreamRef(ctx); upstream == "" {
-		// Use the default branch when the local branch has no upstream.
-		if defaultBranch := g.getDefaultRemoteBranch(ctx); defaultBranch != "" {
-			pullBranch = defaultBranch
-		}
+	remote, pullBranch, targetErr := g.resolvePullTarget(ctx, branch, expected)
+	if targetErr != nil {
+		result.Error = targetErr.Error()
+		return result, nil
 	}
 
 	var args []string
@@ -445,8 +443,17 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 	return result, nil
 }
 
-// Push performs a git push operation.
+// Push performs a git push operation. A tracked WorkspaceTracker routes the
+// push to the exact writable action head, including custom remote names and
+// destination refspecs; it never derives the destination from origin.
 func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*GitOperationResult, error) {
+	return g.PushWithExpectation(ctx, force, setUpstream, GitMutationExpectation{})
+}
+
+// PushWithExpectation validates the action-head generation and observation
+// before invoking Git. A known absent destination is allowed for a first push;
+// unknown or ambiguous evidence is rejected.
+func (g *GitOperator) PushWithExpectation(ctx context.Context, force bool, setUpstream bool, expected GitMutationExpectation) (*GitOperationResult, error) {
 	if !g.tryLock("push") {
 		return nil, ErrOperationInProgress
 	}
@@ -484,19 +491,12 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		return result, nil
 	}
 
-	args := []string{"push"}
-	shouldSetUpstream := setUpstream || g.getUpstreamRef(ctx) == ""
-	remote := "origin"
-	refspec := branch
-	if g.contributionDestination != nil {
-		remote = g.contributionDestination.ContributionRemoteName()
-		refspec = branch
-		shouldSetUpstream = setUpstream
-	} else if g.remoteContribution != nil {
-		remote = g.remoteContribution.ContributionRemoteName()
-		refspec = "HEAD:refs/heads/" + g.remoteContribution.HeadBranch
-		shouldSetUpstream = setUpstream
+	remote, refspec, shouldSetUpstream, targetErr := g.resolvePushTarget(ctx, branch, setUpstream, expected)
+	if targetErr != nil {
+		result.Error = targetErr.Error()
+		return result, nil
 	}
+	args := []string{"push"}
 	if shouldSetUpstream {
 		args = append(args, "--set-upstream")
 	}
@@ -586,10 +586,16 @@ func (g *GitOperator) PushPreflight(ctx context.Context) (*GitOperationResult, e
 	return result, nil
 }
 
-// Rebase performs a git rebase onto the specified base branch.
+// Rebase performs a git rebase onto the specified base branch. When a
+// comparison context is delivered, baseBranch is retained only for wire
+// compatibility and the delivered comparison target is authoritative.
 func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
+	return g.RebaseWithExpectation(ctx, baseBranch, GitMutationExpectation{})
+}
+
+func (g *GitOperator) RebaseWithExpectation(ctx context.Context, baseBranch string, expected GitMutationExpectation) (*GitOperationResult, error) {
 	// Validate branch name to prevent command injection
-	if !securityutil.IsValidBranchName(baseBranch) {
+	if baseBranch != "" && !securityutil.IsValidBranchName(baseBranch) {
 		return nil, ErrInvalidBranchName
 	}
 
@@ -600,6 +606,9 @@ func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperat
 
 	result := &GitOperationResult{
 		Operation: "rebase",
+	}
+	if comparisonResult, handled := g.runComparisonMutation(ctx, "rebase", expected); handled {
+		return comparisonResult, nil
 	}
 
 	// Fetch the base branch first
@@ -633,10 +642,16 @@ func (g *GitOperator) Rebase(ctx context.Context, baseBranch string) (*GitOperat
 	return result, nil
 }
 
-// Merge performs a git merge of the specified base branch.
+// Merge performs a git merge of the specified base branch. A delivered
+// comparison context selects the exact repository/ref and takes precedence
+// over the legacy baseBranch argument.
 func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperationResult, error) {
+	return g.MergeWithExpectation(ctx, baseBranch, GitMutationExpectation{})
+}
+
+func (g *GitOperator) MergeWithExpectation(ctx context.Context, baseBranch string, expected GitMutationExpectation) (*GitOperationResult, error) {
 	// Validate branch name to prevent command injection
-	if !securityutil.IsValidBranchName(baseBranch) {
+	if baseBranch != "" && !securityutil.IsValidBranchName(baseBranch) {
 		return nil, ErrInvalidBranchName
 	}
 
@@ -647,6 +662,9 @@ func (g *GitOperator) Merge(ctx context.Context, baseBranch string) (*GitOperati
 
 	result := &GitOperationResult{
 		Operation: "merge",
+	}
+	if comparisonResult, handled := g.runComparisonMutation(ctx, "merge", expected); handled {
+		return comparisonResult, nil
 	}
 
 	// Fetch the base branch first
@@ -1203,38 +1221,30 @@ type PRCreateResult struct {
 // CreatePR creates a pull request using the repository host's CLI.
 // It first pushes the current branch to the remote, then creates the PR.
 func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch string, draft bool) (*PRCreateResult, error) {
+	return g.CreatePRWithExpectation(ctx, title, body, baseBranch, draft, GitMutationExpectation{})
+}
+
+// CreatePRWithExpectation routes a change request through the exact writable
+// source and delivered comparison target when the backend supplied a
+// comparison context. Legacy callers without that context retain the
+// pre-context origin behavior during the wire rollout.
+func (g *GitOperator) CreatePRWithExpectation(ctx context.Context, title, body, baseBranch string, draft bool, expected GitMutationExpectation) (*PRCreateResult, error) {
 	if !g.tryLock("create-pr") {
 		return nil, ErrOperationInProgress
 	}
 	defer g.unlock()
 
 	result := &PRCreateResult{}
+	providerRoute, remoteURL, targetRemoteURL, branch, routeErr := g.resolvePRRoute(ctx, expected)
+	if routeErr != nil {
+		result.Error = routeErr.Error()
+		return result, nil
+	}
 	if g.remoteContributionErr != nil {
 		result.Error = g.remoteContributionErr.Error()
 		return result, nil
 	}
-	if g.remoteContribution != nil {
-		if err := g.validateContributionRemote(ctx); err != nil {
-			result.Error = err.Error()
-			return result, nil
-		}
-		branch, err := g.getCurrentBranch(ctx)
-		if err != nil {
-			result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
-			return result, nil
-		}
-		output, err := g.runGitCommand(ctx, "push", g.remoteContribution.ContributionRemoteName(), "HEAD:refs/heads/"+g.remoteContribution.HeadBranch)
-		if err != nil {
-			result.Error = fmt.Sprintf("failed to push contribution branch: %s", g.sanitizePRFailure(output, title, body))
-			result.Output = g.sanitizeGitPushOutput(output)
-			return result, nil
-		}
-		result.Success = true
-		result.BranchPushed = true
-		result.PRURL = g.remoteContribution.CanonicalURL
-		result.Provider = g.remoteContribution.Provider
-		result.Output = g.sanitizeGitPushOutput(output)
-		g.logger.Info("updated existing remote contribution", zap.String("branch", branch), zap.String("provider", result.Provider))
+	if g.updateRemoteContributionForPR(ctx, result, title, body, providerRoute) {
 		return result, nil
 	}
 	if g.contributionDestinationErr != nil {
@@ -1245,47 +1255,24 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		return g.createManagedContributionPR(ctx, title, body, baseBranch, draft)
 	}
 
-	branch, err := g.getCurrentBranch(ctx)
-	if err != nil {
-		result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
+	var branchErr error
+	branch, remoteURL, branchErr = g.resolvePRBranchAndRemote(ctx, branch, remoteURL)
+	if branchErr != nil {
+		result.Error = branchErr.Error()
 		return result, nil
 	}
 	g.logger.Debug("current branch", zap.String("branch", branch))
+	g.logger.Debug("action remote", zap.String("remote", redactRemoteURL(remoteURL)))
 
-	remoteURL, err := g.getOriginRemoteURL(ctx)
-	if err != nil {
-		result.Error = err.Error()
+	provider, gitLabInfo, providerErr := g.preparePRProvider(remoteURL, targetRemoteURL, providerRoute)
+	if providerErr != nil {
+		result.Error = providerErr.Error()
 		return result, nil
 	}
-	g.logger.Debug("origin remote", zap.String("remote", redactRemoteURL(remoteURL)))
+	result.Provider = string(provider)
+	var err error
 
-	provider := g.detectPRProvider(remoteURL)
-	var gitLabInfo *gitLabRepoInfo
-	switch provider {
-	case prProviderAzureRepos:
-		result.Provider = string(prProviderAzureRepos)
-		if _, parseErr := parseAzureRepoInfo(remoteURL); parseErr != nil {
-			result.Error = parseErr.Error()
-			return result, nil
-		}
-	case prProviderGitHub:
-		result.Provider = string(prProviderGitHub)
-	case prProviderGitLab:
-		result.Provider = string(prProviderGitLab)
-		gitLabInfo, err = parseGitLabRepoInfo(remoteURL, g.environmentValue(gitLabHostEnv))
-		if err != nil {
-			result.Error = err.Error()
-			return result, nil
-		}
-	default:
-		result.Error = fmt.Sprintf(
-			"unsupported git remote for PR creation: %s (GitHub, GitLab, and Azure Repos are supported)",
-			redactRemoteURL(remoteURL),
-		)
-		return result, nil
-	}
-
-	pushOutput, err := g.runGitCommand(ctx, "push", "--set-upstream", "origin", "HEAD")
+	pushOutput, err := g.pushPRBranch(ctx, providerRoute)
 	if err != nil {
 		sanitizedOutput := g.sanitizePRFailure(pushOutput, title, body)
 		result.Error = fmt.Sprintf("failed to push branch: %s", sanitizedOutput)
@@ -1296,13 +1283,13 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 
 	switch provider {
 	case prProviderAzureRepos:
-		created, createErr := g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft)
+		created, createErr := g.createAzureReposPR(ctx, result, remoteURL, branch, title, body, baseBranch, draft, providerRoute)
 		return finalizePRCreationAfterPush(created, createErr)
 	case prProviderGitHub:
-		created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+		created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft, providerRoute)
 		return finalizePRCreationAfterPush(created, createErr)
 	case prProviderGitLab:
-		created, createErr := g.createGitLabPR(ctx, result, gitLabInfo, branch, title, body, baseBranch, draft)
+		created, createErr := g.createGitLabPR(ctx, result, gitLabInfo, branch, title, body, baseBranch, draft, providerRoute)
 		return finalizePRCreationAfterPush(created, createErr)
 	default:
 		result.Error = "unsupported git remote for PR creation"
@@ -1342,7 +1329,7 @@ func (g *GitOperator) createManagedContributionPR(
 	}
 	result.Provider = string(prProviderGitHub)
 	result.BranchPushed = true
-	created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
+	created, createErr := g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft, nil)
 	return finalizePRCreationAfterPush(created, createErr)
 }
 

@@ -110,7 +110,18 @@ func (wt *WorkspaceTracker) ObserveGitRemoteRef(ctx context.Context, role GitRem
 	observation.Behind = nil
 
 	ref := "refs/heads/" + identity.Ref
-	output, err := wt.runGitOutput(ctx, "ls-remote", "--heads", role.RemoteName, ref)
+	probe := role.RemoteName
+	if role.Role == gitremote.ActionHeadRole {
+		// ActionHead identity is resolved from pushurl when configured. Git's
+		// ls-remote remote-name form reads fetchurl, which could be a
+		// triangular repository and would make a writable destination appear
+		// absent or present based on the wrong remote. Probe the exact push URL
+		// for this role; credentials stay inside Git and never cross the wire.
+		if pushURL, pushErr := wt.runGitOutput(ctx, "config", "--get", "remote."+role.RemoteName+".pushurl"); pushErr == nil && strings.TrimSpace(string(pushURL)) != "" {
+			probe = strings.TrimSpace(string(pushURL))
+		}
+	}
+	output, err := wt.runGitOutput(ctx, "ls-remote", "--heads", probe, ref)
 	if err != nil {
 		return observation
 	}

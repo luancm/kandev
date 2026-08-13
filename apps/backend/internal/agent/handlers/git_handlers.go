@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -175,6 +176,7 @@ type GitPullRequest struct {
 	SessionID string `json:"session_id"`
 	Rebase    bool   `json:"rebase"`
 	Repo      string `json:"repo,omitempty"`
+	GitMutationExpectation
 }
 
 // GitPushRequest for worktree.push action.
@@ -184,6 +186,49 @@ type GitPushRequest struct {
 	Force       bool   `json:"force"`
 	SetUpstream bool   `json:"set_upstream"`
 	Repo        string `json:"repo,omitempty"`
+	GitMutationExpectation
+}
+
+// GitMutationExpectation carries the exact role evidence supplied by the
+// frontend status snapshot. It is forwarded without provider credentials.
+type GitMutationExpectation struct {
+	ExpectedRemoteRolesGeneration       string                       `json:"expected_remote_roles_generation,omitempty"`
+	ExpectedTarget                      *gitremote.RemoteRefIdentity `json:"expected_target,omitempty"`
+	ExpectedObservationState            gitremote.ObservationState   `json:"expected_observation_state,omitempty"`
+	ExpectedRemoteHeadCommit            string                       `json:"expected_remote_head_commit,omitempty"`
+	ExpectedActionHeadState             gitremote.ObservationState   `json:"expected_action_head_state,omitempty"`
+	ExpectedActionHeadCommit            string                       `json:"expected_action_head_commit,omitempty"`
+	ExpectedTrackingUpstreamState       gitremote.ObservationState   `json:"expected_tracking_upstream_state,omitempty"`
+	ExpectedTrackingUpstreamCommit      string                       `json:"expected_tracking_upstream_commit,omitempty"`
+	ExpectedComparisonContextGeneration string                       `json:"expected_comparison_context_generation,omitempty"`
+	ExpectedSource                      *gitremote.RemoteRefIdentity `json:"expected_source,omitempty"`
+	ExpectedBase                        *gitremote.RemoteRefIdentity `json:"expected_base,omitempty"`
+}
+
+func (e GitMutationExpectation) agentctl() client.GitMutationExpectation {
+	state := e.ExpectedObservationState
+	if state == "" {
+		state = e.ExpectedActionHeadState
+	}
+	if state == "" {
+		state = e.ExpectedTrackingUpstreamState
+	}
+	head := e.ExpectedRemoteHeadCommit
+	if head == "" {
+		head = e.ExpectedActionHeadCommit
+	}
+	if head == "" {
+		head = e.ExpectedTrackingUpstreamCommit
+	}
+	return client.GitMutationExpectation{
+		ExpectedRemoteRolesGeneration:       e.ExpectedRemoteRolesGeneration,
+		ExpectedTarget:                      e.ExpectedTarget,
+		ExpectedObservationState:            state,
+		ExpectedRemoteHeadCommit:            head,
+		ExpectedComparisonContextGeneration: e.ExpectedComparisonContextGeneration,
+		ExpectedSource:                      e.ExpectedSource,
+		ExpectedBase:                        e.ExpectedBase,
+	}
 }
 
 // GitContributionRequest carries the provider-head lease for a managed
@@ -200,6 +245,7 @@ type GitRebaseRequest struct {
 	SessionID  string `json:"session_id"`
 	BaseBranch string `json:"base_branch"`
 	Repo       string `json:"repo,omitempty"`
+	GitMutationExpectation
 }
 
 // GitMergeRequest for worktree.merge action.
@@ -208,6 +254,7 @@ type GitMergeRequest struct {
 	SessionID  string `json:"session_id"`
 	BaseBranch string `json:"base_branch"`
 	Repo       string `json:"repo,omitempty"`
+	GitMutationExpectation
 }
 
 // GitAbortRequest for worktree.abort action.
@@ -270,6 +317,7 @@ type GitCreatePRRequest struct {
 	BaseBranch string `json:"base_branch"`
 	Draft      bool   `json:"draft"`
 	Repo       string `json:"repo,omitempty"`
+	GitMutationExpectation
 }
 
 // GitRevertCommitRequest for worktree.revert_commit action
@@ -310,7 +358,7 @@ func (h *GitHandlers) wsPull(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, err
 	}
 
-	result, err := client.GitPull(ctx, req.Rebase, req.Repo)
+	result, err := client.GitPull(ctx, req.Rebase, req.Repo, req.agentctl())
 	if err != nil {
 		return nil, fmt.Errorf("pull failed: %w", err)
 	}
@@ -335,7 +383,7 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, err
 	}
 
-	result, err := client.GitPush(ctx, req.Force, req.SetUpstream, req.Repo)
+	result, err := client.GitPush(ctx, req.Force, req.SetUpstream, req.Repo, req.agentctl())
 	if err != nil {
 		return nil, fmt.Errorf("push failed: %w", err)
 	}
@@ -399,7 +447,7 @@ func (h *GitHandlers) wsRebase(ctx context.Context, msg *ws.Message) (*ws.Messag
 		return nil, err
 	}
 
-	result, err := client.GitRebase(ctx, req.BaseBranch, req.Repo)
+	result, err := client.GitRebase(ctx, req.BaseBranch, req.Repo, req.agentctl())
 	if err != nil {
 		return nil, fmt.Errorf("rebase failed: %w", err)
 	}
@@ -427,7 +475,7 @@ func (h *GitHandlers) wsMerge(ctx context.Context, msg *ws.Message) (*ws.Message
 		return nil, err
 	}
 
-	result, err := client.GitMerge(ctx, req.BaseBranch, req.Repo)
+	result, err := client.GitMerge(ctx, req.BaseBranch, req.Repo, req.agentctl())
 	if err != nil {
 		return nil, fmt.Errorf("merge failed: %w", err)
 	}
@@ -650,7 +698,7 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return nil, err
 	}
 
-	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft, req.Repo)
+	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft, req.Repo, req.agentctl())
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
 	}

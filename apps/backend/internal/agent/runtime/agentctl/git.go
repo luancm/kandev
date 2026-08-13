@@ -24,6 +24,30 @@ type GitOperationResult struct {
 	RecoveryBranch string   `json:"recovery_branch,omitempty"`
 }
 
+// GitMutationExpectation is the role evidence captured by the status stream
+// and echoed with a remote mutation request. It is additive so older callers
+// may omit it while newer callers get stale-generation protection.
+type GitMutationExpectation struct {
+	ExpectedRemoteRolesGeneration       string                       `json:"expected_remote_roles_generation,omitempty"`
+	ExpectedTarget                      *gitremote.RemoteRefIdentity `json:"expected_target,omitempty"`
+	ExpectedObservationState            gitremote.ObservationState   `json:"expected_observation_state,omitempty"`
+	ExpectedRemoteHeadCommit            string                       `json:"expected_remote_head_commit,omitempty"`
+	ExpectedActionHeadState             gitremote.ObservationState   `json:"expected_action_head_state,omitempty"`
+	ExpectedActionHeadCommit            string                       `json:"expected_action_head_commit,omitempty"`
+	ExpectedTrackingUpstreamState       gitremote.ObservationState   `json:"expected_tracking_upstream_state,omitempty"`
+	ExpectedTrackingUpstreamCommit      string                       `json:"expected_tracking_upstream_commit,omitempty"`
+	ExpectedComparisonContextGeneration string                       `json:"expected_comparison_context_generation,omitempty"`
+	ExpectedSource                      *gitremote.RemoteRefIdentity `json:"expected_source,omitempty"`
+	ExpectedBase                        *gitremote.RemoteRefIdentity `json:"expected_base,omitempty"`
+}
+
+func firstGitMutationExpectation(values []GitMutationExpectation) GitMutationExpectation {
+	if len(values) == 0 {
+		return GitMutationExpectation{}
+	}
+	return values[0]
+}
+
 // PRCreateResult represents the result of a PR creation operation.
 // This matches the server-side process.PRCreateResult.
 type PRCreateResult struct {
@@ -38,13 +62,15 @@ type PRCreateResult struct {
 // GitPull performs a git pull operation on the worktree.
 // If rebase is true, uses git pull --rebase.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitPull(ctx context.Context, rebase bool, repo string) (*GitOperationResult, error) {
+func (c *Client) GitPull(ctx context.Context, rebase bool, repo string, expected ...GitMutationExpectation) (*GitOperationResult, error) {
 	payload := struct {
 		Rebase bool   `json:"rebase"`
 		Repo   string `json:"repo,omitempty"`
+		GitMutationExpectation
 	}{
-		Rebase: rebase,
-		Repo:   repo,
+		Rebase:                 rebase,
+		Repo:                   repo,
+		GitMutationExpectation: firstGitMutationExpectation(expected),
 	}
 	return c.gitOperation(ctx, "/api/v1/git/pull", payload)
 }
@@ -53,15 +79,17 @@ func (c *Client) GitPull(ctx context.Context, rebase bool, repo string) (*GitOpe
 // If force is true, uses --force-with-lease.
 // If setUpstream is true, uses --set-upstream.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitPush(ctx context.Context, force, setUpstream bool, repo string) (*GitOperationResult, error) {
+func (c *Client) GitPush(ctx context.Context, force, setUpstream bool, repo string, expected ...GitMutationExpectation) (*GitOperationResult, error) {
 	payload := struct {
 		Force       bool   `json:"force"`
 		SetUpstream bool   `json:"set_upstream"`
 		Repo        string `json:"repo,omitempty"`
+		GitMutationExpectation
 	}{
-		Force:       force,
-		SetUpstream: setUpstream,
-		Repo:        repo,
+		Force:                  force,
+		SetUpstream:            setUpstream,
+		Repo:                   repo,
+		GitMutationExpectation: firstGitMutationExpectation(expected),
 	}
 	return c.gitOperation(ctx, "/api/v1/git/push", payload)
 }
@@ -104,13 +132,15 @@ func (c *Client) GitUseRemoteContribution(ctx context.Context, expectedRemoteHea
 // GitRebase rebases the worktree branch onto the specified base branch.
 // It first fetches origin/<baseBranch>, then rebases onto it.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitRebase(ctx context.Context, baseBranch, repo string) (*GitOperationResult, error) {
+func (c *Client) GitRebase(ctx context.Context, baseBranch, repo string, expected ...GitMutationExpectation) (*GitOperationResult, error) {
 	payload := struct {
 		BaseBranch string `json:"base_branch"`
 		Repo       string `json:"repo,omitempty"`
+		GitMutationExpectation
 	}{
-		BaseBranch: baseBranch,
-		Repo:       repo,
+		BaseBranch:             baseBranch,
+		Repo:                   repo,
+		GitMutationExpectation: firstGitMutationExpectation(expected),
 	}
 	return c.gitOperation(ctx, "/api/v1/git/rebase", payload)
 }
@@ -118,13 +148,15 @@ func (c *Client) GitRebase(ctx context.Context, baseBranch, repo string) (*GitOp
 // GitMerge merges the specified base branch into the worktree branch.
 // It first fetches origin/<baseBranch>, then merges it.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitMerge(ctx context.Context, baseBranch, repo string) (*GitOperationResult, error) {
+func (c *Client) GitMerge(ctx context.Context, baseBranch, repo string, expected ...GitMutationExpectation) (*GitOperationResult, error) {
 	payload := struct {
 		BaseBranch string `json:"base_branch"`
 		Repo       string `json:"repo,omitempty"`
+		GitMutationExpectation
 	}{
-		BaseBranch: baseBranch,
-		Repo:       repo,
+		BaseBranch:             baseBranch,
+		Repo:                   repo,
+		GitMutationExpectation: firstGitMutationExpectation(expected),
 	}
 	return c.gitOperation(ctx, "/api/v1/git/merge", payload)
 }
@@ -248,19 +280,21 @@ func (c *Client) GitReset(ctx context.Context, commitSHA, mode, repo string) (*G
 
 // GitCreatePR creates a pull request using the gh CLI.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string, draft bool, repo string) (*PRCreateResult, error) {
+func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string, draft bool, repo string, expected ...GitMutationExpectation) (*PRCreateResult, error) {
 	payload := struct {
 		Title      string `json:"title"`
 		Body       string `json:"body"`
 		BaseBranch string `json:"base_branch"`
 		Draft      bool   `json:"draft"`
 		Repo       string `json:"repo,omitempty"`
+		GitMutationExpectation
 	}{
-		Title:      title,
-		Body:       body,
-		BaseBranch: baseBranch,
-		Draft:      draft,
-		Repo:       repo,
+		Title:                  title,
+		Body:                   body,
+		BaseBranch:             baseBranch,
+		Draft:                  draft,
+		Repo:                   repo,
+		GitMutationExpectation: firstGitMutationExpectation(expected),
 	}
 
 	reqBody, err := json.Marshal(payload)
