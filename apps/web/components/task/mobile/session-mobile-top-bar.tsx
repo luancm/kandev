@@ -307,6 +307,7 @@ type MobileTopBarActionsProps = {
   onPush: (force?: boolean) => void;
   onRebase: () => void;
   onMerge: () => void;
+  canCreatePR: boolean;
   onMenuClick: () => void;
 };
 
@@ -322,6 +323,7 @@ type MobileTopBarGitActionsProps = Pick<
   | "onPush"
   | "onRebase"
   | "onMerge"
+  | "canCreatePR"
 >;
 
 function MobileTopBarGitActions(props: MobileTopBarGitActionsProps) {
@@ -356,6 +358,7 @@ function MobileTopBarGitActions(props: MobileTopBarGitActionsProps) {
         onPush={props.onPush}
         onRebase={props.onRebase}
         onMerge={props.onMerge}
+        canCreatePR={props.canCreatePR}
         comparisonDisabled={remoteActionPolicy.relation.comparisonEvidenceAvailable === false}
         pushDisabled={remoteActionPolicy.pushDisabled}
         pullDisabled={remoteActionPolicy.pullDisabled}
@@ -402,6 +405,7 @@ function MobileTopBarActions({
   onPush,
   onRebase,
   onMerge,
+  canCreatePR,
   onMenuClick,
 }: MobileTopBarActionsProps) {
   const { t } = useTranslation();
@@ -441,6 +445,7 @@ function MobileTopBarActions({
         onPush={onPush}
         onRebase={onRebase}
         onMerge={onMerge}
+        canCreatePR={canCreatePR}
       />
       <Button
         variant="ghost"
@@ -480,6 +485,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     handleMerge,
     handleCommit,
     handleCreatePR,
+    canCreatePR,
   } = useMobileGitActions(
     props.sessionId,
     props.baseBranch,
@@ -532,6 +538,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         onPush={handlePush}
         onRebase={handleRebase}
         onMerge={handleMerge}
+        canCreatePR={canCreatePR}
         onMenuClick={props.onMenuClick}
       />
       <MobileGitDialogs

@@ -299,8 +299,11 @@ function classifyProviderHeads(
   const actionHead = roles.actionHeadCommit;
   if (!actionHead) return result("unknown", providerHead, fallback);
 
+  // A provider head is not attributable to this checkout when the provider's
+  // exact source identity was not delivered. Treat the missing identity as a
+  // mismatch instead of allowing a same-SHA coincidence to enable Push.
   const actionMatchesProvider =
-    !input.providerSourceIdentity ||
+    Boolean(input.providerSourceIdentity) &&
     sameRemoteIdentity(input.actionHead?.identity, input.providerSourceIdentity);
   if (
     actionMatchesProvider &&

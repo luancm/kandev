@@ -145,8 +145,8 @@ type CommitsSectionProps = {
   repoDisplayName?: (repositoryName: string) => string | undefined;
   /** The session's base branch — passed through to the per-repo PR dialog. */
   repoBaseBranch?: string;
-  /** Per-repo branch / upstream summary; used for the Push indicator. */
-  perRepoStatus?: Array<{ repository_name: string; pushAhead?: number; ahead?: number }>;
+  /** Per-repo role evidence and branch summary used by Push/PR controls. */
+  perRepoStatus?: CommitsRepoStatus[];
   /** Existing PR URL keyed by repository_name; "" key for single-repo. */
   prByRepo?: Record<string, string | undefined>;
   /** Initial collapse state. Defaults to collapsed; the panel expands it when it is the first visible section. */
@@ -154,8 +154,61 @@ type CommitsSectionProps = {
   label?: string;
   testId?: string;
   pushDisabled?: boolean;
+  pushDisabledRepositoryName?: string;
   showActions?: boolean;
 };
+
+type CommitsRepoStatus = {
+  repository_name: string;
+  pushAhead?: number;
+  ahead?: number;
+  actionEvidenceAvailable?: boolean;
+  comparisonEvidenceAvailable?: boolean;
+};
+
+function buildRepositoryActionHandlers({
+  repositoryName,
+  status,
+  showActions,
+  pushDisabled,
+  pushDisabledRepositoryName,
+  onRepoPush,
+  onRepoCreatePR,
+}: {
+  repositoryName: string;
+  status: CommitsRepoStatus | undefined;
+  showActions: boolean;
+  pushDisabled: boolean;
+  pushDisabledRepositoryName: string | undefined;
+  onRepoPush: ((repo: string) => void) | undefined;
+  onRepoCreatePR: ((repo: string) => void) | undefined;
+}) {
+  return {
+    onRepoPush:
+      showActions &&
+      !isRepositoryPushDisabled(repositoryName, status, pushDisabled, pushDisabledRepositoryName)
+        ? onRepoPush
+        : undefined,
+    onRepoCreatePR:
+      showActions && !isRepositoryCreatePRDisabled(status) ? onRepoCreatePR : undefined,
+  };
+}
+
+export function isRepositoryPushDisabled(
+  repositoryName: string,
+  status: CommitsRepoStatus | undefined,
+  pushDisabled: boolean,
+  pushDisabledRepositoryName: string | undefined,
+): boolean {
+  return (
+    status?.actionEvidenceAvailable !== true ||
+    (pushDisabled && (!pushDisabledRepositoryName || repositoryName === pushDisabledRepositoryName))
+  );
+}
+
+export function isRepositoryCreatePRDisabled(status: CommitsRepoStatus | undefined): boolean {
+  return status?.actionEvidenceAvailable !== true || status?.comparisonEvidenceAvailable !== true;
+}
 
 // Commits grouping shares the helper above with files — see @/lib/group-by-repo.
 
@@ -175,6 +228,7 @@ export function CommitsSection({
   label,
   testId = "commits-section",
   pushDisabled = false,
+  pushDisabledRepositoryName,
   showActions = true,
 }: CommitsSectionProps) {
   const { t } = useTranslation();
@@ -182,18 +236,29 @@ export function CommitsSection({
   const aheadByRepo = new Map(
     (perRepoStatus ?? []).map((s) => [s.repository_name, s.pushAhead ?? s.ahead ?? 0]),
   );
+  const statusByRepo = new Map((perRepoStatus ?? []).map((s) => [s.repository_name, s]));
   // Single-repo: drop the per-repo sub-header (CommitsRepoGroup with
   // showHeader=false renders flat) and lift the Push / PR buttons into the
   // section header.
   const isSingleRepo = isSingleRepoGroup(groups);
+  const singleRepoStatus = statusByRepo.get("");
+  const singleRepoActions = buildRepositoryActionHandlers({
+    repositoryName: "",
+    status: singleRepoStatus,
+    showActions,
+    pushDisabled,
+    pushDisabledRepositoryName,
+    onRepoPush,
+    onRepoCreatePR,
+  });
   const sectionAction = isSingleRepo ? (
     <CommitsGroupActions
       repositoryName=""
       aheadCount={aheadByRepo.get("") ?? 0}
       prExists={!!prByRepo?.[""]}
-      canCreatePR={!!onRepoCreatePR && !prByRepo?.[""]}
-      onRepoPush={showActions && !pushDisabled ? onRepoPush : undefined}
-      onRepoCreatePR={showActions ? onRepoCreatePR : undefined}
+      canCreatePR={!!singleRepoActions.onRepoCreatePR && !prByRepo?.[""]}
+      onRepoPush={singleRepoActions.onRepoPush}
+      onRepoCreatePR={singleRepoActions.onRepoCreatePR}
       stop={(e) => e.stopPropagation()}
     />
   ) : undefined;
@@ -222,8 +287,15 @@ export function CommitsSection({
             onAmendCommit={onAmendCommit}
             onRevertCommit={onRevertCommit}
             onResetToCommit={onResetToCommit}
-            onRepoPush={showActions && !pushDisabled ? onRepoPush : undefined}
-            onRepoCreatePR={showActions ? onRepoCreatePR : undefined}
+            {...buildRepositoryActionHandlers({
+              repositoryName: g.repositoryName,
+              status: statusByRepo.get(g.repositoryName),
+              showActions,
+              pushDisabled,
+              pushDisabledRepositoryName,
+              onRepoPush,
+              onRepoCreatePR,
+            })}
           />
         ))}
       </ul>

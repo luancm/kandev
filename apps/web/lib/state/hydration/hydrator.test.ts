@@ -635,7 +635,39 @@ describe("hydrateState — session runtime model state", () => {
     });
 
     expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe(liveModelId);
+  });
+});
 
+describe("hydrateState — repository-scoped git status", () => {
+  it("restores missing repository entries without erasing retained live siblings", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.gitStatus.byEnvironmentRepo["env-1"] = {
+        frontend: { branch: "live", files: {} } as never,
+      };
+      hydrateState(draft, {
+        gitStatus: {
+          byEnvironmentId: {
+            "env-1": { branch: "boot", files: {} } as never,
+          },
+          byEnvironmentRepo: {
+            "env-1": {
+              backend: { branch: "boot-backend", files: {} } as never,
+            },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.gitStatus.byEnvironmentRepo["env-1"]).toMatchObject({
+      frontend: { branch: "live" },
+      backend: { branch: "boot-backend" },
+    });
+    expect(result.gitStatus.byEnvironmentId["env-1"].branch).toBe("boot");
+  });
+});
+
+describe("hydrateState — system slice", () => {
+  it("leaves the system slice untouched when the caller supplies no system fields", () => {
     const systemResult = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       hydrateState(draft, {});
     });

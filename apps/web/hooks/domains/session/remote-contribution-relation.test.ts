@@ -29,6 +29,7 @@ const baseInput: RemoteContributionRelationInput = {
   remoteBehind: 0,
   baseAhead: 4,
   hasUpstream: true,
+  providerSourceIdentity: SOURCE_IDENTITY,
 };
 
 function input(overrides: Partial<RemoteContributionRelationInput> = {}) {
@@ -55,7 +56,16 @@ const classificationCases = [
   },
   {
     name: "local ahead of the current provider head",
-    overrides: { remoteAhead: 1 },
+    overrides: {
+      remoteAhead: 1,
+      actionHead: {
+        identity: SOURCE_IDENTITY,
+        observation_state: "present",
+        remote_head_commit: PROVIDER_HEAD,
+        ahead: 1,
+        behind: 0,
+      },
+    },
     expected: { kind: "local_ahead", canPush: true, pushAhead: 1 },
   },
   {
@@ -252,6 +262,30 @@ describe("classifyRemoteContribution", () => {
       actionEvidenceAvailable: true,
       trackingEvidenceAvailable: true,
     });
+  });
+
+  it("does not classify local-ahead when provider source identity is missing", () => {
+    const relation = classifyRemoteContribution(
+      input({
+        actionHead: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 2,
+          behind: 0,
+        },
+        trackingUpstream: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 0,
+          behind: 0,
+        },
+        providerSourceIdentity: undefined,
+      }),
+    );
+
+    expect(relation).toMatchObject({ kind: "diverged", canPush: false });
   });
 
   it.each(["unknown", "ambiguous", "unresolved"] as const)(
@@ -456,7 +490,25 @@ describe("remoteContributionActionPolicy", () => {
   });
 
   it("keeps normal push behavior for local-ahead history", () => {
-    const relation = classifyRemoteContribution(input({ remoteAhead: 2 }));
+    const relation = classifyRemoteContribution(
+      input({
+        remoteAhead: 2,
+        actionHead: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 2,
+          behind: 0,
+        },
+        trackingUpstream: {
+          identity: SOURCE_IDENTITY,
+          observation_state: "present",
+          remote_head_commit: PROVIDER_HEAD,
+          ahead: 0,
+          behind: 0,
+        },
+      }),
+    );
 
     expect(remoteContributionActionPolicy(relation)).toEqual({
       action: "normal_push",

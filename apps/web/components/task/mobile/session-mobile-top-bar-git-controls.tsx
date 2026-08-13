@@ -474,6 +474,7 @@ export function useMobileGitActions(
 
   return {
     isGitLoading,
+    canCreatePR: git.repoNames.length <= 1 && git.canCreatePR,
     handlePull,
     handlePush,
     handleRebase,

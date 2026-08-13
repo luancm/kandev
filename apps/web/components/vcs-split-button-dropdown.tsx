@@ -109,8 +109,102 @@ function ContributionDropdownItems({
   );
 }
 
+function CreatePRDropdownItem({
+  disabled,
+  canCreatePR,
+  onPR,
+}: Pick<VcsDropdownItemsProps, "disabled" | "canCreatePR" | "onPR">) {
+  const { t } = useTranslation();
+  return (
+    <DropdownMenuItem
+      className="cursor-pointer gap-3"
+      onClick={onPR}
+      disabled={disabled || !canCreatePR}
+    >
+      <IconGitPullRequest className="h-4 w-4 text-muted-foreground" />
+      <span className="flex-1">{t("integrations:createPr")}</span>
+    </DropdownMenuItem>
+  );
+}
+
+function PullDropdownItem({
+  disabled,
+  pullDisabled,
+  pullDisabledReason,
+  hasUpstream,
+  behindCount,
+  onPull,
+}: Pick<
+  VcsDropdownItemsProps,
+  "disabled" | "pullDisabled" | "pullDisabledReason" | "hasUpstream" | "behindCount" | "onPull"
+>) {
+  const { t } = useTranslation();
+  const disabledTitle = pullDisabledReason ?? t("task:divergedActionsUnavailable");
+  return (
+    <DropdownMenuItem
+      className="cursor-pointer gap-3"
+      onClick={onPull}
+      disabled={disabled || pullDisabled}
+      title={pullDisabled ? disabledTitle : undefined}
+    >
+      <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
+      <span className="flex-1">{t("integrations:pull")}</span>
+      {hasUpstream && behindCount > 0 && (
+        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          {BEHIND_MARK}
+          {behindCount}
+        </span>
+      )}
+    </DropdownMenuItem>
+  );
+}
+
+function ComparisonDropdownItems({
+  disabled,
+  comparisonEvidenceAvailable,
+  baseBranch,
+  onRebase,
+  onMerge,
+}: Pick<
+  VcsDropdownItemsProps,
+  "disabled" | "comparisonEvidenceAvailable" | "baseBranch" | "onRebase" | "onMerge"
+>) {
+  const { t } = useTranslation();
+  const comparisonDisabled = disabled || !comparisonEvidenceAvailable;
+  const branch = baseBranch || DEFAULT_BASE_BRANCH;
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        className="cursor-pointer gap-3"
+        onClick={onRebase}
+        disabled={comparisonDisabled}
+      >
+        <IconGitCherryPick className="h-4 w-4 text-muted-foreground" />
+        <span className="flex-1">{t("integrations:rebase")}</span>
+        <span className="text-xs text-muted-foreground">
+          {t("integrations:ontoBranch", { branch })}
+        </span>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="cursor-pointer gap-3"
+        onClick={onMerge}
+        disabled={comparisonDisabled}
+      >
+        <IconGitMerge className="h-4 w-4 text-muted-foreground" />
+        <span className="flex-1">{t("integrations:merge")}</span>
+        <span className="text-xs text-muted-foreground">
+          {t("integrations:fromBranch", { branch })}
+        </span>
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 export type VcsDropdownItemsProps = {
   disabled: boolean;
+  canCreatePR?: boolean;
+  comparisonEvidenceAvailable?: boolean;
   baseBranch?: string;
   hasUpstream: boolean;
   behindCount: number;
@@ -135,6 +229,8 @@ export type VcsDropdownItemsProps = {
 
 export function VcsDropdownItems({
   disabled,
+  canCreatePR = false,
+  comparisonEvidenceAvailable = false,
   baseBranch,
   hasUpstream,
   behindCount,
@@ -158,29 +254,18 @@ export function VcsDropdownItems({
 }: VcsDropdownItemsProps) {
   const { t } = useTranslation();
   const pushDisabledTitle = pushDisabledReason ?? t("task:divergedActionsUnavailable");
-  const pullDisabledTitle = pullDisabledReason ?? t("task:divergedActionsUnavailable");
   return (
     <DropdownMenuContent align="end" className="w-56">
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onPR} disabled={disabled}>
-        <IconGitPullRequest className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:createPr")}</span>
-      </DropdownMenuItem>
+      <CreatePRDropdownItem disabled={disabled} canCreatePR={canCreatePR} onPR={onPR} />
       <DropdownMenuSeparator />
-      <DropdownMenuItem
-        className="cursor-pointer gap-3"
-        onClick={onPull}
-        disabled={disabled || pullDisabled}
-        title={pullDisabled ? pullDisabledTitle : undefined}
-      >
-        <IconCloudDownload className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:pull")}</span>
-        {hasUpstream && behindCount > 0 && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {BEHIND_MARK}
-            {behindCount}
-          </span>
-        )}
-      </DropdownMenuItem>
+      <PullDropdownItem
+        disabled={disabled}
+        pullDisabled={pullDisabled}
+        pullDisabledReason={pullDisabledReason}
+        hasUpstream={hasUpstream}
+        behindCount={behindCount}
+        onPull={onPull}
+      />
       {!showContributionResolution && (
         <StandardPushDropdownItems
           disabled={disabled}
@@ -202,21 +287,13 @@ export function VcsDropdownItems({
           prNumber={prNumber}
         />
       )}
-      <DropdownMenuSeparator />
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onRebase} disabled={disabled}>
-        <IconGitCherryPick className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:rebase")}</span>
-        <span className="text-xs text-muted-foreground">
-          {t("integrations:ontoBranch", { branch: baseBranch || DEFAULT_BASE_BRANCH })}
-        </span>
-      </DropdownMenuItem>
-      <DropdownMenuItem className="cursor-pointer gap-3" onClick={onMerge} disabled={disabled}>
-        <IconGitMerge className="h-4 w-4 text-muted-foreground" />
-        <span className="flex-1">{t("integrations:merge")}</span>
-        <span className="text-xs text-muted-foreground">
-          {t("integrations:fromBranch", { branch: baseBranch || DEFAULT_BASE_BRANCH })}
-        </span>
-      </DropdownMenuItem>
+      <ComparisonDropdownItems
+        disabled={disabled}
+        comparisonEvidenceAvailable={comparisonEvidenceAvailable}
+        baseBranch={baseBranch}
+        onRebase={onRebase}
+        onMerge={onMerge}
+      />
     </DropdownMenuContent>
   );
 }

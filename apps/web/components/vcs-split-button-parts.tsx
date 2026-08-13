@@ -81,6 +81,8 @@ type SingleRepoVcsButtonProps = {
   primaryAction: "commit" | "push" | "pr" | "rebase";
   isDisabled: boolean;
   isGitLoading: boolean;
+  canCreatePR: boolean;
+  comparisonEvidenceAvailable: boolean;
   baseBranch?: string;
   hasUpstream: boolean;
   behindCount: number;
@@ -106,11 +108,14 @@ type SingleRepoVcsButtonProps = {
   showDivergencePills?: boolean;
 };
 
+// eslint-disable-next-line max-lines-per-function -- primary button and role-gated dropdown stay coordinated.
 function SingleRepoVcsButton({
   primaryButtonConfig,
   primaryAction,
   isDisabled,
   isGitLoading,
+  canCreatePR,
+  comparisonEvidenceAvailable,
   baseBranch,
   hasUpstream,
   behindCount,
@@ -178,6 +183,8 @@ function SingleRepoVcsButton({
         </DropdownMenuTrigger>
         <VcsDropdownItems
           disabled={isDisabled}
+          canCreatePR={canCreatePR}
+          comparisonEvidenceAvailable={comparisonEvidenceAvailable}
           baseBranch={baseBranch}
           hasUpstream={hasUpstream}
           behindCount={behindCount}
@@ -236,6 +243,8 @@ type VcsSplitButtonContentProps = {
   primaryAction: "commit" | "push" | "pr" | "rebase";
   isDisabled: boolean;
   isGitLoading: boolean;
+  canCreatePR: boolean;
+  comparisonEvidenceAvailable: boolean;
   baseBranch?: string;
   hasUpstream: boolean;
   behindCount: number;
@@ -373,12 +382,103 @@ function MultiRepoVcsContent({
   );
 }
 
+function SingleRepoVcsContent({
+  primaryButtonConfig,
+  primaryAction,
+  isDisabled,
+  isGitLoading,
+  canCreatePR,
+  comparisonEvidenceAvailable,
+  baseBranch,
+  hasUpstream,
+  behindCount,
+  aheadCount,
+  pushDisabled,
+  pullDisabled,
+  pushDisabledReason,
+  pullDisabledReason,
+  showContributionResolution,
+  replaceDisabled,
+  useDisabled,
+  blockedRepositoryName,
+  buttonSize,
+  className,
+  showDivergencePills,
+  callbacks,
+  prNumber,
+}: Pick<
+  VcsSplitButtonContentProps,
+  | "primaryButtonConfig"
+  | "primaryAction"
+  | "isDisabled"
+  | "isGitLoading"
+  | "canCreatePR"
+  | "comparisonEvidenceAvailable"
+  | "baseBranch"
+  | "hasUpstream"
+  | "behindCount"
+  | "aheadCount"
+  | "pushDisabled"
+  | "pullDisabled"
+  | "pushDisabledReason"
+  | "pullDisabledReason"
+  | "showContributionResolution"
+  | "replaceDisabled"
+  | "useDisabled"
+  | "blockedRepositoryName"
+  | "buttonSize"
+  | "className"
+  | "showDivergencePills"
+  | "callbacks"
+  | "prNumber"
+>) {
+  const contributionCallbacks = buildSingleRepoContributionCallbacks(
+    callbacks,
+    blockedRepositoryName,
+  );
+  return (
+    <SingleRepoVcsButton
+      primaryButtonConfig={primaryButtonConfig}
+      primaryAction={primaryAction}
+      isDisabled={isDisabled}
+      isGitLoading={isGitLoading}
+      canCreatePR={canCreatePR}
+      comparisonEvidenceAvailable={comparisonEvidenceAvailable}
+      baseBranch={baseBranch}
+      hasUpstream={hasUpstream}
+      behindCount={behindCount}
+      aheadCount={aheadCount}
+      pushDisabled={pushDisabled}
+      pullDisabled={pullDisabled}
+      pushDisabledReason={pushDisabledReason}
+      pullDisabledReason={pullDisabledReason}
+      showContributionResolution={showContributionResolution}
+      replaceDisabled={replaceDisabled}
+      useDisabled={useDisabled}
+      buttonSize={buttonSize}
+      className={className}
+      showDivergencePills={showDivergencePills}
+      onPR={() => callbacks.onPR()}
+      onPull={() => callbacks.onPull()}
+      onPush={(force) => callbacks.onPush(force)}
+      onReplaceContribution={contributionCallbacks.onReplaceContribution}
+      onUseContribution={contributionCallbacks.onUseContribution}
+      onViewPRVersion={contributionCallbacks.onViewContribution}
+      prNumber={prNumber}
+      onRebase={() => callbacks.onRebase()}
+      onMerge={() => callbacks.onMerge()}
+    />
+  );
+}
+
 export function VcsSplitButtonContent({
   isMultiRepo,
   primaryButtonConfig,
   primaryAction,
   isDisabled,
   isGitLoading,
+  canCreatePR,
+  comparisonEvidenceAvailable,
   baseBranch,
   hasUpstream,
   behindCount,
@@ -431,18 +531,15 @@ export function VcsSplitButtonContent({
     );
   }
 
-  const singleRepoContributionCallbacks = buildSingleRepoContributionCallbacks(
-    callbacks,
-    blockedRepositoryName,
-  );
-
   return (
     <>
-      <SingleRepoVcsButton
+      <SingleRepoVcsContent
         primaryButtonConfig={primaryButtonConfig}
         primaryAction={primaryAction}
         isDisabled={isDisabled}
         isGitLoading={isGitLoading}
+        canCreatePR={canCreatePR}
+        comparisonEvidenceAvailable={comparisonEvidenceAvailable}
         baseBranch={baseBranch}
         hasUpstream={hasUpstream}
         behindCount={behindCount}
@@ -454,18 +551,12 @@ export function VcsSplitButtonContent({
         showContributionResolution={showContributionResolution}
         replaceDisabled={replaceDisabled}
         useDisabled={useDisabled}
+        blockedRepositoryName={blockedRepositoryName}
         buttonSize={buttonSize}
         className={className}
         showDivergencePills={showDivergencePills}
-        onPR={() => callbacks.onPR()}
-        onPull={() => callbacks.onPull()}
-        onPush={(force) => callbacks.onPush(force)}
-        onReplaceContribution={singleRepoContributionCallbacks.onReplaceContribution}
-        onUseContribution={singleRepoContributionCallbacks.onUseContribution}
-        onViewPRVersion={singleRepoContributionCallbacks.onViewContribution}
+        callbacks={callbacks}
         prNumber={prNumber}
-        onRebase={() => callbacks.onRebase()}
-        onMerge={() => callbacks.onMerge()}
       />
       <ContributionResolutionDialog
         resolution={resolution}

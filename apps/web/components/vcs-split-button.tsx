@@ -314,6 +314,26 @@ export function buildVcsSplitCallbacks({
   };
 }
 
+function isVcsSplitButtonDisabled({
+  git,
+  sessionId,
+  primaryAction,
+}: {
+  git: Pick<
+    ReturnType<typeof useSessionGit>,
+    "isLoading" | "canCreatePR" | "comparisonEvidenceAvailable" | "repoNames"
+  >;
+  sessionId: string | null;
+  primaryAction: "commit" | "push" | "pr" | "rebase";
+}): boolean {
+  if (git.isLoading || !sessionId) return true;
+  if (git.repoNames.length > 1) return false;
+  return (
+    (primaryAction === "pr" && !git.canCreatePR) ||
+    (primaryAction === "rebase" && !git.comparisonEvidenceAvailable)
+  );
+}
+
 const VcsSplitButton = memo(function VcsSplitButton({
   sessionId,
   baseBranch,
@@ -342,7 +362,6 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const aheadCount = remoteActionPolicy.pushDisabled ? 0 : git.pushAhead;
   const behindCount = git.behind;
   const pullCount = git.pullBehind;
-  const isDisabled = git.isLoading || !sessionId;
   const showContributionResolution = relation.action === "diverged_replace";
   const pushDisabledReasonKey = remoteContributionActionReasonKey(relation, "push");
   const pullDisabledReasonKey = remoteContributionActionReasonKey(relation, "pull");
@@ -352,6 +371,11 @@ const VcsSplitButton = memo(function VcsSplitButton({
     behindCount,
     hasOpenPR,
   );
+  const isDisabled = isVcsSplitButtonDisabled({
+    git,
+    sessionId,
+    primaryAction,
+  });
   const primaryButtonConfig = buildPrimaryButtonConfig({
     t,
     primaryAction,
@@ -384,6 +408,8 @@ const VcsSplitButton = memo(function VcsSplitButton({
       primaryAction={primaryAction}
       isDisabled={isDisabled}
       isGitLoading={git.isLoading}
+      canCreatePR={git.canCreatePR}
+      comparisonEvidenceAvailable={git.comparisonEvidenceAvailable}
       baseBranch={baseBranch}
       hasUpstream={hasUpstream}
       behindCount={pullCount}

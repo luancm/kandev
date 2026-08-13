@@ -60,7 +60,11 @@ export function hasComparisonEvidence(
       >
     | undefined,
 ): boolean {
-  if (!gitStatus) return true;
+  // A missing snapshot is not evidence that the comparison target is safe.
+  // Callers may still render legacy controls while status is loading, but all
+  // comparison-dependent mutations must remain fail-closed until a snapshot
+  // arrives.
+  if (!gitStatus) return false;
   if (gitStatus.comparison === undefined) {
     return (
       gitStatus.remote_roles_generation === undefined &&
@@ -399,6 +403,7 @@ export function deriveSessionGitValues(
     canCreatePR:
       changes.hasCommits &&
       Boolean(gitStatus) &&
+      hasCompleteRemoteIdentity(gitStatus?.action_head?.identity) &&
       status.actionEvidenceAvailable &&
       hasComparisonEvidence(gitStatus),
   };

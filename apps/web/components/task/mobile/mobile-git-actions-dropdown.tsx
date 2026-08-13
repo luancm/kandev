@@ -48,6 +48,7 @@ export type GitActionsDropdownProps = {
   onPush: (force?: boolean) => void;
   onRebase: () => void;
   onMerge: () => void;
+  canCreatePR?: boolean;
   comparisonDisabled?: boolean;
   pushDisabled?: boolean;
   pullDisabled?: boolean;
@@ -190,6 +191,7 @@ function GitActionsMenu({
   onPush,
   onRebase,
   onMerge,
+  canCreatePR = false,
   comparisonDisabled = false,
   pushDisabled = false,
   pullDisabled = false,
@@ -222,7 +224,7 @@ function GitActionsMenu({
       <DropdownMenuItem
         className="min-h-11 cursor-pointer gap-3"
         onClick={onPRClick}
-        disabled={disabled}
+        disabled={disabled || !canCreatePR}
       >
         <IconGitPullRequest className="h-4 w-4 text-cyan-500" />
         <span className="flex-1">{t("task:createChangeRequest", { shortName })}</span>

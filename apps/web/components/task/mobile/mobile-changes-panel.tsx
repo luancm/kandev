@@ -105,6 +105,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           behindCount={data.git.pullBehind}
           pullDisabled={data.pullDisabled}
           pullDisabledReason={data.pullDisabledReason}
+          pullDisabledRepositoryName={data.git.repoNames.length > 1 ? data.repositoryName : ""}
           isLoading={data.git.isLoading}
           loadingOperation={data.git.loadingOperation}
           onOpenDiffAll={handleOpenDiffAll}

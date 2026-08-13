@@ -145,12 +145,17 @@ export type ChangesPanelBodyProps = {
   onRepoCommit?: (repo: string) => void;
   onRepoPush?: (repo: string) => void;
   onRepoCreatePR?: (repo: string) => void;
+  pushDisabledRepositoryName?: string;
   repoDisplayName?: (repositoryName: string) => string | undefined;
   perRepoStatus?: Array<{
     repository_name: string;
     ahead: number;
     pushAhead: number;
     pullBehind: number;
+    actionEvidenceAvailable: boolean;
+    trackingEvidenceAvailable: boolean;
+    trackingUpstreamState: string | null;
+    comparisonEvidenceAvailable: boolean;
   }>;
   prByRepo?: Record<string, string | undefined>;
 };
@@ -184,6 +189,18 @@ function usePerRepoCallbacks(
     }),
     [git, vcsDialogs, gitHandlers],
   );
+}
+
+export function hasCompleteRepositoryCreatePREvidence(
+  perRepoStatus: Array<{
+    repository_name: string;
+    actionEvidenceAvailable: boolean;
+    comparisonEvidenceAvailable: boolean;
+  }>,
+  repositoryName: string,
+): boolean {
+  const status = perRepoStatus.find((entry) => entry.repository_name === repositoryName);
+  return status?.actionEvidenceAvailable === true && status.comparisonEvidenceAvailable === true;
 }
 
 type ChangesPanelPRBuildInput = {
@@ -522,7 +539,15 @@ export function buildChangesPanelBodyProps(
     onRepoUnstageAll: repoCallbacks.onRepoUnstageAll,
     onRepoCommit: repoCallbacks.onRepoCommit,
     onRepoPush: repoCallbacks.onRepoPush,
-    onRepoCreatePR: repoCallbacks.onRepoCreatePR,
+    onRepoCreatePR: (repo) => {
+      if (
+        hasCompleteRepositoryCreatePREvidence(data.git.perRepoStatus, repo) &&
+        repoCallbacks.onRepoCreatePR
+      ) {
+        repoCallbacks.onRepoCreatePR(repo);
+      }
+    },
+    pushDisabledRepositoryName: data.git.repoNames.length > 1 ? data.repositoryName : "",
     repoDisplayName: data.repoDisplayName,
     perRepoStatus: git.perRepoStatus,
     prByRepo: data.prByRepo,

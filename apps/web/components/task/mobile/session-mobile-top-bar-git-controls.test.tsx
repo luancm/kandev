@@ -41,6 +41,7 @@ const baseProps = {
   onPush: vi.fn(),
   onRebase: vi.fn(),
   onMerge: vi.fn(),
+  canCreatePR: true,
 };
 
 describe("GitActionsDropdown remote safety", () => {
@@ -104,6 +105,12 @@ describe("GitActionsDropdown remote safety", () => {
 
     expect(screen.getByRole("button", { name: /Rebase/ })).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: /Merge/ })).toHaveProperty("disabled", true);
+  });
+
+  it("disables Create PR when the shared model has no complete source evidence", () => {
+    render(<GitActionsDropdown {...baseProps} canCreatePR={false} />);
+
+    expect(screen.getByRole("button", { name: /Create PR/ })).toHaveProperty("disabled", true);
   });
 
   it("offers scoped contribution version choices without the generic push submenu", () => {

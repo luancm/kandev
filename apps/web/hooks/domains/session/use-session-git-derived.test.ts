@@ -46,6 +46,13 @@ function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
 
 // eslint-disable-next-line max-lines-per-function -- role-specific cases stay together for the derived model.
 describe("deriveSessionGitValues", () => {
+  it("does not treat an absent status as comparison evidence", () => {
+    expect(hasComparisonEvidence(undefined)).toBe(false);
+    expect(deriveSessionGitValues(undefined, false, [], [], []).comparisonEvidenceAvailable).toBe(
+      false,
+    );
+  });
+
   it("uses upstream-relative counts for remote actions", () => {
     const result = deriveSessionGitValues(
       status({
@@ -305,6 +312,18 @@ describe("deriveSessionGitValues", () => {
     );
     expect(missingSource.canCreatePR).toBe(false);
     expect(missingComparison.canCreatePR).toBe(false);
+  });
+
+  it("does not expose Create PR for legacy status without a source identity", () => {
+    const result = deriveSessionGitValues(
+      status({ comparison: COMPARISON }),
+      false,
+      [],
+      [],
+      [{} as never],
+    );
+
+    expect(result.canCreatePR).toBe(false);
   });
 
   it("fails closed when a generation omits both role observations", () => {

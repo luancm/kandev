@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  blockedRemoteOperationResult,
   groupPathsByRepoName,
   hasComparisonForRepository,
   repositoryScopesForMutation,
@@ -77,5 +78,17 @@ describe("hasComparisonForRepository", () => {
     expect(hasComparisonForRepository(statuses, undefined)).toBe(true);
     expect(hasComparisonForRepository([], undefined, true)).toBe(true);
     expect(hasComparisonForRepository([], undefined, false)).toBe(false);
+  });
+});
+
+describe("blockedRemoteOperationResult", () => {
+  it("reports blocked comparison operations as failures instead of successful no-ops", () => {
+    expect(blockedRemoteOperationResult("rebase")).toEqual({
+      success: false,
+      operation: "rebase",
+      output: "",
+      error_code: "remote_role_evidence_unavailable",
+    });
+    expect(blockedRemoteOperationResult("merge").success).toBe(false);
   });
 });

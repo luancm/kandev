@@ -60,6 +60,7 @@ type TimelineProps = Pick<
   | "resolutionTarget"
   | "providerPRNumber"
   | "pushDisabled"
+  | "pushDisabledRepositoryName"
   | "pullDisabled"
   | "canPush"
   | "canCreatePR"
@@ -199,6 +200,7 @@ function CommitHistorySections({
             testId="local-checkout-commits-section"
             defaultCollapsed={defaultCollapsed}
             pushDisabled={props.pushDisabled}
+            pushDisabledRepositoryName={props.pushDisabledRepositoryName}
             onOpenCommitDetail={props.onOpenCommitDetail}
             onRevertCommit={props.onRevertCommit}
             onAmendCommit={props.dialogs.handleOpenAmendDialog}
@@ -240,6 +242,7 @@ function CommitHistorySections({
       perRepoStatus={props.perRepoStatus}
       prByRepo={props.prByRepo}
       pushDisabled={props.pushDisabled}
+      pushDisabledRepositoryName={props.pushDisabledRepositoryName}
     />
   );
 }

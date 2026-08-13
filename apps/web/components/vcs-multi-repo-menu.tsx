@@ -35,6 +35,10 @@ export type PerRepoStatus = {
   behind: number;
   pushAhead: number;
   pullBehind: number;
+  actionEvidenceAvailable?: boolean;
+  trackingEvidenceAvailable?: boolean;
+  trackingUpstreamState?: string | null;
+  comparisonEvidenceAvailable?: boolean;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
@@ -186,42 +190,48 @@ const ACTION_DEFS: ActionDef[] = [
     key: "push",
     labelKey: "integrations:push",
     icon: <IconCloudUpload className={ICON_CLASS} />,
-    disabledFor: (s) => (s?.pushAhead ?? 0) === 0,
+    disabledFor: (s) => s?.actionEvidenceAvailable !== true || (s.pushAhead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(false, repo),
   },
   {
     key: "pr",
     labelKey: "integrations:createPr",
     icon: <IconGitPullRequest className={ICON_CLASS} />,
-    disabledFor: () => false,
+    disabledFor: (s) =>
+      s?.actionEvidenceAvailable !== true || s.comparisonEvidenceAvailable !== true,
     invoke: (repo, cb) => cb.onPR(repo),
   },
   {
     key: "pull",
     labelKey: "integrations:pull",
     icon: <IconCloudDownload className={ICON_CLASS} />,
-    disabledFor: () => false,
+    disabledFor: (s) =>
+      s?.trackingEvidenceAvailable !== true ||
+      s.trackingUpstreamState !== "present" ||
+      typeof s.pullBehind !== "number" ||
+      !Number.isFinite(s.pullBehind) ||
+      s.pullBehind < 0,
     invoke: (repo, cb) => cb.onPull(repo),
   },
   {
     key: "rebase",
     labelKey: "integrations:rebase",
     icon: <IconGitCherryPick className={ICON_CLASS} />,
-    disabledFor: () => false,
+    disabledFor: (s) => s?.comparisonEvidenceAvailable !== true,
     invoke: (repo, cb) => cb.onRebase(repo),
   },
   {
     key: "merge",
     labelKey: "integrations:merge",
     icon: <IconGitMerge className={ICON_CLASS} />,
-    disabledFor: () => false,
+    disabledFor: (s) => s?.comparisonEvidenceAvailable !== true,
     invoke: (repo, cb) => cb.onMerge(repo),
   },
   {
     key: "force-push",
     labelKey: "integrations:forcePush",
     icon: <IconAlertTriangle className={ICON_CLASS} />,
-    disabledFor: (s) => (s?.pushAhead ?? 0) === 0,
+    disabledFor: (s) => s?.actionEvidenceAvailable !== true || (s.pushAhead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(true, repo),
   },
 ];

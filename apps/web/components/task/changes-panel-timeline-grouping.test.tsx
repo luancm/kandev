@@ -227,7 +227,14 @@ describe("CommitsSection actions", () => {
       <CommitsSection
         commits={[commit("c1", "already pushed"), commit("c2", "also pushed")]}
         onRepoPush={() => undefined}
-        perRepoStatus={[{ repository_name: "", ahead: 0 }]}
+        perRepoStatus={[
+          {
+            repository_name: "",
+            ahead: 0,
+            actionEvidenceAvailable: true,
+            comparisonEvidenceAvailable: true,
+          },
+        ]}
       />,
     );
 
@@ -243,7 +250,14 @@ describe("CommitsSection actions", () => {
       <CommitsSection
         commits={[commit("c1", "newest"), commit("c2", "middle"), commit("c3", "oldest")]}
         onRepoPush={() => undefined}
-        perRepoStatus={[{ repository_name: "", ahead: 1 }]}
+        perRepoStatus={[
+          {
+            repository_name: "",
+            ahead: 1,
+            actionEvidenceAvailable: true,
+            comparisonEvidenceAvailable: true,
+          },
+        ]}
       />,
     );
 

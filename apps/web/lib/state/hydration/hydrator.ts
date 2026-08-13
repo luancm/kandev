@@ -13,6 +13,7 @@ import {
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import type { GitStatusState } from "@/lib/state/slices/session-runtime/types";
 
 /**
  * Hydration options for controlling merge behavior
@@ -391,6 +392,68 @@ function hydrateSession(
 }
 
 /** Hydrate session runtime slices (volatile state). */
+function shouldSkipGitEnvironment(
+  environmentId: string,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): boolean {
+  return forceMergeSessionId === null && environmentId === activeSessionId;
+}
+
+function shouldForceGitEnvironmentMerge(
+  environmentId: string,
+  forceMergeSessionId: string | null,
+): boolean {
+  return forceMergeSessionId !== null && environmentId === forceMergeSessionId;
+}
+
+function mergeGitStatusByEnvironmentId(
+  target: Draft<GitStatusState>,
+  source: Partial<GitStatusState>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): void {
+  for (const [environmentId, incoming] of Object.entries(source.byEnvironmentId ?? {})) {
+    if (shouldSkipGitEnvironment(environmentId, activeSessionId, forceMergeSessionId)) continue;
+    const shouldForceMerge = shouldForceGitEnvironmentMerge(environmentId, forceMergeSessionId);
+    const existing = target.byEnvironmentId[environmentId];
+    if (shouldForceMerge && existing) deepMerge(existing, incoming);
+    else if (shouldForceMerge || !existing) target.byEnvironmentId[environmentId] = incoming;
+  }
+}
+
+function mergeGitStatusRepositories(
+  target: Draft<GitStatusState>,
+  source: Partial<GitStatusState>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): void {
+  for (const [environmentId, incomingRepos] of Object.entries(source.byEnvironmentRepo ?? {})) {
+    if (shouldSkipGitEnvironment(environmentId, activeSessionId, forceMergeSessionId)) continue;
+    const shouldForceMerge = shouldForceGitEnvironmentMerge(environmentId, forceMergeSessionId);
+    const existingRepos = target.byEnvironmentRepo[environmentId];
+    if (!existingRepos) {
+      target.byEnvironmentRepo[environmentId] = incomingRepos;
+      continue;
+    }
+    for (const [repositoryName, incoming] of Object.entries(incomingRepos)) {
+      const existing = existingRepos[repositoryName];
+      if (shouldForceMerge && existing) deepMerge(existing, incoming);
+      else if (!existing) existingRepos[repositoryName] = incoming;
+    }
+  }
+}
+
+function mergeGitStatusRuntime(
+  target: Draft<GitStatusState>,
+  source: Partial<GitStatusState>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): void {
+  mergeGitStatusByEnvironmentId(target, source, activeSessionId, forceMergeSessionId);
+  mergeGitStatusRepositories(target, source, activeSessionId, forceMergeSessionId);
+}
+
 function hydrateSessionRuntime(
   draft: Draft<AppState>,
   state: HydrationState,
@@ -423,12 +486,7 @@ function hydrateSessionRuntime(
   }
   if (state.processes) deepMerge(draft.processes, state.processes);
   if (state.gitStatus) {
-    mergeSessionMap(
-      draft.gitStatus.byEnvironmentId,
-      state.gitStatus?.byEnvironmentId,
-      activeSessionId,
-      forceMergeSessionId,
-    );
+    mergeGitStatusRuntime(draft.gitStatus, state.gitStatus, activeSessionId, forceMergeSessionId);
   }
   mergeBySession("contextWindow");
   if (state.environmentIdBySessionId) {

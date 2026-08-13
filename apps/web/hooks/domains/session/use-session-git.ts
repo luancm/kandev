@@ -526,15 +526,48 @@ function usePerRepoPendingClear(
 type RemoteOpsArgs = {
   gitOps: ReturnType<typeof useGitOperations>;
   repoNamesForControls: string[];
+  legacyTrackingEvidenceAvailable: boolean;
   legacyComparisonEvidenceAvailable: boolean;
   perRepoStatus: Array<{
     repository_name: string;
     pushAhead: number;
+    pullBehind: number;
     trackingUpstreamState: string | null;
     trackingEvidenceAvailable: boolean;
     comparisonEvidenceAvailable: boolean;
   }>;
 };
+
+export function blockedRemoteOperationResult(
+  operation: "pull" | "rebase" | "merge",
+): GitOperationResult {
+  return {
+    success: false,
+    operation,
+    output: "",
+    error_code: "remote_role_evidence_unavailable",
+  };
+}
+
+function hasTrackingForRepository(
+  perRepoStatus: RemoteOpsArgs["perRepoStatus"],
+  repo: string | undefined,
+  legacyTrackingEvidenceAvailable: boolean,
+): boolean {
+  const hasTrackingEvidence = (status: RemoteOpsArgs["perRepoStatus"][number]) =>
+    status.trackingEvidenceAvailable &&
+    status.trackingUpstreamState === "present" &&
+    Number.isFinite(status.pullBehind) &&
+    status.pullBehind >= 0;
+  if (repo !== undefined) {
+    return perRepoStatus.some(
+      (status) => status.repository_name === repo && hasTrackingEvidence(status),
+    );
+  }
+  return perRepoStatus.length > 0
+    ? perRepoStatus.some(hasTrackingEvidence)
+    : legacyTrackingEvidenceAvailable;
+}
 
 export function hasComparisonForRepository(
   perRepoStatus: Array<
@@ -568,6 +601,7 @@ function useRemoteOpsFanOut({
   gitOps,
   repoNamesForControls,
   perRepoStatus,
+  legacyTrackingEvidenceAvailable,
   legacyComparisonEvidenceAvailable,
 }: RemoteOpsArgs) {
   const namedRepos = useMemo(() => repoNamesForControls, [repoNamesForControls]);
@@ -580,10 +614,7 @@ function useRemoteOpsFanOut({
   const trackingByRepo = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const s of perRepoStatus) {
-      m.set(
-        s.repository_name,
-        s.trackingEvidenceAvailable && s.trackingUpstreamState === "present",
-      );
+      m.set(s.repository_name, hasTrackingForRepository([s], s.repository_name, false));
     }
     return m;
   }, [perRepoStatus]);
@@ -595,15 +626,27 @@ function useRemoteOpsFanOut({
 
   const pull = useCallback(
     async (rebase = false, repo?: string): Promise<GitOperationResult> => {
-      if (repo !== undefined || !isMultiRepo) return gitOps.pull(rebase, repo);
+      if (repo !== undefined || !isMultiRepo) {
+        if (!hasTrackingForRepository(perRepoStatus, repo, legacyTrackingEvidenceAvailable)) {
+          return blockedRemoteOperationResult("pull");
+        }
+        return gitOps.pull(rebase, repo);
+      }
       const reposWithTracking = namedRepos.filter((r) => trackingByRepo.get(r) === true);
       if (reposWithTracking.length === 0) {
-        return { success: true, operation: "pull", output: "No tracking upstream available" };
+        return blockedRemoteOperationResult("pull");
       }
       return fanOutAcrossRepositoryWaves(reposWithTracking, "pull", (r) => gitOps.pull(rebase, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
-    [gitOps.pull, isMultiRepo, namedRepos, trackingByRepo],
+    [
+      gitOps.pull,
+      isMultiRepo,
+      namedRepos,
+      perRepoStatus,
+      legacyTrackingEvidenceAvailable,
+      trackingByRepo,
+    ],
   );
 
   const push = useCallback(
@@ -626,7 +669,7 @@ function useRemoteOpsFanOut({
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined) {
         if (!hasComparisonForRepository(perRepoStatus, repo, legacyComparisonEvidenceAvailable)) {
-          return { success: true, operation: "rebase", output: "" };
+          return blockedRemoteOperationResult("rebase");
         }
         return gitOps.rebase(baseBranch, repo);
       }
@@ -634,13 +677,12 @@ function useRemoteOpsFanOut({
         if (
           !hasComparisonForRepository(perRepoStatus, undefined, legacyComparisonEvidenceAvailable)
         ) {
-          return { success: true, operation: "rebase", output: "" };
+          return blockedRemoteOperationResult("rebase");
         }
         return gitOps.rebase(baseBranch, repo);
       }
       const reposWithComparison = namedRepos.filter((r) => comparisonByRepo.get(r) === true);
-      if (reposWithComparison.length === 0)
-        return { success: true, operation: "rebase", output: "" };
+      if (reposWithComparison.length === 0) return blockedRemoteOperationResult("rebase");
       return fanOutAcrossRepositoryWaves(reposWithComparison, "rebase", (r) =>
         gitOps.rebase(baseBranch, r),
       );
@@ -653,7 +695,7 @@ function useRemoteOpsFanOut({
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined) {
         if (!hasComparisonForRepository(perRepoStatus, repo, legacyComparisonEvidenceAvailable)) {
-          return { success: true, operation: "merge", output: "" };
+          return blockedRemoteOperationResult("merge");
         }
         return gitOps.merge(baseBranch, repo);
       }
@@ -661,13 +703,12 @@ function useRemoteOpsFanOut({
         if (
           !hasComparisonForRepository(perRepoStatus, undefined, legacyComparisonEvidenceAvailable)
         ) {
-          return { success: true, operation: "merge", output: "" };
+          return blockedRemoteOperationResult("merge");
         }
         return gitOps.merge(baseBranch, repo);
       }
       const reposWithComparison = namedRepos.filter((r) => comparisonByRepo.get(r) === true);
-      if (reposWithComparison.length === 0)
-        return { success: true, operation: "merge", output: "" };
+      if (reposWithComparison.length === 0) return blockedRemoteOperationResult("merge");
       return fanOutAcrossRepositoryWaves(reposWithComparison, "merge", (r) =>
         gitOps.merge(baseBranch, r),
       );
@@ -782,6 +823,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     gitOps,
     repoNamesForControls,
     perRepoStatus,
+    legacyTrackingEvidenceAvailable: Boolean(gitStatus) && derived.trackingEvidenceAvailable,
     legacyComparisonEvidenceAvailable: Boolean(gitStatus) && hasComparisonEvidence(gitStatus),
   });
   const scopedStageOperations = useScopedStageOperations(
