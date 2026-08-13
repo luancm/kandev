@@ -69,15 +69,20 @@ type GitSummary struct {
 }
 
 // GitComparisonSummary is a bounded, provider-neutral projection of the
-// comparison evidence carried by a Git status update. Counts remain in the
-// aggregate legacy fields; unresolved evidence is represented explicitly by
-// ResolutionState and Reason instead of being mistaken for zero counts.
+// comparison evidence carried by a Git status update. Counts retain the
+// nullable wire shape: nil means the comparison did not resolve that count,
+// while a pointer to zero is an authoritative computed zero. The aggregate
+// legacy fields on GitSummary are populated only from non-nil counts.
 type GitComparisonSummary struct {
 	ContextGeneration string               `json:"context_generation,omitempty"`
 	ResolutionState   string               `json:"resolution_state,omitempty"`
 	Reason            string               `json:"reason,omitempty"`
 	ResolvedRef       string               `json:"resolved_ref,omitempty"`
 	BaseCommit        string               `json:"base_commit,omitempty"`
+	Additions         *int                 `json:"additions,omitempty"`
+	Deletions         *int                 `json:"deletions,omitempty"`
+	Ahead             *int                 `json:"ahead,omitempty"`
+	Behind            *int                 `json:"behind,omitempty"`
 	Target            *GitComparisonTarget `json:"target,omitempty"`
 }
 

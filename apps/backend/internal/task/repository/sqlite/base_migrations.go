@@ -337,6 +337,8 @@ func (r *Repository) runMigrations() error {
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+	r.migrate.Apply("task_session_git_snapshots.repository_name", `ALTER TABLE task_session_git_snapshots ADD COLUMN repository_name TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("task_session_git_snapshots.repository_name.index", `CREATE INDEX IF NOT EXISTS idx_git_snapshots_session_repository ON task_session_git_snapshots(session_id, repository_name, created_at DESC)`)
 
 	// Bounded task-level status projection. Keep this on the replay path as well
 	// as the fresh schema path so an existing installation gets the table

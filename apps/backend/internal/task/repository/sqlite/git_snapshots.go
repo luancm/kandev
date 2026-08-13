@@ -18,9 +18,9 @@ import (
 const TriggeredByLiveMonitor = "live_monitor"
 
 // UpsertLatestLiveGitSnapshot keeps at most one cached "live monitor" snapshot
-// per session by deleting any previous live row and inserting the new one in a
-// single transaction. This is the cache that backs the sidebar diff badge for
-// tasks whose executor isn't currently running.
+// per (session, repository) by deleting the previous row for that identity and
+// inserting the new one in a single transaction. This is the cache that backs
+// the sidebar diff badge for tasks whose executor isn't currently running.
 func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error {
 	if snapshot == nil {
 		return fmt.Errorf("snapshot is nil")
@@ -33,6 +33,9 @@ func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *
 	if snapshot.CreatedAt.IsZero() {
 		snapshot.CreatedAt = time.Now().UTC()
 	}
+	if snapshot.RepositoryName == "" {
+		snapshot.RepositoryName = snapshotRepositoryNameFromMetadata(snapshot.Metadata)
+	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -42,8 +45,8 @@ func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_session_git_snapshots
-		WHERE session_id = ? AND snapshot_type = ? AND triggered_by = ?
-	`), snapshot.SessionID, string(models.SnapshotTypeStatusUpdate), TriggeredByLiveMonitor); err != nil {
+		WHERE session_id = ? AND repository_name = ? AND snapshot_type = ? AND triggered_by = ?
+	`), snapshot.SessionID, snapshot.RepositoryName, string(models.SnapshotTypeStatusUpdate), TriggeredByLiveMonitor); err != nil {
 		return fmt.Errorf("delete previous live snapshot: %w", err)
 	}
 
@@ -54,10 +57,10 @@ func (r *Repository) UpsertLatestLiveGitSnapshot(ctx context.Context, snapshot *
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
-			id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+			id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 			ahead, behind, files, triggered_by, metadata, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), snapshot.ID, snapshot.SessionID, string(snapshot.SnapshotType), snapshot.Branch,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), snapshot.ID, snapshot.SessionID, snapshot.RepositoryName, string(snapshot.SnapshotType), snapshot.Branch,
 		snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
 		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt); err != nil {
 		return fmt.Errorf("insert live snapshot: %w", err)
@@ -105,6 +108,9 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 	if snapshot.CreatedAt.IsZero() {
 		snapshot.CreatedAt = time.Now().UTC()
 	}
+	if snapshot.RepositoryName == "" {
+		snapshot.RepositoryName = snapshotRepositoryNameFromMetadata(snapshot.Metadata)
+	}
 
 	filesJSON, metadataJSON, err := serializeSnapshotJSON(snapshot)
 	if err != nil {
@@ -113,10 +119,10 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_git_snapshots (
-			id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+			id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 			ahead, behind, files, triggered_by, metadata, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), snapshot.ID, snapshot.SessionID, string(snapshot.SnapshotType), snapshot.Branch,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), snapshot.ID, snapshot.SessionID, snapshot.RepositoryName, string(snapshot.SnapshotType), snapshot.Branch,
 		snapshot.RemoteBranch, snapshot.HeadCommit, snapshot.BaseCommit, snapshot.Ahead,
 		snapshot.Behind, filesJSON, snapshot.TriggeredBy, metadataJSON, snapshot.CreatedAt)
 
@@ -125,19 +131,20 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 
 func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, orderDir string) (*models.GitSnapshot, error) {
 	snapshot := &models.GitSnapshot{}
+	var repositoryName string
 	var snapshotType string
 	var filesJSON string
 	var metadataJSON string
 
 	query := fmt.Sprintf(`
-		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+		SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
 		ORDER BY created_at %s LIMIT 1
 	`, orderDir)
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(
-		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
+		&snapshot.ID, &snapshot.SessionID, &repositoryName, &snapshotType, &snapshot.Branch,
 		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
 		&metadataJSON, &snapshot.CreatedAt,
@@ -147,6 +154,7 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 	}
 
 	snapshot.SnapshotType = models.SnapshotType(snapshotType)
+	snapshot.RepositoryName = repositoryName
 	if filesJSON != "" && filesJSON != "{}" {
 		if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
 			return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
@@ -156,6 +164,9 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 		if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
 		}
+	}
+	if snapshot.RepositoryName == "" {
+		snapshot.RepositoryName = snapshotRepositoryNameFromMetadata(snapshot.Metadata)
 	}
 
 	return snapshot, nil
@@ -169,7 +180,7 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 // Returns sql.ErrNoRows if no snapshot is found.
 func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
 	query := `
-		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+		SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
@@ -179,6 +190,24 @@ func (r *Repository) GetLatestGitSnapshot(ctx context.Context, sessionID string)
 		LIMIT 1
 	`
 	return scanGitSnapshot(r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID))
+}
+
+// GetLatestGitSnapshotByRepository retrieves the best snapshot for one exact
+// (session, repository) identity. It is used by partial live-status updates so
+// comparison evidence can be carried forward without consulting a sibling
+// repository's row.
+func (r *Repository) GetLatestGitSnapshotByRepository(ctx context.Context, sessionID, repositoryName string) (*models.GitSnapshot, error) {
+	query := `
+		SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
+		       ahead, behind, files, triggered_by, metadata, created_at
+		FROM task_session_git_snapshots
+		WHERE session_id = ? AND repository_name = ?
+		ORDER BY
+			CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
+			created_at DESC
+		LIMIT 1
+	`
+	return scanGitSnapshot(r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, repositoryName))
 }
 
 // GetLatestGitSnapshotsBySessionIDs loads one authoritative snapshot per
@@ -196,10 +225,10 @@ func (r *Repository) GetLatestGitSnapshotsBySessionIDs(
 	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
 		placeholders, args := buildInPlaceholders(chunk)
 		query := `
-			SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+			SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 			       ahead, behind, files, triggered_by, metadata, created_at
 			FROM (
-				SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+				SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 				       ahead, behind, files, triggered_by, metadata, created_at,
 				       ROW_NUMBER() OVER (
 					       PARTITION BY session_id
@@ -235,17 +264,79 @@ func (r *Repository) GetLatestGitSnapshotsBySessionIDs(
 	return result, nil
 }
 
+// GetLatestGitSnapshotsBySessionIDsAndRepository loads one authoritative
+// snapshot for every (session, repository) identity. The legacy batch method
+// above intentionally keeps its one-row-per-session contract for callers that
+// render a single session status; status-summary rehydration uses this method
+// so a later sibling repository cannot erase an earlier one after restart.
+func (r *Repository) GetLatestGitSnapshotsBySessionIDsAndRepository(
+	ctx context.Context,
+	sessionIDs []string,
+) (map[string][]*models.GitSnapshot, error) {
+	result := make(map[string][]*models.GitSnapshot, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := `
+			SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
+			       ahead, behind, files, triggered_by, metadata, created_at
+			FROM (
+				SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
+				       ahead, behind, files, triggered_by, metadata, created_at,
+				       ROW_NUMBER() OVER (
+					       PARTITION BY session_id, repository_name
+					       ORDER BY CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
+					                created_at DESC
+				       ) AS row_number
+				FROM task_session_git_snapshots
+				WHERE session_id IN (` + placeholders + `)
+			) ranked
+			WHERE row_number = 1
+			ORDER BY session_id, repository_name
+		`
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			snapshot, scanErr := scanGitSnapshot(rows)
+			if scanErr != nil {
+				_ = rows.Close()
+				return nil, scanErr
+			}
+			result[snapshot.SessionID] = append(result[snapshot.SessionID], snapshot)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+	}
+	return result, nil
+}
+
 type gitSnapshotScanner interface {
 	Scan(dest ...interface{}) error
 }
 
+func snapshotRepositoryNameFromMetadata(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	name, _ := metadata["repository_name"].(string)
+	return name
+}
+
 func scanGitSnapshot(scanner gitSnapshotScanner) (*models.GitSnapshot, error) {
 	snapshot := &models.GitSnapshot{}
+	var repositoryName string
 	var snapshotType string
 	var filesJSON string
 	var metadataJSON string
 	if err := scanner.Scan(
-		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
+		&snapshot.ID, &snapshot.SessionID, &repositoryName, &snapshotType, &snapshot.Branch,
 		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
 		&metadataJSON, &snapshot.CreatedAt,
@@ -253,6 +344,7 @@ func scanGitSnapshot(scanner gitSnapshotScanner) (*models.GitSnapshot, error) {
 		return nil, err
 	}
 	snapshot.SnapshotType = models.SnapshotType(snapshotType)
+	snapshot.RepositoryName = repositoryName
 	if filesJSON != "" && filesJSON != "{}" {
 		if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
 			return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
@@ -262,6 +354,9 @@ func scanGitSnapshot(scanner gitSnapshotScanner) (*models.GitSnapshot, error) {
 		if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
 		}
+	}
+	if snapshot.RepositoryName == "" {
+		snapshot.RepositoryName = snapshotRepositoryNameFromMetadata(snapshot.Metadata)
 	}
 	return snapshot, nil
 }
@@ -277,7 +372,7 @@ func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) 
 // Returns an empty slice if no snapshots are found.
 func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
 	query := `
-		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+		SELECT id, session_id, repository_name, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
@@ -296,12 +391,13 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 	var result []*models.GitSnapshot
 	for rows.Next() {
 		snapshot := &models.GitSnapshot{}
+		var repositoryName string
 		var snapshotType string
 		var filesJSON string
 		var metadataJSON string
 
 		err := rows.Scan(
-			&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
+			&snapshot.ID, &snapshot.SessionID, &repositoryName, &snapshotType, &snapshot.Branch,
 			&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
 			&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
 			&metadataJSON, &snapshot.CreatedAt,
@@ -311,6 +407,7 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 		}
 
 		snapshot.SnapshotType = models.SnapshotType(snapshotType)
+		snapshot.RepositoryName = repositoryName
 		if filesJSON != "" && filesJSON != "{}" {
 			if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
 				return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
@@ -320,6 +417,9 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 			if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
 			}
+		}
+		if snapshot.RepositoryName == "" {
+			snapshot.RepositoryName = snapshotRepositoryNameFromMetadata(snapshot.Metadata)
 		}
 
 		result = append(result, snapshot)

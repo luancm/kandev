@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -500,11 +501,11 @@ func (s *Service) loadSummaryPRs(
 func (s *Service) loadSummaryGit(
 	ctx context.Context,
 	sessionIDs []string,
-) (map[string]*models.GitSnapshot, bool) {
+) (map[string][]*models.GitSnapshot, bool) {
 	if s.gitSnapshots == nil || len(sessionIDs) == 0 {
 		return nil, false
 	}
-	snapshots, err := s.gitSnapshots.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := s.gitSnapshots.GetLatestGitSnapshotsBySessionIDsAndRepository(ctx, sessionIDs)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to load Git state for status summary repair", zap.Error(err))
@@ -517,7 +518,7 @@ func (s *Service) loadSummaryGit(
 func (s *Service) rebuildInput(
 	sessions []*models.TaskSession,
 	pendingBySession map[string]models.TaskPendingAction,
-	gitBySession map[string]*models.GitSnapshot,
+	gitBySession map[string][]*models.GitSnapshot,
 	gitObserved bool,
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
@@ -577,7 +578,10 @@ func (s *Service) rebuildInput(
 		if action := string(pendingBySession[session.ID]); strings.TrimSpace(action) != "" {
 			input.PendingActions[session.ID] = action
 		}
-		if snapshot := gitBySession[session.ID]; snapshot != nil {
+		for _, snapshot := range gitBySession[session.ID] {
+			if snapshot == nil {
+				continue
+			}
 			input.Git = append(input.Git, statussummary.RebuildGit{
 				Repository: snapshotRepositoryKey(snapshot, session.ID),
 				Summary:    gitSummaryFromSnapshot(snapshot),
@@ -588,6 +592,9 @@ func (s *Service) rebuildInput(
 }
 
 func snapshotRepositoryKey(snapshot *models.GitSnapshot, fallback string) string {
+	if snapshot != nil && strings.TrimSpace(snapshot.RepositoryName) != "" {
+		return snapshot.RepositoryName
+	}
 	if snapshot != nil && snapshot.Metadata != nil {
 		if repository, ok := snapshot.Metadata["repository_name"].(string); ok && strings.TrimSpace(repository) != "" {
 			return repository
@@ -606,7 +613,23 @@ func gitSummaryFromSnapshot(snapshot *models.GitSnapshot) statussummary.GitSumma
 		ChangedFiles: changedFilesFromSnapshot(snapshot),
 		Ahead:        maxInt(snapshot.Ahead, 0),
 		Behind:       maxInt(snapshot.Behind, 0),
+		Comparison:   gitComparisonSummaryFromSnapshotMetadata(snapshot.Metadata),
 	}
+}
+
+func gitComparisonSummaryFromSnapshotMetadata(metadata map[string]interface{}) *statussummary.GitComparisonSummary {
+	if metadata == nil || metadata["comparison"] == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(metadata["comparison"])
+	if err != nil {
+		return nil
+	}
+	var comparison statussummary.GitComparisonSummary
+	if err := json.Unmarshal(encoded, &comparison); err != nil || comparison.ResolutionState == "" {
+		return nil
+	}
+	return &comparison
 }
 
 func changedFilesFromSnapshot(snapshot *models.GitSnapshot) int {

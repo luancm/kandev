@@ -542,15 +542,17 @@ func loadTaskGitObservations(
 			sessionIDs = append(sessionIDs, session.ID)
 		}
 	}
-	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDsAndRepository(ctx, sessionIDs)
 	if err != nil {
 		return nil, err
 	}
 	observations := make([]statussummary.GitObservation, 0, len(snapshots))
 	for _, session := range sessions {
-		observation, ok := taskGitObservation(session, snapshots[session.ID])
-		if ok {
-			observations = append(observations, observation)
+		for _, snapshot := range snapshots[session.ID] {
+			observation, ok := taskGitObservation(session, snapshot)
+			if ok {
+				observations = append(observations, observation)
+			}
 		}
 	}
 	return observations, nil

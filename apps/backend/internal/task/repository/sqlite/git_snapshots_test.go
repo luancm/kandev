@@ -81,6 +81,9 @@ func assertGitSnapshotEqual(t *testing.T, got, want *models.GitSnapshot) {
 	if got.SessionID != want.SessionID {
 		t.Errorf("SessionID = %q, want %q", got.SessionID, want.SessionID)
 	}
+	if got.RepositoryName != want.RepositoryName {
+		t.Errorf("RepositoryName = %q, want %q", got.RepositoryName, want.RepositoryName)
+	}
 	if got.SnapshotType != want.SnapshotType {
 		t.Errorf("SnapshotType = %q, want %q", got.SnapshotType, want.SnapshotType)
 	}
@@ -493,6 +496,60 @@ func TestUpsertLatestLiveGitSnapshotKeepsOneLiveRowPerSession(t *testing.T) {
 		t.Errorf("newest snapshot = %+v, want the second live upsert", all[0])
 	}
 	assertJSONMapEqual(t, "Files", all[0].Files, map[string]interface{}{"a.go": "modified"})
+}
+
+func TestUpsertLatestLiveGitSnapshotKeepsSiblingRepositoriesIsolated(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedSessionForGit(t, repo, "task-snap-multi", "session-snap-multi")
+
+	for _, snapshot := range []*models.GitSnapshot{
+		{
+			ID: "live-backend", SessionID: "session-snap-multi", RepositoryName: "backend",
+			Branch: "feature/backend", Metadata: map[string]interface{}{
+				"repository_name": "backend",
+				"comparison":      map[string]interface{}{"resolution_state": "resolved", "base_commit": "base-backend"},
+			},
+		},
+		{
+			ID: "live-frontend", SessionID: "session-snap-multi", RepositoryName: "frontend",
+			Branch: "feature/frontend", Metadata: map[string]interface{}{
+				"repository_name": "frontend",
+				"comparison":      map[string]interface{}{"resolution_state": "unresolved", "reason": "not fetched"},
+			},
+		},
+	} {
+		if err := repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
+			t.Fatalf("UpsertLatestLiveGitSnapshot(%s): %v", snapshot.RepositoryName, err)
+		}
+	}
+
+	if got := countRows(t, repo,
+		`SELECT COUNT(1) FROM task_session_git_snapshots WHERE session_id = ? AND triggered_by = ?`,
+		"session-snap-multi", TriggeredByLiveMonitor); got != 2 {
+		t.Fatalf("live rows = %d, want one per repository", got)
+	}
+	for repository, wantState := range map[string]string{"backend": "resolved", "frontend": "unresolved"} {
+		got, err := repo.GetLatestGitSnapshotByRepository(ctx, "session-snap-multi", repository)
+		if err != nil {
+			t.Fatalf("GetLatestGitSnapshotByRepository(%s): %v", repository, err)
+		}
+		if got.RepositoryName != repository {
+			t.Errorf("%s repository name = %q", repository, got.RepositoryName)
+		}
+		comparison, _ := got.Metadata["comparison"].(map[string]interface{})
+		if comparison["resolution_state"] != wantState {
+			t.Errorf("%s comparison = %#v, want %q", repository, comparison, wantState)
+		}
+	}
+
+	bySession, err := repo.GetLatestGitSnapshotsBySessionIDsAndRepository(ctx, []string{"session-snap-multi"})
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshotsBySessionIDsAndRepository: %v", err)
+	}
+	if len(bySession["session-snap-multi"]) != 2 {
+		t.Fatalf("multi-repo batch = %#v, want two observations", bySession)
+	}
 }
 
 func TestUpsertLatestLiveGitSnapshotGeneratesIDAndRejectsNil(t *testing.T) {

@@ -923,6 +923,7 @@ func (r *Repository) initGitSchema() error {
 	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
 		id TEXT PRIMARY KEY,
 		session_id TEXT NOT NULL,
+		repository_name TEXT NOT NULL DEFAULT '',
 		snapshot_type TEXT NOT NULL,
 		branch TEXT NOT NULL,
 		remote_branch TEXT DEFAULT '',

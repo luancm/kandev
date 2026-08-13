@@ -69,3 +69,22 @@ func TestGitSnapshotCacheForget(t *testing.T) {
 	// Forgetting an unknown session is a no-op.
 	c.forget("unknown")
 }
+
+func TestGitSnapshotCacheIsIndependentPerRepository(t *testing.T) {
+	c := newGitSnapshotCache()
+	now := time.Unix(4_000_000, 0)
+	if !c.shouldWrite(gitSnapshotCacheKey("s1", "backend"), "same-status", now) {
+		t.Fatal("first backend write should be allowed")
+	}
+	if !c.shouldWrite(gitSnapshotCacheKey("s1", "frontend"), "same-status", now) {
+		t.Fatal("first frontend write should not be throttled by backend")
+	}
+	if c.shouldWrite(gitSnapshotCacheKey("s1", "backend"), "same-status", now.Add(time.Second)) {
+		t.Fatal("duplicate backend write should be throttled")
+	}
+
+	c.forget("s1")
+	if len(c.byID) != 0 {
+		t.Fatalf("session cache entries after forget = %#v, want empty", c.byID)
+	}
+}

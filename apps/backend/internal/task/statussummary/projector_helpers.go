@@ -266,6 +266,29 @@ func nonNegativeInt(data map[string]interface{}, keys ...string) int {
 	return 0
 }
 
+func nullableNonNegativeInt(data map[string]interface{}, key string) *int {
+	if data == nil {
+		return nil
+	}
+	value, present := data[key]
+	if !present || value == nil {
+		return nil
+	}
+	parsed, ok := intValue(value)
+	if !ok {
+		return nil
+	}
+	parsed = maxInt(parsed, 0)
+	return &parsed
+}
+
+func comparisonCountOrZero(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 func changedFileCount(data map[string]interface{}) int {
 	if value, ok := intValue(data["changed_files"]); ok {
 		return maxInt(value, 0)
@@ -297,6 +320,10 @@ func gitComparisonFromStatus(status map[string]interface{}) (*GitComparisonSumma
 		Reason:            truncateString(stringField(data, "reason"), MaxActiveErrorPreviewBytes),
 		ResolvedRef:       truncateString(stringField(data, "resolved_ref"), maxPendingActionBytes),
 		BaseCommit:        truncateString(stringField(data, "base_commit"), maxSessionIDBytes),
+		Additions:         nullableNonNegativeInt(data, "additions"),
+		Deletions:         nullableNonNegativeInt(data, "deletions"),
+		Ahead:             nullableNonNegativeInt(data, "ahead"),
+		Behind:            nullableNonNegativeInt(data, "behind"),
 	}
 	if targetData, ok := data["target"].(map[string]interface{}); ok {
 		target := &GitComparisonTarget{Ref: truncateString(stringField(targetData, "ref"), maxPendingActionBytes)}

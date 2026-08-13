@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/office/costs/modelsdev"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -323,6 +325,58 @@ func TestHandleGitStatusUpdate_LeavesAlreadyWatchedBranchAlone(t *testing.T) {
 
 	if ghSvc.resetWatchCalls != 0 {
 		t.Errorf("ResetPRWatch called %d times, want 0 — feature/b already has watch-2", ghSvc.resetWatchCalls)
+	}
+}
+
+func TestPersistGitStatusSnapshotKeepsRepositoryScopedComparisonEvidence(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-git-snapshot-multi", "session-git-snapshot-multi", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.gitSnapshotCache = newGitSnapshotCache()
+
+	resolved := func(base string) *streams.GitComparisonStatus {
+		additions, deletions, ahead, behind := 4, 2, 3, 1
+		return &streams.GitComparisonStatus{
+			State:      gitremote.ResolutionResolved,
+			BaseCommit: base,
+			Additions:  &additions,
+			Deletions:  &deletions,
+			Ahead:      &ahead,
+			Behind:     &behind,
+		}
+	}
+	persist := func(repository string, comparison *streams.GitComparisonStatus) {
+		svc.persistGitStatusSnapshot(ctx, watcher.GitEventData{
+			TaskID: "task-git-snapshot-multi", SessionID: "session-git-snapshot-multi",
+			Status: &lifecycle.GitStatusData{RepositoryName: repository, Branch: "main", Comparison: comparison},
+		})
+	}
+
+	persist("backend", resolved("base-backend"))
+	persist("frontend", resolved("base-frontend"))
+	// This partial backend status must carry forward backend's evidence, not
+	// whichever sibling happened to be the latest session row.
+	persist("backend", nil)
+
+	backend, err := repo.GetLatestGitSnapshotByRepository(ctx, "session-git-snapshot-multi", "backend")
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshotByRepository(backend): %v", err)
+	}
+	if backend.RepositoryName != "backend" {
+		t.Fatalf("backend repository_name = %q, want backend", backend.RepositoryName)
+	}
+	comparison, ok := backend.Metadata["comparison"].(map[string]interface{})
+	if !ok || comparison["base_commit"] != "base-backend" {
+		t.Fatalf("backend comparison = %#v, want backend evidence", backend.Metadata["comparison"])
+	}
+
+	frontend, err := repo.GetLatestGitSnapshotByRepository(ctx, "session-git-snapshot-multi", "frontend")
+	if err != nil {
+		t.Fatalf("GetLatestGitSnapshotByRepository(frontend): %v", err)
+	}
+	if frontend.RepositoryName != "frontend" {
+		t.Fatalf("frontend repository_name = %q, want frontend", frontend.RepositoryName)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/gitremote"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -44,9 +45,14 @@ type gitSnapshotCacheEntry struct {
 	lastWrite time.Time
 }
 
-// gitSnapshotCache throttles per-session writes to the live git snapshot cache
-// table. It is process-local — first event after a restart will rewrite the
-// row, which is fine because UpsertLatestLiveGitSnapshot is idempotent.
+type gitSnapshotRepositoryByIdentity interface {
+	GetLatestGitSnapshotByRepository(context.Context, string, string) (*models.GitSnapshot, error)
+}
+
+// gitSnapshotCache throttles per-(session, repository) writes to the live git
+// snapshot cache table. It is process-local — first event after a restart will
+// rewrite the row, which is fine because UpsertLatestLiveGitSnapshot is
+// idempotent.
 type gitSnapshotCache struct {
 	mu      sync.Mutex
 	byID    map[string]gitSnapshotCacheEntry
@@ -101,7 +107,22 @@ func (c *gitSnapshotCache) evictOldestLocked() {
 func (c *gitSnapshotCache) forget(sessionID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Keep the exact delete for callers/tests that use the pre-multi-repository
+	// key shape, then remove every repository-qualified key for this session.
 	delete(c.byID, sessionID)
+	prefix := sessionID + "|"
+	for key := range c.byID {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.byID, key)
+		}
+	}
+}
+
+// gitSnapshotCacheKey keeps live-status throttling independent for each
+// repository in a multi-repository session. The empty repository name is the
+// legacy single-repository key segment.
+func gitSnapshotCacheKey(sessionID, repositoryName string) string {
+	return sessionID + "|" + repositoryName
 }
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
@@ -111,6 +132,13 @@ func gitStatusHash(s *lifecycle.GitStatusData) string {
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	if comparison, err := json.Marshal(s.Comparison); err == nil {
 		_, _ = h.Write(comparison)
+	}
+	if roles, err := json.Marshal(struct {
+		Generation string                          `json:"generation,omitempty"`
+		Action     *gitremote.RemoteRefObservation `json:"action,omitempty"`
+		Tracking   *gitremote.RemoteRefObservation `json:"tracking,omitempty"`
+	}{s.RemoteRolesGeneration, s.ActionHead, s.TrackingUpstream}); err == nil {
+		_, _ = h.Write(roles)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -188,37 +216,48 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 		return
 	}
 	hash := gitStatusHash(data.Status)
-	if !s.gitSnapshotCache.shouldWrite(data.SessionID, hash, time.Now()) {
+	repositoryName := data.Status.RepositoryName
+	if !s.gitSnapshotCache.shouldWrite(gitSnapshotCacheKey(data.SessionID, repositoryName), hash, time.Now()) {
 		return
 	}
 
 	st := data.Status
 	snapshot := &models.GitSnapshot{
-		SessionID:    data.SessionID,
-		Branch:       st.Branch,
-		RemoteBranch: st.RemoteBranch,
-		HeadCommit:   st.HeadCommit,
-		BaseCommit:   st.BaseCommit,
-		Ahead:        st.Ahead,
-		Behind:       st.Behind,
-		Files:        nil, // intentional: badge only needs totals
+		SessionID:      data.SessionID,
+		RepositoryName: repositoryName,
+		Branch:         st.Branch,
+		RemoteBranch:   st.RemoteBranch,
+		HeadCommit:     st.HeadCommit,
+		BaseCommit:     st.BaseCommit,
+		Ahead:          st.Ahead,
+		Behind:         st.Behind,
+		Files:          nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
-			"branch_additions": st.BranchAdditions,
-			"branch_deletions": st.BranchDeletions,
-			"modified":         st.Modified,
-			"added":            st.Added,
-			"deleted":          st.Deleted,
-			"untracked":        st.Untracked,
-			"renamed":          st.Renamed,
-			"timestamp":        data.Timestamp,
+			// Keep the repository identity beside the persisted snapshot. A
+			// session can emit one status stream per repository, so consumers
+			// must never infer this identity from whichever row was written last.
+			"repository_name":         repositoryName,
+			"branch_additions":        st.BranchAdditions,
+			"branch_deletions":        st.BranchDeletions,
+			"modified":                st.Modified,
+			"added":                   st.Added,
+			"deleted":                 st.Deleted,
+			"untracked":               st.Untracked,
+			"renamed":                 st.Renamed,
+			"timestamp":               data.Timestamp,
+			"remote_roles_generation": st.RemoteRolesGeneration,
+			"action_head":             st.ActionHead,
+			"tracking_upstream":       st.TrackingUpstream,
 		},
 	}
 	if st.Comparison != nil {
 		snapshot.Metadata["comparison"] = st.Comparison
-	} else if previous, err := s.repo.GetLatestGitSnapshot(ctx, data.SessionID); err == nil && previous != nil {
+	} else if previous, err := s.latestGitSnapshotForRepository(ctx, data.SessionID, repositoryName); err == nil && previous != nil {
 		// A partial status event omits comparison evidence rather than clearing
-		// it. Preserve the last structured observation in the live snapshot so
-		// sidebar hydration cannot regress to legacy origin-based counts.
+		// it. Preserve the last structured observation for this same repository
+		// so sidebar hydration cannot regress to legacy origin-based counts. A
+		// session-level latest-row lookup may return a sibling repository; that
+		// row is intentionally ignored rather than leaking its comparison.
 		if previousComparison, ok := previous.Metadata["comparison"]; ok {
 			snapshot.Metadata["comparison"] = previousComparison
 		}
@@ -228,6 +267,31 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
+}
+
+func (s *Service) latestGitSnapshotForRepository(ctx context.Context, sessionID, repositoryName string) (*models.GitSnapshot, error) {
+	if scoped, ok := s.repo.(gitSnapshotRepositoryByIdentity); ok {
+		return scoped.GetLatestGitSnapshotByRepository(ctx, sessionID, repositoryName)
+	}
+	previous, err := s.repo.GetLatestGitSnapshot(ctx, sessionID)
+	if err != nil || previous == nil || snapshotRepositoryName(previous) != repositoryName {
+		return nil, err
+	}
+	return previous, nil
+}
+
+func snapshotRepositoryName(snapshot *models.GitSnapshot) string {
+	if snapshot == nil {
+		return ""
+	}
+	if snapshot.RepositoryName != "" {
+		return snapshot.RepositoryName
+	}
+	if snapshot.Metadata == nil {
+		return ""
+	}
+	name, _ := snapshot.Metadata["repository_name"].(string)
+	return name
 }
 
 // pushTrackerUnsynced is the pushTracker sentinel for "no upstream
