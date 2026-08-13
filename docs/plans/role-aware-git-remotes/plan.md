@@ -108,11 +108,11 @@ Wave 6:
 
 Wave 7:
 
-- [ ] [Task 07: Route Git operations](task-07-route-git-operations.md) (`in_progress`)
+- [x] [Task 07: Route Git operations](task-07-route-git-operations.md) (`completed`)
 
 Wave 8:
 
-- [ ] [Task 08: Align frontend remote safety](task-08-align-frontend-remote-safety.md)
+- [ ] [Task 08: Align frontend remote safety](task-08-align-frontend-remote-safety.md) (`in_progress`)
 
 Wave 9:
 
@@ -132,7 +132,7 @@ Wave 12:
 
 ## Current checkpoint
 
-Tasks 00 through 06 are complete and committed as `1cee6ccb4`, `442cffb5c`, `e94c70bde`, `12f48a185`, and `fd0433328`. The branch is reconciled with current `upstream/main` `6aeaf4ad2` through merge commits `191ed4a0d` and `aa1f79e15`; the latest merge incorporated upstream provider-history Changes enrichment and its desktop/mobile tests. Task 06's post-merge audit, repository-scoped persistence remediation, and focused backend/frontend evidence are recorded in its task file. Task 07 is now in progress, with operation routing serialized after the shared agentctl Git seams; no PR has been created.
+Tasks 00 through 07 are complete and committed as `1cee6ccb4`, `442cffb5c`, `e94c70bde`, `12f48a185`, `fd0433328`, and `eaa876f76`. The branch is reconciled with current `upstream/main` `6aeaf4ad2` through merge commits `191ed4a0d` and `aa1f79e15`; the latest merge incorporated upstream provider-history Changes enrichment and its desktop/mobile tests. Task 06's post-merge audit and Task 07's role-routed operation evidence are recorded in their task files. Task 08 is now in progress after the sequential agentctl Git seam; no PR has been created.
 
 Wave labels describe dependency and ownership constraints; shared seams remain serialized even when tasks are otherwise independent.
 
