@@ -132,7 +132,7 @@ Wave 12:
 
 ## Current checkpoint
 
-Tasks 00 through 05 are complete and committed through `1afd8243c`; the Task 06 implementation snapshot is committed as `1cee6ccb4`, while its task file still has pending Results and the task remains open for the required upstream re-audit. Its implementation session is waiting for input. Do not resume or discard the checkpoint until the user explicitly continues the work.
+Tasks 00 through 05 are complete and committed through `1afd8243c`; the Task 06 implementation and comparison-retention remediation are committed as `1cee6ccb4` and `442cffb5c`. Its task file still has pending Results and the task remains open for the required upstream re-audit. Its implementation session is waiting for input. Do not resume or discard the checkpoint until the user explicitly continues the work.
 
 The local `upstream/main` ref is now `fa7d88bee`, beyond the `e014f8072` baseline merged by Task 00. Upstream commit `8ca01e0f7` adds local-first contribution resolution and overlaps the pending agentctl Git/API, contribution-relation, Changes-panel, and desktop/mobile E2E seams. Before Task 06 or any later task resumes, reconcile that upstream drift and rerun the required path/ownership audit; do not merge it over the Task 06 checkpoint blindly.
 
