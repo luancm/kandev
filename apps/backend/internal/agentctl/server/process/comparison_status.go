@@ -82,7 +82,10 @@ func (wt *WorkspaceTracker) resolveComparisonStatus(
 	status.State = gitremote.ResolutionResolved
 	status.ResolvedRef = ref
 	status.Reason = "comparison target resolved"
-	status.BaseCommit = wt.selectComparisonBase(ctx, mergeBase, comparison.StoredBaseCommit)
+	// A resolved target is authoritative for this poll. StoredBaseCommit is
+	// only a safe fallback while the target is unresolved; preferring it here
+	// can make newly landed canonical commits appear as deletions.
+	status.BaseCommit = mergeBase
 	return comparisonResolution{status: status, ref: ref}
 }
 
@@ -91,26 +94,6 @@ func comparisonStoredOrHead(stored, head string) string {
 		return stored
 	}
 	return head
-}
-
-// selectComparisonBase keeps a qualified stored anchor when it is newer than
-// the current merge-base. An older stored anchor is corrected to the live
-// merge-base; unrelated or unprovable anchors also defer to the live base.
-func (wt *WorkspaceTracker) selectComparisonBase(ctx context.Context, mergeBase, stored string) string {
-	if !sha1HexPattern.MatchString(mergeBase) {
-		return comparisonStoredOrHead(stored, "")
-	}
-	if !sha1HexPattern.MatchString(stored) || stored == mergeBase {
-		return mergeBase
-	}
-	git := workspaceTrackerComparisonGit{tracker: wt}
-	if ancestor, err := git.IsAncestor(ctx, stored, mergeBase); err == nil && ancestor {
-		return mergeBase
-	}
-	if ancestor, err := git.IsAncestor(ctx, mergeBase, stored); err == nil && ancestor {
-		return stored
-	}
-	return mergeBase
 }
 
 func (wt *WorkspaceTracker) applyComparisonStatus(

@@ -55,9 +55,26 @@ function buildGitStatusEntry(event: GitStatusUpdateEvent): GitStatusEntry {
   };
 }
 
+function retainOmittedComparison(
+  store: StoreApi<AppState>,
+  event: GitStatusUpdateEvent,
+  entry: GitStatusEntry,
+): GitStatusEntry {
+  if (Object.prototype.hasOwnProperty.call(event.status, "comparison")) {
+    return entry;
+  }
+  const envKey = resolveEnvKey(store, event.session_id);
+  const repositoryName = event.status.repository_name ?? "";
+  const existing = store.getState().gitStatus.byEnvironmentRepo[envKey]?.[repositoryName];
+  if (existing && existing.comparison !== undefined) {
+    entry.comparison = existing.comparison;
+  }
+  return entry;
+}
+
 const gitEventHandlers: GitEventHandlers = {
   status_update: (store, event) => {
-    const gitStatus = buildGitStatusEntry(event);
+    const gitStatus = retainOmittedComparison(store, event, buildGitStatusEntry(event));
     // setGitStatus performs the deep change comparison once and reports back
     // whether anything changed; reuse that instead of comparing again here.
     // Under a massive rebase the comparison is the dominant CPU cost.

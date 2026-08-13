@@ -663,6 +663,37 @@ func assertProjectedLastActivity(t *testing.T, summary *TaskStatusSummary, want 
 	}
 }
 
+func TestProjectorRetainsComparisonWhenStatusOmitsIt(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-comparison-partial"
+	const sessionID = "session-comparison-partial"
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id": taskID, "session_id": sessionID, "type": "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a",
+			"comparison": map[string]interface{}{
+				"resolution_state": "resolved", "base_commit": "base-a",
+				"additions": 4, "deletions": 2, "ahead": 3, "behind": 1,
+			},
+		},
+	})
+	publishProjectorEvent(t, eventBus, events.GitEvent, events.BuildGitEventSubject(sessionID), map[string]interface{}{
+		"task_id": taskID, "session_id": sessionID, "type": "status_update",
+		"status": map[string]interface{}{
+			"repository_name": "repo-a", "branch_additions": 99,
+			"branch_deletions": 99, "ahead": 99, "behind": 99,
+		},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.Git == nil || got.Git.Comparison == nil {
+		t.Fatalf("partial comparison summary = %+v", got)
+	}
+	if got.Git.Additions != 4 || got.Git.Deletions != 2 || got.Git.Ahead != 3 || got.Git.Behind != 1 {
+		t.Fatalf("partial status replaced comparison counts: %+v", got.Git)
+	}
+}
+
 // Session events carry a `session_metadata` snapshot taken when the publisher
 // read the session, so one taken before the error was cleared must not re-arm an
 // error this projection already cleared.

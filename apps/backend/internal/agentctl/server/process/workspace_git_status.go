@@ -463,22 +463,49 @@ func (wt *WorkspaceTracker) getAheadBehindCountsForRef(ctx context.Context, upda
 		compareRef = ""
 	}
 	if compareRef == "" {
-		carryAheadBehind(update, prior)
+		wt.carryAheadBehindForComparison(update, prior, compareRef)
 		return
 	}
 	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)
 	if err != nil {
 		wt.logger.Debug("getAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
-		carryAheadBehind(update, prior)
+		wt.carryAheadBehindForComparison(update, prior, compareRef)
 		return
 	}
 	parts := strings.Fields(string(countOut))
 	if len(parts) != 2 {
-		carryAheadBehind(update, prior)
+		wt.carryAheadBehindForComparison(update, prior, compareRef)
 		return
 	}
 	update.Ahead, _ = strconv.Atoi(parts[0])
 	update.Behind, _ = strconv.Atoi(parts[1])
+}
+
+func (wt *WorkspaceTracker) carryAheadBehindForComparison(
+	update *types.GitStatusUpdate,
+	prior types.GitStatusUpdate,
+	compareRef string,
+) {
+	if !sameComparisonObservation(update.Comparison, prior.Comparison, compareRef) {
+		return
+	}
+	carryAheadBehind(update, prior)
+}
+
+func sameComparisonObservation(
+	current, prior *types.GitComparisonStatus,
+	compareRef string,
+) bool {
+	if current == nil || prior == nil || current.State != gitremote.ResolutionResolved || prior.State != gitremote.ResolutionResolved {
+		return false
+	}
+	if current.ContextGeneration != prior.ContextGeneration || current.ResolvedRef != compareRef || prior.ResolvedRef != compareRef || current.BaseCommit != prior.BaseCommit {
+		return false
+	}
+	if current.Target == nil || prior.Target == nil {
+		return current.Target == prior.Target
+	}
+	return current.Target.Equal(*prior.Target)
 }
 
 // getRemoteAheadBehindCounts populates RemoteAhead/RemoteBehind relative to

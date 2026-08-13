@@ -286,5 +286,11 @@ describe("git-status WS handler comparison evidence", () => {
     };
     handler(gitEvent(second));
     expect(invalidateCumulativeDiffCacheMock).toHaveBeenCalledTimes(2);
+
+    const partial = statusUpdateEvent("2026-05-28T00:00:03Z");
+    handler(gitEvent(partial));
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION].comparison).toEqual(
+      second.status.comparison,
+    );
   });
 });

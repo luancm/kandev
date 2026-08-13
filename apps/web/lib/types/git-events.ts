@@ -15,7 +15,7 @@ export type GitStatusData = {
   head_commit?: string;
   base_commit?: string;
   remote_head_commit?: string;
-  comparison?: GitComparisonStatus;
+  comparison?: GitComparisonStatus | null;
   modified: string[];
   added: string[];
   deleted: string[];

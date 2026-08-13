@@ -99,3 +99,40 @@ func TestGetGitStatus_UnresolvedComparisonRetainsQualifiedStoredAnchor(t *testin
 		t.Fatalf("legacy counts should remain zero projections for unresolved evidence: %+v", status)
 	}
 }
+
+func TestGetGitStatus_AmbiguousComparisonDoesNotGuessRemote(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	tip := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	runGit(t, repoDir, "remote", "add", "canonical", "https://github.com/acme/canonical.git")
+	runGit(t, repoDir, "remote", "add", "mirror", "https://github.com/acme/canonical.git")
+	runGit(t, repoDir, "update-ref", "refs/remotes/canonical/main", tip)
+	runGit(t, repoDir, "update-ref", "refs/remotes/mirror/main", tip)
+
+	target := gitremote.RemoteRefIdentity{
+		Repository: gitremote.RemoteRepositoryIdentity{
+			Provider:       gitremote.ProviderGitHub,
+			Host:           "github.com",
+			RepositoryPath: "acme/canonical",
+		},
+		Ref: "main",
+	}
+	comparison, err := gitremote.NewComparisonContext(target, tip, "comparison-ambiguous")
+	if err != nil {
+		t.Fatalf("NewComparisonContext: %v", err)
+	}
+	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	tracker.SetComparisonContext(&comparison)
+
+	status, err := tracker.GetGitStatus(context.Background(), true)
+	if err != nil {
+		t.Fatalf("GetGitStatus: %v", err)
+	}
+	if status.Comparison == nil || status.Comparison.State != gitremote.ResolutionAmbiguous {
+		t.Fatalf("comparison = %+v, want ambiguous", status.Comparison)
+	}
+	if status.Ahead != 0 || status.Behind != 0 || status.BranchAdditions != 0 || status.BranchDeletions != 0 {
+		t.Fatalf("ambiguous comparison produced counts: %+v", status)
+	}
+}

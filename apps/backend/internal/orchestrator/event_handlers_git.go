@@ -215,6 +215,13 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 	}
 	if st.Comparison != nil {
 		snapshot.Metadata["comparison"] = st.Comparison
+	} else if previous, err := s.repo.GetLatestGitSnapshot(ctx, data.SessionID); err == nil && previous != nil {
+		// A partial status event omits comparison evidence rather than clearing
+		// it. Preserve the last structured observation in the live snapshot so
+		// sidebar hydration cannot regress to legacy origin-based counts.
+		if previousComparison, ok := previous.Metadata["comparison"]; ok {
+			snapshot.Metadata["comparison"] = previousComparison
+		}
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Debug("failed to persist live git snapshot",

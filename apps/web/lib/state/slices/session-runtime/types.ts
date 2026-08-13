@@ -98,7 +98,7 @@ export type GitStatusEntry = {
   remote_ahead?: number;
   remote_behind?: number;
   remote_head_commit?: string;
-  comparison?: GitComparisonStatus;
+  comparison?: GitComparisonStatus | null;
   files: Record<string, FileInfo>;
   timestamp: string | null;
   branch_additions?: number;
