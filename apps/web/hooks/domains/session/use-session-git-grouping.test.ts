@@ -3,6 +3,7 @@ import {
   blockedRemoteOperationResult,
   groupPathsByRepoName,
   hasComparisonForRepository,
+  resolveRemoteOperationRepositoryScope,
   repositoryScopesForMutation,
 } from "./use-session-git";
 
@@ -90,5 +91,16 @@ describe("blockedRemoteOperationResult", () => {
       error_code: "remote_role_evidence_unavailable",
     });
     expect(blockedRemoteOperationResult("merge").success).toBe(false);
+  });
+});
+
+describe("resolveRemoteOperationRepositoryScope", () => {
+  it("keeps the sole named repository explicit when no root scope exists", () => {
+    expect(resolveRemoteOperationRepositoryScope(undefined, ["frontend"])).toBe("frontend");
+    expect(resolveRemoteOperationRepositoryScope("frontend", ["frontend"])).toBe("frontend");
+  });
+
+  it("keeps the legacy root scope unscoped", () => {
+    expect(resolveRemoteOperationRepositoryScope(undefined, [""])).toBeUndefined();
   });
 });

@@ -1,5 +1,9 @@
 import type { PluginRepositoryProviderRegistration } from "./registry";
 import type { PluginHostRepository } from "./types";
+import type {
+  GitStatusEntry,
+  GitRemoteRefObservation,
+} from "@/lib/state/slices/session-runtime/types";
 import { t } from "@/lib/i18n";
 
 type TaskRepositoryLink = { repository_id: string; position?: number };
@@ -20,6 +24,44 @@ export type ChangeRequestProviderTarget = {
   repositoryId: string;
   repository: PluginHostRepository;
 };
+
+function hasCompleteRemoteIdentity(value: GitRemoteRefObservation["identity"]): boolean {
+  return Boolean(
+    value?.ref &&
+    value.repository?.host &&
+    (value.repository.repository_path || value.repository.provider_repository_id),
+  );
+}
+
+/**
+ * Checks the evidence required immediately before a registered provider
+ * creates a change request. The action head is the exact source and the
+ * delivered comparison target is the exact base; either role being absent,
+ * stale, or unresolved must fail closed.
+ */
+export function hasCompleteChangeRequestRemoteRoleEvidence(
+  status:
+    | Pick<GitStatusEntry, "remote_roles_generation" | "action_head" | "comparison">
+    | undefined,
+): boolean {
+  if (!status?.remote_roles_generation) return false;
+  const actionHead = status.action_head;
+  const comparison = status.comparison;
+  if (!actionHead || !hasCompleteRemoteIdentity(actionHead.identity)) return false;
+  if (actionHead.observation_state !== "present" && actionHead.observation_state !== "absent") {
+    return false;
+  }
+  if (actionHead.observation_state === "present" && !actionHead.remote_head_commit) return false;
+  if (
+    !comparison ||
+    comparison.resolution_state !== "resolved" ||
+    !comparison.context_generation ||
+    !hasCompleteRemoteIdentity(comparison.target)
+  ) {
+    return false;
+  }
+  return true;
+}
 
 function taskRepositoryLinks(task: CreationTask): readonly TaskRepositoryLink[] {
   if (task.repositories?.length) {
@@ -82,6 +124,59 @@ type NativeCreateResult = {
   association_error?: string;
 };
 
+async function remoteRolesAuthorized(
+  revalidateRemoteRoles: (() => boolean | Promise<boolean>) | undefined,
+): Promise<boolean> {
+  if (!revalidateRemoteRoles) return true;
+  try {
+    return (await revalidateRemoteRoles()) === true;
+  } catch {
+    return false;
+  }
+}
+
+type PreparedBranch = {
+  success: boolean;
+  branchPushed: boolean;
+  output: string;
+  error?: string;
+};
+
+async function prepareChangeRequestBranch({
+  branchAlreadyPushed,
+  push,
+  repositoryScope,
+  revalidateRemoteRoles,
+}: {
+  branchAlreadyPushed: boolean;
+  push(options: { setUpstream: boolean }, repositoryScope?: string): Promise<PushResult>;
+  repositoryScope?: string;
+  revalidateRemoteRoles?: () => boolean | Promise<boolean>;
+}): Promise<PreparedBranch> {
+  if (!branchAlreadyPushed && !(await remoteRolesAuthorized(revalidateRemoteRoles))) {
+    return {
+      success: false,
+      branchPushed: false,
+      output: "",
+      error: "remote_role_expectation_unavailable",
+    };
+  }
+  if (branchAlreadyPushed) {
+    return { success: true, branchPushed: true, output: "" };
+  }
+  const pushed = await push({ setUpstream: true }, repositoryScope);
+  const output = pushed.output ?? "";
+  if (!pushed.success) {
+    return {
+      success: false,
+      branchPushed: false,
+      output,
+      ...(pushed.error ? { error: pushed.error } : {}),
+    };
+  }
+  return { success: true, branchPushed: true, output };
+}
+
 export async function createChangeRequestWithProvider({
   target,
   push,
@@ -93,6 +188,7 @@ export async function createChangeRequestWithProvider({
   branchAlreadyPushed,
   sessionId,
   signal,
+  revalidateRemoteRoles,
 }: {
   target: ChangeRequestProviderTarget;
   push(options: { setUpstream: boolean }, repositoryScope?: string): Promise<PushResult>;
@@ -104,19 +200,30 @@ export async function createChangeRequestWithProvider({
   branchAlreadyPushed: boolean;
   sessionId: string;
   signal: AbortSignal;
+  /** Rechecks current role generation/source/base immediately before creation. */
+  revalidateRemoteRoles?: () => boolean | Promise<boolean>;
 }): Promise<NativeCreateResult> {
-  let pushOutput = "";
-  if (!branchAlreadyPushed) {
-    const pushed = await push({ setUpstream: true }, repositoryScope);
-    pushOutput = pushed.output ?? "";
-    if (!pushed.success) {
-      return {
-        success: false,
-        branch_pushed: false,
-        output: pushOutput,
-        ...(pushed.error ? { error: pushed.error } : {}),
-      };
-    }
+  const prepared = await prepareChangeRequestBranch({
+    branchAlreadyPushed,
+    push,
+    repositoryScope,
+    revalidateRemoteRoles,
+  });
+  if (!prepared.success) {
+    return {
+      success: false,
+      branch_pushed: prepared.branchPushed,
+      output: prepared.output,
+      ...(prepared.error ? { error: prepared.error } : {}),
+    };
+  }
+  if (!(await remoteRolesAuthorized(revalidateRemoteRoles))) {
+    return {
+      success: false,
+      branch_pushed: prepared.branchPushed,
+      output: prepared.output,
+      error: "remote_role_expectation_unavailable",
+    };
   }
   try {
     const created = await target.provider.createChangeRequest!({
@@ -136,7 +243,7 @@ export async function createChangeRequestWithProvider({
       branch_pushed: true,
       pr_url: created.url,
       provider: created.provider ?? target.provider.id,
-      output: created.output ?? pushOutput,
+      output: created.output ?? prepared.output,
       ...(created.linked === undefined ? {} : { linked: created.linked }),
       ...(created.associationError ? { association_error: created.associationError } : {}),
     };
@@ -144,7 +251,7 @@ export async function createChangeRequestWithProvider({
     return {
       success: false,
       branch_pushed: true,
-      output: pushOutput,
+      output: prepared.output,
       error: error instanceof Error ? error.message : t("integrations:changeRequestCreationFailed"),
     };
   }

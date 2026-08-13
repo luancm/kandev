@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createChangeRequestWithProvider,
+  hasCompleteChangeRequestRemoteRoleEvidence,
   resolveChangeRequestProviderTarget,
 } from "./change-request-creation";
 import type { RepositoryProviderRegistration } from "./types";
@@ -102,6 +103,51 @@ describe("resolveChangeRequestProviderTarget", () => {
   });
 });
 
+describe("hasCompleteChangeRequestRemoteRoleEvidence", () => {
+  const sourceIdentity = {
+    repository: { host: "github.com", repository_path: "contributor/widget" },
+    ref: "feature",
+  };
+  const baseIdentity = {
+    repository: { host: "github.com", repository_path: "upstream/widget" },
+    ref: "main",
+  };
+  const complete = {
+    remote_roles_generation: "roles-1",
+    action_head: {
+      identity: sourceIdentity,
+      observation_state: "present" as const,
+      remote_head_commit: "head-1",
+    },
+    comparison: {
+      context_generation: "comparison-1",
+      target: baseIdentity,
+      resolution_state: "resolved" as const,
+      resolved_ref: "upstream/main",
+      base_commit: "base-1",
+    },
+  };
+
+  it("accepts complete source and base identities from one delivered generation", () => {
+    expect(hasCompleteChangeRequestRemoteRoleEvidence(complete)).toBe(true);
+  });
+
+  it("rejects missing source identity or unresolved comparison evidence", () => {
+    expect(
+      hasCompleteChangeRequestRemoteRoleEvidence({
+        ...complete,
+        action_head: { ...complete.action_head, identity: undefined },
+      }),
+    ).toBe(false);
+    expect(
+      hasCompleteChangeRequestRemoteRoleEvidence({
+        ...complete,
+        comparison: { ...complete.comparison, resolution_state: "ambiguous" },
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("createChangeRequestWithProvider", () => {
   it("pushes before invoking provider create and returns native PR result", async () => {
     const order: string[] = [];
@@ -193,6 +239,7 @@ describe("createChangeRequestWithProvider", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- retry and authorization ordering are one contract.
 describe("createChangeRequestWithProvider retry behavior", () => {
   it("does not invoke provider create when push fails", async () => {
     const createChangeRequest = vi.fn();
@@ -244,6 +291,81 @@ describe("createChangeRequestWithProvider retry behavior", () => {
       success: false,
       branch_pushed: true,
       error: "provider unavailable",
+    });
+  });
+
+  it("does not push or create when the remote-role authorization is unavailable", async () => {
+    const push = vi.fn();
+    const createChangeRequest = vi.fn();
+    const revalidateRemoteRoles = vi.fn().mockResolvedValue(false);
+    const result = await createChangeRequestWithProvider({
+      target: {
+        provider: provider({ createChangeRequest }),
+        workspaceId: WORKSPACE_ID,
+        taskId: "task-a",
+        repositoryId: "repo-a",
+        repository: repositories[0],
+      },
+      push,
+      title: "Title",
+      body: "",
+      draft: false,
+      branchAlreadyPushed: false,
+      sessionId: "session-a",
+      signal: new AbortController().signal,
+      revalidateRemoteRoles,
+    } as Parameters<typeof createChangeRequestWithProvider>[0] & {
+      revalidateRemoteRoles: () => Promise<boolean>;
+    });
+
+    expect(revalidateRemoteRoles).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+    expect(createChangeRequest).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      branch_pushed: false,
+      error: "remote_role_expectation_unavailable",
+    });
+  });
+
+  it("revalidates remote roles again immediately before provider mutation", async () => {
+    const order: string[] = [];
+    const push = vi.fn(async () => {
+      order.push("push");
+      return { success: true, operation: "push", output: "pushed" };
+    });
+    const createChangeRequest = vi.fn(async () => {
+      order.push("create");
+      return { url: CREATED_PR_URL, provider: "bitbucket" };
+    });
+    const revalidateRemoteRoles = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const result = await createChangeRequestWithProvider({
+      target: {
+        provider: provider({ createChangeRequest }),
+        workspaceId: WORKSPACE_ID,
+        taskId: "task-a",
+        repositoryId: "repo-a",
+        repository: repositories[0],
+      },
+      push,
+      title: "Title",
+      body: "",
+      draft: false,
+      branchAlreadyPushed: false,
+      sessionId: "session-a",
+      signal: new AbortController().signal,
+      revalidateRemoteRoles,
+    } as Parameters<typeof createChangeRequestWithProvider>[0] & {
+      revalidateRemoteRoles: () => Promise<boolean>;
+    });
+
+    expect(revalidateRemoteRoles).toHaveBeenCalledTimes(2);
+    expect(order).toEqual(["push"]);
+    expect(createChangeRequest).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      branch_pushed: true,
+      error: "remote_role_expectation_unavailable",
     });
   });
 });

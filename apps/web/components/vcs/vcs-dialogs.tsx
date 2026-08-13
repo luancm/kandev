@@ -29,7 +29,9 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import type { FileInfo } from "@/lib/state/slices";
 import { Trans, useTranslation } from "react-i18next";
 import { createChangeRequestWithProvider } from "@/lib/plugins/change-request-creation";
+import { hasCompleteChangeRequestRemoteRoleEvidence } from "@/lib/plugins/change-request-creation";
 import { useChangeRequestProviderTarget } from "@/hooks/use-change-request-provider-target";
+import { useAppStoreApi } from "@/components/state-provider";
 import {
   useCreateChangeRequestHandler,
   type CreateChangeRequestInput,
@@ -380,6 +382,33 @@ export function pickRepoLabel(
   return resolveDisplayName("") || t("integrations:repository");
 }
 
+function readCurrentGitStatus(
+  storeApi: ReturnType<typeof useAppStoreApi>,
+  sessionId: string | null,
+  repositoryScope?: string,
+) {
+  if (!sessionId) return undefined;
+  const state = storeApi.getState();
+  const environmentId = state.environmentIdBySessionId[sessionId] ?? sessionId;
+  const byEnvironmentRepo = state.gitStatus.byEnvironmentRepo[environmentId];
+  const legacyStatus = state.gitStatus.byEnvironmentId[environmentId];
+  if (repositoryScope !== undefined && repositoryScope !== "") {
+    return byEnvironmentRepo?.[repositoryScope];
+  }
+  if (repositoryScope === "") {
+    return byEnvironmentRepo ? byEnvironmentRepo[""] : legacyStatus;
+  }
+  if (byEnvironmentRepo) {
+    const namedRepositories = Object.keys(byEnvironmentRepo).filter((name) => name !== "");
+    if (namedRepositories.length === 1 && !byEnvironmentRepo[""]) {
+      return byEnvironmentRepo[namedRepositories[0]];
+    }
+    return byEnvironmentRepo[""];
+  }
+  return legacyStatus;
+}
+
+// eslint-disable-next-line max-lines-per-function -- dialog state and provider authorization share one lifecycle.
 function useVcsDialogsState(
   sessionId: string | null,
   taskTitle: string | undefined,
@@ -389,6 +418,7 @@ function useVcsDialogsState(
   const cs = useCommitDialogState();
   const ps = usePRDialogState();
   const gitWithFeedback = useGitWithFeedback();
+  const storeApi = useAppStoreApi();
   const gitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
   // Use SessionGit so commit fans out per-repo for multi-repo workspaces.
@@ -424,9 +454,13 @@ function useVcsDialogsState(
         branchAlreadyPushed: input.branchAlreadyPushed,
         sessionId,
         signal: input.signal,
+        revalidateRemoteRoles: () =>
+          hasCompleteChangeRequestRemoteRoleEvidence(
+            readCurrentGitStatus(storeApi, sessionId, input.repositoryScope),
+          ),
       });
     },
-    [createBuiltInPR, push, registeredCreateTarget, sessionId],
+    [createBuiltInPR, push, registeredCreateTarget, sessionId, storeApi],
   );
   const supportsDraft = registeredCreateTarget?.provider.supportsDraft !== false;
   const repoDisplayName = useRepoDisplayName(sessionId);

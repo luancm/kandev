@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- SessionGit coordinates the shared operation and file fan-outs. */
+
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
 import { useSessionCommits } from "./use-session-commits";
@@ -549,6 +551,22 @@ export function blockedRemoteOperationResult(
   };
 }
 
+/**
+ * Keeps a sole named repository explicit for callers that omit a scope. This
+ * is important while a multi-repo status stream is partially hydrated: the
+ * named repo is still a real checkout even though no root status exists.
+ */
+export function resolveRemoteOperationRepositoryScope(
+  repo: string | undefined,
+  repoNamesForControls: readonly string[],
+): string | undefined {
+  if (repo !== undefined) return repo;
+  if (repoNamesForControls.length === 1 && repoNamesForControls[0] !== "") {
+    return repoNamesForControls[0];
+  }
+  return undefined;
+}
+
 function hasTrackingForRepository(
   perRepoStatus: RemoteOpsArgs["perRepoStatus"],
   repo: string | undefined,
@@ -597,6 +615,7 @@ export function hasComparisonForRepository(
  * to push. Pull uses only tracking-capable repos, Rebase/Merge use only repos
  * with resolved comparison evidence, and Abort fans out across every repo.
  */
+// eslint-disable-next-line max-lines-per-function -- operation routing stays together to preserve shared scope semantics.
 function useRemoteOpsFanOut({
   gitOps,
   repoNamesForControls,
@@ -627,10 +646,11 @@ function useRemoteOpsFanOut({
   const pull = useCallback(
     async (rebase = false, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) {
-        if (!hasTrackingForRepository(perRepoStatus, repo, legacyTrackingEvidenceAvailable)) {
+        const scopedRepo = resolveRemoteOperationRepositoryScope(repo, repoNamesForControls);
+        if (!hasTrackingForRepository(perRepoStatus, scopedRepo, legacyTrackingEvidenceAvailable)) {
           return blockedRemoteOperationResult("pull");
         }
-        return gitOps.pull(rebase, repo);
+        return gitOps.pull(rebase, scopedRepo);
       }
       const reposWithTracking = namedRepos.filter((r) => trackingByRepo.get(r) === true);
       if (reposWithTracking.length === 0) {
@@ -654,7 +674,12 @@ function useRemoteOpsFanOut({
       options?: { force?: boolean; setUpstream?: boolean },
       repo?: string,
     ): Promise<GitOperationResult> => {
-      if (repo !== undefined || !isMultiRepo) return gitOps.push(options, repo);
+      if (repo !== undefined || !isMultiRepo) {
+        return gitOps.push(
+          options,
+          resolveRemoteOperationRepositoryScope(repo, repoNamesForControls),
+        );
+      }
       const reposWithAhead = namedRepos.filter((r) => (aheadByRepo.get(r) ?? 0) > 0);
       if (reposWithAhead.length === 0) {
         return { success: true, operation: "push", output: "No commits to push" };
@@ -674,12 +699,13 @@ function useRemoteOpsFanOut({
         return gitOps.rebase(baseBranch, repo);
       }
       if (!isMultiRepo) {
+        const scopedRepo = resolveRemoteOperationRepositoryScope(repo, repoNamesForControls);
         if (
-          !hasComparisonForRepository(perRepoStatus, undefined, legacyComparisonEvidenceAvailable)
+          !hasComparisonForRepository(perRepoStatus, scopedRepo, legacyComparisonEvidenceAvailable)
         ) {
           return blockedRemoteOperationResult("rebase");
         }
-        return gitOps.rebase(baseBranch, repo);
+        return gitOps.rebase(baseBranch, scopedRepo);
       }
       const reposWithComparison = namedRepos.filter((r) => comparisonByRepo.get(r) === true);
       if (reposWithComparison.length === 0) return blockedRemoteOperationResult("rebase");
@@ -700,12 +726,13 @@ function useRemoteOpsFanOut({
         return gitOps.merge(baseBranch, repo);
       }
       if (!isMultiRepo) {
+        const scopedRepo = resolveRemoteOperationRepositoryScope(repo, repoNamesForControls);
         if (
-          !hasComparisonForRepository(perRepoStatus, undefined, legacyComparisonEvidenceAvailable)
+          !hasComparisonForRepository(perRepoStatus, scopedRepo, legacyComparisonEvidenceAvailable)
         ) {
           return blockedRemoteOperationResult("merge");
         }
-        return gitOps.merge(baseBranch, repo);
+        return gitOps.merge(baseBranch, scopedRepo);
       }
       const reposWithComparison = namedRepos.filter((r) => comparisonByRepo.get(r) === true);
       if (reposWithComparison.length === 0) return blockedRemoteOperationResult("merge");
@@ -719,7 +746,12 @@ function useRemoteOpsFanOut({
 
   const abort = useCallback(
     async (operation: "merge" | "rebase", repo?: string): Promise<GitOperationResult> => {
-      if (repo !== undefined || !isMultiRepo) return gitOps.abort(operation, repo);
+      if (repo !== undefined || !isMultiRepo) {
+        return gitOps.abort(
+          operation,
+          resolveRemoteOperationRepositoryScope(repo, repoNamesForControls),
+        );
+      }
       return fanOutAcrossRepositoryWaves(namedRepos, "abort", (r) => gitOps.abort(operation, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
