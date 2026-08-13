@@ -396,6 +396,19 @@ test.describe("Mobile GitLab parity", () => {
       .toBe("push --set-upstream origin HEAD");
     const mrButton = testPage.getByTestId("mr-topbar-button");
     await expect(mrButton).toHaveAttribute("data-mr-iid", "100", { timeout: 120_000 });
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      gitLabMR(100, "Mobile runtime-created GitLab MR", {
+        source_project_path: "fork/platform/kandev",
+        source_project_id: 202,
+        target_project_path: GITLAB_PROJECT,
+        target_project_id: 101,
+      }),
+    ]);
+    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+      task_id: task.id,
+      repository_id: seedData.repositoryId,
+      mr_url: `${backend.baseUrl}/${GITLAB_PROJECT}/-/merge_requests/100`,
+    });
     await expectTouchTarget(mrButton, "mobile auto-linked MR");
     const taskMRsResponse = await apiClient.rawRequest(
       "GET",
@@ -410,7 +423,7 @@ test.describe("Mobile GitLab parity", () => {
       host: backend.baseUrl,
       project_path: GITLAB_PROJECT,
       source_host: backend.baseUrl,
-      source_project_path: GITLAB_PROJECT,
+      source_project_path: "fork/platform/kandev",
       target_host: backend.baseUrl,
       target_project_path: GITLAB_PROJECT,
       head_branch: expect.any(String),

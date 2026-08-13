@@ -4,10 +4,18 @@ import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { makeGitEnv } from "../../helpers/git-helper";
+import {
+  configureWritableForkRemote,
+  GitHelper,
+  makeGitEnv,
+} from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 const MOBILE_FILE = "mobile-external-link.ts";
+const MOBILE_ADDED = "mobile-added.ts";
+const MOBILE_DELETED = "mobile-deleted.ts";
+const MOBILE_RENAMED = "mobile-renamed.ts";
+const MOBILE_RENAMED_OLD = "mobile-old-renamed.ts";
 const MOBILE_REMOTE = "https://github.com/testorg/mobile-external-links.git";
 const MOBILE_PR = 91;
 function initializeMobileRepository(backend: BackendContext): string {
@@ -59,7 +67,7 @@ test.describe("Mobile external VCS file link", () => {
     backend,
   }) => {
     const repositoryPath = initializeMobileRepository(backend);
-    await createMobileRepository(apiClient, seedData.workspaceId, repositoryPath);
+    const repository = await createMobileRepository(apiClient, seedData.workspaceId, repositoryPath);
     await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
       source: "legacy_shared",
       status: "active",
@@ -86,6 +94,28 @@ test.describe("Mobile external VCS file link", () => {
         deletions: 1,
         patch: "@@ -1 +1 @@\n-export const mobile = false;\n+export const mobile = true;",
       },
+      {
+        filename: MOBILE_ADDED,
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        patch: "@@ -0,0 +1 @@\n+export const added = true;",
+      },
+      {
+        filename: MOBILE_DELETED,
+        status: "deleted",
+        additions: 0,
+        deletions: 1,
+        patch: "@@ -1 +0,0 @@\n-export const deleted = true;",
+      },
+      {
+        filename: MOBILE_RENAMED,
+        old_path: MOBILE_RENAMED_OLD,
+        status: "renamed",
+        additions: 1,
+        deletions: 1,
+        patch: "@@ -1 +1 @@\n-export const oldName = false;\n+export const newName = true;",
+      },
     ]);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -100,6 +130,8 @@ test.describe("Mobile external VCS file link", () => {
     );
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: repository.id,
       owner: "testorg",
       repo: "mobile-external-links",
       pr_number: MOBILE_PR,
@@ -123,15 +155,78 @@ test.describe("Mobile external VCS file link", () => {
     await session.waitForLoad();
     await session.waitForChatIdle();
     const sessions = await apiClient.listTaskSessions(task.id);
-    const taskCheckout =
+    const checkout =
       sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
       sessions.sessions[0]?.worktree_path ||
       repositoryPath;
+    const actionGit = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
+    actionGit.exec("git checkout -B feature/mobile-links");
+    const writableFork = configureWritableForkRemote(
+      actionGit,
+      backend.tmpDir,
+      "https://github.com/mobile-reviewer/mobile-external-links.git",
+    );
+    expect(writableFork.branch).toBe("feature/mobile-links");
+    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible();
+    await testPage
+      .getByTestId("mobile-changes-panel")
+      .getByRole("button", { name: "Review", exact: true })
+      .tap();
+    const review = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(review).toBeVisible();
+    await expect(
+      review.getByTestId("review-file-header").filter({ hasText: MOBILE_FILE }).getByRole("link"),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mobile-reviewer/mobile-external-links/blob/feature%2Fmobile-links/mobile-external-link.ts",
+    );
+    await expect(
+      review.getByTestId("review-file-header").filter({ hasText: MOBILE_ADDED }).getByRole("link"),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mobile-reviewer/mobile-external-links/blob/feature%2Fmobile-links/mobile-added.ts",
+    );
+    await expect(
+      review.getByTestId("review-file-header").filter({ hasText: MOBILE_DELETED }).getByRole("link"),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/testorg/mobile-external-links/blob/main/mobile-deleted.ts",
+    );
+    await expect(
+      review
+        .getByTestId("review-file-header")
+        .filter({ hasText: MOBILE_RENAMED })
+        .getByRole("link"),
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/mobile-reviewer/mobile-external-links/blob/feature%2Fmobile-links/mobile-renamed.ts",
+    );
+    await review.getByRole("button", { name: "Close review" }).tap();
+    const taskCheckout = checkout;
     fs.writeFileSync(path.join(taskCheckout, MOBILE_FILE), "export const mobile = false;\n");
+    const localOld = "mobile-base-old.ts";
+    const localRenamed = "mobile-base-renamed.ts";
+    fs.writeFileSync(path.join(taskCheckout, localOld), "export const oldBase = true;\n");
+    execFileSync("git", ["mv", localOld, localRenamed], {
+      cwd: taskCheckout,
+      env: makeGitEnv(backend.tmpDir),
+    });
     await testPage.getByRole("button", { name: "Files" }).tap();
     const fileNode = testPage.locator(`[data-testid="file-tree-node"][data-path="${MOBILE_FILE}"]`);
     await expect(fileNode).toBeVisible({ timeout: 15_000 });
     await fileNode.tap();
+
+    await testPage.getByRole("button", { name: "Files" }).tap();
+    const renamedNode = testPage.locator(
+      `[data-testid="file-tree-node"][data-path="${localRenamed}"]`,
+    );
+    await expect(renamedNode).toBeVisible({ timeout: 15_000 });
+    await renamedNode.tap();
+    await expect(testPage.getByTestId("mobile-file-viewer-panel").getByRole("link")).toHaveAttribute(
+      "href",
+      "https://github.com/testorg/mobile-external-links/blob/main/mobile-base-old.ts",
+    );
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible();

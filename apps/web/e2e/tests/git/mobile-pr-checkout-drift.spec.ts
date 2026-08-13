@@ -4,6 +4,7 @@ import {
   configureTriangularRemoteFixture,
   GitHelper,
   makeGitEnv,
+  makeTriangularRemoteFixtureInput,
 } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
@@ -175,6 +176,31 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toContainText("PR #902 version");
+    const initialProviderHead = providerHistory.head;
+    expect(initialProviderHead).toBe(providerHistory.commits.at(-1)?.sha);
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 902,
+        title: "Mobile rewritten provider head moved",
+        state: "open",
+        head_branch: providerBranch,
+        base_branch: "main",
+        author_login: "mobile-remote-contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: providerHistory.commits[0]?.sha,
+      },
+    ]);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-git-actions")).toBeVisible();
+    await testPage.getByTestId("mobile-git-actions").tap();
+    const movedMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await expect(movedMenu.getByRole("menuitem", { name: /^Pull/ })).toHaveCount(0);
+    expect(git.getCurrentSha()).toBe(localHead);
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
@@ -249,11 +275,12 @@ test.describe("Mobile rewritten contribution history", () => {
     seedData,
     backend,
   }) => {
+    const fixtureInput = makeTriangularRemoteFixtureInput();
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "github",
       provider_host: "https://github.com",
       provider_owner: "testorg",
-      provider_name: "canonical",
+      provider_name: fixtureInput.canonicalName,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -275,7 +302,7 @@ test.describe("Mobile rewritten contribution history", () => {
     const checkout = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_path;
     if (!checkout) throw new Error("mobile triangular remote task has no worktree path");
     const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
-    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir);
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir, fixtureInput);
 
     type StoreWindow = Window & {
       __KANDEV_E2E_STORE__?: {
@@ -350,7 +377,15 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeDisabled();
+    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeEnabled();
+    expect(git.exec("git remote get-url origin").trim()).toBe(fixture.originURL);
+    expect(git.exec("git remote").trim().split(/\r?\n/).sort()).toEqual([
+      "comparison",
+      "origin",
+      "publish",
+      "tracking",
+    ]);
+    expect(git.exec(`git config --get branch.${fixture.branch}.pushRemote`).trim()).toBe("publish");
     expect(git.getCurrentSha()).toBe(fixture.localHead);
   });
 });

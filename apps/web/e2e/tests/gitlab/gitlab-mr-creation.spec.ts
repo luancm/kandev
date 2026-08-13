@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { openChangesTab } from "../git/diff-update-helpers";
-import { GITLAB_PROJECT } from "../../helpers/gitlab";
+import { GITLAB_PROJECT, gitLabMR } from "../../helpers/gitlab";
 import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
@@ -79,6 +79,19 @@ test.describe("GitLab merge request creation", () => {
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveAttribute("data-mr-iid", "100", {
       timeout: 120_000,
     });
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      gitLabMR(100, "Runtime-created GitLab MR", {
+        source_project_path: "fork/platform/kandev",
+        source_project_id: 202,
+        target_project_path: GITLAB_PROJECT,
+        target_project_id: 101,
+      }),
+    ]);
+    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+      task_id: task.id,
+      repository_id: seedData.repositoryId,
+      mr_url: `${backend.baseUrl}/${GITLAB_PROJECT}/-/merge_requests/100`,
+    });
     await gitlab.openLinkedMR(100);
     await expect(
       testPage.getByTestId("mr-detail-panel").last().getByText("Runtime-created GitLab MR"),
@@ -97,7 +110,7 @@ test.describe("GitLab merge request creation", () => {
       host: backend.baseUrl,
       project_path: GITLAB_PROJECT,
       source_host: backend.baseUrl,
-      source_project_path: GITLAB_PROJECT,
+      source_project_path: "fork/platform/kandev",
       target_host: backend.baseUrl,
       target_project_path: GITLAB_PROJECT,
       head_branch: expect.any(String),

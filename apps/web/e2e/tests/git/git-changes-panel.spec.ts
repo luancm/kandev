@@ -8,7 +8,10 @@ import type { Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { configureTriangularRemoteFixture } from "../../helpers/git-helper";
+import {
+  configureTriangularRemoteFixture,
+  makeTriangularRemoteFixtureInput,
+} from "../../helpers/git-helper";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -1783,6 +1786,28 @@ test.describe("Git Changes Panel", () => {
     await expect(
       localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
     ).toContainText("Local checkout commits");
+    const initialProviderHead = providerHistory.head;
+    expect(initialProviderHead).toBe(providerHistory.commits.at(-1)?.sha);
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 901,
+        title: "Rewritten contribution moved provider head",
+        state: "open",
+        head_branch: providerBranch,
+        base_branch: "main",
+        author_login: "remote-contributor",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        head_sha: providerHistory.commits[0]?.sha,
+      },
+    ]);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await session.clickTab("Changes");
+    await expect(testPage.getByTestId("changes-panel")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: /^Pull/ })).toBeDisabled();
+    expect(git.getCurrentSha()).toBe(localHead);
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
@@ -2068,11 +2093,12 @@ test.describe("Git Changes Panel", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const fixtureInput = makeTriangularRemoteFixtureInput();
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "github",
       provider_host: "https://github.com",
       provider_owner: "testorg",
-      provider_name: "canonical",
+      provider_name: fixtureInput.canonicalName,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -2102,7 +2128,7 @@ test.describe("Git Changes Panel", () => {
       GIT_COMMITTER_NAME: "E2E Test",
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     });
-    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir);
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir, fixtureInput);
 
     type RoleSnapshot = {
       branch?: string | null;
@@ -2149,7 +2175,10 @@ test.describe("Git Changes Panel", () => {
         remote_behind: 1,
         action_head: {
           observation_state: "present",
-          identity: { repository: { repository_path: /testorg\/fork-/ }, ref: fixture.branch },
+          identity: {
+            repository: { repository_path: /testorg\/fork-/ },
+            ref: fixture.branch,
+          },
         },
         tracking_upstream: {
           observation_state: "present",
@@ -2160,7 +2189,10 @@ test.describe("Git Changes Panel", () => {
           resolution_state: "resolved",
           additions: 1,
           deletions: 0,
-          target: { repository: { repository_path: /testorg\/canonical-/ }, ref: "main" },
+          target: {
+            repository: { repository_path: fixtureInput.canonicalName },
+            ref: "main",
+          },
         },
       });
 
@@ -2173,7 +2205,15 @@ test.describe("Git Changes Panel", () => {
     await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeDisabled();
+    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeEnabled();
+    expect(git.exec("git remote get-url origin").trim()).toBe(fixture.originURL);
+    expect(git.exec("git remote").trim().split(/\r?\n/).sort()).toEqual([
+      "comparison",
+      "origin",
+      "publish",
+      "tracking",
+    ]);
+    expect(git.exec(`git config --get branch.${fixture.branch}.pushRemote`).trim()).toBe("publish");
     expect(git.getCurrentSha()).toBe(fixture.localHead);
   });
 });

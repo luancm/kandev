@@ -78,8 +78,41 @@ export type TriangularRemoteFixture = {
   comparisonURL: string;
   writableURL: string;
   trackingURL: string;
-  unrelatedURL: string;
+  originURL: string;
 };
+
+export type TriangularRemoteFixtureInput = {
+  suffix: string;
+  canonicalOwner: string;
+  canonicalName: string;
+};
+
+export function makeTriangularRemoteFixtureInput(): TriangularRemoteFixtureInput {
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    suffix,
+    canonicalOwner: "testorg",
+    canonicalName: `canonical-${suffix}`,
+  };
+}
+
+export function configureWritableForkRemote(
+  git: GitHelper,
+  tmpDir: string,
+  providerURL: string,
+): { branch: string; url: string } {
+  const branch = git.exec("git branch --show-current").trim();
+  if (!branch) throw new Error("writable fork fixture requires a named branch");
+  const barePath = path.join(tmpDir, "repos", `fork-action-${Date.now()}.git`);
+  fs.mkdirSync(path.dirname(barePath), { recursive: true });
+  execSync(`git init --bare -b main "${barePath}"`, { env: git.getEnv() });
+  const remoteURL = `${providerURL.replace(/\.git$/, "")}.git`;
+  git.exec(`git remote set-url origin "${remoteURL}"`);
+  git.exec(`git config --local url."file://${barePath}".insteadOf "${remoteURL}"`);
+  git.exec(`git push origin HEAD:refs/heads/${branch}`);
+  git.exec(`git config branch."${branch}".pushRemote origin`);
+  return { branch, url: remoteURL };
+}
 
 /**
  * Configure a production-shaped triangular checkout for remote-role E2E tests.
@@ -90,14 +123,15 @@ export type TriangularRemoteFixture = {
 export function configureTriangularRemoteFixture(
   git: GitHelper,
   tmpDir: string,
+  input = makeTriangularRemoteFixtureInput(),
 ): TriangularRemoteFixture {
-  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const { suffix } = input;
   const branch = `feature/role-aware-${suffix}`;
   const remotes = {
-    comparison: `https://github.com/testorg/canonical-${suffix}.git`,
+    comparison: `https://github.com/${input.canonicalOwner}/${input.canonicalName}.git`,
     writable: `https://github.com/testorg/fork-${suffix}.git`,
     tracking: `https://github.com/testorg/tracking-${suffix}.git`,
-    unrelated: `https://github.com/unrelated/unrelated-${suffix}.git`,
+    origin: `https://github.com/unrelated/unrelated-${suffix}.git`,
   };
   const barePaths = Object.fromEntries(
     Object.keys(remotes).map((name) => [name, path.join(tmpDir, "repos", `role-${name}-${suffix}.git`)]),
@@ -136,16 +170,16 @@ export function configureTriangularRemoteFixture(
     cwd: git.getRepoDir(),
     env,
   });
-  execSync(`git push "${barePaths.unrelated}" ${initialHead}:refs/heads/main`, {
+  execSync(`git push "${barePaths.origin}" ${initialHead}:refs/heads/main`, {
     cwd: git.getRepoDir(),
     env,
   });
 
   for (const [name, remoteURL] of Object.entries(remotes)) {
-    if (git.exec("git remote").split(/\r?\n/).includes(name === "writable" ? "publish" : name)) {
-      git.exec(`git remote remove "${name === "writable" ? "publish" : name}"`);
-    }
     const remoteName = name === "writable" ? "publish" : name;
+    if (git.exec("git remote").split(/\r?\n/).includes(remoteName)) {
+      git.exec(`git remote remove "${remoteName}"`);
+    }
     git.exec(`git remote add "${remoteName}" "${remoteURL}"`);
     git.exec(`git config --local url."file://${barePaths[name as keyof typeof barePaths]}".insteadOf "${remoteURL}"`);
   }
@@ -165,7 +199,7 @@ export function configureTriangularRemoteFixture(
     comparisonURL: remotes.comparison,
     writableURL: remotes.writable,
     trackingURL: remotes.tracking,
-    unrelatedURL: remotes.unrelated,
+    originURL: remotes.origin,
   };
 }
 

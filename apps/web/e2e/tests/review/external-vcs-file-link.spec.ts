@@ -5,7 +5,7 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
-import { makeGitEnv } from "../../helpers/git-helper";
+import { configureWritableForkRemote, GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 const GITHUB_OWNER = "testorg";
@@ -16,7 +16,6 @@ const ADDED_FILE = "added-link.ts";
 const DELETED_FILE = "deleted-link.ts";
 const RENAMED_FILE = "renamed-link.ts";
 const RENAMED_OLD_FILE = "old-renamed-link.ts";
-const BASE_RENAME_PR = 82;
 const EXISTING_FILE = "base-link.ts";
 const UNTRACKED_FILE = "local-only-link.ts";
 
@@ -83,7 +82,7 @@ test.describe("External VCS file links", () => {
     backend,
   }) => {
     const repositoryPath = initializeRepository(backend, `external-link-pr-${Date.now()}`);
-    await createGitHubRepository(apiClient, seedData.workspaceId, repositoryPath);
+    const repository = await createGitHubRepository(apiClient, seedData.workspaceId, repositoryPath);
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("reviewer");
     await apiClient.mockGitHubAddPRs([
@@ -130,7 +129,7 @@ test.describe("External VCS file links", () => {
       },
     ]);
 
-    const checkoutBranch = "main";
+    const checkoutBranch = "feature/external-links";
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Published external file link",
@@ -144,6 +143,8 @@ test.describe("External VCS file links", () => {
     );
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: repository.id,
       owner: GITHUB_OWNER,
       repo: GITHUB_REPOSITORY,
       pr_number: 81,
@@ -166,6 +167,19 @@ test.describe("External VCS file links", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const checkout =
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
+      sessions.sessions[0]?.worktree_path ||
+      repositoryPath;
+    const actionGit = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
+    actionGit.exec(`git checkout -B ${checkoutBranch}`);
+    const writableFork = configureWritableForkRemote(
+      actionGit,
+      backend.tmpDir,
+      "https://github.com/reviewer-fork/external-file-links.git",
+    );
+    expect(writableFork.branch).toBeTruthy();
     await session.clickTab("Changes");
     await expect(
       session.changes.getByRole("button", { name: new RegExp(PUBLISHED_FILE) }),
@@ -214,30 +228,6 @@ test.describe("External VCS file links", () => {
       source: "legacy_shared",
       status: "active",
     });
-    await apiClient.mockGitHubReset();
-    await apiClient.mockGitHubSetUser("reviewer");
-    await apiClient.mockGitHubAddPRs([
-      {
-        number: BASE_RENAME_PR,
-        title: "Canonical rename link",
-        state: "open",
-        head_branch: "",
-        base_branch: "main",
-        author_login: "reviewer",
-        repo_owner: GITHUB_OWNER,
-        repo_name: BASE_GITHUB_REPOSITORY,
-      },
-    ]);
-    await apiClient.mockGitHubAddPRFiles(GITHUB_OWNER, BASE_GITHUB_REPOSITORY, BASE_RENAME_PR, [
-      {
-        filename: RENAMED_FILE,
-        old_path: RENAMED_OLD_FILE,
-        status: "renamed",
-        additions: 1,
-        deletions: 1,
-        patch: "@@ -1 +1 @@\n-export const oldName = false;\n+export const newName = true;",
-      },
-    ]);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Base external file link",
@@ -249,30 +239,22 @@ test.describe("External VCS file links", () => {
         repositories: [trustedGitHubTaskRepository(BASE_GITHUB_REPOSITORY)],
       },
     );
-    await apiClient.mockGitHubAssociateTaskPR({
-      task_id: task.id,
-      owner: GITHUB_OWNER,
-      repo: BASE_GITHUB_REPOSITORY,
-      pr_number: BASE_RENAME_PR,
-      pr_url: `https://github.com/${GITHUB_OWNER}/${BASE_GITHUB_REPOSITORY}/pull/${BASE_RENAME_PR}`,
-      pr_title: "Canonical rename link",
-      head_branch: "",
-      base_branch: "main",
-      author_login: "reviewer",
-      head_host: "https://github.com",
-      head_owner: "reviewer-fork",
-      head_repo: BASE_GITHUB_REPOSITORY,
-      head_repo_id: 883,
-      base_host: "https://github.com",
-      base_owner: GITHUB_OWNER,
-      base_repo: BASE_GITHUB_REPOSITORY,
-      base_repo_id: 884,
-    });
-
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
+    const sessions = await apiClient.listTaskSessions(task.id);
+    const taskCheckout =
+      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
+      sessions.sessions[0]?.worktree_path ||
+      repositoryPath;
+    fs.writeFileSync(path.join(taskCheckout, UNTRACKED_FILE), "export const local = true;\n");
+    fs.writeFileSync(path.join(taskCheckout, RENAMED_OLD_FILE), "export const oldName = true;\n");
+    execFileSync("git", ["mv", RENAMED_OLD_FILE, RENAMED_FILE], {
+      cwd: taskCheckout,
+      env: makeGitEnv(backend.tmpDir),
+    });
+
     await session.clickTab("Changes");
     await expect(session.changes.getByRole("button", { name: "Review", exact: true })).toBeVisible({
       timeout: 20_000,
@@ -289,12 +271,6 @@ test.describe("External VCS file links", () => {
       `https://github.com/testorg/${BASE_GITHUB_REPOSITORY}/blob/main/${RENAMED_OLD_FILE}`,
     );
     await renameReview.getByRole("button", { name: "Close review" }).click();
-    const sessions = await apiClient.listTaskSessions(task.id);
-    const taskCheckout =
-      sessions.sessions[0]?.worktrees?.[0]?.worktree_path ||
-      sessions.sessions[0]?.worktree_path ||
-      repositoryPath;
-    fs.writeFileSync(path.join(taskCheckout, UNTRACKED_FILE), "export const local = true;\n");
 
     await session.clickTab("Changes");
     await expect(

@@ -100,7 +100,7 @@ test.describe("Task sidebar diff stats", () => {
       sessions.sessions[0]?.worktree_path;
     if (!checkout) throw new Error("Sidebar comparison task has no checkout");
     const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
-    const fixture = configureTriangularRemoteFixture(git, checkout);
+    const fixture = configureTriangularRemoteFixture(git, backend.tmpDir);
 
     await expect
       .poll(
@@ -116,6 +116,7 @@ test.describe("Task sidebar diff stats", () => {
     const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: task.title });
     await expect(row.getByTestId("sidebar-task-diff-stats")).toHaveText("+1 -0");
     expect(fixture.localHead).not.toBe(fixture.comparisonHead);
+    expect(git.exec("git status --porcelain").trim()).toBe("");
   });
 
   test("badges survive backend restart for non-active tasks", async ({

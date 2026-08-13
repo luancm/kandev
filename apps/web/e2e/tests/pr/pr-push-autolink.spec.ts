@@ -107,6 +107,19 @@ test.describe("GitHub PR push-detection auto-link", () => {
     await expect(prButton).toHaveAttribute("data-pr-number", String(prNumber), {
       timeout: 150_000,
     });
+    const linkedPRResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/task-prs/${encodeURIComponent(task.id)}`,
+    );
+    expect(linkedPRResponse.ok).toBe(true);
+    const linkedPR = (await linkedPRResponse.json()) as Record<string, unknown>;
+    expect(linkedPR).toMatchObject({
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: prNumber,
+      head_branch: branch,
+      base_branch: "main",
+    });
 
     await testPage.reload();
     await expect(session.prTopbarButton()).toHaveAttribute("data-pr-number", String(prNumber), {
