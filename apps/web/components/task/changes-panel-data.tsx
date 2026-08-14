@@ -42,6 +42,10 @@ import {
 } from "./changes-panel-helpers";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
+import type {
+  GitComparisonStatus,
+  GitRemoteRefObservation,
+} from "@/lib/state/slices/session-runtime/types";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
@@ -156,6 +160,9 @@ export type ChangesPanelBodyProps = {
     trackingEvidenceAvailable: boolean;
     trackingUpstreamState: string | null;
     comparisonEvidenceAvailable: boolean;
+    actionHead: GitRemoteRefObservation | null | undefined;
+    trackingUpstream: GitRemoteRefObservation | null | undefined;
+    comparison: GitComparisonStatus | null | undefined;
   }>;
   prByRepo?: Record<string, string | undefined>;
 };

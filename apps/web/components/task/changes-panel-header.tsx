@@ -32,6 +32,10 @@ import { BaseBranchPicker } from "./base-branch-picker";
 import type { GitCredentialDisplay } from "./changes-git-credential-display";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
+import type {
+  GitComparisonStatus,
+  GitRemoteRefObservation,
+} from "@/lib/state/slices/session-runtime/types";
 import { PerRepoPullMenu, repoActionAvailability } from "./changes-panel-per-repo-menu";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
 import {
@@ -39,6 +43,7 @@ import {
   type useRemoteContributionResolution,
 } from "./use-remote-contribution-resolution";
 import { RemoteContributionHeaderActions } from "./remote-contribution-header-actions";
+import { RemoteRoleDetails } from "./remote-role-details";
 
 export type PerRepoStatus = {
   repository_name: string;
@@ -49,6 +54,9 @@ export type PerRepoStatus = {
   trackingUpstreamState?: string | null;
   trackingEvidenceAvailable?: boolean;
   comparisonEvidenceAvailable?: boolean;
+  actionHead?: GitRemoteRefObservation | null;
+  trackingUpstream?: GitRemoteRefObservation | null;
+  comparison?: GitComparisonStatus | null;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
@@ -622,6 +630,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
               credentialDisplay={credentialDisplay}
             />
           )}
+          <RemoteRoleDetails statuses={perRepoStatus} repoDisplayName={repoDisplayName} />
           <RemoteContributionHeaderActions
             relation={relation}
             resolution={resolution}

@@ -391,6 +391,19 @@ test.describe("Mobile rewritten contribution history", () => {
     const changes = testPage.getByRole("button", { name: "Changes", exact: true });
     await changes.tap();
     await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 20_000 });
+    await testPage.getByTestId("remote-roles-trigger").tap();
+    const remoteRoles = testPage.getByTestId("remote-roles-popover");
+    await expect(remoteRoles).toBeVisible();
+    await expect(remoteRoles.getByTestId("remote-role-row-action_head")).toContainText(
+      `testorg/fork-${fixtureInput.suffix}`,
+    );
+    await expect(remoteRoles.getByTestId("remote-role-row-tracking_upstream")).toContainText(
+      `testorg/tracking-${fixtureInput.suffix}`,
+    );
+    await expect(remoteRoles.getByTestId("remote-role-row-comparison_target")).toContainText(
+      `${fixtureInput.canonicalOwner}/${fixtureInput.canonicalName}`,
+    );
+    await testPage.keyboard.press("Escape");
     const actions = testPage.getByTestId("mobile-git-actions");
     await actions.tap();
     const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');

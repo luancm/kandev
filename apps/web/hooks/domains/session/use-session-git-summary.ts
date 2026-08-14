@@ -1,5 +1,9 @@
 import { useMemo } from "react";
-import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
+import type {
+  FileInfo,
+  GitComparisonStatus,
+  GitRemoteRefObservation,
+} from "@/lib/state/slices/session-runtime/types";
 import { useSessionGitStatusByRepo } from "./use-session-git-status";
 import { deriveRemoteRoleCapabilities, hasComparisonEvidence } from "./use-session-git-derived";
 
@@ -19,6 +23,9 @@ export type RepositoryStatusSummary = {
   trackingUpstreamState: string | null;
   actionHeadCommit: string | null;
   trackingUpstreamCommit: string | null;
+  actionHead: GitRemoteRefObservation | null | undefined;
+  trackingUpstream: GitRemoteRefObservation | null | undefined;
+  comparison: GitComparisonStatus | null | undefined;
   actionEvidenceAvailable: boolean;
   trackingEvidenceAvailable: boolean;
   comparisonEvidenceAvailable: boolean;
@@ -38,6 +45,9 @@ function upstreamCounts(status: RepositoryStatus["status"], ahead: number) {
     trackingUpstreamState: roles.trackingUpstreamState,
     actionHeadCommit: roles.actionHeadCommit,
     trackingUpstreamCommit: roles.trackingUpstreamCommit,
+    actionHead: status?.action_head,
+    trackingUpstream: status?.tracking_upstream,
+    comparison: status?.comparison,
     actionEvidenceAvailable: roles.actionEvidenceAvailable,
     trackingEvidenceAvailable: roles.trackingEvidenceAvailable,
     comparisonEvidenceAvailable: hasComparisonEvidence(status),

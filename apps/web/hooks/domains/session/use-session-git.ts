@@ -10,6 +10,8 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type {
   FileInfo,
+  GitComparisonStatus,
+  GitRemoteRefObservation,
   SessionCommit,
   CumulativeDiff,
 } from "@/lib/state/slices/session-runtime/types";
@@ -132,6 +134,9 @@ export type SessionGit = {
     trackingUpstreamState: string | null;
     actionHeadCommit: string | null;
     trackingUpstreamCommit: string | null;
+    actionHead: GitRemoteRefObservation | null | undefined;
+    trackingUpstream: GitRemoteRefObservation | null | undefined;
+    comparison: GitComparisonStatus | null | undefined;
     actionEvidenceAvailable: boolean;
     trackingEvidenceAvailable: boolean;
     comparisonEvidenceAvailable: boolean;

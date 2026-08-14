@@ -2218,6 +2218,19 @@ test.describe("Git Changes Panel", () => {
     const changes = testPage.getByTestId("changes-panel");
     await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 20_000 });
     await expect(changes.getByText("Local contribution on writable branch")).toBeVisible();
+    await changes.getByTestId("remote-roles-trigger").click();
+    const remoteRoles = testPage.getByTestId("remote-roles-popover");
+    await expect(remoteRoles).toBeVisible();
+    await expect(remoteRoles.getByTestId("remote-role-row-action_head")).toContainText(
+      `testorg/fork-${fixtureInput.suffix}`,
+    );
+    await expect(remoteRoles.getByTestId("remote-role-row-tracking_upstream")).toContainText(
+      `testorg/tracking-${fixtureInput.suffix}`,
+    );
+    await expect(remoteRoles.getByTestId("remote-role-row-comparison_target")).toContainText(
+      `${fixtureInput.canonicalOwner}/${fixtureInput.canonicalName}`,
+    );
+    await testPage.keyboard.press("Escape");
     await changes.getByRole("button", { name: "Open VCS options" }).click();
     const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
     await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
