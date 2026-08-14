@@ -2116,6 +2116,8 @@ test.describe("Git Changes Panel", () => {
       provider_owner: "testorg",
       provider_name: fixtureInput.canonicalName,
     });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Git triangular remote roles",
@@ -2134,7 +2136,11 @@ test.describe("Git Changes Panel", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
 
     const sessions = await apiClient.listTaskSessions(task.id);
-    const checkout = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_path;
+    const sessionSummary = sessions.sessions.find((item) => item.id === task.session_id);
+    const checkout =
+      sessionSummary?.worktree_path ??
+      sessionSummary?.workspace_path ??
+      sessionSummary?.worktrees?.[0]?.worktree_path;
     if (!checkout) throw new Error("triangular remote task has no worktree path");
     const git = new GitHelper(checkout, {
       ...process.env,
@@ -2231,13 +2237,10 @@ test.describe("Git Changes Panel", () => {
       `${fixtureInput.canonicalOwner}/${fixtureInput.canonicalName}`,
     );
     await testPage.keyboard.press("Escape");
-    await changes.getByRole("button", { name: "Open VCS options" }).click();
-    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
-    await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeEnabled();
-    expect(git.exec("git remote get-url origin").trim()).toBe(fixture.originURL);
+    // The fixture deliberately gives tracking/main a different history from
+    // the writable branch. All mutating actions must therefore fail closed.
+    await expect(changes.getByRole("button", { name: /^Pull/ })).toBeDisabled();
+    expect(git.exec("git config --get remote.origin.url").trim()).toBe(fixture.originURL);
     expect(git.exec("git remote").trim().split(/\r?\n/).sort()).toEqual([
       "comparison",
       "origin",

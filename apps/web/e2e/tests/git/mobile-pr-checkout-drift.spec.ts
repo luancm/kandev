@@ -297,6 +297,8 @@ test.describe("Mobile rewritten contribution history", () => {
       provider_owner: "testorg",
       provider_name: fixtureInput.canonicalName,
     });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile triangular remote roles",
@@ -314,7 +316,11 @@ test.describe("Mobile rewritten contribution history", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
     const sessions = await apiClient.listTaskSessions(task.id);
-    const checkout = sessions.sessions.find((item) => item.id === task.session_id)?.worktree_path;
+    const sessionSummary = sessions.sessions.find((item) => item.id === task.session_id);
+    const checkout =
+      sessionSummary?.worktree_path ??
+      sessionSummary?.workspace_path ??
+      sessionSummary?.worktrees?.[0]?.worktree_path;
     if (!checkout) throw new Error("mobile triangular remote task has no worktree path");
     const git = new GitHelper(checkout, makeGitEnv(backend.tmpDir));
     const fixture = configureTriangularRemoteFixture(git, backend.tmpDir, fixtureInput);
@@ -407,11 +413,13 @@ test.describe("Mobile rewritten contribution history", () => {
     const actions = testPage.getByTestId("mobile-git-actions");
     await actions.tap();
     const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
-    await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeEnabled();
-    expect(git.exec("git remote get-url origin").trim()).toBe(fixture.originURL);
+    // Tracking/main intentionally diverges from the writable branch, so the
+    // mobile action menu must keep every mutating operation disabled.
+    await expect(menu.getByRole("menuitem", { name: /^Pull/ })).toBeDisabled();
+    await expect(menu.getByRole("menuitem", { name: /^Rebase/ })).toBeDisabled();
+    await expect(menu.getByRole("menuitem", { name: /^Merge/ })).toBeDisabled();
+    await expect(menu.getByRole("menuitem", { name: /^Push/ })).toBeDisabled();
+    expect(git.exec("git config --get remote.origin.url").trim()).toBe(fixture.originURL);
     expect(git.exec("git remote").trim().split(/\r?\n/).sort()).toEqual([
       "comparison",
       "origin",
