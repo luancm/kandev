@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
 
@@ -70,6 +70,15 @@ describe("WorkflowStepper", () => {
     // Fallback step isn't the real current step, so it must not claim aria-current.
     expect(screen.getByTestId("workflow-step-Spec").getAttribute("aria-current")).toBeNull();
     expect(screen.getByText("1/3")).toBeTruthy();
+  });
+
+  it("opens a target navigator when the collapsed stepper is activated", () => {
+    collapsedMock.mockReturnValue(true);
+    render(<WorkflowStepper steps={STEPS} currentStepId="b" taskId="task-1" workflowId="wf-1" />);
+
+    fireEvent.click(screen.getByTestId("workflow-step-Work"));
+
+    expect(screen.getByTestId("workflow-step-c-move-options")).toBeTruthy();
   });
 
   it("shows the archived badge instead of a step when collapsed and archived", () => {
