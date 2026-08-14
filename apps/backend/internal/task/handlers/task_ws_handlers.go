@@ -410,8 +410,11 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman, EntryOptions: req.EntryOptions},
 	)
 	if err != nil {
-		h.logger.Error("failed to move task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
+		code := classifyWSMoveTaskError(err)
+		if code == ws.ErrorCodeInternalError {
+			h.logger.Error("failed to move task", zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to move task", nil)
 	}
 
 	response := dto.MoveTaskResponse{
@@ -424,6 +427,19 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func classifyWSMoveTaskError(err error) string {
+	switch {
+	case isNotFound(err):
+		return ws.ErrorCodeNotFound
+	case isMoveConflict(err):
+		return ws.ErrorCodeConflict
+	case isValidationError(err):
+		return ws.ErrorCodeValidation
+	default:
+		return ws.ErrorCodeInternalError
+	}
 }
 
 type wsUpdateTaskStateRequest struct {

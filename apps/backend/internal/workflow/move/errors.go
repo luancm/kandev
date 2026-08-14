@@ -12,6 +12,9 @@ var (
 	ErrEntryOptionsRequireStepChange = errors.New("entry options require a workflow step change")
 	ErrEntryTargetUnavailable        = errors.New("workflow move entry target has no session or auto-start")
 	ErrEntryStoreUnavailable         = errors.New("workflow move entry store unavailable")
+	ErrProfileUnavailable            = errors.New("workflow move entry profile unavailable")
+	ErrModelUnavailable              = errors.New("workflow move entry model unavailable")
+	ErrMoveConflict                  = errors.New("another workflow move is already pending")
 )
 
 // ConflictingInstructionsError reports that the nested instructions and the

@@ -1,7 +1,7 @@
 ---
 id: "01-backend-move-contract-and-entry"
 title: "Backend move contract and entry"
-status: completed
+status: reopened
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -12,7 +12,7 @@ spec: "../../specs/workflow-step-move-overrides/spec.md"
 
 ## Scope
 
-Implement the typed EntryOptions contract across HTTP, WebSocket, MCP, task.moved, PendingMove, private move entries, and orchestrator step entry. Preserve existing move authorization and target validation while replacing the separately queued MCP prompt with one transition-scoped value.
+Implement the typed EntryOptions contract across HTTP, WebSocket, MCP, task.moved, PendingMove, private move entries, and orchestrator step entry. Preserve existing move authorization and target validation while replacing the separately queued MCP prompt with one transition-scoped value. Reconcile this with upstream WIP-capacity queueing and lifecycle recovery so immediate, active-turn deferred, WIP-queued, promoted, and restarted moves all retain and consume EntryOptions exactly once.
 
 ## Likely files
 
@@ -32,6 +32,7 @@ Implement the typed EntryOptions contract across HTTP, WebSocket, MCP, task.move
 - Explicit profile, reset, model, and prompt precedence is applied at target entry in the specified order for existing sessions, switched or reused sessions, new auto-start sessions, passthrough, and no-auto-start queued prompts.
 - Existing authorization, reachable-target, workspace, archive, WIP, active-session, and step-history behavior remains intact. Agent-facing overrides with no target session and no target auto-start are rejected before the task changes.
 - A move hand-off prompt is delivered once and cannot be misdelivered to the source session after transition failure or profile switching.
+- WIP-full moves retain reset, instructions, profile, and model overrides through queued source-exit, promotion, and restart recovery.
 - Tests cover normalization, event propagation, pending persistence/restart, invalid inputs, all entry paths, and duplicate-signal idempotence.
 
 ## Verification

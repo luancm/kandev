@@ -136,6 +136,10 @@ const WorkflowStepper = memo(function WorkflowStepper({
           sortedSteps={sortedSteps}
           currentIndex={currentIndex}
           isArchived={isArchived}
+          taskId={taskId}
+          workflowId={workflowId}
+          movingToStepId={movingToStepId}
+          onMove={handleMove}
         />
       ) : (
         <>
@@ -173,12 +177,22 @@ function MinimalWorkflowStepper({
   sortedSteps,
   currentIndex,
   isArchived,
+  taskId,
+  workflowId,
+  movingToStepId,
+  onMove,
 }: {
   sortedSteps: Step[];
   currentIndex: number;
   isArchived?: boolean;
+  taskId?: string | null;
+  workflowId?: string | null;
+  movingToStepId: string | null;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => void;
 }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [optionsStepId, setOptionsStepId] = useState<string | null>(null);
   if (isArchived) {
     return (
       <span
@@ -193,27 +207,117 @@ function MinimalWorkflowStepper({
   const current = currentIndex >= 0 ? sortedSteps[currentIndex] : sortedSteps[0];
   if (!current) return null;
 
+  const closeOptions = () => setOptionsStepId(null);
+
   return (
-    <div
-      data-testid="workflow-stepper-minimal"
-      className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
-    >
-      <div
-        data-testid={`workflow-step-${current.name}`}
-        aria-current={currentIndex >= 0 ? "step" : undefined}
-        className="flex min-w-0 items-center gap-1.5 text-xs"
-      >
-        <StepCircleIndicator isCurrent isCompleted={false} />
-        <span className="truncate text-xs font-medium leading-none text-foreground">
-          {current.name}
-        </span>
-      </div>
-      {sortedSteps.length > 1 && (
-        <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
-          {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
-        </span>
+    <>
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerTrigger asChild>
+          <button
+            type="button"
+            data-testid="workflow-stepper-minimal"
+            className="flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
+            aria-label={t("task:workflowMoveChooseTarget")}
+          >
+            <span
+              data-testid={`workflow-step-${current.name}`}
+              aria-current={currentIndex >= 0 ? "step" : undefined}
+              className="flex min-w-0 items-center gap-1.5 text-xs"
+            >
+              <StepCircleIndicator isCurrent isCompleted={false} />
+              <span className="truncate text-xs font-medium leading-none text-foreground">
+                {current.name}
+              </span>
+            </span>
+            {sortedSteps.length > 1 && (
+              <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
+                {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
+              </span>
+            )}
+          </button>
+        </DrawerTrigger>
+        <DrawerContent>
+          <DrawerHeader className="text-left">
+            <DrawerTitle>{t("task:workflowMoveChooseTarget")}</DrawerTitle>
+            <DrawerDescription>{t("task:workflowMoveOptionsDescription")}</DrawerDescription>
+          </DrawerHeader>
+          <div className="max-h-[60vh] overflow-y-auto px-4 pb-5" data-vaul-no-drag>
+            <div className="flex flex-col gap-2">
+              {sortedSteps.map((step, index) => {
+                const isCurrent = index === currentIndex;
+                const canMove = canMoveToStep({
+                  isArchived,
+                  isCurrent,
+                  taskId,
+                  workflowId,
+                  isAdjacent:
+                    currentIndex >= 0 &&
+                    (index === currentIndex - 1 || index === currentIndex + 1),
+                  allowManualMove: step.allow_manual_move,
+                });
+                const isMoving = movingToStepId === step.id;
+                return (
+                  <div
+                    key={step.id}
+                    className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2"
+                  >
+                    <span className={cn("min-w-0 truncate text-sm", isCurrent && "font-medium")}>
+                      {step.name}
+                    </span>
+                    {canMove && (
+                      <span className="flex shrink-0 items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="default"
+                          className="min-h-11"
+                          disabled={isMoving}
+                          onClick={() => {
+                            setOpen(false);
+                            onMove(step.id);
+                          }}
+                        >
+                          {isMoving ? t("task:moving") : t("task:moveHere")}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="min-h-11"
+                          disabled={isMoving}
+                          data-testid={`workflow-step-${step.id}-move-options`}
+                          onClick={() => {
+                            setOpen(false);
+                            setOptionsStepId(step.id);
+                          }}
+                        >
+                          {t("task:moveWithOptions")}
+                        </Button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
+      {optionsStepId && (
+        <WorkflowMoveOptions
+          open
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) closeOptions();
+          }}
+          targetStepName={sortedSteps.find((step) => step.id === optionsStepId)?.name ?? ""}
+          isMoving={movingToStepId === optionsStepId}
+          onSubmit={(options) => {
+            const stepId = optionsStepId;
+            closeOptions();
+            onMove(stepId, options);
+          }}
+        />
       )}
-    </div>
+    </>
   );
 }
 
@@ -399,6 +503,7 @@ function StepHoverContent({
             className="min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
             disabled={isMoving}
             onClick={onOpenOptions}
+            data-testid={`workflow-step-${step.id}-move-options`}
           >
             {t("task:moveWithOptions")}
           </Button>

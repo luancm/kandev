@@ -648,6 +648,15 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
 
+	// A human move with one-shot entry options is committed while this turn is
+	// active, but its destination reset/profile/model/prompt must wait until the
+	// exact ready event above. The task marker and private entry store make this
+	// hand-off recoverable when the task.moved notification raced the turn end or
+	// the process restarted before destination entry began.
+	if s.resumeCommittedWorkflowMoveAfterTurn(ctx, data.TaskID, data.SessionID, session) {
+		return
+	}
+
 	// A move_task_kandev call during this turn deferred the actual move to
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular

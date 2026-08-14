@@ -1,7 +1,7 @@
 ---
 id: "03-e2e-docs-and-delivery"
 title: "Move override E2E and docs"
-status: completed
+status: reopened
 wave: 3
 depends_on:
   - "01-backend-move-contract-and-entry"
@@ -32,6 +32,7 @@ Prove the feature through desktop and mobile workflows, then update public workf
 - Desktop E2E opens target options, submits a one-shot profile/model/reset/instructions override, and verifies the task reaches the target without mutating workflow defaults.
 - Mobile E2E reaches the same options through touch, verifies the Drawer controls and submission, and asserts no horizontal overflow.
 - An active-session or deferred move scenario verifies that the override survives the turn boundary and is delivered once when the target starts.
+- A WIP-queued move scenario verifies that all override fields survive queue promotion and are delivered once after capacity opens.
 - Public docs explain direct moves, one-shot overrides, target-step defaults, the MCP compatibility alias, and desktop/mobile affordances without promising PR draft/readiness support.
 - Public documentation validators and focused E2E commands pass with retries disabled for the focused specs.
 
@@ -46,4 +47,4 @@ Prove the feature through desktop and mobile workflows, then update public workf
 
 ## Handoff
 
-Implementation complete. Public workflow, agent-communication, WebSocket, and configuration-prompt documentation are updated and the public-doc validators pass. Dedicated browser specs were not added in this pass.
+Public documentation is updated, but dedicated browser specs and upstream queue-aware integration coverage remain required before completion.

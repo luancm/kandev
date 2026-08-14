@@ -2,14 +2,20 @@
 spec: docs/specs/workflow-step-move-overrides/spec.md
 decision: docs/decisions/2026-08-13-workflow-move-overrides.md
 created: 2026-08-13
-status: implemented
+status: integration-required
 ---
 
 # Implementation Plan: Workflow Step Move Overrides
 
 ## Outcome
 
-Extend the existing task move path with a typed, one-shot EntryOptions object. Human UI moves and move_task_kandev use the same destination-plus-options contract, active moves retain the object in PendingMove, direct moves store it privately behind a move_id, and the orchestrator applies profile, reset, model, and instructions overrides at target step entry. The workflow stepper and chat/passthrough next-step controls share one responsive options form.
+Extend the existing task move path with a typed, one-shot EntryOptions object. Human UI moves and move_task_kandev use the same destination-plus-options contract, active moves retain the object in PendingMove, direct moves store it privately behind a move_id, and the orchestrator applies profile, reset, model, and instructions overrides at target step entry. The workflow stepper and chat/passthrough next-step controls share one responsive options form. The contract is queue-agnostic: immediate moves, active-turn deferred moves, WIP-blocked queued moves, promotions, and restart recovery all preserve the same options and consume them exactly once when the task actually enters the target step.
+
+## Upstream integration boundary
+
+Upstream now supports durable WIP-capacity queues and lifecycle recovery for workflow transitions. A move can therefore be accepted without entering its target immediately. EntryOptions must travel with the accepted transition through WIP admission, queued source-step exit, promotion, and recovery; queueing delays the transition effects but does not change or discard the requested behavior. The combined pipeline is: validate and persist options, admit or queue the move, preserve options through every durable intermediate record, run source exit once, promote or recover, enter the target, apply profile/reset/model, append instructions, and consume options once.
+
+The implementation must preserve upstream's WIP admission, queue-promotion, dependency, and lifecycle-recovery invariants while reapplying the move override behavior at the final target-entry seam. Do not resolve the merge by choosing the feature-side or upstream-side workflow handler wholesale.
 
 Version one includes reset_context, instructions, agent_profile_id, and model. Pull-request draft/readiness is explicitly out of scope.
 
@@ -45,7 +51,7 @@ Create the typed model, normalization/validation helpers, and private entry stor
 
 Extend httpMoveTaskRequest and wsMoveTaskRequest with entry_options and pass them to MoveTaskWithOptions. Keep all existing move validation and active-primary behavior. Add MCP decoding for entry_options, legacy prompt normalization, profile/model validation, and the existing configuration-task authorization checks.
 
-Extend watcher.TaskMovedEventData with move_id and messagequeue.PendingMove with the typed value. Add a replayable pending_moves migration for a serialized entry_options column, update SQLite and memory repositories, and ensure session transfer copies it. Existing rows decode to an empty value.
+Extend watcher.TaskMovedEventData with move_id and messagequeue.PendingMove with the typed value. Add a replayable pending_moves migration for a serialized entry_options column, update SQLite and memory repositories, and ensure session transfer copies it. Existing rows decode to an empty value. Integrate these fields with upstream's queued-move destination, WIP-admission, source-exit barrier, promotion, and startup-recovery records so no queue path loses the options.
 
 Remove the current pre-move queueMoveTaskPrompt dependency from move_task_kandev. For an active source session, persist the full value in PendingMove. For an immediate move, pass move_id through task.moved and let target entry load the private value after the target session is selected. Preserve cleanup on invalid targets, transition failure, and prompt-delivery failure so a hand-off cannot leak to the source session.
 
@@ -67,7 +73,7 @@ Route every new label, help text, validation message, and button copy through th
 
 ### Verification, E2E, and documentation
 
-Add backend unit coverage for normalization, precedence, direct event propagation, deferred persistence and restart, session transfer, invalid target/profile/model, prompt delivery, and exactly-once behavior. Add frontend component and hook coverage for direct versus options moves, payload shape, profile/model/reset/prompt state, chat/passthrough parity, and touch Drawer rendering.
+Add backend unit coverage for normalization, precedence, direct event propagation, deferred persistence and restart, session transfer, invalid target/profile/model, prompt delivery, and exactly-once behavior. Add coverage for WIP-full moves, promotion, queued source-exit recovery, and restart recovery with all four override fields preserved. Add frontend component and hook coverage for direct versus options moves, payload shape, profile/model/reset/prompt state, chat/passthrough parity, and touch Drawer rendering.
 
 Add desktop and mobile Playwright coverage using the existing workflow fixtures and semantic backend polling. The desktop scenario should open a target's options, submit an override, and verify the task enters the target with the selected fields. The mobile scenario should open the same options through touch, verify the Drawer controls, submit, and assert no horizontal overflow. Include an active-agent deferred move case where practical.
 
@@ -103,7 +109,7 @@ Frontend focused checks:
     cd apps/web && pnpm run i18n:check
     cd apps/web && pnpm run i18n:ratchet
 
-Focused browser checks: not added in this pass; the responsive Drawer and options payload are covered by component tests, while the existing workflow proceed E2E continues to cover the unchanged direct path.
+Focused browser checks: still required after upstream integration. Add desktop and mobile scenarios for an immediate override move and, where the fixture can fill a WIP-limited step, a queued move whose options apply only after promotion. The existing workflow proceed E2E covers only the unchanged direct path.
 
 Public documentation checks:
 
@@ -114,4 +120,4 @@ Before delivery, run git diff --check and verify staged Go files with gofmt -l a
 
 ## Handoff
 
-Implementation is complete for the approved v1 boundary. The direct and deferred move paths share the typed one-shot EntryOptions contract, and the public task.moved event exposes only the private move_id. Pull-request draft/readiness remains intentionally out of scope. The task is ready for Review after the focused checks and commit are recorded.
+The original direct/deferred implementation is complete, but upstream WIP-queue integration is required before this package is complete. Pull-request draft/readiness remains intentionally out of scope. The task is ready for Review only after the combined queue-aware paths and focused browser checks pass.

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,44 @@ import (
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type pendingMoveEntryStore struct {
+	mu      sync.Mutex
+	entries map[string]*workflowmove.Entry
+}
+
+func newPendingMoveEntryStore() *pendingMoveEntryStore {
+	return &pendingMoveEntryStore{entries: make(map[string]*workflowmove.Entry)}
+}
+
+func (s *pendingMoveEntryStore) Save(_ context.Context, entry *workflowmove.Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copy := *entry
+	s.entries[entry.ID] = &copy
+	return nil
+}
+
+func (s *pendingMoveEntryStore) Load(_ context.Context, id string) (*workflowmove.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[id]
+	if entry == nil {
+		return nil, nil
+	}
+	copy := *entry
+	return &copy, nil
+}
+
+func (s *pendingMoveEntryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.entries[id]; !ok {
+		return workflowmove.ErrEntryNotFound
+	}
+	delete(s.entries, id)
+	return nil
+}
 
 // TestPendingMove_ReviewToInProgress_OneTransitionOnly reproduces the production bug
 // observed at task a99d863e ("buggy fibo"): a QA agent calls move_task_kandev to send
@@ -340,6 +379,165 @@ func TestPendingMoveWithEntryOptionsPreservesUnrelatedQueuedMessageOnFailure(t *
 	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
 	if status.Count != 1 || status.Entries[0].Content != "user follow-up" {
 		t.Fatalf("queue after failed move = %+v, want unrelated message preserved", status.Entries)
+	}
+}
+
+func TestPendingMoveWithEntryOptionsSurvivesWIPQueueUntilPromotion(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps[stepInProgressID].AgentProfileID = profileReview
+	sc.stepGetter.steps[stepInProgressID].WIPLimit = 1
+	entryStore := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(entryStore)
+	seedExecutorRunning(t, sc.repo, sc.reviewSessionID, "task-1", "ae-review")
+
+	if err := sc.repo.CreateTask(sc.ctx, &models.Task{
+		ID: "progress-occupant", WorkspaceID: "ws1", WorkflowID: "wf1",
+		WorkflowStepID: stepInProgressID, State: v1.TaskStateTODO, WIPAdmitted: true,
+	}); err != nil {
+		t.Fatalf("create WIP occupant: %v", err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load source session: %v", err)
+	}
+	moveID := "deferred-options-move"
+	options := &workflowmove.EntryOptions{
+		ResetContext:   true,
+		Instructions:   "Create the PR ready for review, not as a draft.",
+		AgentProfileID: profileReview,
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+		MoveID:         moveID,
+		EntryOptions:   options,
+	})
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload queued task: %v", err)
+	}
+	if task.WorkflowStepID != stepInProgressID || task.WIPAdmitted || task.QueuedForStepID != stepInProgressID {
+		t.Fatalf("queued task placement = step=%q admitted=%v queue=%q", task.WorkflowStepID, task.WIPAdmitted, task.QueuedForStepID)
+	}
+	if got := queuedMoveEntryID(task); got != moveID {
+		t.Fatalf("queued move id = %q, want %q", got, moveID)
+	}
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry == nil || entry.Options != *options {
+		t.Fatalf("private entry = %+v err=%v, want options retained while queued", entry, loadErr)
+	}
+
+	// The source-exit barrier runs asynchronously after the transition. Wait
+	// for its durable completion before making the destination appear admitted.
+	deadline := time.Now().Add(time.Second)
+	for {
+		task, err = sc.repo.GetTask(sc.ctx, "task-1")
+		if err != nil {
+			t.Fatalf("reload source-exit state: %v", err)
+		}
+		if queuedMoveExitCompleted(task) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queued source-exit barrier did not complete: %#v", task.Metadata)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Promotion is normally performed by the WIP reconciler. This simulates
+	// the durable promotion write and then delivers its event, which must reuse
+	// the same private move row and consume it only at destination entry.
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.QueuedAt = nil
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	task.Metadata[models.MetaKeyQueuePromotionPending] = true
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("persist simulated promotion: %v", err)
+	}
+	entryCompleted := make(chan struct{})
+	sc.svc.onTaskQueuePromotionEntryComplete = func() { close(entryCompleted) }
+	sc.svc.handleTaskQueuePromoted(sc.ctx, watcher.TaskEventData{TaskID: "task-1"})
+	select {
+	case <-entryCompleted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("destination entry did not complete after queue promotion")
+	}
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry != nil {
+		t.Fatalf("private entry after promotion = %+v err=%v, want consumed", entry, loadErr)
+	}
+	latest, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload promoted task: %v", err)
+	}
+	if _, pending := latest.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("workflow move marker remained after destination entry: %#v", latest.Metadata)
+	}
+}
+
+func TestWorkflowMoveEntryRecoveryConsumesPrivateOptionsAfterRestart(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	entryStore := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(entryStore)
+
+	// Recovery must be able to resume an already-committed move without the
+	// original task.moved notification. Keep the target session idle and use a
+	// target step with no auto-start action so the test isolates the durable
+	// entry hand-off and queue delivery.
+	sc.stepGetter.steps[stepInProgressID] = &wfmodels.WorkflowStep{
+		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
+		AgentProfileID: profileReview,
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := sc.repo.UpdateTaskSession(sc.ctx, session); err != nil {
+		t.Fatalf("persist idle review session: %v", err)
+	}
+
+	const moveID = "restart-recovered-move"
+	options := &workflowmove.EntryOptions{Instructions: "Continue from the durable move."}
+	if err := entryStore.Save(sc.ctx, &workflowmove.Entry{ID: moveID, TaskID: "task-1", Options: *options}); err != nil {
+		t.Fatalf("save private move entry: %v", err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WorkflowStepID = stepInProgressID
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.Metadata = map[string]interface{}{
+		models.MetaKeyWorkflowMovePending: map[string]interface{}{
+			"from_step_id": stepInReviewID,
+			"move_id":      moveID,
+		},
+	}
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("persist committed move marker: %v", err)
+	}
+
+	// This is the startup reconciliation action for the durable marker.
+	sc.svc.recoverWorkflowMoveEntry(sc.ctx, task)
+
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry != nil {
+		t.Fatalf("private entry after recovery = %+v err=%v, want consumed", entry, loadErr)
+	}
+	recovered, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload recovered task: %v", err)
+	}
+	if _, pending := recovered.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("workflow move marker remained after recovery: %#v", recovered.Metadata)
+	}
+	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
+	if status.Count == 0 || !strings.Contains(status.Entries[len(status.Entries)-1].Content, options.Instructions) {
+		t.Fatalf("recovered queue = %+v, want one-time instructions", status.Entries)
 	}
 }
 

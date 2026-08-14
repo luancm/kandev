@@ -92,6 +92,9 @@ func isMoveConflict(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, workflowmove.ErrMoveConflict) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "active session") ||
 		strings.Contains(msg, "archived tasks cannot be moved") ||
@@ -115,7 +118,9 @@ func isValidationError(err error) bool {
 	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
-		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) ||
+		errors.Is(err, workflowmove.ErrProfileUnavailable) ||
+		errors.Is(err, workflowmove.ErrModelUnavailable) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
