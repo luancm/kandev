@@ -223,9 +223,6 @@ type PendingMove struct {
 	WorkflowStepID string    `json:"workflow_step_id"`
 	Position       int       `json:"position"`
 	QueuedAt       time.Time `json:"queued_at"`
-	// MoveID identifies the deferred transition so its private entry options
-	// can be bound to the committed destination after the source turn ends.
-	MoveID string `json:"move_id,omitempty"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	// SenderSessionID identifies the session that requested the move. It is

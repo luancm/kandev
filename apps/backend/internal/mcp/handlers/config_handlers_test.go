@@ -1019,8 +1019,9 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
 	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
 	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
-	require.Len(t, queue.calls, 1)
-	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
+	require.NotNil(t, queue.pendingMoves[0].EntryOptions)
+	assert.Equal(t, "continue the work", queue.pendingMoves[0].EntryOptions.Instructions)
+	assert.Empty(t, queue.calls, "legacy prompt is carried in the private move options, not a source-session queue entry")
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {
