@@ -723,7 +723,7 @@ func TestRunBatchedBranchQuery_MatchesExactHeadAndDeduplicatesRepresentations(t 
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	status := got[graphqlBranchKey("fork", "project", "local-feature", &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature"})]
+	status := got.Statuses[graphqlBranchKey("fork", "project", "local-feature", &PRHeadRef{Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature"})]
 	if status == nil || status.PR == nil {
 		t.Fatalf("exact-head status = %#v, want one PR", status)
 	}
@@ -755,11 +755,11 @@ func TestRunBatchedBranchQuery_KeepsDistinctExactHeadsWithTheSameLocalBranch(t *
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 2 {
+	if len(got.Statuses) != 2 {
 		t.Fatalf("exact-head results = %#v, want one result per exact head", got)
 	}
-	if got[graphqlBranchKey(refs[0].Owner, refs[0].Repo, refs[0].Branch, refs[0].Head)] == nil ||
-		got[graphqlBranchKey(refs[1].Owner, refs[1].Repo, refs[1].Branch, refs[1].Head)] == nil {
+	if got.Statuses[graphqlBranchKey(refs[0].Owner, refs[0].Repo, refs[0].Branch, refs[0].Head)] == nil ||
+		got.Statuses[graphqlBranchKey(refs[1].Owner, refs[1].Repo, refs[1].Branch, refs[1].Head)] == nil {
 		t.Fatalf("exact-head results lost one of the distinct heads: %#v", got)
 	}
 }
@@ -792,7 +792,7 @@ func TestRunBatchedBranchQuery_PaginatesExactHeadCandidatesBeforeUniqueness(t *t
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
+	if len(got.Statuses) != 0 {
 		t.Fatalf("paginated ambiguous exact-head results = %#v, want no result", got)
 	}
 	if len(exec.queries) != 2 {
@@ -813,7 +813,7 @@ func TestRunBatchedBranchQuery_HeadlessRejectsSiblingFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
+	if len(got.Statuses) != 0 {
 		t.Fatalf("headless sibling-fork result = %#v, want no result", got)
 	}
 }
@@ -833,7 +833,7 @@ func TestRunBatchedBranchQuery_PreservesBranchCaseAndRepositoryCaseRules(t *test
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if got[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch, ref.Head)] == nil {
+	if got.Statuses[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch, ref.Head)] == nil {
 		t.Fatalf("case-insensitive repository identity should match exact head: %#v", got)
 	}
 
@@ -846,7 +846,7 @@ func TestRunBatchedBranchQuery_PreservesBranchCaseAndRepositoryCaseRules(t *test
 	if err != nil {
 		t.Fatalf("run branch-case mismatch: %v", err)
 	}
-	if len(got) != 0 {
+	if len(got.Statuses) != 0 {
 		t.Fatalf("branch-case mismatch = %#v, want no result", got)
 	}
 }
@@ -866,7 +866,7 @@ func TestRunBatchedBranchQuery_RejectsForeignHeadHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
+	if len(got.Statuses) != 0 {
 		t.Fatalf("foreign-host exact-head result = %#v, want no result", got)
 	}
 }
@@ -892,7 +892,7 @@ func TestRunBatchedBranchQuery_RejectsAmbiguousExactHeadMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(got) != 0 {
+	if len(got.Statuses) != 0 {
 		t.Fatalf("ambiguous exact-head matches = %#v, want no result", got)
 	}
 }

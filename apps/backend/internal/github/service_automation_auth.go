@@ -246,7 +246,7 @@ func (s *Service) findPRForWatchWithResolvedClient(
 		return nil, err
 	}
 	if watch.HeadOwner == "" || watch.HeadRepo == "" || watch.HeadBranch == "" {
-		return resolved.Client.FindPRByBranch(ctx, attachedOwner, attachedRepo, watch.Branch)
+		return s.findPRByBranchInForkNetwork(ctx, resolved.Client, resolved.CacheScope, attachedOwner, attachedRepo, watch.Branch)
 	}
 	return s.findPRByExactHeadWithClient(ctx, resolved.Client, watch.WorkspaceID, attachedOwner, attachedRepo, PRHeadRef{
 		Host: watch.HeadHost, Owner: watch.HeadOwner, Repo: watch.HeadRepo, Branch: watch.HeadBranch,

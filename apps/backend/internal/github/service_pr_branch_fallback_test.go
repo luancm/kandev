@@ -90,6 +90,18 @@ func TestFindPRByBranchForWorkspace_DoesNotUseAnotherForkWithSameBranch(t *testi
 func TestPollerDetectPRForWatch_RebindsForkWatchToParentPRRepository(t *testing.T) {
 	poller, _, client, store := setupPollerTest(t)
 	seedTask(t, store, "task-1", false)
+	if _, err := store.db.Exec(`CREATE TABLE repositories (
+		id TEXT PRIMARY KEY,
+		provider TEXT NOT NULL DEFAULT '',
+		provider_owner TEXT NOT NULL DEFAULT '',
+		provider_name TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create repositories table: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO repositories (id, provider, provider_owner, provider_name) VALUES (?, ?, ?, ?)`,
+		"repo-1", "github", forkOwner, forkRepo); err != nil {
+		t.Fatalf("seed attached repository: %v", err)
+	}
 	seedForkNetwork(client)
 	client.AddPR(forkNetworkPR())
 
@@ -127,6 +139,18 @@ func TestPollerDetectPRForWatch_RebindsForkWatchToParentPRRepository(t *testing.
 func TestSyncWorkspaceWatchesBatched_ForkFallsBackToParent(t *testing.T) {
 	_, service, client, store := setupBatchedPollerTest(t)
 	seedTask(t, store, "task-1", false)
+	if _, err := store.db.Exec(`CREATE TABLE repositories (
+		id TEXT PRIMARY KEY,
+		provider TEXT NOT NULL DEFAULT '',
+		provider_owner TEXT NOT NULL DEFAULT '',
+		provider_name TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create repositories table: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO repositories (id, provider, provider_owner, provider_name) VALUES (?, ?, ?, ?)`,
+		"repo-1", "github", forkOwner, forkRepo); err != nil {
+		t.Fatalf("seed attached repository: %v", err)
+	}
 	seedForkNetwork(client.MockClient)
 	client.AddPR(forkNetworkPR())
 	client.branchResponses = []string{`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`}

@@ -106,9 +106,17 @@ func deriveActiveError(state *projectionState) *ActiveErrorSummary {
 func deriveGitSummary(state *projectionState) *GitSummary {
 	if !state.gitObserved && state.gitBaseline != nil {
 		copy := *state.gitBaseline
+		if state.gitBaseline.ComparisonByRepository != nil {
+			comparisons := make(map[string]GitComparisonSummary, len(*state.gitBaseline.ComparisonByRepository))
+			for repository, comparison := range *state.gitBaseline.ComparisonByRepository {
+				comparisons[repository] = comparison
+			}
+			copy.ComparisonByRepository = &comparisons
+		}
 		return &copy
 	}
 	var git GitSummary
+	comparisons := make(map[string]GitComparisonSummary)
 	for _, observation := range state.git {
 		git.Additions += observation.Additions
 		git.Deletions += observation.Deletions
@@ -116,7 +124,23 @@ func deriveGitSummary(state *projectionState) *GitSummary {
 		git.Ahead += observation.Ahead
 		git.Behind += observation.Behind
 	}
-	if git == (GitSummary{}) {
+	for repository, observation := range state.git {
+		if observation.Comparison != nil {
+			comparisons[repository] = *observation.Comparison
+		}
+	}
+	switch {
+	case len(state.git) == 1 && len(comparisons) == 1:
+		for _, comparison := range comparisons {
+			copy := comparison
+			git.Comparison = &copy
+		}
+	default:
+		if len(state.git) > 1 && len(comparisons) > 0 {
+			git.ComparisonByRepository = &comparisons
+		}
+	}
+	if git.Additions == 0 && git.Deletions == 0 && git.ChangedFiles == 0 && git.Ahead == 0 && git.Behind == 0 && git.Comparison == nil && (git.ComparisonByRepository == nil || len(*git.ComparisonByRepository) == 0) {
 		return nil
 	}
 	return &git

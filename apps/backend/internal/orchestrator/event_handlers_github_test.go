@@ -316,6 +316,9 @@ func (m *mockGitHubService) EnsurePRWatchForWorkspace(
 ) (*github.PRWatch, error) {
 	return m.EnsurePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, branch)
 }
+func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
+	return m.prWatch, nil
+}
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }

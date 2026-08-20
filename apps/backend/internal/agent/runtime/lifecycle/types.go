@@ -29,7 +29,11 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID                string
+	ID string
+	// RunID identifies the Office run that launched this execution. It is
+	// retained after runtime environment cleanup so delayed stop events can
+	// still be attributed to the correct run.
+	RunID             string
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
@@ -421,6 +425,9 @@ func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
 
 // signalPromptCompletionForStartupGeneration claims the current startup
 // generation and enqueues its completion signal as one ownership operation.
+// A stream can finish its generation check just before recovery advances the
+// execution, so checking and sending under the same mutex prevents an old
+// stream from publishing into the replacement prompt's channel.
 func (e *AgentExecution) signalPromptCompletionForStartupGeneration(
 	startupGeneration uint64,
 	signal PromptCompletionSignal,

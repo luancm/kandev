@@ -65,7 +65,7 @@ func (m *remoteHeadGitHubService) CreatePRWatchForWorkspaceWithHead(
 ) (*github.PRWatch, error) {
 	m.createdWithHead = true
 	m.createdHead = head
-	return m.mockGitHubService.CreatePRWatchForWorkspace(
+	return m.CreatePRWatchForWorkspace(
 		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repo, prNumber, branch,
 	)
 }
@@ -113,7 +113,7 @@ func TestSyncPRWatchTargetPersistsRuntimeHead(t *testing.T) {
 	}}}
 	svc.SetGitHubService(ghSvc)
 
-	svc.syncPRWatchTarget(context.Background(), "s1", "local-feature", &streams.GitHeadRemote{
+	svc.syncPRWatchTarget(context.Background(), "t1", "s1", "", "local-feature", &streams.GitHeadRemote{
 		Provider: "github", Host: "github.com", Owner: "fork", Repo: "project", Branch: "review-feature",
 	})
 

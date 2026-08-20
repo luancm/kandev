@@ -321,6 +321,13 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	}
 	if summary.Git != nil {
 		copy := *summary.Git
+		if summary.Git.ComparisonByRepository != nil {
+			comparisons := make(map[string]GitComparisonSummary, len(*summary.Git.ComparisonByRepository))
+			for repository, comparison := range *summary.Git.ComparisonByRepository {
+				comparisons[repository] = comparison
+			}
+			copy.ComparisonByRepository = &comparisons
+		}
 		state.gitBaseline = &copy
 	}
 	if summary.PullRequest != nil {
@@ -682,12 +689,37 @@ func (p *Projector) applyGitEventLocked(state *projectionState, data map[string]
 		state.gitBaseline = nil
 		state.gitObserved = true
 	}
+	comparison, hasComparison := gitComparisonFromStatus(status)
+	additions := nonNegativeInt(status, "branch_additions", "additions")
+	deletions := nonNegativeInt(status, "branch_deletions", "deletions")
+	ahead := nonNegativeInt(status, "ahead")
+	behind := nonNegativeInt(status, "behind")
+	previous, hasPrevious := state.git[repository]
+	if hasComparison {
+		// Structured comparison counts are authoritative. A nil count remains
+		// unknown and must not be filled from compatibility fields that may
+		// describe a different Git role.
+		if comparison != nil {
+			additions = comparisonCountOrZero(comparison.Additions)
+			deletions = comparisonCountOrZero(comparison.Deletions)
+			ahead = comparisonCountOrZero(comparison.Ahead)
+			behind = comparisonCountOrZero(comparison.Behind)
+		}
+	} else if hasPrevious && previous.Comparison != nil {
+		// Omitted comparison evidence is a partial observation, not a clear.
+		comparison = previous.Comparison
+		additions = previous.Additions
+		deletions = previous.Deletions
+		ahead = previous.Ahead
+		behind = previous.Behind
+	}
 	observation := GitSummary{
-		Additions:    nonNegativeInt(status, "branch_additions", "additions"),
-		Deletions:    nonNegativeInt(status, "branch_deletions", "deletions"),
+		Additions:    additions,
+		Deletions:    deletions,
 		ChangedFiles: changedFileCount(status),
-		Ahead:        nonNegativeInt(status, "ahead"),
-		Behind:       nonNegativeInt(status, "behind"),
+		Ahead:        ahead,
+		Behind:       behind,
+		Comparison:   comparison,
 	}
 	if equalGitSummary(state.git[repository], observation) {
 		return false

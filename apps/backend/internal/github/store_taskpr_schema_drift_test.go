@@ -134,6 +134,9 @@ func TestTaskPRSourceIdentityRoundTripsAndPartialUpdatePreservesIt(t *testing.T)
 func TestTaskPRSourceIdentitySurvivesLegacyTableRebuildAndReplay(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES (?, ?)`, "task-legacy", "ws-legacy"); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
 	if _, err := store.db.Exec(`ALTER TABLE github_task_prs RENAME TO github_task_prs_before_rebuild`); err != nil {
 		t.Fatalf("rename current task PR table: %v", err)
 	}
