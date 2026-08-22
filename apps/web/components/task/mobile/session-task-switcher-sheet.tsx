@@ -9,9 +9,10 @@ import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
+import type { TaskMoveWorkflow } from "../task-move-context-menu";
+import { MobileTaskMoveOptionsSurface, useMobileTaskMoveOptions } from "./mobile-task-move-options";
 import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
-import type { TaskMoveWorkflow } from "../task-move-context-menu";
 import { applyView } from "@/lib/sidebar/apply-view";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
@@ -85,6 +86,8 @@ export type MobileTaskListProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -226,7 +229,67 @@ function surfaceAction<TArgs extends unknown[]>(
   };
 }
 
+function buildMobileTaskListSurfaceActions({
+  presentation,
+  onOpenChange,
+  actions,
+  rename,
+  edit,
+  linking,
+}: Pick<
+  TaskSwitcherSurfaceContentProps,
+  "presentation" | "onOpenChange" | "actions" | "rename" | "edit" | "linking"
+>): Pick<
+  MobileTaskListProps,
+  | "onEditTask"
+  | "onRenameTask"
+  | "onArchiveTask"
+  | "onDeleteTask"
+  | "onDetachTask"
+  | "onLinkPullRequest"
+  | "onLinkIssue"
+  | "onLinkMergeRequest"
+  | "onLinkJiraTicket"
+  | "onLinkLinearIssue"
+  | "onLinkSentryIssue"
+> {
+  return {
+    onEditTask: surfaceAction(presentation, onOpenChange, edit.handleEditTask),
+    onRenameTask: surfaceAction(presentation, onOpenChange, rename.handleRenameTask),
+    onArchiveTask: surfaceAction(presentation, onOpenChange, actions.handleArchiveTask),
+    onDeleteTask: surfaceAction(presentation, onOpenChange, actions.handleDeleteTask),
+    onDetachTask: surfaceAction(presentation, onOpenChange, actions.handleDetachTask),
+    onLinkPullRequest: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkPullRequest,
+    ),
+    onLinkIssue: surfaceAction(presentation, onOpenChange, linking.taskListHandlers.onLinkIssue),
+    onLinkMergeRequest: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkMergeRequest,
+    ),
+    onLinkJiraTicket: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkJiraTicket,
+    ),
+    onLinkLinearIssue: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkLinearIssue,
+    ),
+    onLinkSentryIssue: surfaceAction(
+      presentation,
+      onOpenChange,
+      linking.taskListHandlers.onLinkSentryIssue,
+    ),
+  };
+}
+
 type TaskSwitcherSurfaceContentProps = {
+  open: boolean;
   presentation: "sheet" | "drawer";
   workspaceId: string | null;
   onOpenChange: (open: boolean) => void;
@@ -260,6 +323,7 @@ function MobileSubtaskDialog({
 }
 
 function TaskSwitcherSurfaceContent({
+  open,
   presentation,
   workspaceId,
   onOpenChange,
@@ -273,6 +337,29 @@ function TaskSwitcherSurfaceContent({
   linking,
 }: TaskSwitcherSurfaceContentProps) {
   const { t } = useTranslation();
+  const moveOptions = useMobileTaskMoveOptions({
+    open,
+    stepsByWorkflowId: data.stepsByWorkflowId,
+  });
+  if (moveOptions.moveOptionsStep && moveOptions.request) {
+    return (
+      <MobileTaskMoveOptionsSurface
+        presentation={presentation}
+        step={moveOptions.moveOptionsStep}
+        isMoving={moveOptions.isMoving}
+        onBack={moveOptions.handleClose}
+        onSubmit={moveOptions.handleSubmit}
+      />
+    );
+  }
+  const taskListActions = buildMobileTaskListSurfaceActions({
+    presentation,
+    onOpenChange,
+    actions,
+    rename,
+    edit,
+    linking,
+  });
   return (
     <>
       <TaskSwitcherSurfaceHeader
@@ -303,43 +390,13 @@ function TaskSwitcherSurfaceContent({
             activeTaskId={data.activeTaskId}
             selectedTaskId={data.selectedTaskId}
             onSelectTask={actions.handleSelectTask}
-            onEditTask={surfaceAction(presentation, onOpenChange, edit.handleEditTask)}
-            onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
+            onRequestMoveOptions={presentation === "drawer" ? moveOptions.handleRequest : undefined}
+            onBeforeMoveOptionsOpen={
+              presentation === "drawer" ? () => onOpenChange(false) : undefined
+            }
+            {...taskListActions}
             onCreateSubtask={onCreateSubtask}
-            onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
-            onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
-            onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
             onNestTask={actions.handleNestTask}
-            onLinkPullRequest={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkPullRequest,
-            )}
-            onLinkIssue={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkIssue,
-            )}
-            onLinkMergeRequest={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkMergeRequest,
-            )}
-            onLinkJiraTicket={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkJiraTicket,
-            )}
-            onLinkLinearIssue={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkLinearIssue,
-            )}
-            onLinkSentryIssue={surfaceAction(
-              presentation,
-              onOpenChange,
-              linking.taskListHandlers.onLinkSentryIssue,
-            )}
             deletingTaskId={actions.deletingTaskId}
             isLoading={data.tasksLoading}
             loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
@@ -506,6 +563,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
 
   const surfaceContent = (
     <TaskSwitcherSurfaceContent
+      open={open}
       presentation={presentation}
       workspaceId={workspaceId}
       onOpenChange={handleOpenChange}

@@ -282,13 +282,18 @@ export function usePlanActions(opts: {
   const disablePlanMode = useDirectDisablePlanMode(opts.resolvedSessionId);
   const { planModeEnabled } = opts;
   // Disable plan mode only after a successful move. A failed workflow move
-  // should leave the plan layout and context intact for retry.
-  const proceed = useCallback(async () => {
-    const moved = await rawProceed();
-    if (moved && planModeEnabled) {
-      disablePlanMode();
-    }
-  }, [planModeEnabled, disablePlanMode, rawProceed]);
+  // should leave the plan layout and context intact for retry, and the failure
+  // must propagate so move-options surfaces keep their draft open.
+  const proceed = useCallback(
+    async (entryOptions?: WorkflowMoveEntryOptions) => {
+      const moved = await rawProceed(entryOptions);
+      if (moved && planModeEnabled) {
+        disablePlanMode();
+      }
+      return moved;
+    },
+    [planModeEnabled, disablePlanMode, rawProceed],
+  );
 
   const showImplement = opts.planModeEnabled;
   const implementPlanHandler = showImplement

@@ -357,14 +357,33 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // own message control its metadata directly).
 // references contains validated entity references whose exact server-generated
 // context block may survive first-turn canonicalization.
-//
-//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+// Workflow entry overrides use the private options-aware helper so existing
+// launcher interfaces keep their stable method signature.
 func (s *Service) StartCreatedSession(
 	ctx context.Context,
 	taskID, sessionID, agentProfileID, prompt string,
 	skipMessageRecord, planMode, autoStart bool,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSessionWithOptions(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, nil,
+	)
+}
+
+// startCreatedSessionWithOptions is the workflow-internal variant that keeps
+// a one-shot entry profile from being replaced by the durable step profile
+// while a CREATED target session is auto-started.
+//
+//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+func (s *Service) startCreatedSessionWithOptions(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	moveOptions *workflowmove.EntryOptions,
 ) (*executor.TaskExecution, error) {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
@@ -416,12 +435,16 @@ func (s *Service) StartCreatedSession(
 		effectiveProfileID = session.AgentProfileID
 	}
 
-	// Resolve the workflow step override / workflow default before the
-	// required-profile guard, so a session without its own agent_profile_id
-	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
-	// the caller profile only when neither a step override nor a workflow
-	// default applies; either of those overrides a non-empty caller.
-	effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	if moveOptions != nil && moveOptions.AgentProfileID != "" {
+		effectiveProfileID = moveOptions.AgentProfileID
+	} else {
+		// Resolve the workflow step override / workflow default before the
+		// required-profile guard, so a session without its own agent_profile_id
+		// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
+		// the caller profile only when neither a step override nor a workflow
+		// default applies; either of those overrides a non-empty caller.
+		effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	}
 
 	if effectiveProfileID == "" {
 		return nil, fmt.Errorf("agent_profile_id is required")

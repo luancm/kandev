@@ -18,6 +18,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 func seedAutopilotTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string, sessionState models.TaskSessionState) {
@@ -300,6 +301,97 @@ func TestPrepareWorkflowStepSession_PreservesMatchingProfileSession(t *testing.T
 	}
 	if !updated.IsPrimary {
 		t.Fatal("matching profile session must remain primary")
+	}
+}
+
+func TestProcessOnEnter_EntryProfileOverrideSurvivesPreparedAutoStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-entry-profile", "session-current", "step-target")
+
+	task, err := repo.GetTask(ctx, "task-entry-profile")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Description = "Run the target step"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-current")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = "profile-current"
+	session.ExecutorID = "exec-local"
+	session.ExecutorProfileID = "executor-profile"
+	session.State = models.TaskSessionStateWaitingForInput
+	session.IsPrimary = true
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	targetStep := &wfmodels.WorkflowStep{
+		ID:             "step-target",
+		WorkflowID:     "wf1",
+		Name:           "Target",
+		AgentProfileID: "profile-step",
+		Prompt:         "Target prompt",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterAutoStartAgent,
+		}}},
+	}
+	stepGetter.steps[targetStep.ID] = targetStep
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[task.ID] = &v1.Task{
+		ID:          task.ID,
+		WorkspaceID: task.WorkspaceID,
+		WorkflowID:  task.WorkflowID,
+		Title:       task.Title,
+		Description: task.Description,
+		State:       v1.TaskStateInProgress,
+	}
+
+	const entryProfile = "profile-entry-override"
+	var launchedProfile string
+	agentMgr := &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{
+			ProfileID: entryProfile,
+			Mode:      "agent",
+		},
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchedProfile = req.AgentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-entry-profile"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.processOnEnter(ctx, task.ID, session, targetStep, task.Description, &workflowmove.EntryOptions{
+		AgentProfileID: entryProfile,
+		Instructions:   "Use the one-time profile.",
+	})
+
+	sessions, err := repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	var targetSession *models.TaskSession
+	for _, candidate := range sessions {
+		if candidate.ID != session.ID {
+			targetSession = candidate
+			break
+		}
+	}
+	if targetSession == nil {
+		t.Fatalf("expected a new target session, got %d sessions", len(sessions))
+	}
+	if targetSession.AgentProfileID != entryProfile {
+		t.Fatalf("target session profile = %q, want one-time override %q", targetSession.AgentProfileID, entryProfile)
+	}
+	if launchedProfile != entryProfile {
+		t.Fatalf("launched profile = %q, want one-time override %q", launchedProfile, entryProfile)
 	}
 }
 

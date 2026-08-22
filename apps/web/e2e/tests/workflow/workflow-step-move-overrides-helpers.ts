@@ -63,8 +63,6 @@ export async function fillMoveOverrides(page: Page, profileId: string): Promise<
   await page.getByTestId("workflow-move-instructions").fill(MOVE_INSTRUCTIONS);
   await page.getByTestId("workflow-move-agent-profile").click();
   await page.getByTestId(`workflow-move-profile-option-${profileId}`).click();
-  await page.getByTestId("workflow-move-model").click();
-  await page.getByTestId("workflow-move-model-option-mock-smart").click();
 }
 
 export function waitForMoveRequest(page: Page, taskId: string) {

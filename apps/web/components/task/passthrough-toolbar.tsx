@@ -41,7 +41,7 @@ import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { Trans, useTranslation } from "react-i18next";
-import { WorkflowMoveProceedControls } from "@/components/task/workflow-move-options";
+import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 function isEditableElement(element: Element | null) {
@@ -498,7 +498,7 @@ type StatusRowProps = {
   taskId: string | null;
   sessionId?: string | null;
   nextStepName: string | null;
-  onProceed: (options?: WorkflowMoveEntryOptions) => void;
+  onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isMoving: boolean;
   showProceed: boolean;
   composerOpen: boolean;
@@ -547,13 +547,12 @@ function PassthroughStatusRow({
         <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
-          <WorkflowMoveProceedControls
+          <WorkflowMoveProceedButton
             nextStepName={nextStepName}
             onProceed={onProceed}
             isMoving={isMoving}
-            directClassName="h-6 shrink-0 gap-1 px-2.5 text-xs cursor-pointer text-primary"
-            optionsClassName="min-h-11 shrink-0 px-2 text-xs cursor-pointer"
-            directTestId="passthrough-proceed-next-step"
+            className="h-6 shrink-0"
+            testId="passthrough-proceed-next-step"
             optionsTestId="passthrough-proceed-next-step-options"
           />
         )}

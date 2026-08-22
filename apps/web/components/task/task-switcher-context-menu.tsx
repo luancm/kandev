@@ -19,7 +19,9 @@ import {
 } from "@kandev/ui/context-menu";
 import {
   TaskMoveContextMenuItems,
+  TaskMoveOptionsSurface,
   type TaskMoveWorkflow,
+  useTaskMoveOptions,
 } from "@/components/task/task-move-context-menu";
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
@@ -52,6 +54,8 @@ type ContextMenuProps = TaskLinkHandlers & {
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
   pinnedTaskIds?: string[];
@@ -153,37 +157,15 @@ function useMenuTouchDragCancel(onOpenChange: (open: boolean) => void) {
   };
 }
 
-export function TaskItemWithContextMenu({
-  task,
-  workflows,
-  stepsByWorkflowId,
-  steps,
-  children,
-  onEditTask,
-  onRenameTask,
-  onArchiveTask,
-  onCreateSubtask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  onMoveToStep,
-  onTogglePin,
-  isPinned,
-  pinnedTaskIds,
-  isDeleting,
-  selectedTaskIds,
-  onBulkArchive,
-  onBulkDelete,
-  onBulkPin,
-  onBulkMove,
-  onClearSelection,
-  isMixedWorkflowSelection,
-}: ContextMenuProps) {
+export function TaskItemWithContextMenu(props: ContextMenuProps) {
+  const {
+    task,
+    stepsByWorkflowId,
+    steps,
+    children,
+    onRequestMoveOptions,
+    onBeforeMoveOptionsOpen,
+  } = props;
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
   const moveTasks = useTaskWorkflowMove();
@@ -192,67 +174,110 @@ export function TaskItemWithContextMenu({
     setMenuKey((k) => k + 1);
   };
   const { handleOpenChange, triggerProps } = useMenuTouchDragCancel(setContextOpen);
+  const { moveOptionsStep, isMoving, openMoveOptions, submitMoveOptions, closeMoveOptions } =
+    useTaskMoveOptions({
+      taskId: task.id,
+      workflowId: task.workflowId,
+      steps: task.workflowId ? (stepsByWorkflowId?.[task.workflowId] ?? steps) : steps,
+      closeMenu,
+    });
+  const handleMoveToStepWithOptions = (targetStepId: string) => {
+    if (onRequestMoveOptions && task.workflowId) {
+      closeMenu();
+      onRequestMoveOptions(task.id, task.workflowId, targetStepId);
+      return;
+    }
+    onBeforeMoveOptionsOpen?.();
+    openMoveOptions(targetStepId);
+  };
+  const contextMenuProps = buildTaskContextMenuItemsProps(
+    props,
+    closeMenu,
+    moveTasks,
+    handleMoveToStepWithOptions,
+  );
 
   return (
-    <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
-      <ContextMenuTrigger asChild>
-        <div {...triggerProps}>{cloneWithMenuOpen(children, contextOpen)}</div>
-      </ContextMenuTrigger>
-      <ContextMenuContent
-        className="w-48"
-        // The menu renders in a portal whose fiber ancestors include the
-        // dnd-kit drag handle that wraps the row. React synthetic events
-        // bubble through the fiber tree, not the DOM, so without these guards
-        // a mousedown/pointerdown/touchstart on any menu item (e.g. the Color
-        // submenu trigger or a swatch) reaches the handle's sensor listeners
-        // and starts a row drag, and a click activates the row. Bubble-phase
-        // guards run after the item's own handlers, so menu actions still work.
-        onMouseDown={(event) => event.stopPropagation()}
-        onPointerDown={(event) => event.stopPropagation()}
-        onTouchStart={(event) => event.stopPropagation()}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <TaskContextMenuItems
-          task={task}
-          workflows={workflows}
-          stepsByWorkflowId={stepsByWorkflowId}
-          steps={steps}
-          onEditTask={onEditTask}
-          onRenameTask={onRenameTask}
-          onArchiveTask={onArchiveTask}
-          onCreateSubtask={onCreateSubtask}
-          onDeleteTask={onDeleteTask}
-          onDetachTask={onDetachTask}
-          onLinkPullRequest={onLinkPullRequest}
-          onLinkIssue={onLinkIssue}
-          onLinkMergeRequest={onLinkMergeRequest}
-          onLinkJiraTicket={onLinkJiraTicket}
-          onLinkLinearIssue={onLinkLinearIssue}
-          onLinkSentryIssue={onLinkSentryIssue}
-          onMoveToStep={onMoveToStep}
-          onTogglePin={onTogglePin}
-          isPinned={isPinned}
-          pinnedTaskIds={pinnedTaskIds}
-          isDeleting={isDeleting}
-          selectedTaskIds={selectedTaskIds}
-          onBulkArchive={onBulkArchive}
-          onBulkDelete={onBulkDelete}
-          onBulkPin={onBulkPin}
-          onBulkMove={onBulkMove}
-          onClearSelection={onClearSelection}
-          isMixedWorkflowSelection={isMixedWorkflowSelection}
-          closeMenu={closeMenu}
-          moveTasks={moveTasks}
-        />
-      </ContextMenuContent>
-    </ContextMenu>
+    <>
+      <ContextMenu key={menuKey} onOpenChange={handleOpenChange}>
+        <ContextMenuTrigger asChild>
+          <div {...triggerProps}>{cloneWithMenuOpen(children, contextOpen)}</div>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          className="w-48"
+          // The menu renders in a portal whose fiber ancestors include the
+          // dnd-kit drag handle that wraps the row. React synthetic events
+          // bubble through the fiber tree, not the DOM, so without these guards
+          // a mousedown/pointerdown/touchstart on any menu item (e.g. the Color
+          // submenu trigger or a swatch) reaches the handle's sensor listeners
+          // and starts a row drag; menu actions still work.
+          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          onTouchStart={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <TaskContextMenuItems {...contextMenuProps} />
+        </ContextMenuContent>
+      </ContextMenu>
+      <TaskMoveOptionsSurface
+        step={moveOptionsStep}
+        isMoving={isMoving}
+        onClose={closeMoveOptions}
+        onSubmit={submitMoveOptions}
+      />
+    </>
   );
 }
 
-type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
+type TaskContextMenuItemsProps = Omit<
+  ContextMenuProps,
+  "children" | "onBeforeMoveOptionsOpen" | "onRequestMoveOptions"
+> & {
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
+  onMoveToStepWithOptions?: (targetStepId: string) => void;
 };
+
+function buildTaskContextMenuItemsProps(
+  props: ContextMenuProps,
+  closeMenu: () => void,
+  moveTasks: ReturnType<typeof useTaskWorkflowMove>,
+  onMoveToStepWithOptions: (targetStepId: string) => void,
+): TaskContextMenuItemsProps {
+  return {
+    task: props.task,
+    workflows: props.workflows,
+    stepsByWorkflowId: props.stepsByWorkflowId,
+    steps: props.steps,
+    onEditTask: props.onEditTask,
+    onRenameTask: props.onRenameTask,
+    onArchiveTask: props.onArchiveTask,
+    onCreateSubtask: props.onCreateSubtask,
+    onDeleteTask: props.onDeleteTask,
+    onDetachTask: props.onDetachTask,
+    onLinkPullRequest: props.onLinkPullRequest,
+    onLinkIssue: props.onLinkIssue,
+    onLinkMergeRequest: props.onLinkMergeRequest,
+    onLinkJiraTicket: props.onLinkJiraTicket,
+    onLinkLinearIssue: props.onLinkLinearIssue,
+    onLinkSentryIssue: props.onLinkSentryIssue,
+    onMoveToStep: props.onMoveToStep,
+    onMoveToStepWithOptions,
+    onTogglePin: props.onTogglePin,
+    isPinned: props.isPinned,
+    pinnedTaskIds: props.pinnedTaskIds,
+    isDeleting: props.isDeleting,
+    selectedTaskIds: props.selectedTaskIds,
+    onBulkArchive: props.onBulkArchive,
+    onBulkDelete: props.onBulkDelete,
+    onBulkPin: props.onBulkPin,
+    onBulkMove: props.onBulkMove,
+    onClearSelection: props.onClearSelection,
+    isMixedWorkflowSelection: props.isMixedWorkflowSelection,
+    closeMenu,
+    moveTasks,
+  };
+}
 
 function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
   const { task, selectedTaskIds } = props;
@@ -289,6 +314,7 @@ function SingleSelectionMenuItems({
   onDeleteTask,
   onDetachTask,
   onMoveToStep,
+  onMoveToStepWithOptions,
   onTogglePin,
   isPinned,
   isDeleting,
@@ -348,6 +374,7 @@ function SingleSelectionMenuItems({
           steps={steps}
           isDeleting={isDeleting}
           onMoveToStep={onMoveToStep}
+          onMoveToStepWithOptions={onMoveToStepWithOptions}
           actingIds={actingIds}
           actingOnSelection={actingOnSelection}
           onBulkMove={onBulkMove}
@@ -530,6 +557,7 @@ function TaskMoveItems({
   steps,
   isDeleting,
   onMoveToStep,
+  onMoveToStepWithOptions,
   actingIds,
   actingOnSelection,
   onBulkMove,
@@ -592,6 +620,9 @@ function TaskMoveItems({
       stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [workflowId]: steps } : {})}
       disabled={isDeleting || task.isArchived}
       onMoveToStep={moveToStep}
+      onMoveToStepWithOptions={
+        actingIds.length === 1 && onMoveToStepWithOptions ? onMoveToStepWithOptions : undefined
+      }
       onSendToWorkflow={(targetWorkflowId, stepId) => {
         if (actingOnSelection) {
           runSelectionMove(targetWorkflowId, stepId, "workflow");

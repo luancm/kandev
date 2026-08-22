@@ -2557,7 +2557,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// runs in a goroutine and the session is already WAITING_FOR_INPUT, so
 		// autoStartStepPrompt sends the prompt directly via PromptTask.
 		effectivePrompt := appendWorkflowMoveOptions(s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough), moveOptions)
-		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true); err != nil {
+		if err := s.autoStartStepPrompt(ctx, taskID, session, step, effectivePrompt, hasPlanMode, true, moveOptions); err != nil {
 			s.logger.Error("failed to auto-start agent for step",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -2586,7 +2586,7 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 			// autoStartStepPrompt would block the caller's goroutine.
 			go func() {
 				asyncCtx := context.WithoutCancel(ctx)
-				err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true)
+				err := s.autoStartStepPrompt(asyncCtx, taskID, session, step, effectivePrompt, planMode, true, moveOptions)
 				if err != nil {
 					s.logger.Error("failed to launch agent after profile switch",
 						zap.String("task_id", taskID),
@@ -3300,7 +3300,12 @@ func (s *Service) autoStartStepPrompt(
 	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
 	planMode bool,
 	shouldQueueIfBusy bool,
+	entryOptions ...*workflowmove.EntryOptions,
 ) error {
+	var moveOptions *workflowmove.EntryOptions
+	if len(entryOptions) > 0 {
+		moveOptions = entryOptions[0]
+	}
 	sessionID := session.ID
 	origin := workflowOriginFromStep(step)
 	stepName := origin.StepName
@@ -3388,9 +3393,9 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(
+		_, err := s.startCreatedSessionWithOptions(
 			ctx, taskID, sessionID, session.AgentProfileID,
-			recordedPrompt, true, planMode, true, attachments, references,
+			recordedPrompt, true, planMode, true, attachments, references, moveOptions,
 		)
 		if err != nil {
 			s.handleCreatedAutoStartLaunchFailure(
@@ -3421,7 +3426,7 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
 			return s.fallbackFreshLaunchOnMissingExecution(
-				ctx, taskID, sessionID, recordedPrompt, planMode, takenMsg, attachments, references,
+				ctx, taskID, sessionID, recordedPrompt, planMode, takenMsg, attachments, references, moveOptions,
 			)
 		}
 
@@ -3484,7 +3489,12 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+	entryOptions ...*workflowmove.EntryOptions,
 ) error {
+	var moveOptions *workflowmove.EntryOptions
+	if len(entryOptions) > 0 {
+		moveOptions = entryOptions[0]
+	}
 	requeue := func() {
 		if takenMsg != nil {
 			s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
@@ -3511,9 +3521,9 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(
+	if _, err := s.startCreatedSessionWithOptions(
 		ctx, taskID, sessionID, fresh.AgentProfileID,
-		prompt, true, planMode, true, attachments, references,
+		prompt, true, planMode, true, attachments, references, moveOptions,
 	); err != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
 			zap.String("session_id", sessionID), zap.Error(err))

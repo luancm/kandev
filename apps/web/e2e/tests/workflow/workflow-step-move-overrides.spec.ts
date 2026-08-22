@@ -17,15 +17,17 @@ test("moves immediately with one-shot options from the desktop stepper", async (
     seedData,
     "Desktop Move Override",
   );
-  const target = fixture.session.stepperStep("Verify");
+  const target = testPage.getByTestId("workflow-step-Verify");
   await target.hover();
-  await testPage.getByTestId(`workflow-step-${fixture.targetStepId}-move-options`).click();
 
-  const form = testPage.getByTestId("workflow-move-options");
-  await expect(form).toBeVisible();
+  // The compact popover keeps the direct Move here action; the collapsed
+  // Options disclosure expands the one-shot fields inside the same surface.
+  await testPage.getByTestId(`workflow-step-${fixture.targetStepId}-move-options`).click();
+  await expect(testPage.getByTestId("workflow-move-agent-profile")).toBeVisible();
+  await expect(testPage.getByTestId("workflow-move-model")).toHaveCount(0);
   await fillMoveOverrides(testPage, fixture.profileId);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
-  await testPage.getByTestId("workflow-move-submit").click();
+  await testPage.getByTestId("workflow-step-move-here").click();
 
   expect((await moveRequest).postDataJSON()).toEqual({
     workflow_id: expect.any(String),
@@ -35,7 +37,6 @@ test("moves immediately with one-shot options from the desktop stepper", async (
       reset_context: true,
       instructions: MOVE_INSTRUCTIONS,
       agent_profile_id: fixture.profileId,
-      model: "mock-smart",
     },
   });
   await expect(fixture.session.stepperStep("Verify")).toHaveAttribute("aria-current", "step", {

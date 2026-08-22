@@ -1,9 +1,13 @@
 "use client";
 
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { cn } from "@kandev/ui/lib/utils";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@kandev/ui/collapsible";
 import {
   Drawer,
   DrawerContent,
@@ -12,11 +16,20 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import { IconArrowRight } from "@tabler/icons-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { IconArrowRight, IconChevronDown } from "@tabler/icons-react";
 import { useWorkflowMove } from "@/hooks/domains/kanban/use-workflow-move";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
-import { WorkflowMoveOptions } from "./workflow-move-options";
+import {
+  useWorkflowMoveOptionsForm,
+  WorkflowMoveOptionsFields,
+  workflowMoveOptionsPayload,
+} from "./workflow-move-options";
+import {
+  useHoverIntentAffordance,
+  HOVER_INTENT_OPEN_DELAY_MS,
+} from "./use-hover-intent-affordance";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
@@ -25,6 +38,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import { useTranslation } from "react-i18next";
+import { useToast } from "@/components/toast-provider";
 
 type Step = {
   id: string;
@@ -86,9 +100,21 @@ const WorkflowStepper = memo(function WorkflowStepper({
   isArchived,
 }: WorkflowStepperProps) {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
   const disablePlanMode = useDisablePlanMode();
   const { move } = useWorkflowMove();
+
+  const notifyMoveFailure = useCallback(
+    (error: unknown) => {
+      toast({
+        title: t("task:failedToMoveTask"),
+        description: error instanceof Error ? error.message : t("task:failedToMoveTask"),
+        variant: "error",
+      });
+    },
+    [t, toast],
+  );
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -98,9 +124,8 @@ const WorkflowStepper = memo(function WorkflowStepper({
   );
 
   const handleMove = useCallback(
-    async (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => {
-      if (!taskId || !workflowId) return;
-      disablePlanMode();
+    async (stepId: string, entryOptions?: WorkflowMoveEntryOptions): Promise<boolean> => {
+      if (!taskId || !workflowId) return false;
       setMovingToStepId(stepId);
       try {
         const result = await move(taskId, {
@@ -109,14 +134,20 @@ const WorkflowStepper = memo(function WorkflowStepper({
           position: 0,
           entry_options: entryOptions,
         });
-        if (result.disposition === "failed") throw result.error;
-      } catch (err) {
-        console.error("[WorkflowStepper] Failed to move task:", err);
+        if (result.disposition === "failed") {
+          notifyMoveFailure(result.error);
+          return false;
+        }
+        disablePlanMode();
+        return true;
+      } catch (error) {
+        notifyMoveFailure(error);
+        return false;
       } finally {
         setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, disablePlanMode, move],
+    [taskId, workflowId, disablePlanMode, move, notifyMoveFailure],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).
@@ -136,10 +167,6 @@ const WorkflowStepper = memo(function WorkflowStepper({
           sortedSteps={sortedSteps}
           currentIndex={currentIndex}
           isArchived={isArchived}
-          taskId={taskId}
-          workflowId={workflowId}
-          movingToStepId={movingToStepId}
-          onMove={handleMove}
         />
       ) : (
         <>
@@ -177,22 +204,12 @@ function MinimalWorkflowStepper({
   sortedSteps,
   currentIndex,
   isArchived,
-  taskId,
-  workflowId,
-  movingToStepId,
-  onMove,
 }: {
   sortedSteps: Step[];
   currentIndex: number;
   isArchived?: boolean;
-  taskId?: string | null;
-  workflowId?: string | null;
-  movingToStepId: string | null;
-  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const [optionsStepId, setOptionsStepId] = useState<string | null>(null);
   if (isArchived) {
     return (
       <span
@@ -207,117 +224,27 @@ function MinimalWorkflowStepper({
   const current = currentIndex >= 0 ? sortedSteps[currentIndex] : sortedSteps[0];
   if (!current) return null;
 
-  const closeOptions = () => setOptionsStepId(null);
-
   return (
-    <>
-      <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerTrigger asChild>
-          <button
-            type="button"
-            data-testid="workflow-stepper-minimal"
-            className="flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
-            aria-label={t("task:workflowMoveChooseTarget")}
-          >
-            <span
-              data-testid={`workflow-step-${current.name}`}
-              aria-current={currentIndex >= 0 ? "step" : undefined}
-              className="flex min-w-0 items-center gap-1.5 text-xs"
-            >
-              <StepCircleIndicator isCurrent isCompleted={false} />
-              <span className="truncate text-xs font-medium leading-none text-foreground">
-                {current.name}
-              </span>
-            </span>
-            {sortedSteps.length > 1 && (
-              <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
-                {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
-              </span>
-            )}
-          </button>
-        </DrawerTrigger>
-        <DrawerContent>
-          <DrawerHeader className="text-left">
-            <DrawerTitle>{t("task:workflowMoveChooseTarget")}</DrawerTitle>
-            <DrawerDescription>{t("task:workflowMoveOptionsDescription")}</DrawerDescription>
-          </DrawerHeader>
-          <div className="max-h-[60vh] overflow-y-auto px-4 pb-5" data-vaul-no-drag>
-            <div className="flex flex-col gap-2">
-              {sortedSteps.map((step, index) => {
-                const isCurrent = index === currentIndex;
-                const canMove = canMoveToStep({
-                  isArchived,
-                  isCurrent,
-                  taskId,
-                  workflowId,
-                  isAdjacent:
-                    currentIndex >= 0 &&
-                    (index === currentIndex - 1 || index === currentIndex + 1),
-                  allowManualMove: step.allow_manual_move,
-                });
-                const isMoving = movingToStepId === step.id;
-                return (
-                  <div
-                    key={step.id}
-                    className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2"
-                  >
-                    <span className={cn("min-w-0 truncate text-sm", isCurrent && "font-medium")}>
-                      {step.name}
-                    </span>
-                    {canMove && (
-                      <span className="flex shrink-0 items-center gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="default"
-                          className="min-h-11"
-                          disabled={isMoving}
-                          onClick={() => {
-                            setOpen(false);
-                            onMove(step.id);
-                          }}
-                        >
-                          {isMoving ? t("task:moving") : t("task:moveHere")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="min-h-11"
-                          disabled={isMoving}
-                          data-testid={`workflow-step-${step.id}-move-options`}
-                          onClick={() => {
-                            setOpen(false);
-                            setOptionsStepId(step.id);
-                          }}
-                        >
-                          {t("task:moveWithOptions")}
-                        </Button>
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </DrawerContent>
-      </Drawer>
-      {optionsStepId && (
-        <WorkflowMoveOptions
-          open
-          onOpenChange={(nextOpen) => {
-            if (!nextOpen) closeOptions();
-          }}
-          targetStepName={sortedSteps.find((step) => step.id === optionsStepId)?.name ?? ""}
-          isMoving={movingToStepId === optionsStepId}
-          onSubmit={(options) => {
-            const stepId = optionsStepId;
-            closeOptions();
-            onMove(stepId, options);
-          }}
-        />
+    <div
+      data-testid="workflow-stepper-minimal"
+      className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
+    >
+      <div
+        data-testid={`workflow-step-${current.name}`}
+        aria-current={currentIndex >= 0 ? "step" : undefined}
+        className="flex min-w-0 items-center gap-1.5 text-xs"
+      >
+        <StepCircleIndicator isCurrent isCompleted={false} />
+        <span className="truncate text-xs font-medium leading-none text-foreground">
+          {current.name}
+        </span>
+      </div>
+      {sortedSteps.length > 1 && (
+        <span className="shrink-0 text-[11px] tabular-nums leading-none text-muted-foreground">
+          {(currentIndex >= 0 ? currentIndex : 0) + 1}/{sortedSteps.length}
+        </span>
       )}
-    </>
+    </div>
   );
 }
 
@@ -334,22 +261,27 @@ function canMoveToStep(params: {
   return params.isAdjacent || !!params.allowManualMove;
 }
 
+type WorkflowStepTriggerProps = ComponentPropsWithoutRef<"button"> & {
+  step: Step;
+  isCurrent: boolean;
+  isCompleted: boolean;
+};
+
+/** Step trigger. Forwards trigger props (and the ref) injected by PopoverTrigger/DrawerTrigger with asChild. */
 function WorkflowStepTrigger({
   step,
   isCurrent,
   isCompleted,
-}: {
-  step: Step;
-  isCurrent: boolean;
-  isCompleted: boolean;
-}) {
+  ...triggerProps
+}: WorkflowStepTriggerProps) {
   return (
     <button
       type="button"
+      {...triggerProps}
       data-testid={`workflow-step-${step.name}`}
       aria-current={isCurrent ? "step" : undefined}
       className={cn(
-        "flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs whitespace-nowrap transition-colors cursor-pointer",
+        "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-pointer",
         isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
       )}
     >
@@ -379,7 +311,7 @@ function WorkflowStepItem({
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
-  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
@@ -395,17 +327,44 @@ function WorkflowStepItem({
   });
 
   const usesTouchDrawer = useTouchDrawer();
+  const affordance = useHoverIntentAffordance({ openDelayMs: HOVER_INTENT_OPEN_DELAY_MS });
   const [touchDrawerOpen, setTouchDrawerOpen] = useState(false);
-  const [optionsOpen, setOptionsOpen] = useState(false);
-  const openOptions = useCallback(() => {
-    // The options surface owns its own touch drawer. Close the target picker
-    // first so mobile never stacks two Vaul drawers and traps focus between
-    // them.
+  const [optionsExpanded, setOptionsExpanded] = useState(false);
+  const surfaceOpen = usesTouchDrawer ? touchDrawerOpen : affordance.open;
+
+  // The disclosure state belongs to one surface session; a closed surface
+  // always comes back compact.
+  useEffect(() => {
+    if (!surfaceOpen) setOptionsExpanded(false);
+  }, [surfaceOpen]);
+
+  const handleOptionsExpandedChange = useCallback(
+    (expanded: boolean) => {
+      setOptionsExpanded(expanded);
+      // Expanding reveals fields the user is about to fill: pin the popover so
+      // pointer movement towards a field (or its portaled dropdown) cannot
+      // dismiss the surface mid-entry.
+      affordance.setPinned(expanded);
+    },
+    [affordance],
+  );
+
+  const closeSurface = useCallback(() => {
+    affordance.requestClose();
     setTouchDrawerOpen(false);
-    setOptionsOpen(true);
-  }, []);
-  const trigger = (
-    <WorkflowStepTrigger step={step} isCurrent={isCurrent} isCompleted={isCompleted} />
+  }, [affordance]);
+
+  const stepActions = (
+    <StepHoverContent
+      step={step}
+      isCurrent={isCurrent}
+      canMove={canMove}
+      isMoving={movingToStepId === step.id}
+      onMove={onMove}
+      onSurfaceClose={closeSurface}
+      optionsExpanded={optionsExpanded}
+      onOptionsExpandedChange={handleOptionsExpandedChange}
+    />
   );
 
   return (
@@ -413,100 +372,162 @@ function WorkflowStepItem({
       {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
       {usesTouchDrawer ? (
         <Drawer open={touchDrawerOpen} onOpenChange={setTouchDrawerOpen}>
-          <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+          <DrawerTrigger asChild>
+            <WorkflowStepTrigger step={step} isCurrent={isCurrent} isCompleted={isCompleted} />
+          </DrawerTrigger>
           <DrawerContent>
             <DrawerHeader className="text-left">
               <DrawerTitle>{step.name}</DrawerTitle>
               <DrawerDescription className="sr-only">{step.name}</DrawerDescription>
             </DrawerHeader>
-            <div className="px-4 pb-5">
-              <StepHoverContent
-                step={step}
-                isCurrent={isCurrent}
-                canMove={canMove}
-                isMoving={movingToStepId === step.id}
-                onMove={onMove}
-                onOpenOptions={openOptions}
-              />
-            </div>
+            <div className="px-4 pb-5">{stepActions}</div>
           </DrawerContent>
         </Drawer>
       ) : (
-        <HoverCard openDelay={200} closeDelay={100}>
-          <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
-          <StepHoverContent
-            step={step}
-            isCurrent={isCurrent}
-            canMove={canMove}
-            isMoving={movingToStepId === step.id}
-            onMove={onMove}
-            onOpenOptions={openOptions}
-          />
-        </HoverCard>
+        <StepPopover
+          affordance={affordance}
+          step={step}
+          isCurrent={isCurrent}
+          isCompleted={isCompleted}
+        >
+          {stepActions}
+        </StepPopover>
       )}
-      <WorkflowMoveOptions
-        open={optionsOpen}
-        onOpenChange={setOptionsOpen}
-        targetStepName={step.name}
-        isMoving={movingToStepId === step.id}
-        onSubmit={(options) => {
-          setOptionsOpen(false);
-          onMove(step.id, options);
-        }}
-      />
     </div>
+  );
+}
+
+/** Fine-pointer surface: hover/focus opens the compact step popover. */
+function StepPopover({
+  affordance,
+  step,
+  isCurrent,
+  isCompleted,
+  children,
+}: {
+  affordance: ReturnType<typeof useHoverIntentAffordance>;
+  step: Step;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    // Dismiss paths are intercepted in popoverContentProps; an onOpenChange
+    // mirror would clobber the keyboard focus-restore semantics.
+    <Popover open={affordance.open}>
+      <PopoverTrigger asChild>
+        <WorkflowStepTrigger
+          step={step}
+          isCurrent={isCurrent}
+          isCompleted={isCompleted}
+          onPointerEnter={affordance.triggerProps.onPointerEnter}
+          onPointerLeave={affordance.triggerProps.onPointerLeave}
+          onFocus={affordance.triggerProps.onFocus}
+        />
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="center" {...affordance.popoverContentProps}>
+        <div {...affordance.contentProps} data-testid="workflow-step-popover">
+          {children}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
 /** Connector line between steps */
 function StepConnector({ isActive }: { isActive: boolean }) {
-  return (
-    <div className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")} />
-  );
+  return <div className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")} />;
 }
 
-/** Hover content for a workflow step */
+/** Step popover/drawer body: direct move, collapsed options disclosure, status info. */
 function StepHoverContent({
   step,
   isCurrent,
   canMove,
   isMoving,
   onMove,
-  onOpenOptions,
+  onSurfaceClose,
+  optionsExpanded,
+  onOptionsExpandedChange,
 }: {
   step: Step;
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
-  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => void;
-  onOpenOptions: () => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+  onSurfaceClose: () => void;
+  optionsExpanded: boolean;
+  onOptionsExpandedChange: (expanded: boolean) => void;
 }) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
-  const body = (
+  const { draft, patchDraft, profileOptions } = useWorkflowMoveOptionsForm();
+  const [submitting, setSubmitting] = useState(false);
+  const busy = isMoving || submitting;
+
+  const submitMove = async () => {
+    if (busy) return;
+    setSubmitting(true);
+    try {
+      // Untouched options normalize to undefined, so the same button stays the
+      // direct move; anything the user filled becomes this entry's options.
+      const moved = await onMove(step.id, workflowMoveOptionsPayload(draft));
+      if (moved) onSurfaceClose();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Desktop hover card keeps the compact h-6 action; the coarse-pointer Drawer body keeps 44px targets.
+  const actionClass = usesTouchDrawer
+    ? "min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
+    : "cursor-pointer text-xs h-6 px-2.5 rounded-sm";
+
+  return (
     <div className="w-auto min-w-28 p-1.5 flex flex-col items-center gap-1.5">
       {canMove && (
         <>
           <Button
             size="sm"
             variant="default"
-            className="min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
-            disabled={isMoving}
-            onClick={() => onMove(step.id)}
+            className={actionClass}
+            disabled={busy}
+            onClick={submitMove}
+            data-testid="workflow-step-move-here"
           >
             <IconArrowRight className="h-3 w-3" />
-            {isMoving ? t("task:moving") : t("task:moveHere")}
+            {busy ? t("task:moving") : t("task:moveHere")}
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
-            disabled={isMoving}
-            onClick={onOpenOptions}
-            data-testid={`workflow-step-${step.id}-move-options`}
-          >
-            {t("task:moveWithOptions")}
-          </Button>
+          <Collapsible open={optionsExpanded} onOpenChange={onOptionsExpandedChange}>
+            <CollapsibleTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={cn(actionClass, "text-muted-foreground")}
+                data-testid={`workflow-step-${step.id}-move-options`}
+                aria-expanded={optionsExpanded}
+              >
+                <IconChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 transition-transform",
+                    optionsExpanded && "rotate-180",
+                  )}
+                />
+                {t("task:workflowMoveOptionsToggle")}
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <div className="w-72 max-w-full pt-1.5 text-left">
+                <WorkflowMoveOptionsFields
+                  draft={draft}
+                  onDraftChange={patchDraft}
+                  profileOptions={profileOptions}
+                  isTouchSurface={usesTouchDrawer}
+                  instructionsRows={3}
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </>
       )}
       {isCurrent && (
@@ -514,17 +535,6 @@ function StepHoverContent({
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
     </div>
-  );
-  return (
-    <>
-      {usesTouchDrawer ? (
-        body
-      ) : (
-        <HoverCardContent side="bottom" align="center">
-          {body}
-        </HoverCardContent>
-      )}
-    </>
   );
 }
 

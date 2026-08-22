@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import {
   IconArchive,
+  IconAdjustments,
   IconArrowRight,
   IconLoader,
   IconLogicBuffer,
@@ -62,6 +63,7 @@ type SubmenuEntry = {
   disabled?: boolean;
   testId?: string;
   className?: string;
+  onSelect?: () => void;
   children: KanbanCardMenuEntry[];
 };
 
@@ -104,6 +106,7 @@ type BuildKanbanCardMenuEntriesArgs = {
   onLinkSentryIssue?: () => void;
   pluginLinkActions?: KanbanPluginLinkAction[];
   onMoveToStep?: (stepId: string) => void;
+  onMoveToStepWithOptions?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
   /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
   pluginMenuContext?: PluginTaskMenuContext;
@@ -121,7 +124,15 @@ function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMe
   return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
 }
 
-function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
+function StepBadges({
+  step,
+  isCurrent,
+  testIdPrefix = "task-context-step",
+}: {
+  step: TaskMoveStep;
+  isCurrent: boolean;
+  testIdPrefix?: string;
+}) {
   const { t } = useTranslation();
   const hasAutoStart = stepHasAutoStart(step);
   if (!isCurrent && !hasAutoStart) return null;
@@ -129,10 +140,10 @@ function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolea
   return (
     <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
       {isCurrent && (
-        <span data-testid={`task-context-step-current-${step.id}`}>{t("kanban:current")}</span>
+        <span data-testid={`${testIdPrefix}-current-${step.id}`}>{t("kanban:current")}</span>
       )}
       {hasAutoStart && (
-        <span data-testid={`task-context-step-autostart-${step.id}`}>{t("kanban:autoStart")}</span>
+        <span data-testid={`${testIdPrefix}-autostart-${step.id}`}>{t("kanban:autoStart")}</span>
       )}
     </span>
   );
@@ -142,19 +153,48 @@ function buildStepEntry(
   step: TaskMoveStep,
   currentStepId: string | null | undefined,
   onSelect: (stepId: string) => void,
+  options: {
+    keyPrefix?: string;
+    testIdPrefix?: string;
+    onMoveToStepWithOptions?: (stepId: string) => void;
+  } = {},
 ): KanbanCardMenuEntry {
   const isCurrent = step.id === currentStepId;
-  return {
-    kind: "item",
-    key: `step-${step.id}`,
-    testId: `task-context-step-${step.id}`,
+  const keyPrefix = options.keyPrefix ?? "step";
+  const testIdPrefix = options.testIdPrefix ?? "task-context-step";
+  const stepEntry = {
+    key: `${keyPrefix}-${step.id}`,
+    testId: `${testIdPrefix}-${step.id}`,
     disabled: isCurrent,
     leading: <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color ?? "")} />,
     label: <span className="flex-1 truncate">{step.title}</span>,
-    trailing: <StepBadges step={step} isCurrent={isCurrent} />,
+    trailing: <StepBadges step={step} isCurrent={isCurrent} testIdPrefix={testIdPrefix} />,
     onSelect: () => {
       if (!isCurrent) onSelect(step.id);
     },
+  };
+
+  if (!options.onMoveToStepWithOptions) {
+    return { kind: "item", ...stepEntry };
+  }
+
+  return {
+    kind: "submenu",
+    ...stepEntry,
+    className: "w-48",
+    children: [
+      {
+        kind: "item",
+        key: `move-with-options-step-${step.id}`,
+        testId: `task-context-options-step-${step.id}`,
+        icon: <IconAdjustments className="mr-2 h-4 w-4" />,
+        label: t("task:moveWithOptions"),
+        disabled: isCurrent,
+        onSelect: () => {
+          if (!isCurrent) options.onMoveToStepWithOptions?.(step.id);
+        },
+      },
+    ],
   };
 }
 
@@ -163,11 +203,13 @@ function buildMoveToCurrentWorkflowSubmenu({
   currentStepId,
   disabled,
   onMoveToStep,
+  onMoveToStepWithOptions,
 }: {
   steps: TaskMoveStep[];
   currentStepId?: string | null;
   disabled?: boolean;
   onMoveToStep?: (stepId: string) => void;
+  onMoveToStepWithOptions?: (stepId: string) => void;
 }): KanbanCardMenuEntry | null {
   if (!onMoveToStep || steps.length <= 1) return null;
   return {
@@ -178,7 +220,9 @@ function buildMoveToCurrentWorkflowSubmenu({
     label: t("kanban:moveTo"),
     disabled,
     className: "w-48",
-    children: steps.map((step) => buildStepEntry(step, currentStepId, onMoveToStep)),
+    children: steps.map((step) =>
+      buildStepEntry(step, currentStepId, onMoveToStep, { onMoveToStepWithOptions }),
+    ),
   };
 }
 
@@ -277,6 +321,7 @@ export function buildKanbanCardMenuEntries({
   onLinkSentryIssue,
   pluginLinkActions,
   onMoveToStep,
+  onMoveToStepWithOptions,
   onSendToWorkflow,
   pluginMenuContext,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
@@ -296,6 +341,7 @@ export function buildKanbanCardMenuEntries({
     currentStepId,
     disabled: isProcessing,
     onMoveToStep,
+    onMoveToStepWithOptions,
   });
   if (moveToEntry) entries.push(moveToEntry);
 
@@ -434,11 +480,47 @@ export function useKanbanCardMoveTargets(
 }
 
 function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
+  const pointerTypeRef = useRef<string | null>(null);
   if (entry.kind === "separator") return <ContextMenuSeparator />;
   if (entry.kind === "submenu") {
     return (
       <ContextMenuSub>
-        <ContextMenuSubTrigger data-testid={entry.testId} disabled={entry.disabled}>
+        <ContextMenuSubTrigger
+          data-testid={entry.testId}
+          disabled={entry.disabled}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            pointerTypeRef.current = event.pointerType;
+          }}
+          onPointerCancel={() => {
+            pointerTypeRef.current = null;
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            const pointerType = pointerTypeRef.current;
+            pointerTypeRef.current = null;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const tappedChevron =
+              (pointerType === "touch" || pointerType === "pen") &&
+              rect.width > 0 &&
+              event.clientX >= rect.right - 32;
+            if (!tappedChevron && !entry.disabled && entry.onSelect) {
+              event.preventDefault();
+              entry.onSelect();
+            }
+          }}
+          onKeyDown={(event) => {
+            if (
+              !entry.disabled &&
+              entry.onSelect &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              event.stopPropagation();
+              event.preventDefault();
+              entry.onSelect();
+            }
+          }}
+        >
           {entry.icon}
           {entry.label}
         </ContextMenuSubTrigger>
@@ -471,6 +553,7 @@ function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
 }
 
 function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
+  const pointerTypeRef = useRef<string | null>(null);
   if (entry.kind === "separator") return <DropdownMenuSeparator />;
   if (entry.kind === "submenu") {
     return (
@@ -478,8 +561,38 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
         <DropdownMenuSubTrigger
           data-testid={entry.testId}
           disabled={entry.disabled}
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            const pointerType = pointerTypeRef.current;
+            pointerTypeRef.current = null;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const tappedChevron =
+              (pointerType === "touch" || pointerType === "pen") &&
+              rect.width > 0 &&
+              event.clientX >= rect.right - 32;
+            if (!tappedChevron && !entry.disabled && entry.onSelect) {
+              event.preventDefault();
+              entry.onSelect();
+            }
+          }}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            pointerTypeRef.current = event.pointerType;
+          }}
+          onPointerCancel={() => {
+            pointerTypeRef.current = null;
+          }}
+          onKeyDown={(event) => {
+            if (
+              !entry.disabled &&
+              entry.onSelect &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              event.stopPropagation();
+              event.preventDefault();
+              entry.onSelect();
+            }
+          }}
         >
           {entry.icon}
           {entry.label}

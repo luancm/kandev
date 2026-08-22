@@ -8,6 +8,10 @@ import {
   buildKanbanCardMenuEntries,
   useKanbanCardMoveTargets,
 } from "@/components/kanban-card-menu-items";
+import {
+  TaskMoveOptionsSurface,
+  useTaskMoveOptions,
+} from "@/components/task/task-move-context-menu";
 import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
@@ -147,6 +151,13 @@ function useKanbanCardMoveMenuActions({
 }: Pick<KanbanCardProps, "task" | "steps" | "isSelected" | "selectedIds" | "onMove">) {
   const moveTargets = useKanbanCardMoveTargets(task.id, steps);
   const moveTasks = useTaskWorkflowMove();
+  const moveOptions = useTaskMoveOptions({
+    taskId: task.id,
+    workflowId: moveTargets.currentWorkflowId,
+    steps: moveTargets.currentWorkflowId
+      ? moveTargets.stepsByWorkflowId[moveTargets.currentWorkflowId]
+      : undefined,
+  });
   const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
 
   const runMoveTasks = (
@@ -184,6 +195,11 @@ function useKanbanCardMoveMenuActions({
 
   return {
     moveTargets,
+    moveOptionsStep: moveOptions.moveOptionsStep,
+    isMovingWithOptions: moveOptions.isMoving,
+    closeMoveOptions: moveOptions.closeMoveOptions,
+    submitMoveOptions: moveOptions.submitMoveOptions,
+    openMoveOptions: moveOptions.openMoveOptions,
     moveToStepFromDropdown,
     moveSelectedToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
     sendTaskToWorkflow: (workflowId: string, stepId: string) => {
@@ -338,18 +354,25 @@ function useKanbanCardMenus({
   };
 
   const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);
+  const optionsHandler = actingOnMultiSelection ? undefined : moveMenu.openMoveOptions;
 
   return {
     ...dialogs,
+    moveOptionsStep: moveMenu.moveOptionsStep,
+    isMovingWithOptions: moveMenu.isMovingWithOptions,
+    closeMoveOptions: moveMenu.closeMoveOptions,
+    submitMoveOptions: moveMenu.submitMoveOptions,
     dropdownMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveToStepFromDropdown,
+      onMoveToStepWithOptions: optionsHandler,
       onSendToWorkflow: moveMenu.sendTaskToWorkflow,
       pluginMenuContext,
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveSelectedToStep,
+      onMoveToStepWithOptions: optionsHandler,
       onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
       pluginMenuContext,
     }),
@@ -381,6 +404,14 @@ function KanbanCardDialogs({
 }) {
   return (
     <>
+      {menu.moveOptionsStep && (
+        <TaskMoveOptionsSurface
+          step={menu.moveOptionsStep}
+          isMoving={menu.isMovingWithOptions}
+          onClose={menu.closeMoveOptions}
+          onSubmit={menu.submitMoveOptions}
+        />
+      )}
       <TaskDeleteConfirmDialog
         open={menu.showDeleteConfirm}
         onOpenChange={menu.setShowDeleteConfirm}
