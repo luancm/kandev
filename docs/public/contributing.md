@@ -32,7 +32,7 @@ make bootstrap
 make dev
 ```
 
-This is the normal development path. The TypeScript supervisor starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs. Backend logs append to `.kandev-dev/logs/backend-logs.log`; startup prints the resolved path.
+This is the normal development path. The native Go launcher starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs. Backend logs append to `.kandev-dev/logs/backend-logs.log`; startup prints the resolved path.
 
 Automatic port selection only applies when no port was requested, and `KANDEV_BACKEND_PORT` or `KANDEV_PORT` in the environment counts as a request. An installed Kandev service that exported one therefore pins development mode to the port its own backend already occupies; the launcher rejects that request before readiness and never silently substitutes another requested port. Pass `PORT=` to override both the environment and the automatic choice, `WEB_PORT=` for the internal Vite port, and `DEV_ARGS=` for any other launcher flag.
 
@@ -49,6 +49,22 @@ KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 One backend owns a Kandev home at a time. Raw backend commands use the normal home by default, so a second backend with that home stops before it changes shared state. For an intentional second backend, use a separate `KANDEV_HOME_DIR`, database, and port.
 
 Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev and writes `<resolved-home>/logs/backend-logs.log`.
+
+### Keep a persistent staging instance
+
+Use `scripts/staging-instance` when several tasks need a durable, production-built Kandev beside the main instance. It stores its database, home, logs, process home, temporary files, and agentctl ports under `~/.kandev-staging`, defaults to backend port `10102`, and refuses the known main port `10101`. `start`, `stop`, `restart`, and `rebuild` never delete the staging database.
+
+```bash
+scripts/staging-instance start --remote
+scripts/staging-instance status
+scripts/staging-instance logs --follow
+scripts/staging-instance rebuild
+scripts/staging-instance stop
+```
+
+The wrapper runs `make build`, serves the embedded production web bundle, and uses mock agents and integration clients by default while retaining the production runtime profile. `--remote` binds on all interfaces and enables Kandev authentication; complete the staging setup wizard on first visit, then open `http://<tailscale-host>:10102`. Use `--real-providers` only when real external effects are intentional. The staging process still shares host resources such as Docker and explicitly selected repositories, so separate storage does not make those external systems disposable.
+
+Set `KANDEV_STAGING_ROOT`, `KANDEV_STAGING_PORT`, `KANDEV_STAGING_AGENTCTL_PORT`, or `KANDEV_STAGING_MAIN_PORT` when the defaults do not fit the host. Run `scripts/staging-instance print-config` to inspect every resolved path and port before starting.
 
 ## Find the owner
 
