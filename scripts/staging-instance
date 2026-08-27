@@ -1,0 +1,789 @@
+#!/usr/bin/env bash
+# staging-instance — run a persistent, production-built Kandev instance next
+# to the developer's normal instance.
+#
+# The staging process uses a clean environment, a separate Kandev home, a
+# separate SQLite database, separate agentctl ports, and embedded production
+# web assets. Its state is intentionally persistent; stop/restart/rebuild do
+# not remove the staging root or database.
+#
+# Safe provider mocks are the default. Use --real-providers only when the
+# staging database and its configured credentials are deliberately allowed to
+# contact real services.
+#
+# Usage:
+#   scripts/staging-instance start [options]
+#   scripts/staging-instance stop [options]
+#   scripts/staging-instance restart [options]
+#   scripts/staging-instance rebuild [options]
+#   scripts/staging-instance status [options]
+#   scripts/staging-instance logs [--follow] [options]
+#   scripts/staging-instance print-config [options]
+#
+# Common options:
+#   --root PATH             Persistent root (default: $HOME/.kandev-staging)
+#   --port N                Backend port (default: 10102)
+#   --agentctl-port N       Standalone agentctl port (default: 10103)
+#   --agentctl-base N       First per-execution agentctl port (default: 10200)
+#   --agentctl-max N        Last per-execution agentctl port (default: 10299)
+#   --host HOST             Backend bind host (default: 127.0.0.1)
+#   --remote                Bind 0.0.0.0 and enable authentication
+#   --auth / --no-auth      Enable or disable opt-in authentication
+#   --allow-unauthenticated-remote
+#                           Permit a non-loopback bind without authentication
+#   --mock-providers        Use isolated mock agents/integrations (default)
+#   --real-providers        Leave provider integrations available to staging
+#   --no-build              Reuse the current production build
+#   --install               Install dependencies before building
+#
+# Environment equivalents use the KANDEV_STAGING_* prefix. Runtime Kandev
+# variables are not inherited: this is what prevents a parent task or the main
+# instance from leaking its database, ports, credentials, or debug profile.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+BACKEND_BIN="$REPO_ROOT/apps/backend/bin/kandev"
+INVOKING_HOME="${HOME:-}"
+
+DEFAULT_ROOT="${HOME:-.}/.kandev-staging"
+STAGING_ROOT="${KANDEV_STAGING_ROOT:-${DEFAULT_ROOT}}"
+BACKEND_PORT="${KANDEV_STAGING_PORT:-10102}"
+AGENTCTL_PORT="${KANDEV_STAGING_AGENTCTL_PORT:-10103}"
+AGENTCTL_BASE="${KANDEV_STAGING_AGENTCTL_BASE:-10200}"
+AGENTCTL_MAX="${KANDEV_STAGING_AGENTCTL_MAX:-10299}"
+SERVER_HOST="${KANDEV_STAGING_HOST:-127.0.0.1}"
+PROVIDER_MODE="${KANDEV_STAGING_PROVIDERS:-mock}"
+AUTH_MODE="${KANDEV_STAGING_AUTH:-auto}"
+ROOT_EXPLICIT=0
+PORT_EXPLICIT=0
+AGENTCTL_PORT_EXPLICIT=0
+AGENTCTL_BASE_EXPLICIT=0
+AGENTCTL_MAX_EXPLICIT=0
+HOST_EXPLICIT=0
+PROVIDER_EXPLICIT=0
+AUTH_EXPLICIT=0
+[[ -n "${KANDEV_STAGING_ROOT+x}" ]] && ROOT_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_PORT+x}" ]] && PORT_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_AGENTCTL_PORT+x}" ]] && AGENTCTL_PORT_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_AGENTCTL_BASE+x}" ]] && AGENTCTL_BASE_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_AGENTCTL_MAX+x}" ]] && AGENTCTL_MAX_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_HOST+x}" ]] && HOST_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_PROVIDERS+x}" ]] && PROVIDER_EXPLICIT=1
+[[ -n "${KANDEV_STAGING_AUTH+x}" ]] && AUTH_EXPLICIT=1
+ALLOW_UNAUTHENTICATED_REMOTE=0
+NO_BUILD=0
+DO_INSTALL=0
+FOLLOW_LOGS=0
+
+# This is the user's reported live backend port. It is a guardrail, not the
+# port-discovery mechanism: every requested staging port is also preflighted.
+MAIN_BACKEND_PORT="${KANDEV_STAGING_MAIN_PORT:-10101}"
+
+ACTION="${1:-help}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
+
+usage() {
+  sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-2}"
+}
+
+case "$ACTION" in
+  -h|--help|help) usage 0 ;;
+esac
+for argument in "$@"; do
+  case "$argument" in
+    -h|--help) usage 0 ;;
+  esac
+done
+
+die() {
+  echo "staging-instance: $*" >&2
+  exit 1
+}
+
+is_integer() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+validate_port() {
+  local label="$1" value="$2"
+  is_integer "$value" || die "$label must be an integer, got '$value'"
+  (( value >= 1 && value <= 65535 )) || die "$label must be between 1 and 65535, got '$value'"
+  }
+
+is_loopback_host() {
+  case "$1" in
+    127.*|localhost|::1|\[::1\]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --root)
+      [[ $# -ge 2 ]] || die "--root requires a path"
+      STAGING_ROOT="$2"
+      ROOT_EXPLICIT=1
+      shift 2
+      ;;
+    --port|--backend-port)
+      [[ $# -ge 2 ]] || die "$1 requires a value"
+      BACKEND_PORT="$2"
+      PORT_EXPLICIT=1
+      shift 2
+      ;;
+    --agentctl-port)
+      [[ $# -ge 2 ]] || die "--agentctl-port requires a value"
+      AGENTCTL_PORT="$2"
+      AGENTCTL_PORT_EXPLICIT=1
+      shift 2
+      ;;
+    --agentctl-base)
+      [[ $# -ge 2 ]] || die "--agentctl-base requires a value"
+      AGENTCTL_BASE="$2"
+      AGENTCTL_BASE_EXPLICIT=1
+      shift 2
+      ;;
+    --agentctl-max)
+      [[ $# -ge 2 ]] || die "--agentctl-max requires a value"
+      AGENTCTL_MAX="$2"
+      AGENTCTL_MAX_EXPLICIT=1
+      shift 2
+      ;;
+    --host)
+      [[ $# -ge 2 ]] || die "--host requires a value"
+      SERVER_HOST="$2"
+      HOST_EXPLICIT=1
+      shift 2
+      ;;
+    --remote)
+      SERVER_HOST="0.0.0.0"
+      HOST_EXPLICIT=1
+      AUTH_MODE="on"
+      AUTH_EXPLICIT=1
+      shift
+      ;;
+    --auth)
+      AUTH_MODE="on"
+      AUTH_EXPLICIT=1
+      shift
+      ;;
+    --no-auth)
+      AUTH_MODE="off"
+      AUTH_EXPLICIT=1
+      shift
+      ;;
+    --allow-unauthenticated-remote)
+      ALLOW_UNAUTHENTICATED_REMOTE=1
+      shift
+      ;;
+    --mock-providers)
+      PROVIDER_MODE="mock"
+      PROVIDER_EXPLICIT=1
+      shift
+      ;;
+    --real-providers)
+      PROVIDER_MODE="real"
+      PROVIDER_EXPLICIT=1
+      shift
+      ;;
+    --no-build)
+      NO_BUILD=1
+      shift
+      ;;
+    --install)
+      DO_INSTALL=1
+      shift
+      ;;
+    --follow|-f)
+      FOLLOW_LOGS=1
+      shift
+      ;;
+    -h|--help|help)
+      usage 0
+      ;;
+    --*)
+      die "unknown option '$1'"
+      ;;
+    *)
+      die "unexpected argument '$1'"
+      ;;
+  esac
+done
+
+load_persisted_config() {
+  local config_file="$STAGING_ROOT/run/instance.conf"
+  [[ -f "$config_file" ]] || return 0
+  local key value
+  while IFS='=' read -r key value; do
+    case "$key" in
+      root) [[ "$ROOT_EXPLICIT" -eq 1 ]] || STAGING_ROOT="$value" ;;
+      backend_port) [[ "$PORT_EXPLICIT" -eq 1 ]] || BACKEND_PORT="$value" ;;
+      agentctl_port) [[ "$AGENTCTL_PORT_EXPLICIT" -eq 1 ]] || AGENTCTL_PORT="$value" ;;
+      agentctl_base) [[ "$AGENTCTL_BASE_EXPLICIT" -eq 1 ]] || AGENTCTL_BASE="$value" ;;
+      agentctl_max) [[ "$AGENTCTL_MAX_EXPLICIT" -eq 1 ]] || AGENTCTL_MAX="$value" ;;
+      host) [[ "$HOST_EXPLICIT" -eq 1 ]] || SERVER_HOST="$value" ;;
+      providers) [[ "$PROVIDER_EXPLICIT" -eq 1 ]] || PROVIDER_MODE="$value" ;;
+      auth) [[ "$AUTH_EXPLICIT" -eq 1 || "$HOST_EXPLICIT" -eq 1 ]] || AUTH_MODE="$value" ;;
+    esac
+  done < "$config_file"
+}
+
+load_persisted_config
+
+validate_port "backend port" "$BACKEND_PORT"
+validate_port "agentctl port" "$AGENTCTL_PORT"
+validate_port "agentctl base" "$AGENTCTL_BASE"
+validate_port "agentctl max" "$AGENTCTL_MAX"
+validate_port "main backend port" "$MAIN_BACKEND_PORT"
+(( AGENTCTL_BASE <= AGENTCTL_MAX )) || die "agentctl base must not exceed agentctl max"
+(( AGENTCTL_PORT < AGENTCTL_BASE || AGENTCTL_PORT > AGENTCTL_MAX )) || die "standalone agentctl port $AGENTCTL_PORT overlaps agentctl execution range $AGENTCTL_BASE-$AGENTCTL_MAX"
+
+case "$PROVIDER_MODE" in
+  mock|real) ;;
+  *) die "provider mode must be 'mock' or 'real', got '$PROVIDER_MODE'" ;;
+esac
+case "$AUTH_MODE" in
+  auto|on|off) ;;
+  *) die "auth mode must be auto, on, or off, got '$AUTH_MODE'" ;;
+esac
+
+if [[ "$AUTH_MODE" == "auto" ]]; then
+  if is_loopback_host "$SERVER_HOST"; then
+    AUTH_MODE="off"
+  else
+    AUTH_MODE="on"
+  fi
+fi
+if ! is_loopback_host "$SERVER_HOST" && [[ "$AUTH_MODE" == "off" && "$ALLOW_UNAUTHENTICATED_REMOTE" -ne 1 ]]; then
+  die "refusing unauthenticated non-loopback bind; use --auth or explicitly add --allow-unauthenticated-remote"
+fi
+
+canonicalize_path() {
+  local path="$1" parent leaf next resolved
+  [[ -n "$path" ]] || return 1
+  if command -v realpath >/dev/null 2>&1; then
+    resolved="$(realpath -m -- "$path" 2>/dev/null || true)"
+    if [[ -n "$resolved" ]]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  fi
+  case "$path" in
+    /*) ;;
+    *) path="$PWD/$path" ;;
+  esac
+  leaf="${path##*/}"
+  parent="${path%/*}"
+  [[ -n "$parent" ]] || parent=/
+  while [[ ! -e "$parent" && ! -L "$parent" ]]; do
+    next="${parent%/*}"
+    [[ "$next" != "$parent" ]] || return 1
+    parent="$next"
+  done
+  parent="$(cd -P -- "$parent" && pwd -P)" || return 1
+  if [[ "$leaf" == "." || -z "$leaf" ]]; then
+    printf '%s\n' "$parent"
+  else
+    printf '%s/%s\n' "$parent" "$leaf"
+  fi
+}
+
+reject_protected_root() {
+  local root="$1" protected label main_home i
+  [[ -n "$root" && "$root" != "/" ]] || die "staging root must be a specific directory, not '/' or empty"
+  root="$(canonicalize_path "$root")" || die "cannot canonicalize staging root '$1'"
+  main_home=""
+  if [[ -n "$INVOKING_HOME" ]]; then
+    main_home="$(canonicalize_path "$INVOKING_HOME/.kandev")" || die "cannot canonicalize main Kandev home"
+  fi
+
+  # These roots are intentionally compared after canonicalization. The
+  # staging root is allowed to be a child of the invoking home (the default is
+  # ~/.kandev-staging), but never the home itself or the main Kandev tree.
+  local protected_roots=("/" "$REPO_ROOT" "$INVOKING_HOME" "$main_home" "/tmp" "/var/tmp" "/home" "/Users")
+  local protected_labels=("filesystem root" "repository root" "invoking home" "main Kandev home" "temporary root" "temporary root" "home root" "Users root")
+  for ((i = 0; i < ${#protected_roots[@]}; i++)); do
+    protected="${protected_roots[i]}"
+    [[ -n "$protected" ]] || continue
+    protected="$(canonicalize_path "$protected")" || continue
+    label="${protected_labels[i]}"
+    if [[ "$root" == "$protected" ]]; then
+      die "staging root must not be the $label: $1"
+    fi
+    case "$label" in
+      "repository root"|"main Kandev home")
+        if [[ "$root" == "$protected/"* ]]; then
+          die "staging root must be outside the $label: $1"
+        fi
+        ;;
+    esac
+  done
+  STAGING_ROOT="$root"
+}
+
+# Canonicalize and validate before mkdir/chmod. This keeps aliases and
+# symlinks from redirecting the launcher into the checkout, main home, or a
+# broad system root after the protected-root check has already passed.
+reject_protected_root "$STAGING_ROOT"
+
+# Resolve the root once so status output and child paths remain stable even
+# when the caller used a relative path. Creating this directory is the only
+# mutation print-config performs.
+mkdir -p "$STAGING_ROOT"
+KANDEV_HOME_DIR="$STAGING_ROOT/kandev"
+PROCESS_HOME="$STAGING_ROOT/process-home"
+DATA_DIR="$KANDEV_HOME_DIR/data"
+RUN_DIR="$STAGING_ROOT/run"
+LOG_DIR="$STAGING_ROOT/logs"
+TMP_DIR="$STAGING_ROOT/tmp"
+PIDFILE="$RUN_DIR/backend.pid"
+PID_IDENTITY_FILE="$RUN_DIR/backend.identity"
+LOGFILE="$LOG_DIR/staging.log"
+BACKEND_LOG="$KANDEV_HOME_DIR/logs/backend-logs.log"
+DATABASE_PATH="$DATA_DIR/kandev.db"
+
+mkdir -p "$KANDEV_HOME_DIR" "$DATA_DIR" "$PROCESS_HOME" "$RUN_DIR" "$LOG_DIR" "$TMP_DIR"
+chmod 700 "$STAGING_ROOT" "$KANDEV_HOME_DIR" "$PROCESS_HOME" "$RUN_DIR" "$LOG_DIR" "$TMP_DIR"
+
+port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t >/dev/null 2>&1
+    return $?
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH "sport = :$port" 2>/dev/null | grep -q .
+    return $?
+  fi
+  return 1
+}
+
+guard_ports() {
+  [[ "$BACKEND_PORT" != "$MAIN_BACKEND_PORT" ]] || die "backend port $BACKEND_PORT is reserved for the main Kandev instance"
+  [[ "$AGENTCTL_PORT" != "$MAIN_BACKEND_PORT" ]] || die "agentctl port $AGENTCTL_PORT is reserved for the main Kandev instance"
+  (( AGENTCTL_BASE > MAIN_BACKEND_PORT || AGENTCTL_MAX < MAIN_BACKEND_PORT )) || die "agentctl execution range contains the main backend port $MAIN_BACKEND_PORT"
+  [[ "$BACKEND_PORT" != "$AGENTCTL_PORT" ]] || die "backend and agentctl ports must be different"
+  (( AGENTCTL_PORT < AGENTCTL_BASE || AGENTCTL_PORT > AGENTCTL_MAX )) || die "standalone agentctl port $AGENTCTL_PORT overlaps agentctl execution range $AGENTCTL_BASE-$AGENTCTL_MAX"
+  (( AGENTCTL_MAX < BACKEND_PORT || AGENTCTL_BASE > BACKEND_PORT )) || die "agentctl execution range contains backend port $BACKEND_PORT"
+}
+
+preflight_ports() {
+  guard_ports
+  local port
+  for port in "$BACKEND_PORT" "$AGENTCTL_PORT"; do
+    if port_in_use "$port"; then
+      die "port $port is already in use; choose another staging port"
+    fi
+  done
+  for ((port = AGENTCTL_BASE; port <= AGENTCTL_MAX; port++)); do
+    if port_in_use "$port"; then
+      die "agentctl execution port range contains busy port $port; choose another range"
+    fi
+  done
+}
+
+pid_from_file() {
+  [[ -f "$PIDFILE" ]] || return 1
+  local pid
+  pid="$(tr -d '[:space:]' < "$PIDFILE")"
+  is_integer "$pid" || return 1
+  printf '%s\n' "$pid"
+}
+
+pid_start_time() {
+  local pid stat rest
+  pid="$1"
+  [[ -r "/proc/$pid/stat" ]] || return 1
+  stat="$(<"/proc/$pid/stat")"
+  rest="${stat#*) }"
+  [[ "$rest" != "$stat" ]] || return 1
+  set -- $rest
+  [[ -n "${20:-}" ]] || return 1
+  printf '%s\n' "${20}"
+}
+
+pid_identity_matches() {
+  local pid="$1" identity_pid="" identity_start="" identity_exe="" identity_cwd="" identity_pidfile="" key value
+  [[ -f "$PID_IDENTITY_FILE" ]] || return 1
+  while IFS='=' read -r key value; do
+    case "$key" in
+      pid) identity_pid="$value" ;;
+      start_time) identity_start="$value" ;;
+      executable) identity_exe="$value" ;;
+      cwd) identity_cwd="$value" ;;
+      pid_file) identity_pidfile="$value" ;;
+    esac
+  done < "$PID_IDENTITY_FILE"
+  [[ "$identity_pid" == "$pid" ]] || return 1
+  [[ -n "$identity_start" && "$identity_start" == "$(pid_start_time "$pid")" ]] || return 1
+  [[ "$identity_exe" == "$BACKEND_BIN" ]] || return 1
+  [[ "$identity_cwd" == "$STAGING_ROOT" ]] || return 1
+  [[ "$identity_pidfile" == "$PIDFILE" ]] || return 1
+  [[ "$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)" == "$BACKEND_BIN" ]] || return 1
+  [[ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)" == "$STAGING_ROOT" ]] || return 1
+  [[ "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)" == *"__backend"* ]] || return 1
+  [[ "$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -Fx "KANDEV_BACKEND_PID_FILE=$PIDFILE" || true)" == "KANDEV_BACKEND_PID_FILE=$PIDFILE" ]] || return 1
+}
+
+record_pid_identity() {
+  local pid start_time executable cwd temp_file
+  pid="$(pid_from_file)"
+  kill -0 "$pid" 2>/dev/null || return 1
+  start_time="$(pid_start_time "$pid")" || return 1
+  executable="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  [[ "$executable" == "$BACKEND_BIN" && "$cwd" == "$STAGING_ROOT" ]] || return 1
+  pid_identity_matches "$pid" 2>/dev/null && return 0
+  temp_file="$PID_IDENTITY_FILE.tmp.$$"
+  umask 077
+  {
+    printf 'pid=%s\n' "$pid"
+    printf 'start_time=%s\n' "$start_time"
+    printf 'executable=%s\n' "$executable"
+    printf 'cwd=%s\n' "$cwd"
+    printf 'pid_file=%s\n' "$PIDFILE"
+  } > "$temp_file"
+  mv -f -- "$temp_file" "$PID_IDENTITY_FILE"
+  pid_identity_matches "$pid"
+}
+
+pid_state() {
+  local pid command
+  pid="$(pid_from_file 2>/dev/null || true)"
+  [[ -n "$pid" ]] || { printf '%s\n' missing; return; }
+  if ! kill -0 "$pid" 2>/dev/null; then
+    printf '%s\n' stale
+    return
+  fi
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  case "$command" in
+    *kandev*__backend*)
+      if pid_identity_matches "$pid"; then
+        printf '%s\n' running
+      else
+        printf '%s\n' conflict
+      fi
+      ;;
+    *) printf '%s\n' conflict ;;
+  esac
+}
+
+ensure_build() {
+  if [[ "$NO_BUILD" -eq 1 ]]; then
+    [[ -x "$BACKEND_BIN" ]] || die "--no-build requested but $BACKEND_BIN is missing; run '$0 build' first"
+    [[ -f "$REPO_ROOT/apps/backend/internal/webapp/embedded/generated/index.html" ]] || die "--no-build requested but embedded production web assets are missing; run '$0 build' first"
+    return
+  fi
+  if [[ "$DO_INSTALL" -eq 1 ]]; then
+    make -C "$REPO_ROOT" install
+  fi
+  make -C "$REPO_ROOT" build
+  [[ -x "$BACKEND_BIN" ]] || die "production build did not produce $BACKEND_BIN"
+}
+
+write_config() {
+  local config_file="$RUN_DIR/instance.conf"
+  umask 077
+  {
+    printf 'root=%s\n' "$STAGING_ROOT"
+    printf 'home=%s\n' "$KANDEV_HOME_DIR"
+    printf 'database=%s\n' "$DATABASE_PATH"
+    printf 'backend_port=%s\n' "$BACKEND_PORT"
+    printf 'agentctl_port=%s\n' "$AGENTCTL_PORT"
+    printf 'agentctl_base=%s\n' "$AGENTCTL_BASE"
+    printf 'agentctl_max=%s\n' "$AGENTCTL_MAX"
+    printf 'host=%s\n' "$SERVER_HOST"
+    printf 'providers=%s\n' "$PROVIDER_MODE"
+    printf 'auth=%s\n' "$AUTH_MODE"
+    printf 'build_source=%s\n' "$REPO_ROOT"
+  } > "$config_file"
+  chmod 600 "$config_file"
+}
+
+print_config() {
+  cat <<EOF
+staging root:       $STAGING_ROOT
+Kandev home:        $KANDEV_HOME_DIR
+database:           $DATABASE_PATH
+backend bind:       $SERVER_HOST:$BACKEND_PORT
+local URL:          $BASE_URL
+agentctl port:      $AGENTCTL_PORT
+agentctl range:     $AGENTCTL_BASE-$AGENTCTL_MAX
+provider mode:      $PROVIDER_MODE
+authentication:     $AUTH_MODE
+production assets:  embedded (KANDEV_WEB_INTERNAL_URL unset)
+backend log:        $BACKEND_LOG
+staging log:        $LOGFILE
+pid file:           $PIDFILE
+source checkout:    $REPO_ROOT
+EOF
+}
+
+runtime_env() {
+  # The mock-agent sidecar is built beside the backend binary. Include that
+  # directory explicitly so a clean staging environment can discover it after
+  # a restart, even when the caller's PATH does not contain the checkout.
+  local path_value="$REPO_ROOT/apps/backend/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
+  local lang_value="${LANG:-C.UTF-8}"
+  local auth_value="false"
+  [[ "$AUTH_MODE" == "on" ]] && auth_value="true"
+
+  RUNTIME_ENV=(
+    "PATH=$path_value"
+    "HOME=$PROCESS_HOME"
+    "LANG=$lang_value"
+    "TMPDIR=$TMP_DIR"
+    "XDG_CONFIG_HOME=$PROCESS_HOME/.config"
+    "XDG_DATA_HOME=$PROCESS_HOME/.local/share"
+    "XDG_CACHE_HOME=$PROCESS_HOME/.cache"
+    "KANDEV_HOME_DIR=$KANDEV_HOME_DIR"
+    "KANDEV_DATABASE_DRIVER=sqlite"
+    "KANDEV_DATABASE_PATH=$DATABASE_PATH"
+    "KANDEV_SERVER_HOST=$SERVER_HOST"
+    "KANDEV_SERVER_PORT=$BACKEND_PORT"
+    "KANDEV_AGENT_STANDALONE_HOST=127.0.0.1"
+    "KANDEV_AGENT_STANDALONE_PORT=$AGENTCTL_PORT"
+    "AGENTCTL_INSTANCE_PORT_BASE=$AGENTCTL_BASE"
+    "AGENTCTL_INSTANCE_PORT_MAX=$AGENTCTL_MAX"
+    "KANDEV_BACKEND_PID_FILE=$PIDFILE"
+    "KANDEV_LOG_LEVEL=info"
+    "KANDEV_CONSOLE_LOG_LEVEL=warn"
+    "KANDEV_WEB_TITLE_PREFIX=Staging"
+    "KANDEV_NO_BROWSER=1"
+    "KANDEV_FEATURES_AUTH=$auth_value"
+  )
+
+  if [[ "$PROVIDER_MODE" == "mock" ]]; then
+    RUNTIME_ENV+=(
+      "KANDEV_MOCK_AGENT=only"
+      "KANDEV_MOCK_GITHUB=true"
+      "KANDEV_MOCK_GITLAB=true"
+      "KANDEV_MOCK_JIRA=true"
+      "KANDEV_MOCK_LINEAR=true"
+      "KANDEV_MOCK_AZURE_DEVOPS=true"
+      "KANDEV_MOCK_SENTRY=true"
+    )
+  fi
+}
+
+health_probe_host() {
+  case "$1" in
+    0.0.0.0|::|\[::\]) printf '127.0.0.1' ;;
+    \[*\]) printf '%s' "$1" ;;
+    *:*) printf '[%s]' "$1" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+HEALTH_HOST="$(health_probe_host "$SERVER_HOST")"
+BASE_URL="http://$HEALTH_HOST:$BACKEND_PORT"
+health_url="$BASE_URL/health"
+
+wait_for_pidfile() {
+  local i
+  for i in {1..50}; do
+    if [[ -s "$PIDFILE" ]]; then
+      chmod 600 "$PIDFILE" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+wait_for_health() {
+  command -v curl >/dev/null 2>&1 || die "curl is required to verify staging readiness"
+  local i
+  for i in {1..120}; do
+    if curl --silent --show-error --fail --max-time 2 "$health_url" >/dev/null 2>&1; then
+      return 0
+    fi
+    if [[ "$(pid_state)" != running ]]; then
+      return 1
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
+start_instance() {
+  local state
+  state="$(pid_state)"
+  case "$state" in
+    running)
+      echo "staging-instance: already running (pid $(pid_from_file))"
+      print_config
+      return 0
+      ;;
+    conflict)
+      die "pid file points to a live non-Kandev process; refusing to overwrite $PIDFILE"
+      ;;
+    stale)
+      echo "staging-instance: removing stale pid file"
+      rm -f "$PIDFILE"
+      rm -f "$PID_IDENTITY_FILE"
+      ;;
+    missing)
+      rm -f "$PID_IDENTITY_FILE"
+      ;;
+  esac
+
+  preflight_ports
+  ensure_build
+  runtime_env
+  write_config
+  : > "$LOGFILE"
+  chmod 600 "$LOGFILE"
+
+  echo "staging-instance: starting production-built Kandev"
+  echo "staging-instance: logs -> $LOGFILE"
+  (
+    cd "$STAGING_ROOT"
+    if command -v setsid >/dev/null 2>&1; then
+      nohup setsid env -i "${RUNTIME_ENV[@]}" "$BACKEND_BIN" __backend >> "$LOGFILE" 2>&1 < /dev/null &
+    else
+      nohup env -i "${RUNTIME_ENV[@]}" "$BACKEND_BIN" __backend >> "$LOGFILE" 2>&1 < /dev/null &
+    fi
+  )
+
+  if ! wait_for_pidfile; then
+    tail -n 80 "$LOGFILE" >&2 || true
+    die "backend did not create its pid file"
+  fi
+  if ! record_pid_identity; then
+    tail -n 80 "$LOGFILE" >&2 || true
+    die "backend pid identity could not be verified; refusing to manage the process"
+  fi
+  if ! wait_for_health; then
+    tail -n 100 "$LOGFILE" >&2 || true
+    echo "staging-instance: startup failed; stopping the staging process" >&2
+    stop_instance || true
+    exit 1
+  fi
+
+  echo "staging-instance: ready at $BASE_URL"
+  if ! is_loopback_host "$SERVER_HOST"; then
+    echo "staging-instance: remote URL -> http://<tailscale-host>:$BACKEND_PORT"
+    if [[ "$AUTH_MODE" == "on" ]]; then
+      echo "staging-instance: authentication is enabled; complete the staging setup wizard on first visit"
+    fi
+  fi
+  print_config
+}
+
+stop_instance() {
+  local state pid i
+  state="$(pid_state)"
+  case "$state" in
+    missing)
+      echo "staging-instance: not running"
+      return 0
+      ;;
+    stale)
+      echo "staging-instance: removing stale pid file"
+      rm -f "$PIDFILE"
+      rm -f "$PID_IDENTITY_FILE"
+      return 0
+      ;;
+    conflict)
+      die "pid file points to a live non-Kandev process; refusing to signal it"
+      ;;
+  esac
+
+  pid="$(pid_from_file)"
+  echo "staging-instance: stopping Kandev backend pid $pid"
+  kill -TERM "$pid"
+  for i in {1..100}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$PIDFILE"
+      rm -f "$PID_IDENTITY_FILE"
+      echo "staging-instance: stopped; database preserved at $DATABASE_PATH"
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  echo "staging-instance: graceful stop timed out; sending SIGKILL" >&2
+  kill -KILL "$pid"
+  for i in {1..50}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$PIDFILE"
+      rm -f "$PID_IDENTITY_FILE"
+      echo "staging-instance: stopped; database preserved at $DATABASE_PATH"
+      return 0
+    fi
+    sleep 0.1
+  done
+  die "backend pid $pid did not exit; leaving pid file for manual inspection"
+}
+
+restart_instance() {
+  stop_instance
+  NO_BUILD=1
+  start_instance
+}
+
+rebuild_instance() {
+  ensure_build
+  stop_instance
+  NO_BUILD=1
+  start_instance
+}
+
+status_instance() {
+  local state
+  state="$(pid_state)"
+  print_config
+  case "$state" in
+    running)
+      echo "status:             running (pid $(pid_from_file))"
+      if command -v curl >/dev/null 2>&1 && curl --silent --show-error --fail --max-time 2 "$health_url" >/dev/null 2>&1; then
+        echo "health:             ready"
+      else
+        echo "health:             not ready"
+        return 1
+      fi
+      ;;
+    missing)
+      echo "status:             stopped"
+      return 3
+      ;;
+    stale)
+      echo "status:             stale pid file"
+      return 3
+      ;;
+    conflict)
+      echo "status:             pid file conflict"
+      return 2
+      ;;
+  esac
+}
+
+logs_instance() {
+  [[ -f "$LOGFILE" ]] || die "no staging log exists yet: $LOGFILE"
+  if [[ "$FOLLOW_LOGS" -eq 1 ]]; then
+    exec tail -n 200 -f "$LOGFILE"
+  fi
+  tail -n 200 "$LOGFILE"
+}
+
+case "$ACTION" in
+  help) usage 0 ;;
+  build)
+    ensure_build
+    echo "staging-instance: production build ready"
+    print_config
+    ;;
+  start) start_instance ;;
+  stop) stop_instance ;;
+  restart) restart_instance ;;
+  rebuild) rebuild_instance ;;
+  status) status_instance ;;
+  logs) logs_instance ;;
+  print-config) print_config ;;
+  *) die "unknown action '$ACTION'; use '$0 --help'" ;;
+esac

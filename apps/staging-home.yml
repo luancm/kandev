@@ -1,0 +1,294 @@
+- generic:
+  - generic:
+    - region "Notifications alt+T"
+    - generic:
+      - generic:
+        - complementary:
+          - generic:
+            - generic:
+              - link:
+                - /url: /?home=overview&workspaceId=dff7c10a-8618-41c6-ab83-c766d2273b0a
+                - text: Kandev
+              - generic: /
+              - button:
+                - generic: Default Workspace
+              - button
+            - navigation:
+              - generic:
+                - generic:
+                  - link:
+                    - /url: /?home=overview&workspaceId=dff7c10a-8618-41c6-ab83-c766d2273b0a
+                    - generic: Home
+                  - generic:
+                    - button:
+                      - generic: New Task
+                    - generic:
+                      - button
+                      - button
+                - generic:
+                  - generic:
+                    - button:
+                      - generic: Automations
+                    - generic:
+                      - link:
+                        - /url: /automations
+                    - button
+              - generic:
+                - generic:
+                  - button [expanded]:
+                    - generic: Tasks
+                  - generic:
+                    - generic:
+                      - button:
+                        - generic: All tasks
+                      - button
+                  - button
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - button:
+                                    - generic: Unassigned
+                                    - generic: "6"
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - button:
+                                            - generic:
+                                              - generic: MOVE-06 Done control | completed workflow
+                                              - generic: 33m ago
+                                            - generic:
+                                              - button
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - button:
+                                            - generic:
+                                              - generic: MOVE-05 Active queue | start before moving
+                                              - generic: 33m ago
+                                            - generic:
+                                              - button
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - button:
+                                            - generic:
+                                              - generic: MOVE-04 Idle control | adjacent and backward moves
+                                              - generic: 33m ago
+                                            - generic:
+                                              - button
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - button:
+                                            - generic:
+                                              - generic: MOVE-03 QA -> PR | ready for review
+                                              - generic: 33m ago
+                                            - generic:
+                                              - button
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - button:
+                                            - generic:
+                                              - generic: MOVE-02 Review -> QA | alternate model
+                                              - generic: 30m ago
+                                            - generic:
+                                              - button
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - button:
+                                            - generic:
+                                              - generic: MOVE-01 Spec -> Work | clear context + append prompt
+                                              - generic: 1m ago
+                                            - generic:
+                                              - button
+                                  - status
+            - generic:
+              - button
+              - button
+              - button
+              - button
+              - button
+          - button
+      - generic:
+        - main:
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - textbox [ref=e4]:
+                      - /placeholder: Search tasks...
+                    - generic:
+                      - group:
+                        - radio [checked]
+                        - radio
+                        - radio
+                      - button
+                      - button:
+                        - generic: Setup Issues
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - button:
+                              - checkbox
+                              - text: Multi-select
+                          - button:
+                            - generic:
+                              - text: Move Overrides Lab
+                              - generic: "6"
+                          - generic:
+                            - button
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Spec
+                                      - generic: "1"
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - button:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - paragraph: MOVE-01 Spec -> Work | clear context + append prompt
+                                                  - generic:
+                                                    - button
+                                                - paragraph: "Move this task to Work with clear context enabled and append: Start by checking the acceptance criteria against the implementation plan."
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Work
+                                      - generic: "2"
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - button:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - paragraph: MOVE-05 Active queue | start before moving
+                                                  - generic:
+                                                    - button
+                                                - paragraph: Start this task with the mock agent, then move it while a turn is active. Add a receiving prompt and override the agent profile.
+                                    - generic:
+                                      - generic:
+                                        - button:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - paragraph: MOVE-04 Idle control | adjacent and backward moves
+                                                  - generic:
+                                                    - button
+                                                - paragraph: Use this idle task to exercise ordinary adjacent moves, backward moves, and cancellation without a queued turn.
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Review
+                                      - generic: "1"
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - button:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - paragraph: MOVE-02 Review -> QA | alternate model
+                                                  - generic:
+                                                    - button
+                                                - paragraph: Move this task to QA using the Move Lab Smart Override profile. Confirm the receiving turn uses the selected profile/model.
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: QA
+                                      - generic: "1"
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - button:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - paragraph: MOVE-03 QA -> PR | ready for review
+                                                  - generic:
+                                                    - button
+                                                - paragraph: Move this task to PR and choose ready-for-review instead of the normal draft PR behavior.
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: PR
+                                      - generic: "0"
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - heading [level=2]: Done
+                                      - generic: "1"
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - button:
+                                          - generic:
+                                            - generic:
+                                              - generic:
+                                                - generic:
+                                                  - generic:
+                                                    - generic:
+                                                      - paragraph: MOVE-06 Done control | completed workflow
+                                                  - generic:
+                                                    - button
+                                                - paragraph: A control task already at Done. Leave it in place while testing the other fixtures.
+                        - status
+                  - status
+  - dialog [ref=e6]:
+    - generic [ref=e7]:
+      - heading "AI Agents" [level=2] [ref=e8]
+      - paragraph [ref=e9]: Manage discovered agents and install new ones.
+    - generic [ref=e11]:
+      - button "Mock Mock Slow Installed" [ref=e14] [cursor=pointer]:
+        - paragraph [ref=e18]: Mock
+        - generic [ref=e19]: Mock Slow
+        - generic [ref=e20]: Installed
+      - paragraph [ref=e25]: Expand an agent to configure its model and permissions. Changes are saved when you proceed. You can also add custom TUI agents later in Settings > Agents.
+      - paragraph [ref=e26]: "Careful: The default Agent Profiles run with Auto Approve enabled (YOLO mode)."
+    - generic [ref=e33]:
+      - button "Skip" [active] [ref=e34] [cursor=pointer]
+      - button "Next" [ref=e36] [cursor=pointer]
