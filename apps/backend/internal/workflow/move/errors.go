@@ -16,6 +16,9 @@ var (
 	ErrProfileUnavailable            = errors.New("workflow move entry profile unavailable")
 	ErrMoveConflict                  = errors.New("another workflow move is already pending")
 	ErrPermanentPendingMoveMismatch  = errors.New("pending workflow move is permanently invalid")
+	// ErrPendingMoveActiveSession is transient: a deferred move must remain
+	// queued until every session other than its source has stopped running.
+	ErrPendingMoveActiveSession = errors.New("pending workflow move has another active session")
 )
 
 // ConflictingInstructionsError reports that the nested instructions and the

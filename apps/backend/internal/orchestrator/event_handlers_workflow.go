@@ -1625,6 +1625,9 @@ func (s *Service) recoverTargetBoundWorkflowMove(
 	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
 		return false
 	}
+	if s.recoverQueuedWorkflowMovePrompt(ctx, entry, session) {
+		return true
+	}
 	moveCtx := withWorkflowMoveEntryID(workflowRecoveryContext(ctx), entry.ID)
 	prompt := s.buildWorkflowPrompt(moveCtx, task.Description, targetStep, task.ID, session.ID, session.IsPassthrough)
 	if err := s.autoStartStepPrompt(
@@ -1634,6 +1637,41 @@ func (s *Service) recoverTargetBoundWorkflowMove(
 		s.logger.Warn("failed to recover target-bound workflow move prompt",
 			zap.String("move_id", entry.ID), zap.String("session_id", session.ID), zap.Error(err))
 	}
+	return true
+}
+
+// recoverQueuedWorkflowMovePrompt hands an existing durable workflow-move
+// prompt back to the normal FIFO dispatcher. A lookup failure is handled as
+// "recovery attempted" so callers do not synthesize a duplicate prompt while
+// the queue store is unavailable.
+func (s *Service) recoverQueuedWorkflowMovePrompt(
+	ctx context.Context,
+	entry *workflowmove.Entry,
+	session *models.TaskSession,
+) bool {
+	if s.messageQueue == nil {
+		return false
+	}
+	queued, err := s.messageQueue.FindLifecycleEntryByMoveID(ctx, session.ID, entry.ID)
+	if err != nil {
+		s.logger.Warn("failed to inspect queued workflow move during recovery",
+			zap.String("move_id", entry.ID), zap.String("session_id", session.ID), zap.Error(err))
+		return true
+	}
+	if queued == nil {
+		return false
+	}
+	if session.State == models.TaskSessionStateCreated {
+		if err := s.ensureSessionRunning(ctx, session.ID, session); err != nil {
+			s.logger.Warn("failed to start queued workflow move target during recovery",
+				zap.String("move_id", entry.ID), zap.String("session_id", session.ID), zap.Error(err))
+			return true
+		}
+	}
+	// The matching durable row already contains the complete target prompt and
+	// one-shot options. Normal FIFO delivery handles both unreserved and
+	// crash-reserved rows without rebuilding/merging it.
+	s.drainQueuedMessageForPromptableSession(ctx, session.ID)
 	return true
 }
 
@@ -3338,7 +3376,18 @@ func (s *Service) autoStartPassthroughOnEnter(
 		return
 	}
 	if err := s.autoStartPassthroughPrompt(ctx, taskID, session, step.Name, prompt); err != nil {
-		s.restoreWorkflowMoveDispatchReady(ctx, moveID, session.ID)
+		if passthroughPromptWriteAttempted(err) {
+			// A PTY write error is ambiguous: the runtime may have accepted a
+			// prefix before reporting the failure. Replaying a claimed move
+			// would therefore duplicate the hand-off. Leave the entry claimed
+			// so restart recovery's uncertain-dispatch policy can finalize it.
+			s.logger.Warn("keeping passthrough workflow move claimed after uncertain PTY write",
+				zap.String("move_id", moveID), zap.String("session_id", session.ID))
+		} else {
+			// Only a failure proven to happen before the first write is safe to
+			// replay.
+			s.restoreWorkflowMoveDispatchReady(ctx, moveID, session.ID)
+		}
 		s.logger.Error("failed to auto-start passthrough agent for step",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -3349,6 +3398,19 @@ func (s *Service) autoStartPassthroughOnEnter(
 		return
 	}
 	s.consumeMoveEntry(ctx, moveID, session.ID)
+}
+
+type passthroughPromptDeliveryError struct {
+	err error
+}
+
+func (e *passthroughPromptDeliveryError) Error() string { return e.err.Error() }
+
+func (e *passthroughPromptDeliveryError) Unwrap() error { return e.err }
+
+func passthroughPromptWriteAttempted(err error) bool {
+	var deliveryErr *passthroughPromptDeliveryError
+	return errors.As(err, &deliveryErr)
 }
 
 func (s *Service) autoStartAgentOnEnter(
@@ -3551,6 +3613,19 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		reinsertPendingMove()
 		return
 	}
+	if task.ArchivedAt != nil {
+		s.logger.Info("dropping pending move for archived task",
+			zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
+		cleanupMoveEntry()
+		return
+	}
+	if err := s.validatePendingWorkflowMoveSessions(ctx, taskID, sessionID); err != nil {
+		s.logger.Warn("deferring pending move while another task session is active",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		reinsertPendingMove()
+		return
+	}
 	fromStepID := task.WorkflowStepID
 	if fromStepID == move.WorkflowStepID {
 		if err := s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID); errors.Is(err, errDeferredMoveAlreadyApplied) {
@@ -3722,6 +3797,26 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	taskDescription := task.Description
 	moveCtx := withWorkflowMoveEntryID(context.WithoutCancel(ctx), moveID)
 	go s.processStepExitAndEnter(moveCtx, taskID, session, fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions)
+}
+
+// validatePendingWorkflowMoveSessions is the legacy-path equivalent of the
+// transaction-time repository guard. Legacy repositories cannot make the
+// session check and task transition one transaction, but they must still
+// leave a pending move intact when a secondary session is currently active.
+func (s *Service) validatePendingWorkflowMoveSessions(ctx context.Context, taskID, sourceSessionID string) error {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to list task sessions: %w", err)
+	}
+	for _, candidate := range sessions {
+		if candidate == nil || candidate.ID == sourceSessionID {
+			continue
+		}
+		if candidate.State == models.TaskSessionStateStarting || candidate.State == models.TaskSessionStateRunning {
+			return fmt.Errorf("%w (%s)", workflowmove.ErrPendingMoveActiveSession, candidate.State)
+		}
+	}
+	return nil
 }
 
 type pendingWorkflowMoveCommitter interface {
@@ -4376,7 +4471,9 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 	}
 	if cfgErr != nil {
 		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, content+"\r"); err != nil {
-			return fmt.Errorf("write to passthrough stdin: %w", err)
+			return &passthroughPromptDeliveryError{
+				err: fmt.Errorf("write to passthrough stdin: %w", err),
+			}
 		}
 		return nil
 	}
@@ -4385,7 +4482,9 @@ func (s *Service) deliverPassthroughPrompt(ctx context.Context, sessionID, conte
 			time.Sleep(chunk.DelayBefore)
 		}
 		if err := s.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
-			return fmt.Errorf("write to passthrough stdin: %w", err)
+			return &passthroughPromptDeliveryError{
+				err: fmt.Errorf("write to passthrough stdin: %w", err),
+			}
 		}
 	}
 	return nil

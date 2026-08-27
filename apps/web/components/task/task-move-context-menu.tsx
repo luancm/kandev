@@ -13,7 +13,11 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useWorkflowMove } from "@/hooks/domains/kanban/use-workflow-move";
 import { useToast } from "@/components/toast-provider";
-import { WorkflowMoveAnchoredOptions, WorkflowMoveOptions } from "./workflow-move-options";
+import {
+  WorkflowMoveAnchoredOptions,
+  WorkflowMoveOptions,
+  type WorkflowMoveOptionsSubmit,
+} from "./workflow-move-options";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
@@ -109,7 +113,7 @@ export function TaskMoveOptionsSurface({
   step: TaskMoveStep | null;
   isMoving: boolean;
   onClose: () => void;
-  onSubmit: (entryOptions: WorkflowMoveEntryOptions | undefined) => void;
+  onSubmit: WorkflowMoveOptionsSubmit;
   anchorRef: RefObject<HTMLElement | null>;
   menuBoundaryRef?: RefObject<HTMLElement | null>;
 }) {
@@ -131,9 +135,7 @@ export function TaskMoveOptionsSurface({
       anchorRef={anchorRef}
       focusReturnRef={anchorRef}
       additionalBoundaryRefs={menuBoundaryRef ? [menuBoundaryRef] : undefined}
-      onSubmit={async (entryOptions) => {
-        await onSubmit(entryOptions);
-      }}
+      onSubmit={async (entryOptions) => onSubmit(entryOptions)}
     />
   );
 }

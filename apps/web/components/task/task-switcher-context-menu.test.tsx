@@ -302,6 +302,25 @@ describe("TaskItemWithContextMenu — single-task move options", () => {
     );
   });
 
+  it("keeps desktop one-shot options when the move is rejected", async () => {
+    workflowMoveMock.move.mockResolvedValueOnce({
+      disposition: "failed",
+      error: new Error("move rejected"),
+      response: {},
+    });
+    renderWorkflowMoveMenu();
+    await openTaskMoveOptions();
+
+    const instructions = await screen.findByTestId("workflow-move-instructions");
+    fireEvent.change(instructions, { target: { value: "  retry review later  " } });
+    fireEvent.click(screen.getByTestId("workflow-move-submit"));
+
+    await waitFor(() => expect(workflowMoveMock.move).toHaveBeenCalledOnce());
+    expect((screen.getByTestId("workflow-move-instructions") as HTMLTextAreaElement).value).toBe(
+      "  retry review later  ",
+    );
+  });
+
   it("exposes move options for a one-task selection", async () => {
     renderWorkflowMoveMenu({ selectedTaskIds: new Set(["task-1"]) });
 

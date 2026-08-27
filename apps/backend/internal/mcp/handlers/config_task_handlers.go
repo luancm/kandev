@@ -153,6 +153,9 @@ func (h *Handlers) deferMoveTask(
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 				"failed to load task for move validation", nil)
 		}
+		if err := h.taskSvc.ValidateDeferredTaskMove(ctx, task, session.ID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
+		}
 		sourceWorkflowID = task.WorkflowID
 		sourceStepID = task.WorkflowStepID
 		if task.Metadata != nil {

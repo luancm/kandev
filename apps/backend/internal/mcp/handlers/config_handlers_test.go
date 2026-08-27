@@ -999,8 +999,7 @@ func TestDeferMoveTask_RejectsArchivedTaskBeforeAdmission(t *testing.T) {
 	now := time.Now().UTC()
 	task, err := svc.GetTask(ctx, "task-defer-archived")
 	require.NoError(t, err)
-	task.ArchivedAt = &now
-	require.NoError(t, repo.UpdateTask(ctx, task))
+	require.NoError(t, repo.ArchiveTask(ctx, task.ID))
 	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
 		ID: "src-defer-archived", WorkflowID: "wf-defer-archived", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now,
 	}))

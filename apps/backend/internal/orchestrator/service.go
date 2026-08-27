@@ -2177,7 +2177,13 @@ func (s *Service) StartStartupLifecycleRecovery() {
 	s.startupLifecycleRecoveryMu.Unlock()
 
 	owner.launch(func(ctx context.Context) {
-		s.reconcileTaskLifecycleTokens(withStartupLifecycleRecovery(ctx))
+		recoveryCtx := withStartupLifecycleRecovery(ctx)
+		s.reconcileTaskLifecycleTokens(recoveryCtx)
+		// Pending moves can resume agents and acquire the same database/runtime
+		// resources as lifecycle-marker replay. Keep them in this post-ready
+		// worker too; Start must finish route construction without waiting on
+		// either kind of recovery.
+		s.reconcilePendingMovesOnStartup(recoveryCtx)
 	})
 }
 
@@ -2739,13 +2745,30 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 			})
 		}
 		s.reconcileOneSessionOnStartup(ctx, running, report)
-		s.reconcilePendingMoveOnStartup(ctx, running)
 	}
 	report.flush(s.logger)
 
 	// Pre-poll remote executor status so task lists show accurate state
 	if len(remoteRecords) > 0 && s.agentManager != nil {
 		s.agentManager.PollRemoteStatusForRecords(ctx, remoteRecords)
+	}
+}
+
+// reconcilePendingMovesOnStartup resumes deferred moves after readiness. The
+// source-session reconciliation above intentionally only repairs persisted
+// session state; applying a move may launch or resume an agent and therefore
+// belongs to the post-ready lifecycle recovery worker.
+func (s *Service) reconcilePendingMovesOnStartup(ctx context.Context) {
+	if s.messageQueue == nil {
+		return
+	}
+	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list executors for pending move startup recovery", zap.Error(err))
+		return
+	}
+	for _, running := range runningExecutors {
+		s.reconcilePendingMoveOnStartup(ctx, running)
 	}
 }
 

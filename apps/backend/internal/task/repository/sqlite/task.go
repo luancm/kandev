@@ -698,6 +698,9 @@ func (r *Repository) CommitPendingWorkflowMove(
 	if !found {
 		return nil, nil, false, false, nil
 	}
+	if err := r.validatePendingWorkflowMoveSessionsInTx(ctx, tx, move.taskID, move.sessionID); err != nil {
+		return nil, nil, false, false, err
+	}
 	admitted, err := r.applyPendingWorkflowMove(ctx, tx, currentTask, move, claim)
 	if err != nil {
 		return nil, nil, false, false, err
@@ -961,6 +964,48 @@ func (r *Repository) loadWorkflowStepAdmissionInTx(
 		return "", 0, false, fmt.Errorf("load authoritative workflow move target: %w", err)
 	}
 	return workflowID, limit, true, nil
+}
+
+// validatePendingWorkflowMoveSessionsInTx is the commit-time backstop for
+// deferred move admission. The initial MCP validation is necessarily a read
+// outside the pending-move transaction; locking every session row here closes
+// the race where a secondary session starts after that read but before the
+// task is moved. The source session is exempt because its current turn is the
+// event that is committing this pending move.
+func (r *Repository) validatePendingWorkflowMoveSessionsInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskID, sourceSessionID string,
+) error {
+	lockSuffix := ""
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockSuffix = " FOR UPDATE"
+	}
+	rows, err := tx.QueryContext(ctx, r.db.Rebind(
+		`SELECT id, state FROM task_sessions WHERE task_id = ?`+lockSuffix,
+	), taskID)
+	if err != nil {
+		return fmt.Errorf("list sessions for pending workflow move: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			sessionID string
+			state     string
+		)
+		if err := rows.Scan(&sessionID, &state); err != nil {
+			return fmt.Errorf("scan session for pending workflow move: %w", err)
+		}
+		if sessionID == sourceSessionID ||
+			(state != string(v1.TaskSessionStateStarting) && state != string(v1.TaskSessionStateRunning)) {
+			continue
+		}
+		return fmt.Errorf("%w (%s)", workflowmove.ErrPendingMoveActiveSession, state)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate sessions for pending workflow move: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) lockQueueSessionStdTx(ctx context.Context, tx *sql.Tx, sessionID string) error {

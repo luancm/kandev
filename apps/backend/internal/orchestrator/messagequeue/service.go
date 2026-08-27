@@ -563,6 +563,31 @@ func (s *Service) ReserveQueuedWithAutoRun(ctx context.Context, sessionID string
 	return msg, msg != nil, autoRun
 }
 
+// FindLifecycleEntryByMoveID finds the durable queue row for one workflow move.
+// ListBySession deliberately includes reserved rows, so a restart can detect
+// a prompt whose reservation was persisted before the process stopped and
+// keep the queue's normal FIFO reserve/ack path as the sole delivery owner.
+func (s *Service) FindLifecycleEntryByMoveID(ctx context.Context, sessionID, moveID string) (*QueuedMessage, error) {
+	if sessionID == "" || moveID == "" {
+		return nil, nil
+	}
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("find workflow move queue entry: %w", err)
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if !entry.IsDurableLifecycle() {
+			continue
+		}
+		entryMoveID, _ := entry.Metadata[MetadataDeferredMoveID].(string)
+		if entryMoveID == moveID {
+			return entry, nil
+		}
+	}
+	return nil, nil
+}
+
 // SetAutoRun persists automatic-drain policy through the queue admission gate.
 func (s *Service) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
 	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {

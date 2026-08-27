@@ -465,6 +465,47 @@ func (s *Service) ValidateMoveEntryOptions(ctx context.Context, task *models.Tas
 	return s.moveEntryPreflightValidator(ctx, task, targetStep, options)
 }
 
+// ValidateDeferredTaskMove checks the preconditions that the MCP deferred
+// path must enforce before it admits a pending move. The source primary
+// session is allowed to remain active until its current turn settles; every
+// other active session is a conflict because it could concurrently mutate the
+// task or consume the move's source state.
+func (s *Service) ValidateDeferredTaskMove(ctx context.Context, task *models.Task, sourceSessionID string) error {
+	if task == nil {
+		return errors.New("task is required for deferred move validation")
+	}
+	if task.ArchivedAt != nil {
+		return errors.New("archived tasks cannot be moved")
+	}
+	if sourceSessionID == "" {
+		return errors.New("source session is required for deferred move validation")
+	}
+	sessions, err := s.sessions.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("failed to list task sessions: %w", err)
+	}
+	var sourceFound bool
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if session.ID == sourceSessionID {
+			sourceFound = true
+			if !session.IsPrimary {
+				return errors.New("deferred move source session must be the task's primary session")
+			}
+			continue
+		}
+		if isSessionMoveBlocked(session.State) {
+			return fmt.Errorf("%w (%s)", workflowmove.ErrPendingMoveActiveSession, session.State)
+		}
+	}
+	if !sourceFound {
+		return errors.New("deferred move source session no longer exists")
+	}
+	return nil
+}
+
 // SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace
 // deletion. The callback runs only after the repository cascade succeeds.
 func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {

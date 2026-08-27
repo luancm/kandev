@@ -139,6 +139,7 @@ export function useWorkflowMoveOptionsForm() {
   const patchDraft = useCallback((patch: Partial<WorkflowMoveOptionsDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
   }, []);
+  const resetDraft = useCallback(() => setDraft(EMPTY_DRAFT), []);
 
   // Keep unavailable profiles visible as disabled options with an explanation;
   // hiding them would make a configured target look like an arbitrary
@@ -158,6 +159,7 @@ export function useWorkflowMoveOptionsForm() {
   return {
     draft,
     patchDraft,
+    resetDraft,
     profileOptions,
   };
 }
@@ -242,7 +244,7 @@ type WorkflowMoveOptionsStateProps = {
 };
 
 function useWorkflowMoveOptionsFormState({ onSubmit, isMoving }: WorkflowMoveOptionsStateProps) {
-  const { draft, patchDraft, profileOptions } = useWorkflowMoveOptionsForm();
+  const { draft, patchDraft, profileOptions, resetDraft } = useWorkflowMoveOptionsForm();
   const [submitting, setSubmitting] = useState(false);
   const busy = isMoving || submitting;
 
@@ -250,7 +252,8 @@ function useWorkflowMoveOptionsFormState({ onSubmit, isMoving }: WorkflowMoveOpt
     if (busy) return;
     setSubmitting(true);
     try {
-      await onSubmit(workflowMoveOptionsPayload(draft));
+      const result = await onSubmit(workflowMoveOptionsPayload(draft));
+      if (result !== false) resetDraft();
     } finally {
       setSubmitting(false);
     }

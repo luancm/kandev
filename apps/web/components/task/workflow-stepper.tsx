@@ -485,7 +485,10 @@ function StepHoverContent({
     setSubmitting(true);
     try {
       const moved = await onMove(step.id, entryOptions);
-      if (moved) onSurfaceClose();
+      if (moved) {
+        form.resetDraft();
+        onSurfaceClose();
+      }
     } finally {
       setSubmitting(false);
     }

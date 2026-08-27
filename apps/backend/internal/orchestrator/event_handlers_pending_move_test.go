@@ -740,6 +740,7 @@ func TestStartupReconcilesPendingMoveAfterRestart(t *testing.T) {
 	seedExecutorRunning(t, sc.repo, sc.reviewSessionID, "task-1", "ae-review")
 
 	sc.svc.reconcileExecutorSessionsOnStartup(sc.ctx)
+	sc.svc.reconcilePendingMovesOnStartup(sc.ctx)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -1454,7 +1455,7 @@ func TestWorkflowMovePassthroughFinalizesOnlyAfterPTYAcceptance(t *testing.T) {
 		wantEntry bool
 	}{
 		{name: "accepted", wantEntry: false},
-		{name: "rejected", writeErr: errors.New("pty rejected prompt"), wantPhase: workflowmove.EntryPhaseDispatchReady, wantEntry: true},
+		{name: "rejected", writeErr: errors.New("pty rejected prompt"), wantPhase: workflowmove.EntryPhaseDispatchClaimed, wantEntry: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sc := buildPendingMoveScenario(t)

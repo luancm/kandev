@@ -151,6 +151,7 @@ function ProceedTouchSurface({
         onSubmit={async (options) => {
           const ok = await submit(options);
           if (ok) onOpenChange(false);
+          return ok;
         }}
       />
     </div>
