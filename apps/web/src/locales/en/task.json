@@ -821,6 +821,7 @@
   "workflowMoveOptionsTitle": "Move to {{step}} with options",
   "workflowMoveOptionsDescription": "These overrides apply once when the task enters the destination step.",
   "workflowMoveOptionsForStep": "Open move options for {{step}}",
+  "workflowMoveOptions": "Options",
   "workflowMoveTargetDefault": "Target default",
   "workflowMoveCapabilitiesLoading": "Agent capabilities are still loading",
   "workflowMoveProfileUnavailable": "This agent profile is unavailable for this move",

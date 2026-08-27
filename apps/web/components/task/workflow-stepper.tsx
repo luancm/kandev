@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { cn } from "@kandev/ui/lib/utils";
 import {
   Drawer,
@@ -11,7 +12,7 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import { IconArrowRight } from "@tabler/icons-react";
+import { IconArrowRight, IconChevronDown } from "@tabler/icons-react";
 import { useWorkflowMove } from "@/hooks/domains/kanban/use-workflow-move";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
@@ -19,11 +20,9 @@ import {
   useWorkflowMoveOptionsForm,
   WorkflowMoveOptionsFields,
   workflowMoveOptionsPayload,
+  type WorkflowMoveOptionsDraft,
 } from "./workflow-move-options";
-import {
-  AnchoredActionPopover,
-  ANCHORED_ACTION_POPOVER_WIDTH,
-} from "@/components/confirmation/anchored-action-popover";
+import { AnchoredActionPopover } from "@/components/confirmation/anchored-action-popover";
 import {
   useHoverIntentAffordance,
   HOVER_INTENT_OPEN_DELAY_MS,
@@ -273,7 +272,6 @@ function WorkflowStepSurface({
   touchDrawerOpen,
   onTouchDrawerOpenChange,
   affordance,
-  canMove,
   children,
 }: {
   step: Step;
@@ -284,7 +282,6 @@ function WorkflowStepSurface({
   touchDrawerOpen: boolean;
   onTouchDrawerOpenChange: (open: boolean) => void;
   affordance: ReturnType<typeof useHoverIntentAffordance>;
-  canMove: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -320,7 +317,6 @@ function WorkflowStepSurface({
           step={step}
           isCurrent={isCurrent}
           isCompleted={isCompleted}
-          canMove={canMove}
         >
           {children}
         </StepPopover>
@@ -392,7 +388,6 @@ function WorkflowStepItem({
       touchDrawerOpen={touchDrawerOpen}
       onTouchDrawerOpenChange={setTouchDrawerOpen}
       affordance={affordance}
-      canMove={canMove}
     >
       {stepActions}
     </WorkflowStepSurface>
@@ -405,14 +400,12 @@ function StepPopover({
   step,
   isCurrent,
   isCompleted,
-  canMove,
   children,
 }: {
   affordance: ReturnType<typeof useHoverIntentAffordance>;
   step: Step;
   isCurrent: boolean;
   isCompleted: boolean;
-  canMove: boolean;
   children: React.ReactNode;
 }) {
   const anchorRef = useRef<HTMLButtonElement | null>(null);
@@ -435,11 +428,7 @@ function StepPopover({
         compact
         title={step.name}
         body={children}
-        widthClassName={
-          canMove
-            ? ANCHORED_ACTION_POPOVER_WIDTH
-            : "w-auto min-w-28 max-w-[min(24rem,calc(100vw-1rem))]"
-        }
+        widthClassName="w-auto min-w-28 max-w-[min(24rem,calc(100vw-1rem))]"
         testId="workflow-step-popover"
         interactionProps={{
           onPointerEnter: affordance.contentProps.onPointerEnter,
@@ -474,6 +463,7 @@ function StepHoverContent({
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const form = useWorkflowMoveOptionsForm();
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const busy = isMoving || submitting;
   // Untouched options normalize to undefined, so the same button stays the
@@ -519,15 +509,15 @@ function StepHoverContent({
             <IconArrowRight className="h-3 w-3" />
             {busy ? t("task:moving") : t("task:moveHere")}
           </Button>
-          <div className="w-full min-w-0 text-left" data-testid="workflow-step-move-options">
-            <WorkflowMoveOptionsFields
-              draft={form.draft}
-              onDraftChange={form.patchDraft}
-              profileOptions={form.profileOptions}
-              isTouchSurface={usesTouchDrawer}
-              instructionsRows={3}
-            />
-          </div>
+          <WorkflowMoveOptionsDisclosure
+            stepName={step.name}
+            open={optionsOpen}
+            onOpenChange={setOptionsOpen}
+            usesTouchDrawer={usesTouchDrawer}
+            draft={form.draft}
+            onDraftChange={form.patchDraft}
+            profileOptions={form.profileOptions}
+          />
         </>
       )}
       {isCurrent && (
@@ -535,6 +525,63 @@ function StepHoverContent({
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
     </div>
+  );
+}
+
+function WorkflowMoveOptionsDisclosure({
+  stepName,
+  open,
+  onOpenChange,
+  usesTouchDrawer,
+  draft,
+  onDraftChange,
+  profileOptions,
+}: {
+  stepName: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  usesTouchDrawer: boolean;
+  draft: WorkflowMoveOptionsDraft;
+  onDraftChange: (patch: Partial<WorkflowMoveOptionsDraft>) => void;
+  profileOptions: ReturnType<typeof useWorkflowMoveOptionsForm>["profileOptions"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={onOpenChange}
+      className="w-full"
+      data-testid="workflow-step-move-options"
+    >
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "flex w-full cursor-pointer items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground",
+            usesTouchDrawer ? "min-h-11" : "h-6",
+          )}
+          aria-label={t("task:workflowMoveOptionsForStep", { step: stepName })}
+          data-testid="workflow-step-move-options-trigger"
+        >
+          <span>{t("task:workflowMoveOptions")}</span>
+          <IconChevronDown
+            className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+            aria-hidden="true"
+          />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-1.5" data-testid="workflow-step-move-options-content">
+        <div className="w-full min-w-0 text-left">
+          <WorkflowMoveOptionsFields
+            draft={draft}
+            onDraftChange={onDraftChange}
+            profileOptions={profileOptions}
+            isTouchSurface={usesTouchDrawer}
+            instructionsRows={3}
+          />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

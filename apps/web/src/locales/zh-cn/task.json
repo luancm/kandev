@@ -784,6 +784,7 @@
   "workflowMoveOptionsTitle": "带选项移到{{step}}",
   "workflowMoveOptionsDescription": "这些覆盖设置只在任务进入目标步骤时应用一次。",
   "workflowMoveOptionsForStep": "打开移至{{step}}的选项",
+  "workflowMoveOptions": "选项",
   "workflowMoveTargetDefault": "目标默认设置",
   "workflowMoveCapabilitiesLoading": "代理能力仍在加载",
   "workflowMoveProfileUnavailable": "此代理配置无法用于此次移动",

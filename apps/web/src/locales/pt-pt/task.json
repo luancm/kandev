@@ -785,6 +785,7 @@
   "workflowMoveOptionsTitle": "Mover para {{step}} com opções",
   "workflowMoveOptionsDescription": "Estas substituições aplicam-se uma vez quando a tarefa entra no passo de destino.",
   "workflowMoveOptionsForStep": "Abrir opções de mudança para {{step}}",
+  "workflowMoveOptions": "Opções",
   "workflowMoveTargetDefault": "Predefinição do destino",
   "workflowMoveCapabilitiesLoading": "As capacidades do agente ainda estão a carregar",
   "workflowMoveProfileUnavailable": "Este perfil de agente não está disponível para esta mudança",

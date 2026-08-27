@@ -784,6 +784,7 @@
   "workflowMoveOptionsTitle": "帶選項移到{{step}}",
   "workflowMoveOptionsDescription": "這些覆寫設定只在任務進入目標步驟時套用一次。",
   "workflowMoveOptionsForStep": "開啟移至{{step}}的選項",
+  "workflowMoveOptions": "選項",
   "workflowMoveTargetDefault": "目標預設值",
   "workflowMoveCapabilitiesLoading": "代理程式能力仍在載入",
   "workflowMoveProfileUnavailable": "此代理程式設定檔無法用於此次移動",

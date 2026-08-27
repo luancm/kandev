@@ -29,8 +29,9 @@ test("moves immediately with one-shot options from the desktop stepper", async (
   const target = testPage.getByTestId("workflow-step-Verify");
   await target.hover();
 
-  // Fine-pointer hover opens the one-shot fields directly in the anchored surface.
+  // Fine-pointer hover opens the compact anchored surface; the one-shot fields are opt-in.
   await expect(testPage.getByTestId("workflow-step-popover")).toBeVisible();
+  await testPage.getByTestId("workflow-step-move-options-trigger").click();
   await expect(testPage.getByTestId("workflow-move-agent-profile")).toBeVisible();
   await fillMoveOverrides(testPage, fixture.profileId);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);

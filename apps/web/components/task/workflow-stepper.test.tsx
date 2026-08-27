@@ -70,6 +70,8 @@ const STEP_REVIEW_ID = "workflow-step-Review";
 const MINIMAL_ID = "workflow-stepper-minimal";
 const MOVE_HERE_ID = "workflow-step-move-here";
 const OPTIONS_ID = "workflow-step-move-options";
+const OPTIONS_TRIGGER_ID = "workflow-step-move-options-trigger";
+const OPTIONS_CONTENT_ID = "workflow-step-move-options-content";
 const INSTRUCTIONS_ID = "workflow-move-instructions";
 const AGENT_PROFILE_ID = "workflow-move-agent-profile";
 const POPOVER_CONTENT_SELECTOR = '[data-slot="popover-content"]';
@@ -106,12 +108,6 @@ function renderStepper() {
 async function openStepActions(stepName = "Spec") {
   fireEvent.pointerEnter(screen.getByTestId(`workflow-step-${stepName}`));
   await screen.findByRole("button", { name: /move here/i });
-}
-
-/** Opens a movable step surface and waits for its options fields. */
-async function openStepOptions(stepName = "Spec") {
-  await openStepActions(stepName);
-  return screen.findByTestId(INSTRUCTIONS_ID);
 }
 
 describe("WorkflowStepper", () => {
@@ -178,18 +174,31 @@ describe("WorkflowStepper", () => {
     expect(content?.className).toContain("overflow-hidden");
   });
 
-  it("shows the one-shot options directly on a movable step surface", async () => {
+  it("shows the one-shot options disclosure on a movable step surface", async () => {
     collapsedMock.mockReturnValue(false);
     renderStepper();
 
     await openStepActions();
-    // No disclosure to open: the fields are the surface.
     expect(screen.getByTestId(OPTIONS_ID)).toBeTruthy();
+    expect(screen.getByTestId(OPTIONS_TRIGGER_ID)).toBeTruthy();
+    expect(screen.getByTestId(OPTIONS_CONTENT_ID).hasAttribute("hidden")).toBe(true);
+    expect(screen.queryByTestId(INSTRUCTIONS_ID)).toBeNull();
+    expect(document.querySelector(POPOVER_CONTENT_SELECTOR)?.className).toContain("w-auto");
+  });
+
+  it("keeps the move options collapsed until the disclosure is opened", async () => {
+    renderStepper();
+
+    await openStepActions();
+    const trigger = screen.getByTestId(OPTIONS_TRIGGER_ID);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(trigger);
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByTestId(OPTIONS_CONTENT_ID)).toBeTruthy();
     expect(screen.getByTestId(INSTRUCTIONS_ID)).toBeTruthy();
     expect(screen.getByTestId(AGENT_PROFILE_ID)).toBeTruthy();
-    expect(document.querySelector(POPOVER_CONTENT_SELECTOR)?.className).toContain(
-      "w-[min(24rem,calc(100vw-1rem))]",
-    );
   });
 
   it("bounds the touch step drawer to one safe-area-aware scroll body", async () => {
@@ -279,7 +288,9 @@ describe("WorkflowStepper — move behaviour", () => {
   it("submits the visible anchored-form draft as one-shot entry options", async () => {
     renderStepper();
 
-    const instructions = await openStepOptions();
+    await openStepActions();
+    fireEvent.click(screen.getByTestId(OPTIONS_TRIGGER_ID));
+    const instructions = await screen.findByTestId(INSTRUCTIONS_ID);
     fireEvent.change(instructions, { target: { value: "start the review with tests" } });
     fireEvent.click(screen.getByTestId(MOVE_HERE_ID));
 
@@ -295,7 +306,9 @@ describe("WorkflowStepper — move behaviour", () => {
     });
     renderStepper();
 
-    const instructions = await openStepOptions();
+    await openStepActions();
+    fireEvent.click(screen.getByTestId(OPTIONS_TRIGGER_ID));
+    const instructions = await screen.findByTestId(INSTRUCTIONS_ID);
     fireEvent.change(instructions, { target: { value: "retry after capacity opens" } });
     fireEvent.click(screen.getByTestId(MOVE_HERE_ID));
 
@@ -322,6 +335,7 @@ describe("WorkflowStepper — anchored options", () => {
       const trigger = screen.getByTestId(STEP_SPEC_ID);
       fireEvent.pointerEnter(trigger);
       act(() => vi.advanceTimersByTime(250));
+      fireEvent.click(screen.getByTestId(OPTIONS_TRIGGER_ID));
       fireEvent.pointerDown(screen.getByTestId(AGENT_PROFILE_ID));
       act(() => vi.advanceTimersByTime(250));
 
