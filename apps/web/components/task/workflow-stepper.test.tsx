@@ -179,6 +179,7 @@ describe("WorkflowStepper", () => {
     renderStepper();
 
     await openStepActions();
+    expect(screen.getByTestId("workflow-step-popover").getAttribute("data-align")).toBe("center");
     expect(screen.getByTestId(OPTIONS_ID)).toBeTruthy();
     expect(screen.getByTestId(OPTIONS_TRIGGER_ID)).toBeTruthy();
     expect(screen.getByTestId(OPTIONS_CONTENT_ID).hasAttribute("hidden")).toBe(true);

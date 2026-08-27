@@ -52,6 +52,8 @@ export type AnchoredActionPopoverProps = {
   compact?: boolean;
   testId?: string;
   collisionPadding?: number;
+  /** Horizontal alignment relative to the anchor; defaults to end. */
+  align?: ComponentProps<typeof PopoverContent>["align"];
   onOpenChange: (open: boolean) => void;
   onDismiss?: () => void;
 };
@@ -297,6 +299,7 @@ export function AnchoredActionPopover({
   compact = false,
   testId = "anchored-action-popover",
   collisionPadding = 8,
+  align = "end",
   onOpenChange,
   onDismiss,
 }: AnchoredActionPopoverProps) {
@@ -339,6 +342,7 @@ export function AnchoredActionPopover({
           compact={compact}
           confirmationBoundary={confirmationBoundary}
           collisionPadding={collisionPadding}
+          align={align}
           interactionProps={interactionProps}
           {...contentHandlers}
         />
@@ -361,6 +365,7 @@ type AnchoredActionPopoverContentProps = {
   compact: boolean;
   confirmationBoundary: boolean;
   collisionPadding: number;
+  align: ComponentProps<typeof PopoverContent>["align"];
   interactionProps?: AnchoredActionPopoverProps["interactionProps"];
 } & Pick<
   ComponentProps<typeof PopoverContent>,
@@ -386,6 +391,7 @@ function AnchoredActionPopoverContent({
   compact,
   confirmationBoundary,
   collisionPadding,
+  align,
   interactionProps,
   onOpenAutoFocus,
   onFocusOutside,
@@ -403,7 +409,7 @@ function AnchoredActionPopoverContent({
       data-testid={testId}
       data-confirmation-boundary={confirmationBoundary ? "" : undefined}
       side="bottom"
-      align="end"
+      align={align}
       sideOffset={8}
       collisionPadding={collisionPadding}
       className={cn(

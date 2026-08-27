@@ -426,6 +426,7 @@ function StepPopover({
         contentRef={affordance.contentRef}
         focusReturnRef={anchorRef}
         compact
+        align="center"
         title={step.name}
         body={children}
         widthClassName="w-auto min-w-28 max-w-[min(24rem,calc(100vw-1rem))]"

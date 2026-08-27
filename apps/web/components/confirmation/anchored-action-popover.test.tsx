@@ -4,7 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AnchoredActionPopover } from "./anchored-action-popover";
 
-function Harness({ onDismiss = vi.fn() }: { onDismiss?: () => void }) {
+function Harness({
+  align,
+  onDismiss = vi.fn(),
+}: {
+  align?: "start" | "center" | "end";
+  onDismiss?: () => void;
+}) {
   const [open, setOpen] = useState(true);
   const [showAnchor, setShowAnchor] = useState(true);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -32,6 +38,7 @@ function Harness({ onDismiss = vi.fn() }: { onDismiss?: () => void }) {
         description="Choose how to enter the next step."
         body={body}
         footer={footer}
+        align={align}
         onOpenChange={setOpen}
         onDismiss={onDismiss}
       />
@@ -41,6 +48,22 @@ function Harness({ onDismiss = vi.fn() }: { onDismiss?: () => void }) {
 
 describe("AnchoredActionPopover", () => {
   afterEach(cleanup);
+
+  it("aligns to the anchor end by default", () => {
+    render(<Harness />);
+
+    expect(screen.getByRole("dialog", { name: "Move task" }).getAttribute("data-align")).toBe(
+      "end",
+    );
+  });
+
+  it("honors an explicit alignment override", () => {
+    render(<Harness align="center" />);
+
+    expect(screen.getByRole("dialog", { name: "Move task" }).getAttribute("data-align")).toBe(
+      "center",
+    );
+  });
 
   it("focuses the first form control and returns focus to the live anchor", async () => {
     render(<Harness />);
