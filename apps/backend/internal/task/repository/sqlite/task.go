@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -586,7 +587,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "")
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, "", false, nil)
 	return admitted, err
 }
 
@@ -603,9 +604,382 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	queueExitPending bool,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending, "",
+		ctx, task, targetStepID, limit, admittedState, queueExitPending, "", false, nil,
 	)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep is the direct manual
+// move transaction. It commits the task admission, its lifecycle marker, and
+// the private entry payload together, but only while the task is still at the
+// caller's expected source step and has no move already pending.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	entry *workflowmove.Entry,
+) (admitted bool, applied bool, err error) {
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, targetStepID, limit, admittedState, queueExitPending, expectedStepID, true, entry,
+	)
+}
+
+// WorkflowMoveTransactionOwner identifies the connection pool used by the
+// atomic task-and-entry admission transaction.
+func (r *Repository) WorkflowMoveTransactionOwner() *sql.DB { return r.db.DB }
+
+type pendingWorkflowMoveCommit struct {
+	sessionID              string
+	moveID                 string
+	taskID                 string
+	expectedFromWorkflowID string
+	expectedFromStepID     string
+	targetWorkflowID       string
+	targetStepID           string
+	admittedState          *v1.TaskState
+}
+
+type pendingWorkflowMoveClaim struct {
+	position     int
+	optionsJSON  string
+	entryOptions *workflowmove.EntryOptions
+}
+
+// CommitPendingWorkflowMove atomically turns one exact deferred queue claim
+// into a task transition and, when present, its private entry payload. A
+// false applied result means the pending row or source precondition no longer
+// matches; no task, entry, or queue row is changed.
+func (r *Repository) CommitPendingWorkflowMove(
+	ctx context.Context,
+	sessionID string,
+	moveID string,
+	taskID string,
+	expectedFromWorkflowID string,
+	expectedFromStepID string,
+	targetWorkflowID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+) (*models.Task, *workflowmove.EntryOptions, bool, bool, error) {
+	move := &pendingWorkflowMoveCommit{
+		sessionID:              sessionID,
+		moveID:                 moveID,
+		taskID:                 taskID,
+		expectedFromWorkflowID: expectedFromWorkflowID,
+		expectedFromStepID:     expectedFromStepID,
+		targetWorkflowID:       targetWorkflowID,
+		targetStepID:           targetStepID,
+		admittedState:          admittedState,
+	}
+	if move.sessionID == "" || move.moveID == "" || move.taskID == "" || move.targetWorkflowID == "" || move.targetStepID == "" {
+		return nil, nil, false, false, errors.New("deferred workflow move identity is incomplete")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, false, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	currentTask, ready, err := r.loadPendingWorkflowMoveTask(ctx, tx, move)
+	if err != nil {
+		return nil, nil, false, false, err
+	}
+	if !ready {
+		return nil, nil, false, false, nil
+	}
+	claim, found, err := r.loadPendingWorkflowMoveClaim(ctx, tx, move)
+	if err != nil {
+		return nil, nil, false, false, err
+	}
+	if !found {
+		return nil, nil, false, false, nil
+	}
+	admitted, err := r.applyPendingWorkflowMove(ctx, tx, currentTask, move, claim)
+	if err != nil {
+		return nil, nil, false, false, err
+	}
+	if err := r.consumePendingWorkflowMove(ctx, tx, move); err != nil {
+		return nil, nil, false, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, false, false, err
+	}
+	return currentTask, claim.entryOptions, admitted, true, nil
+}
+
+func (r *Repository) loadPendingWorkflowMoveTask(
+	ctx context.Context,
+	tx *sql.Tx,
+	move *pendingWorkflowMoveCommit,
+) (*models.Task, bool, error) {
+	var workspaceID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT workspace_id FROM tasks WHERE id = ?`), move.taskID).Scan(&workspaceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, fmt.Errorf("%w: %s", ErrTaskNotFound, move.taskID)
+		}
+		return nil, false, fmt.Errorf("read deferred move task workspace: %w", err)
+	}
+	if err := r.lockWorkspaceRowStdTx(ctx, tx, workspaceID); err != nil {
+		return nil, false, err
+	}
+	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, move.taskID)
+	if err != nil {
+		return nil, false, fmt.Errorf("lock deferred move task: %w", err)
+	}
+	if !found {
+		return nil, false, fmt.Errorf("%w: %s", ErrTaskNotFound, move.taskID)
+	}
+	currentTask, err := r.scanSingleTask(tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), move.taskID))
+	if err != nil {
+		return nil, false, fmt.Errorf("reload deferred move task: %w", err)
+	}
+	if pendingWorkflowMoveApplied(currentTask.Metadata, move.moveID) {
+		return nil, false, nil
+	}
+	if currentTask.ArchivedAt != nil || currentStepID != move.expectedFromStepID ||
+		currentTask.WorkflowID != move.expectedFromWorkflowID {
+		return nil, false, fmt.Errorf("%w: source task changed", workflowmove.ErrPermanentPendingMoveMismatch)
+	}
+	if currentTask.Metadata == nil {
+		currentTask.Metadata = map[string]interface{}{}
+	}
+	if pendingWorkflowMoveClaimed(currentTask.Metadata) {
+		return nil, false, nil
+	}
+	return currentTask, true, nil
+}
+
+func pendingWorkflowMoveApplied(metadata map[string]interface{}, moveID string) bool {
+	appliedMoves, ok := metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	applied, _ := appliedMoves[moveID].(bool)
+	return applied
+}
+
+func pendingWorkflowMoveClaimed(metadata map[string]interface{}) bool {
+	for _, key := range []string{
+		models.MetaKeyWorkflowMovePending,
+		models.MetaKeyManualMoveLifecyclePending,
+		models.MetaKeyQueuedMoveExitPending,
+		models.MetaKeyQueuePromotionPending,
+	} {
+		if _, claimed := metadata[key]; claimed {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Repository) loadPendingWorkflowMoveClaim(
+	ctx context.Context,
+	tx *sql.Tx,
+	move *pendingWorkflowMoveCommit,
+) (*pendingWorkflowMoveClaim, bool, error) {
+	if err := r.lockQueueSessionStdTx(ctx, tx, move.sessionID); err != nil {
+		return nil, false, err
+	}
+	var (
+		storedFromWorkflowID string
+		storedFromStepID     string
+		storedWorkflowID     string
+		storedStepID         string
+	)
+	claim := &pendingWorkflowMoveClaim{}
+	lockSuffix := ""
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockSuffix = " FOR UPDATE"
+	}
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT from_workflow_id, from_step_id, workflow_id, workflow_step_id, step_position, entry_options_json
+		FROM pending_moves
+		WHERE session_id = ? AND move_id = ? AND task_id = ?`+lockSuffix),
+		move.sessionID, move.moveID, move.taskID,
+	).Scan(&storedFromWorkflowID, &storedFromStepID, &storedWorkflowID, &storedStepID, &claim.position, &claim.optionsJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("load exact pending workflow move: %w", err)
+	}
+	if (storedFromWorkflowID != "" && storedFromWorkflowID != move.expectedFromWorkflowID) ||
+		(storedFromStepID != "" && storedFromStepID != move.expectedFromStepID) ||
+		storedWorkflowID != move.targetWorkflowID || storedStepID != move.targetStepID {
+		return nil, false, fmt.Errorf("%w: pending identity changed", workflowmove.ErrPermanentPendingMoveMismatch)
+	}
+	claim.entryOptions, err = workflowmove.DecodeEntryOptionsJSON([]byte(claim.optionsJSON))
+	if err != nil {
+		return nil, false, fmt.Errorf("decode pending workflow move options: %w", err)
+	}
+	return claim, true, nil
+}
+
+func (r *Repository) applyPendingWorkflowMove(
+	ctx context.Context,
+	tx *sql.Tx,
+	currentTask *models.Task,
+	move *pendingWorkflowMoveCommit,
+	claim *pendingWorkflowMoveClaim,
+) (bool, error) {
+	currentTargetWorkflowID, currentTargetLimit, found, err := r.loadWorkflowStepAdmissionInTx(ctx, tx, move.targetStepID)
+	if err != nil {
+		return false, err
+	}
+	if !found || currentTargetWorkflowID != move.targetWorkflowID {
+		return false, fmt.Errorf("%w: target step changed", workflowmove.ErrPermanentPendingMoveMismatch)
+	}
+	occupants, err := r.countAdmittedInTx(ctx, tx, move.targetStepID, move.taskID)
+	if err != nil {
+		return false, err
+	}
+	admitted := r.preparePendingWorkflowMoveTask(currentTask, move, claim, currentTargetLimit, occupants)
+	if err := r.persistPendingWorkflowMoveTask(ctx, tx, currentTask, move, claim); err != nil {
+		return false, err
+	}
+	return admitted, nil
+}
+
+func (r *Repository) preparePendingWorkflowMoveTask(
+	currentTask *models.Task,
+	move *pendingWorkflowMoveCommit,
+	claim *pendingWorkflowMoveClaim,
+	targetLimit int,
+	occupants int,
+) bool {
+	now := r.nowUTC()
+	admitted := currentTask.IsEphemeral || targetLimit <= 0 || occupants < targetLimit
+	currentTask.WorkflowID = move.targetWorkflowID
+	currentTask.WorkflowStepID = move.targetStepID
+	currentTask.Position = claim.position
+	currentTask.UpdatedAt = now
+	if admitted {
+		currentTask.WIPAdmitted = !currentTask.IsEphemeral
+		currentTask.QueuedForStepID = ""
+		currentTask.QueuedAt = nil
+		if move.admittedState != nil {
+			currentTask.State = *move.admittedState
+		}
+		delete(currentTask.Metadata, models.MetaKeyQueuedMoveExitPending)
+	} else {
+		currentTask.WIPAdmitted = false
+		currentTask.QueuedForStepID = move.targetStepID
+		currentTask.QueuedAt = &now
+		currentTask.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
+			"from_step_id": move.expectedFromStepID,
+			"move_id":      move.moveID,
+		}
+	}
+	delete(currentTask.Metadata, models.MetaKeyQueuedMoveExitCompleted)
+	delete(currentTask.Metadata, models.MetaKeyQueuePromotionPending)
+	appliedMoves, _ := currentTask.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{})
+	if appliedMoves == nil {
+		appliedMoves = map[string]interface{}{}
+	}
+	appliedMoves[move.moveID] = true
+	currentTask.Metadata[models.MetaKeyAppliedDeferredMoves] = appliedMoves
+	if admitted {
+		currentTask.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
+			"from_step_id": move.expectedFromStepID,
+			"move_id":      move.moveID,
+		}
+	}
+	if claim.entryOptions != nil {
+		currentTask.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
+			"from_step_id": move.expectedFromStepID,
+			"move_id":      move.moveID,
+		}
+	} else {
+		delete(currentTask.Metadata, models.MetaKeyWorkflowMovePending)
+	}
+	return admitted
+}
+
+func (r *Repository) persistPendingWorkflowMoveTask(
+	ctx context.Context,
+	tx *sql.Tx,
+	currentTask *models.Task,
+	move *pendingWorkflowMoveCommit,
+	claim *pendingWorkflowMoveClaim,
+) error {
+	if claim.entryOptions != nil {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO workflow_move_entries (id, task_id, options_json)
+			VALUES (?, ?, ?)
+		`), move.moveID, move.taskID, claim.optionsJSON); err != nil {
+			return fmt.Errorf("insert deferred workflow move entry: %w", err)
+		}
+	}
+	metadata, err := json.Marshal(currentTask.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshal deferred workflow move metadata: %w", err)
+	}
+	if err := r.updateTaskTx(ctx, tx, currentTask, metadata); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *Repository) consumePendingWorkflowMove(ctx context.Context, tx *sql.Tx, move *pendingWorkflowMoveCommit) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM pending_moves WHERE session_id = ? AND move_id = ? AND task_id = ?
+	`), move.sessionID, move.moveID, move.taskID)
+	if err != nil {
+		return fmt.Errorf("consume exact pending workflow move: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect pending workflow move consumption: %w", err)
+	}
+	if rows != 1 {
+		return errors.New("pending workflow move changed during commit")
+	}
+	return nil
+}
+
+func (r *Repository) loadWorkflowStepAdmissionInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	stepID string,
+) (workflowID string, limit int, found bool, err error) {
+	lockSuffix := ""
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockSuffix = " FOR UPDATE"
+	}
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT workflow_id, wip_limit FROM workflow_steps WHERE id = ?`+lockSuffix), stepID,
+	).Scan(&workflowID, &limit)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, false, fmt.Errorf("load authoritative workflow move target: %w", err)
+	}
+	return workflowID, limit, true, nil
+}
+
+func (r *Repository) lockQueueSessionStdTx(ctx context.Context, tx *sql.Tx, sessionID string) error {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queue_session_locks (session_id) VALUES (?)
+		ON CONFLICT(session_id) DO NOTHING
+	`), sessionID); err != nil {
+		return fmt.Errorf("ensure deferred move session lock: %w", err)
+	}
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+	var one int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT 1 FROM queue_session_locks WHERE session_id = ? FOR UPDATE
+	`), sessionID).Scan(&one); err != nil {
+		return fmt.Errorf("lock deferred move session: %w", err)
+	}
+	return nil
 }
 
 // UpdateTaskWithWorkflowStepAdmissionIfAtStep is the AC-46/48 compare-and-swap
@@ -624,7 +998,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	targetStepID string,
 	limit int,
 ) (applied bool, err error) {
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, targetStepID, limit, nil, false, expectedStepID, false, nil)
 	return applied, err
 }
 
@@ -714,6 +1088,111 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	return true, nil
 }
 
+// rebaseTaskForDirectMoveCAS reloads the task under its row lock and carries
+// forward only the fields owned by a manual move. This preserves unrelated
+// concurrent edits while making the source-step and pending-move checks part
+// of the same transaction as admission and private-entry persistence.
+func (r *Repository) rebaseTaskForDirectMoveCAS(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	expectedStepID string,
+	now time.Time,
+) (bool, error) {
+	desiredWorkflowID := task.WorkflowID
+	desiredPosition := task.Position
+	desiredMetadata := task.Metadata
+
+	_, currentStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, fmt.Errorf("read task step for direct move CAS: %w", err)
+	}
+	if !found {
+		return false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if currentStepID != expectedStepID {
+		return false, nil
+	}
+	currentTask, err := r.scanSingleTask(tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), task.ID))
+	if err != nil {
+		return false, fmt.Errorf("reload task for direct move CAS: %w", err)
+	}
+	if currentTask.ArchivedAt != nil {
+		return false, nil
+	}
+	if currentTask.Metadata == nil {
+		currentTask.Metadata = map[string]interface{}{}
+	}
+	if pendingWorkflowMoveClaimed(currentTask.Metadata) {
+		return false, nil
+	}
+	pendingMove, err := r.hasPendingWorkflowMoveRowInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	if pendingMove {
+		return false, nil
+	}
+
+	*task = *currentTask
+	task.WorkflowID = desiredWorkflowID
+	task.Position = desiredPosition
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	for _, key := range []string{
+		models.MetaKeyWorkflowMovePending,
+		models.MetaKeyQueuedMoveExitPending,
+		models.MetaKeyQueuedMoveExitCompleted,
+		models.MetaKeyQueuePromotionPending,
+		models.MetaKeyManualMoveLifecyclePending,
+		models.MetaKeyManualMoveLifecycleCompleted,
+		models.MetaKeyDeferredLaunch,
+	} {
+		if value, ok := desiredMetadata[key]; ok {
+			task.Metadata[key] = value
+		} else {
+			delete(task.Metadata, key)
+		}
+	}
+	task.UpdatedAt = now
+	return true, nil
+}
+
+func (r *Repository) hasPendingWorkflowMoveRowInTx(ctx context.Context, tx *sql.Tx, taskID string) (bool, error) {
+	present, err := r.tableExistsInTx(ctx, tx, "pending_moves")
+	if err != nil {
+		return false, fmt.Errorf("inspect pending move schema: %w", err)
+	}
+	if !present {
+		return false, nil
+	}
+	var pendingCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM pending_moves WHERE task_id = ?
+	`), taskID).Scan(&pendingCount); err != nil {
+		return false, fmt.Errorf("inspect deferred move claims: %w", err)
+	}
+	return pendingCount > 0, nil
+}
+
+func (r *Repository) tableExistsInTx(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
+	var present bool
+	if dialect.IsPostgres(r.db.DriverName()) {
+		if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, table).Scan(&present); err != nil {
+			return false, err
+		}
+		return present, nil
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)
+	`, table).Scan(&present); err != nil {
+		return false, err
+	}
+	return present, nil
+}
+
 func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	ctx context.Context,
 	task *models.Task,
@@ -722,6 +1201,8 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	admittedState *v1.TaskState,
 	queueExitPending bool,
 	expectedStepID string,
+	directAdmission bool,
+	directEntry *workflowmove.Entry,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -760,7 +1241,12 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	// reported as applied=false, not an error, and the transaction is rolled
 	// back untouched.
 	if expectedStepID != "" {
-		casApplied, err := r.rebaseTaskForStepAdmissionCAS(ctx, tx, task, expectedStepID, now)
+		var casApplied bool
+		if directAdmission {
+			casApplied, err = r.rebaseTaskForDirectMoveCAS(ctx, tx, task, expectedStepID, now)
+		} else {
+			casApplied, err = r.rebaseTaskForStepAdmissionCAS(ctx, tx, task, expectedStepID, now)
+		}
 		if err != nil {
 			return false, false, err
 		}
@@ -769,14 +1255,27 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 		}
 	}
 
-	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+	effectiveLimit := limit
+	if directAdmission {
+		targetWorkflowID, targetLimit, found, loadErr := r.loadWorkflowStepAdmissionInTx(ctx, tx, targetStepID)
+		if loadErr != nil {
+			return false, false, loadErr
+		}
+		if !found {
+			return false, false, fmt.Errorf("workflow step %s not found", targetStepID)
+		}
+		if targetWorkflowID != task.WorkflowID {
+			return false, false, fmt.Errorf("workflow step %s does not belong to workflow %s", targetStepID, task.WorkflowID)
+		}
+		effectiveLimit = targetLimit
+	} else if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
 		return false, false, err
 	}
 	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)
 	if err != nil {
 		return false, false, err
 	}
-	admitted = task.IsEphemeral || limit <= 0 || occupants < limit
+	admitted = task.IsEphemeral || effectiveLimit <= 0 || occupants < effectiveLimit
 	task.WorkflowStepID = targetStepID
 	if admitted {
 		task.WIPAdmitted = !task.IsEphemeral
@@ -799,9 +1298,28 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 			}
 		}
 	}
+	if directEntry != nil {
+		if directEntry.ID == "" || directEntry.TaskID != task.ID {
+			return false, false, errors.New("workflow move entry does not match task admission")
+		}
+		marker, ok := task.Metadata[models.MetaKeyWorkflowMovePending].(map[string]interface{})
+		if !ok || marker["move_id"] != directEntry.ID || marker["from_step_id"] != expectedStepID {
+			return false, false, errors.New("workflow move entry does not match task lifecycle marker")
+		}
+		optionsJSON, err := json.Marshal(directEntry.Options)
+		if err != nil {
+			return false, false, fmt.Errorf("marshal workflow move entry options: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO workflow_move_entries (id, task_id, options_json)
+			VALUES (?, ?, ?)
+		`), directEntry.ID, directEntry.TaskID, optionsJSON); err != nil {
+			return false, false, fmt.Errorf("insert workflow move entry: %w", err)
+		}
+	}
 	metadata, err := json.Marshal(task.Metadata)
 	if err != nil {
-		metadata = []byte("{}")
+		return false, false, fmt.Errorf("marshal task metadata for workflow admission: %w", err)
 	}
 	if err := r.updateTaskTx(ctx, tx, task, metadata); err != nil {
 		return false, false, err
@@ -1390,6 +1908,9 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
+		return err
+	}
+	if err := r.purgeWorkflowMoveStateInTx(ctx, tx, id); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2122,6 +2643,9 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
 		return err
 	}
+	if err := r.purgeWorkflowMoveStateInTx(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
@@ -2163,6 +2687,9 @@ func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID stri
 		return false, err
 	}
 	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions); err != nil {
+		return false, err
+	}
+	if err := r.purgeWorkflowMoveStateInTx(ctx, tx, id); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -2207,6 +2734,22 @@ func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID
 		return nil
 	}
 	return err
+}
+
+func (r *Repository) purgeWorkflowMoveStateInTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	present, err := r.tableExistsInTx(ctx, tx.Tx, "workflow_move_entries")
+	if err != nil {
+		return fmt.Errorf("inspect workflow move entry schema during task purge: %w", err)
+	}
+	if present {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflow_move_entries WHERE task_id = ?`), taskID); err != nil {
+			return fmt.Errorf("purge workflow move entries: %w", err)
+		}
+	}
+	if _, err := r.removeTaskMetadataKeyWithExecutor(ctx, tx, taskID, models.MetaKeyWorkflowMovePending); err != nil {
+		return fmt.Errorf("clear workflow move marker during task purge: %w", err)
+	}
+	return nil
 }
 
 // UnarchiveTaskByCascade clears archived_at + archived_by_cascade_id only

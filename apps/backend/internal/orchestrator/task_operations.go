@@ -32,6 +32,7 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -40,6 +41,31 @@ type PromptResult struct {
 	StopReason   string // The reason the agent stopped (e.g., "end_turn")
 	AgentMessage string // The agent's accumulated response message
 	TurnID       string // The exact turn accepted for this prompt, when known.
+}
+
+// createdSessionPromptStage identifies whether a CREATED-session prompt is
+// still raw caller input or has already been composed by the auto-start path.
+// Keeping this distinction internal lets the public launcher preserve its
+// existing composition while preventing workflow auto-starts from composing
+// the same prompt a second time.
+type createdSessionPromptStage uint8
+
+const (
+	createdSessionPromptStageRaw createdSessionPromptStage = iota
+	createdSessionPromptStagePrepared
+)
+
+type createdSessionPrompt struct {
+	text  string
+	stage createdSessionPromptStage
+}
+
+func rawCreatedSessionPrompt(text string) createdSessionPrompt {
+	return createdSessionPrompt{text: text, stage: createdSessionPromptStageRaw}
+}
+
+func preparedCreatedSessionPrompt(text string) createdSessionPrompt {
+	return createdSessionPrompt{text: text, stage: createdSessionPromptStagePrepared}
 }
 
 // CoordinatorTaskStopStatus is the idempotent product result returned to a
@@ -413,14 +439,33 @@ func isInheritParentWorkspace(task *v1.Task) bool {
 // own message control its metadata directly).
 // references contains validated entity references whose exact server-generated
 // context block may survive first-turn canonicalization.
-//
-//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+// Workflow entry overrides use the private options-aware helper so existing
+// launcher interfaces keep their stable method signature.
 func (s *Service) StartCreatedSession(
 	ctx context.Context,
 	taskID, sessionID, agentProfileID, prompt string,
 	skipMessageRecord, planMode, autoStart bool,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSessionWithOptions(
+		ctx, taskID, sessionID, agentProfileID, rawCreatedSessionPrompt(prompt),
+		skipMessageRecord, planMode, autoStart, attachments, references, nil,
+	)
+}
+
+// startCreatedSessionWithOptions is the workflow-internal variant that keeps
+// a one-shot entry profile from being replaced by the durable step profile
+// while a CREATED target session is auto-started.
+//
+//nolint:cyclop,funlen,gocognit,maintidx // Existing complexity inherited from session-lifecycle handling.
+func (s *Service) startCreatedSessionWithOptions(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID string, prompt createdSessionPrompt,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	moveOptions *workflowmove.EntryOptions,
 ) (*executor.TaskExecution, error) {
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
@@ -472,12 +517,16 @@ func (s *Service) StartCreatedSession(
 		effectiveProfileID = session.AgentProfileID
 	}
 
-	// Resolve the workflow step override / workflow default before the
-	// required-profile guard, so a session without its own agent_profile_id
-	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
-	// the caller profile only when neither a step override nor a workflow
-	// default applies; either of those overrides a non-empty caller.
-	effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	if moveOptions != nil && moveOptions.AgentProfileID != "" {
+		effectiveProfileID = moveOptions.AgentProfileID
+	} else {
+		// Resolve the workflow step override / workflow default before the
+		// required-profile guard, so a session without its own agent_profile_id
+		// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
+		// the caller profile only when neither a step override nor a workflow
+		// default applies; either of those overrides a non-empty caller.
+		effectiveProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	}
 
 	if effectiveProfileID == "" {
 		return nil, fmt.Errorf("agent_profile_id is required")
@@ -538,7 +587,7 @@ func (s *Service) StartCreatedSession(
 		return nil, err
 	}
 
-	effectivePrompt := prompt
+	effectivePrompt := prompt.text
 	if effectivePrompt == "" {
 		effectivePrompt = task.Description
 	}
@@ -573,9 +622,10 @@ func (s *Service) StartCreatedSession(
 		return nil, err
 	}
 
-	// Apply workflow step prompt wrapping and plan mode injection.
-	// Called unconditionally so workflow-step prompt composition (prefix/suffix)
-	// applies even when plan mode is not requested.
+	// Apply workflow step prompt wrapping and plan mode injection for raw user
+	// input. Auto-start has already performed these operations, along with the
+	// runtime/reference wrapping and recording, before handing us its prepared
+	// prompt.
 	// Re-read the task after on_turn_start may have changed the workflow step.
 	// Ephemeral tasks skip workflow step processing since they have no workflow.
 	dbTask, err := s.repo.GetTask(ctx, taskID)
@@ -593,42 +643,80 @@ func (s *Service) StartCreatedSession(
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
 		}
 	}
-	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
-		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
-		planMode, task.IsEphemeral, session.IsPassthrough,
-	)
-
-	// Inject config context for config-mode sessions (dedicated settings chat)
-	if configMode {
-		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
-	}
-
-	// Wrap the first prompt with the Kandev MCP system block. See the
-	// matching block in startTask for the rationale (DB stores wrapped form;
-	// Message.ToAPI strips for display). The injectors canonicalize any upstream
-	// wrap from current server state before launch.
-	// Passthrough profiles skip the wrap: the prompt is typed straight into the
-	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
-	// MCP-tool boilerplate prepended to "hello".
-	if effectivePrompt != "" || len(attachments) > 0 {
-		effectivePrompt = s.wrapCreatedSessionPrompt(
-			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
-			isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
+	planModeActive := planMode
+	promptReferenceContext := ""
+	if prompt.stage == createdSessionPromptStageRaw {
+		effectivePrompt, planModeActive, promptReferenceContext = s.applyWorkflowAndPlanMode(
+			ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+			planMode, task.IsEphemeral, session.IsPassthrough,
 		)
+
+		// Inject config context for config-mode sessions (dedicated settings chat)
+		if configMode {
+			effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+		}
+
+		// Wrap the first prompt with the Kandev MCP system block. See the
+		// matching block in startTask for the rationale (DB stores wrapped form;
+		// Message.ToAPI strips for display). The injectors canonicalize any upstream
+		// wrap from current server state before launch.
+		// Passthrough profiles skip the wrap: the prompt is typed straight into
+		// the agent CLI's TTY and the user sees it verbatim — they don't want a
+		// wall of MCP-tool boilerplate prepended to "hello".
+		if effectivePrompt != "" || len(attachments) > 0 {
+			effectivePrompt = s.wrapCreatedSessionPrompt(
+				ctx, effectivePrompt, taskID, sessionID, session, dbTask,
+				isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
+			)
+		}
 	}
 
 	executorID := session.ExecutorID
-
-	// Cache the raw prompt so a transient-provider-error (529) retry can
-	// re-drive this first turn — initial launches bypass PromptTask.
-	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
 	mcpMode := ""
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
-	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments, TurnID: initialTurnID})
+	moveID := workflowMoveEntryIDFromContext(ctx)
+	if moveID != "" && !s.markWorkflowMoveDispatchReady(ctx, moveID, sessionID) {
+		return nil, errors.New("workflow move prompt dispatch is no longer replayable")
+	}
+	deferInitialPrompt := moveID != ""
+	initialTurnID := ""
+	initialTurnCreated := false
+	launchPrompt := effectivePrompt
+	launchAttachments := attachments
+	var onAgentStarted func(context.Context)
+	if deferInitialPrompt {
+		launchPrompt = ""
+		launchAttachments = nil
+		onAgentStarted = func(startedCtx context.Context) {
+			s.dispatchWorkflowMoveInitialPrompt(
+				startedCtx, taskID, sessionID, moveID, effectivePrompt, attachments,
+			)
+		}
+	} else {
+		// Cache the raw prompt so a transient-provider-error (529) retry can
+		// re-drive this first turn — initial launches bypass PromptTask.
+		rememberedPrompt := prompt.text
+		rememberedPlanMode := planMode
+		if prompt.stage == createdSessionPromptStagePrepared {
+			rememberedPrompt = effectivePrompt
+			rememberedPlanMode = false
+		}
+		s.rememberTurnPrompt(sessionID, rememberedPrompt, "", rememberedPlanMode, attachments)
+		initialTurnID, initialTurnCreated = s.startTurnForSessionWithOwnership(ctx, sessionID)
+	}
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
+		AgentProfileID: effectiveProfileID,
+		ExecutorID:     executorID,
+		Prompt:         launchPrompt,
+		StartAgent:     true,
+		McpMode:        mcpMode,
+		Attachments:    launchAttachments,
+		TurnID:         initialTurnID,
+		OnAgentStarted: onAgentStarted,
+	})
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
@@ -867,6 +955,61 @@ type startTaskOptions struct {
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// EntryOptions carries one-shot values accepted by a workflow move. The
+	// private payload is consumed only for this launch and never persisted as
+	// task metadata.
+	EntryOptions *workflowmove.EntryOptions
+	// EntryID identifies a durable workflow move whose initial prompt must wait
+	// for runtime readiness and be acknowledged through the prompt dispatch path.
+	EntryID string
+}
+
+func (s *Service) startTaskWithEntryOptions(ctx context.Context, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, options *workflowmove.EntryOptions) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{
+		EntryOptions: options,
+		EntryID:      workflowMoveEntryIDFromContext(ctx),
+	})
+}
+
+// dispatchWorkflowMoveInitialPrompt delivers a sessionless move's first prompt
+// only after the runtime process is ready. The durable move becomes uncertain
+// inside the executor's prompt-acceptance callback, never during launch setup.
+func (s *Service) dispatchWorkflowMoveInitialPrompt(
+	ctx context.Context,
+	taskID, sessionID, moveID, prompt string,
+	attachments []v1.MessageAttachment,
+) {
+	release := s.lockWorkflowMoveEntry(moveID)
+	defer release()
+	if !s.workflowMoveDispatchReplayable(ctx, moveID) {
+		return
+	}
+	if updated := s.updateTaskSessionState(
+		ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false,
+	); updated == nil {
+		s.logger.Error("failed to make workflow move launch promptable",
+			zap.String("move_id", moveID), zap.String("session_id", sessionID))
+		return
+	}
+	accept := func() {
+		if !s.claimWorkflowMoveDispatch(ctx, moveID, sessionID) {
+			s.logger.Error("failed to persist accepted workflow move prompt",
+				zap.String("move_id", moveID), zap.String("session_id", sessionID))
+			return
+		}
+		s.consumeMoveEntry(ctx, moveID, sessionID)
+	}
+	if strings.TrimSpace(prompt) == "" && len(attachments) == 0 {
+		accept()
+		return
+	}
+	if _, err := s.promptTask(
+		ctx, taskID, sessionID, prompt, "", false, attachments, true,
+		promptTaskOptions{afterDispatch: accept},
+	); err != nil {
+		s.logger.Error("workflow move runtime rejected initial prompt before acceptance",
+			zap.String("move_id", moveID), zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -989,11 +1132,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// The frontend may pass the workspace default profile, but the step may
 	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
 	callerProfileID := agentProfileID
-	if opts.ProfileExplicit && agentProfileID != "" {
+	switch {
+	case opts.EntryOptions != nil && opts.EntryOptions.AgentProfileID != "":
+		agentProfileID = opts.EntryOptions.AgentProfileID
+	case opts.ProfileExplicit && agentProfileID != "":
 		s.logger.Info("manual agent profile selection takes precedence over workflow step",
 			zap.String("task_id", taskID),
 			zap.String("agent_profile_id", agentProfileID))
-	} else {
+	default:
 		agentProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
 	}
 	if s.profileExecutionResolver != nil {
@@ -1047,6 +1193,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, err
 	}
+	if opts.EntryID != "" && !s.markWorkflowMoveDispatchReady(ctx, opts.EntryID, sessionID) {
+		return nil, errors.New("workflow move prompt dispatch is no longer replayable")
+	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
 	// selected profile and before the first prompt, preserving the original
@@ -1098,6 +1247,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
 		planMode, task.IsEphemeral, isPassthrough,
 	)
+	effectivePrompt = appendWorkflowMoveOptions(effectivePrompt, opts.EntryOptions)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -1152,24 +1302,43 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if isOfficeTask {
 		mcpMode = executor.McpModeOffice
 	}
-	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	deferInitialPrompt := opts.EntryID != ""
+	initialTurnID := ""
+	initialTurnCreated := false
+	if !deferInitialPrompt {
+		initialTurnID, initialTurnCreated = s.startTurnForSessionWithOwnership(ctx, sessionID)
 
-	// Cache the raw prompt so a transient-provider-error (529) retry can
-	// re-drive this first turn — initial launches bypass PromptTask.
-	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
+		// Cache the raw prompt so a transient-provider-error (529) retry can
+		// re-drive this first turn — initial launches bypass PromptTask.
+		s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
+	}
+	launchPrompt := effectivePrompt
+	launchAttachments := attachments
+	var onAgentStarted func(context.Context)
+	if deferInitialPrompt {
+		launchPrompt = ""
+		launchAttachments = nil
+		moveID := opts.EntryID
+		onAgentStarted = func(startedCtx context.Context) {
+			s.dispatchWorkflowMoveInitialPrompt(
+				startedCtx, taskID, sessionID, moveID, effectivePrompt, attachments,
+			)
+		}
+	}
 
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           executorID,
 		TurnID:               initialTurnID,
-		Prompt:               effectivePrompt,
+		Prompt:               launchPrompt,
 		WorkflowStepID:       workflowStepID,
 		StartAgent:           true,
 		McpMode:              mcpMode,
-		Attachments:          attachments,
+		Attachments:          launchAttachments,
 		Env:                  env,
 		RouteOverride:        route,
+		OnAgentStarted:       onAgentStarted,
 	})
 	if err != nil {
 		if initialTurnCreated {
@@ -1733,14 +1902,18 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 		}
 	}
 
-	if planMode && !stepHasPlanMode {
-		var parts []string
-		parts = append(parts, sysprompt.Wrap(sysprompt.DefaultPlanPrefix()))
-		parts = append(parts, effectivePrompt)
-		effectivePrompt = strings.Join(parts, "\n\n")
-	}
+	effectivePrompt, planModeActive := applyPlanModeToPrompt(effectivePrompt, planMode, stepHasPlanMode)
+	return effectivePrompt, planModeActive, promptReferenceContext
+}
 
-	return effectivePrompt, planMode || stepHasPlanMode, promptReferenceContext
+func applyPlanModeToPrompt(prompt string, planMode, stepHasPlanMode bool) (string, bool) {
+	if planMode && !stepHasPlanMode {
+		prompt = strings.Join([]string{
+			sysprompt.Wrap(sysprompt.DefaultPlanPrefix()),
+			prompt,
+		}, "\n\n")
+	}
+	return prompt, planMode || stepHasPlanMode
 }
 
 // backfillInitialUserMessageIfMissing records the task's description as the
@@ -1802,9 +1975,26 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 // The end marker is required so multi-paragraph workflow prompts do not break
 // the frontend split (a first-blank-line heuristic would cut mid-body).
 const (
-	workflowInstructionsHeading = "## Workflow instructions"
-	workflowInstructionsEnd     = "<!-- /workflow-instructions -->"
+	workflowInstructionsHeading  = "## Workflow instructions"
+	workflowInstructionsEnd      = "<!-- /workflow-instructions -->"
+	moveEntryInstructionsHeading = "## One-time workflow move instructions"
+	moveEntryInstructionsEnd     = "<!-- /one-time-workflow-move-instructions -->"
 )
+
+func appendWorkflowMoveInstructions(prompt, instructions string) string {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return strings.TrimSpace(prompt)
+	}
+	return strings.TrimSpace(prompt) + "\n\n" + moveEntryInstructionsHeading + "\n\n" + instructions + "\n\n" + moveEntryInstructionsEnd
+}
+
+func appendWorkflowMoveOptions(prompt string, options *workflowmove.EntryOptions) string {
+	if options == nil {
+		return prompt
+	}
+	return appendWorkflowMoveInstructions(prompt, options.Instructions)
+}
 
 func (s *Service) buildWorkflowPromptWithContext(
 	ctx context.Context,
@@ -3855,6 +4045,7 @@ type promptTaskOptions struct {
 	reserveTurnUntilDispatch bool
 	promptDispatchRecovery   *models.PromptDispatchRecovery
 	expectedCurrentTurnID    string
+	afterDispatch            func()
 }
 
 type promptDispatchOutcome struct {
@@ -4031,6 +4222,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	dispatchOutcome := &promptDispatchOutcome{}
 	onDispatched := s.promptDispatchCallback(
 		promptCtx, taskID, sessionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
+		options.afterDispatch,
 	)
 	result, err := s.executor.PromptWithDispatchCallback(
 		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
@@ -4184,6 +4376,7 @@ func (s *Service) promptDispatchCallback(
 	reservedTurn *models.Turn,
 	dispatch *foregroundDispatch,
 	outcome *promptDispatchOutcome,
+	afterDispatch ...func(),
 ) func() {
 	return func() {
 		var publicationErr error
@@ -4213,6 +4406,9 @@ func (s *Service) promptDispatchCallback(
 		outcome.recordAccepted(publicationErr)
 		if s.acceptForegroundDispatch(dispatch) {
 			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+		}
+		if len(afterDispatch) > 0 && afterDispatch[0] != nil {
+			afterDispatch[0]()
 		}
 	}
 }

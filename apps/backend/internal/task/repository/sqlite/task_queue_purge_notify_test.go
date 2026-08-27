@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // TestArchiveTaskNotifiesQueuePurgeAfterCommit proves the post-commit purge
@@ -98,6 +99,62 @@ func TestDeleteTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 	if _, err := repo.GetTask(ctx, "task-delete-purge-notify"); err == nil {
 		t.Fatal("expected task gone after DeleteTask")
+	}
+}
+
+func TestArchiveTaskPurgesWorkflowMoveState(t *testing.T) {
+	repo := newRepoForArchiveTests(t, "task-workflow-move-purge")
+	ctx := context.Background()
+	seedLiveSessionForQueue(t, repo, "session-workflow-move-purge", "task-workflow-move-purge")
+
+	mqRepo, err := messagequeue.NewSQLiteRepository(repo.db, repo.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	queue := messagequeue.NewService(mqRepo, messagequeue.DefaultMaxPerSession, log)
+	queue.SetPendingMove(ctx, "session-workflow-move-purge", &messagequeue.PendingMove{
+		MoveID: "move-workflow-move-purge", TaskID: "task-workflow-move-purge", WorkflowID: "workflow-target", WorkflowStepID: "step-target",
+		EntryOptions: &workflowmove.EntryOptions{Instructions: "must not survive archive"},
+	})
+
+	entryStore, err := workflowmove.NewSQLiteEntryStore(repo.db, repo.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	if err := entryStore.Save(ctx, &workflowmove.Entry{
+		ID: "move-workflow-move-purge", TaskID: "task-workflow-move-purge",
+		Options: workflowmove.EntryOptions{Instructions: "must not survive archive"},
+	}); err != nil {
+		t.Fatalf("save move entry: %v", err)
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "task-workflow-move-purge", models.MetaKeyWorkflowMovePending, map[string]interface{}{"move_id": "move-workflow-move-purge"}); err != nil {
+		t.Fatalf("set move marker: %v", err)
+	}
+
+	if err := repo.ArchiveTask(ctx, "task-workflow-move-purge"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	var pending, entries int
+	if err := repo.db.GetContext(ctx, &pending, `SELECT COUNT(*) FROM pending_moves WHERE task_id = 'task-workflow-move-purge'`); err != nil {
+		t.Fatalf("count pending moves: %v", err)
+	}
+	if err := repo.db.GetContext(ctx, &entries, `SELECT COUNT(*) FROM workflow_move_entries WHERE task_id = 'task-workflow-move-purge'`); err != nil {
+		t.Fatalf("count workflow move entries: %v", err)
+	}
+	if pending != 0 || entries != 0 {
+		t.Fatalf("archived workflow move state = pending:%d entries:%d, want zero", pending, entries)
+	}
+	task, err := repo.GetTask(ctx, "task-workflow-move-purge")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, present := task.Metadata[models.MetaKeyWorkflowMovePending]; present {
+		t.Fatal("workflow move marker survived archive")
 	}
 }
 

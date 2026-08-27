@@ -462,6 +462,14 @@ export type WorkflowStepDTO = {
 export type MoveTaskResponse = {
   task: Task;
   workflow_step: WorkflowStepDTO;
+  move_id?: string;
+  disposition?: "committed" | "deferred";
+  entry_options?: {
+    reset_context?: boolean;
+    instructions?: string;
+    agent_profile_id?: string;
+    model?: string;
+  };
 };
 
 /** A worktree associated with a task session (one per repo on multi-repo tasks). */

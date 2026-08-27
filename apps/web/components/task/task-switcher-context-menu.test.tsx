@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
@@ -10,10 +10,31 @@ import type { TaskSwitcherItem } from "./task-switcher-types";
 
 const PLUGIN_ID = "example-task-actions";
 const PLUGIN_ACTION_LABEL = "Inspect task";
+const WORKFLOW_1_ID = "workflow-1";
+const MOVE_TO_TEST_ID = "task-context-move-to";
+const STEP_2_TEST_ID = "task-context-step-step-2";
+const workflowMoveMock = vi.hoisted(() => ({
+  move: vi.fn(),
+  isMoving: false,
+}));
+const touchDrawerMock = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock("@/hooks/domains/kanban/use-workflow-move", () => ({
+  useWorkflowMove: () => workflowMoveMock,
+}));
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchDrawerMock.enabled,
+}));
 
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
+});
+
+beforeEach(() => {
+  workflowMoveMock.move.mockReset();
+  workflowMoveMock.move.mockResolvedValue({ disposition: "committed", response: {} });
+  touchDrawerMock.enabled = false;
 });
 
 function task(overrides: Partial<TaskSwitcherItem> = {}): TaskSwitcherItem {
@@ -110,6 +131,57 @@ describe("TaskItemWithContextMenu — plugin primary actions", () => {
   });
 });
 
+function renderWorkflowMoveMenu({
+  selectedTaskIds,
+  onMoveToStep,
+  onBulkMove,
+}: {
+  selectedTaskIds?: Set<string>;
+  onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+} = {}) {
+  const bulkMove = onBulkMove ?? vi.fn();
+  render(
+    <StateProvider>
+      <ToastProvider>
+        <TaskItemWithContextMenu
+          task={task({
+            workflowId: WORKFLOW_1_ID,
+            workflowStepId: "step-1",
+          })}
+          workflows={[{ id: WORKFLOW_1_ID, name: "Workflow 1" }]}
+          stepsByWorkflowId={{
+            [WORKFLOW_1_ID]: [
+              { id: "step-1", title: "Todo" },
+              { id: "step-2", title: "Review" },
+            ],
+          }}
+          selectedTaskIds={selectedTaskIds}
+          onMoveToStep={onMoveToStep}
+          onBulkMove={bulkMove}
+        >
+          <div data-testid="task-row">Task 1</div>
+        </TaskItemWithContextMenu>
+      </ToastProvider>
+    </StateProvider>,
+  );
+  return { bulkMove };
+}
+
+async function openTaskMoveOptions() {
+  fireEvent.contextMenu(screen.getByTestId("task-row"));
+  await screen.findByTestId(MOVE_TO_TEST_ID);
+  fireEvent.pointerMove(screen.getByTestId(MOVE_TO_TEST_ID), {
+    pointerType: "mouse",
+  });
+  const targetStep = await screen.findByTestId(STEP_2_TEST_ID);
+  fireEvent.pointerMove(targetStep, {
+    pointerType: "mouse",
+  });
+  const optionsStep = await screen.findByTestId("task-context-step-options-step-2");
+  fireEvent.click(optionsStep);
+}
+
 // happy-dom's TouchEvent drops the touches/changedTouches init, so the touch
 // events in the cancellation tests stub it faithfully.
 function stubTouchEvent() {
@@ -193,6 +265,83 @@ describe("TaskItemWithContextMenu — pointer containment", () => {
       expect(onArchiveTask).toHaveBeenCalledWith("task-1", { cascade: false });
     });
     expect(onClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("TaskItemWithContextMenu — single-task move options", () => {
+  it("keeps the existing direct move as a one-selection action", async () => {
+    const onMoveToStep = vi.fn();
+    renderWorkflowMoveMenu({ onMoveToStep });
+
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    fireEvent.pointerMove(screen.getByTestId(MOVE_TO_TEST_ID), {
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByTestId(STEP_2_TEST_ID));
+
+    expect(onMoveToStep).toHaveBeenCalledOnce();
+    expect(onMoveToStep).toHaveBeenCalledWith("task-1", WORKFLOW_1_ID, "step-2");
+    expect(workflowMoveMock.move).not.toHaveBeenCalled();
+  });
+
+  it("submits one-shot options through the single-task move payload", async () => {
+    renderWorkflowMoveMenu();
+    await openTaskMoveOptions();
+
+    const instructions = await screen.findByTestId("workflow-move-instructions");
+    fireEvent.change(instructions, { target: { value: "  start review with tests  " } });
+    fireEvent.click(screen.getByTestId("workflow-move-submit"));
+
+    await waitFor(() =>
+      expect(workflowMoveMock.move).toHaveBeenCalledWith("task-1", {
+        workflow_id: WORKFLOW_1_ID,
+        workflow_step_id: "step-2",
+        position: 0,
+        entry_options: { instructions: "start review with tests" },
+      }),
+    );
+  });
+
+  it("exposes move options for a one-task selection", async () => {
+    renderWorkflowMoveMenu({ selectedTaskIds: new Set(["task-1"]) });
+
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    await screen.findByTestId(MOVE_TO_TEST_ID);
+
+    expect(screen.queryByTestId("task-context-move-with-options")).toBeNull();
+    fireEvent.pointerMove(screen.getByTestId(MOVE_TO_TEST_ID), {
+      pointerType: "mouse",
+    });
+    fireEvent.pointerMove(await screen.findByTestId(STEP_2_TEST_ID), {
+      pointerType: "mouse",
+    });
+    expect(await screen.findByTestId("task-context-step-options-step-2")).toBeTruthy();
+  });
+
+  it("does not expose an options submenu for bulk selection moves", async () => {
+    const { bulkMove } = renderWorkflowMoveMenu({
+      selectedTaskIds: new Set(["task-1", "task-2"]),
+    });
+    fireEvent.contextMenu(screen.getByTestId("task-row"));
+    await screen.findByTestId(MOVE_TO_TEST_ID);
+
+    expect(screen.queryByTestId("task-context-move-with-options")).toBeNull();
+    expect(screen.getByTestId(MOVE_TO_TEST_ID)).toBeTruthy();
+    expect(workflowMoveMock.move).not.toHaveBeenCalled();
+
+    fireEvent.pointerMove(screen.getByTestId(MOVE_TO_TEST_ID), {
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByTestId(STEP_2_TEST_ID));
+    expect(bulkMove).toHaveBeenCalledWith(["task-1", "task-2"], WORKFLOW_1_ID, "step-2");
+  });
+
+  it("uses the touch Drawer presentation for the shared form", async () => {
+    touchDrawerMock.enabled = true;
+    renderWorkflowMoveMenu();
+    await openTaskMoveOptions();
+
+    expect(await screen.findByTestId("workflow-move-options")).toBeTruthy();
   });
 });
 

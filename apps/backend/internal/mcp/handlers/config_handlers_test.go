@@ -406,6 +406,8 @@ type pendingMoveRecordingQueuer struct {
 	recordingMessageQueuer
 	pendingSessionID string
 	pendingMoves     []messagequeue.PendingMove
+	rejectAdmission  bool
+	admissionCalls   int
 }
 
 func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) {
@@ -415,7 +417,20 @@ func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID
 	}
 }
 
+func (r *pendingMoveRecordingQueuer) AdmitPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) (bool, error) {
+	r.admissionCalls++
+	if r.rejectAdmission {
+		return false, nil
+	}
+	r.SetPendingMove(context.Background(), sessionID, move)
+	return true, nil
+}
+
 func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+}
+
+func (r *recordingMessageQueuer) AdmitPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) (bool, error) {
+	return true, nil
 }
 
 // TakeQueued is a no-op stub — the unit tests below don't exercise rollback,
@@ -423,56 +438,6 @@ func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *
 // "nothing to take", which is what the rollback path checks before logging.
 func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
 	return nil, false
-}
-
-// TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
-// and surfaces a descriptive error so callers can fail fast instead of silently
-// dropping the user-supplied prompt.
-func TestQueueMoveTaskPrompt_NilQueueReturnsError(t *testing.T) {
-	h := &Handlers{logger: testLogger(t).WithFields()}
-
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "message queue")
-}
-
-// TestQueueMoveTaskPrompt_EmptySessionIDReturnsError ensures a missing session ID
-// surfaces an error rather than silently no-op'ing — without a session there's
-// nowhere to deliver the prompt.
-func TestQueueMoveTaskPrompt_EmptySessionIDReturnsError(t *testing.T) {
-	queue := &recordingMessageQueuer{}
-	h := &Handlers{
-		messageQueue: queue,
-		logger:       testLogger(t).WithFields(),
-	}
-
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "primary session")
-	assert.Empty(t, queue.calls, "queue must not be invoked without a session ID")
-}
-
-// TestQueueMoveTaskPrompt_QueuesWithExpectedFields verifies the happy-path
-// invocation: the prompt is queued on the resolved session with the expected
-// metadata (sender = "mcp-move-task", plan mode disabled, no model override).
-func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
-	queue := &recordingMessageQueuer{}
-	h := &Handlers{
-		messageQueue: queue,
-		logger:       testLogger(t).WithFields(),
-	}
-
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
-	require.NoError(t, err)
-
-	require.Len(t, queue.calls, 1)
-	got := queue.calls[0]
-	assert.Equal(t, "session-99", got.SessionID)
-	assert.Equal(t, "task-1", got.TaskID)
-	assert.Equal(t, "Please fix the failing test in foo_test.go", got.Content)
-	assert.Equal(t, messagequeue.QueuedByMoveTask, got.QueuedBy)
-	assert.False(t, got.PlanMode)
-	assert.Equal(t, "", got.Model)
 }
 
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {
@@ -819,9 +784,16 @@ func TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove(t *testing.T) {
 	resp, err := h.handleMoveTask(ctx, msg)
 	require.NoError(t, err)
 	assert.NotEqual(t, ws.MessageTypeError, resp.Type, "active-session move without prompt must not fail")
+	var response moveTaskMCPResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &response))
+	assert.Equal(t, "deferred", response.Disposition)
+	assert.Equal(t, "step-work", response.Task.WorkflowStepID)
+	assert.Equal(t, response.Task.ID, response.ID, "task DTO fields must also be available at the top level")
 
 	require.Len(t, queue.pendingMoves, 1)
 	assert.Equal(t, "step-done", queue.pendingMoves[0].WorkflowStepID)
+	assert.Equal(t, "wf-move", queue.pendingMoves[0].FromWorkflowID)
+	assert.Equal(t, "step-work", queue.pendingMoves[0].FromStepID)
 	assert.Equal(t, "sess-move", queue.pendingSessionID)
 	assert.Empty(t, queue.calls, "no hand-off prompt should be queued when prompt omitted")
 
@@ -1014,8 +986,37 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
 	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
 	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
-	require.Len(t, queue.calls, 1)
-	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
+	require.NotNil(t, queue.pendingMoves[0].EntryOptions)
+	assert.Equal(t, "continue the work", queue.pendingMoves[0].EntryOptions.Instructions)
+	assert.Empty(t, queue.calls, "legacy prompt is carried in the private move options, not a source-session queue entry")
+}
+
+func TestDeferMoveTask_UsesAtomicPendingMoveAdmission(t *testing.T) {
+	svc, repo, wfCtrl, wfRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	seedRunningTask(t, repo, "ws-defer-atomic", "wf-defer-atomic", "task-defer-atomic", "sess-defer-atomic", "src-defer-atomic")
+
+	now := time.Now().UTC()
+	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: "src-defer-atomic", WorkflowID: "wf-defer-atomic", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: "dst-defer-atomic", WorkflowID: "wf-defer-atomic", Name: "Target", Position: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	queue := &pendingMoveRecordingQueuer{rejectAdmission: true}
+	h := &Handlers{taskSvc: svc, workflowCtrl: wfCtrl, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-defer-atomic",
+		"workflow_id":      "wf-defer-atomic",
+		"workflow_step_id": "dst-defer-atomic",
+	})
+
+	resp, err := h.handleMoveTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	assert.Equal(t, 1, queue.admissionCalls)
+	assert.Empty(t, queue.pendingMoves)
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

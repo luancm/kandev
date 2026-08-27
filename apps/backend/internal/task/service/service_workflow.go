@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // ApproveSessionResult contains the result of approving a session
@@ -388,6 +391,8 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 type MoveTaskResult struct {
 	Task         *models.Task
 	WorkflowStep *wfmodels.WorkflowStep
+	MoveID       string
+	EntryOptions *workflowmove.EntryOptions
 }
 
 // MoveTaskOptions controls non-default move behavior for trusted callers.
@@ -415,6 +420,10 @@ type MoveTaskOptions struct {
 	// StepHistoryActor identifies the caller. Agent moves must not inherit the
 	// owner identity that MCP uses for authorization.
 	StepHistoryActor wfmodels.StepTransitionActor
+	// EntryOptions are one-shot values applied when the orchestrator enters the
+	// target workflow step. They are persisted privately and are not included in
+	// task.moved event payloads.
+	EntryOptions *workflowmove.EntryOptions
 }
 
 type workflowMoveLimitsRepository interface {
@@ -442,6 +451,23 @@ type workflowMoveAdmissionWithStateRepository interface {
 		admittedState *v1.TaskState,
 		queueExitPending bool,
 	) (bool, error)
+}
+
+type workflowMoveAtomicAdmissionRepository interface {
+	UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx context.Context,
+		task *models.Task,
+		expectedStepID string,
+		targetStepID string,
+		limit int,
+		admittedState *v1.TaskState,
+		queueExitPending bool,
+		entry *workflowmove.Entry,
+	) (admitted bool, applied bool, err error)
+}
+
+type workflowMoveTransactionOwner interface {
+	WorkflowMoveTransactionOwner() *sql.DB
 }
 
 type workflowQueuedTaskPromoter interface {
@@ -492,9 +518,47 @@ func (s *Service) MoveTaskWithOptions(
 	oldStepID := task.WorkflowStepID
 	oldState := task.State
 	stepChanged := oldStepID != workflowStepID
+	entryOptions, err := workflowmove.NormalizeEntryOptions(opts.EntryOptions, "")
+	if err != nil {
+		return nil, err
+	}
+	change := workflowmove.MoveChangePositionOnly
+	if stepChanged {
+		change = workflowmove.MoveChangeStep
+	}
+	if err := workflowmove.ValidateEntryOptions(entryOptions, change); err != nil {
+		return nil, err
+	}
+	if stepChanged && task.Metadata != nil {
+		if _, pending := task.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+			return nil, workflowmove.ErrMoveConflict
+		}
+	}
+	if entryOptions != nil && s.moveEntryPreflightValidator != nil {
+		if err := s.moveEntryPreflightValidator(ctx, task, targetStep, entryOptions); err != nil {
+			return nil, err
+		}
+	}
+	// Entry options need a recipient. A step without auto-start can still
+	// receive a one-shot hand-off through an active task session, but a
+	// session-less move would otherwise accept and permanently drop the
+	// instructions/profile/model after the task update is committed.
+	if entryOptions != nil && targetStep != nil &&
+		!targetStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) &&
+		s.resolvePrimaryOrActiveSession(ctx, id) == nil {
+		return nil, workflowmove.ErrEntryTargetUnavailable
+	}
+
+	moveID, directEntry, entrySavedOutsideAdmission, err := s.prepareDirectWorkflowMoveEntry(ctx, id, entryOptions)
+	if err != nil {
+		return nil, err
+	}
 	stateAfterAdmission := *task
 	if stepChanged {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {
+			if entrySavedOutsideAdmission {
+				_ = s.moveEntryStore.Delete(ctx, moveID)
+			}
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
 		}
 	}
@@ -509,9 +573,17 @@ func (s *Service) MoveTaskWithOptions(
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
-			"from_step_id": oldStepID,
+		queuedMoveDescriptor := map[string]interface{}{"from_step_id": oldStepID}
+		if moveID != "" {
+			queuedMoveDescriptor["move_id"] = moveID
+			task.Metadata[models.MetaKeyWorkflowMovePending] = map[string]interface{}{
+				"from_step_id": oldStepID,
+				"move_id":      moveID,
+			}
+		} else {
+			delete(task.Metadata, models.MetaKeyWorkflowMovePending)
 		}
+		task.Metadata[models.MetaKeyQueuedMoveExitPending] = queuedMoveDescriptor
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
 		delete(task.Metadata, models.MetaKeyManualMoveLifecycleCompleted)
@@ -563,8 +635,15 @@ func (s *Service) MoveTaskWithOptions(
 		})
 	}
 
-	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState)
+	entryForAdmission := directEntry
+	if entrySavedOutsideAdmission {
+		entryForAdmission = nil
+	}
+	_, err = s.updateMovedTask(moveCtx, task, oldStepID, targetStep, admittedState, entryForAdmission)
 	if err != nil {
+		if entrySavedOutsideAdmission {
+			_ = s.moveEntryStore.Delete(ctx, moveID)
+		}
 		s.logger.Error("failed to move task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -576,7 +655,7 @@ func (s *Service) MoveTaskWithOptions(
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
-		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID)
+		s.publishTaskMovedEvent(ctx, task, oldWorkflowID, oldStepID, workflowStepID, sessionID, moveID)
 		historySessionID := opts.StepHistorySessionID
 		if historySessionID == "" {
 			historySessionID = sessionID
@@ -601,7 +680,7 @@ func (s *Service) MoveTaskWithOptions(
 		zap.String("workflow_step_id", workflowStepID),
 		zap.Int("position", position))
 
-	result := &MoveTaskResult{Task: task}
+	result := &MoveTaskResult{Task: task, MoveID: moveID, EntryOptions: entryOptions}
 
 	// Fetch the workflow step info if getter is available
 	if s.workflowStepGetter != nil {
@@ -617,6 +696,47 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	return result, nil
+}
+
+func (s *Service) prepareDirectWorkflowMoveEntry(
+	ctx context.Context,
+	taskID string,
+	entryOptions *workflowmove.EntryOptions,
+) (string, *workflowmove.Entry, bool, error) {
+	if entryOptions == nil {
+		return "", nil, false, nil
+	}
+	if s.moveEntryStore == nil {
+		return "", nil, false, workflowmove.ErrEntryStoreUnavailable
+	}
+	if err := s.validateWorkflowMoveEntryStoreOwner(); err != nil {
+		return "", nil, false, err
+	}
+	moveID := uuid.NewString()
+	entry := &workflowmove.Entry{ID: moveID, TaskID: taskID, Options: *entryOptions}
+	if _, repositoryOwnsEntryAdmission := s.tasks.(workflowMoveAtomicAdmissionRepository); repositoryOwnsEntryAdmission {
+		return moveID, entry, false, nil
+	}
+	if err := s.moveEntryStore.Save(ctx, entry); err != nil {
+		return "", nil, false, fmt.Errorf("persist workflow move entry: %w", err)
+	}
+	return moveID, entry, true, nil
+}
+
+func (s *Service) validateWorkflowMoveEntryStoreOwner() error {
+	repositoryOwner, owned := s.tasks.(workflowMoveTransactionOwner)
+	if !owned {
+		return nil
+	}
+	entryOwner, compatible := s.moveEntryStore.(workflowmove.TransactionOwnerStore)
+	if !compatible {
+		return workflowmove.ErrEntryStoreUnavailable
+	}
+	repositoryDB := repositoryOwner.WorkflowMoveTransactionOwner()
+	if repositoryDB == nil || entryOwner.WorkflowMoveTransactionOwner() != repositoryDB {
+		return workflowmove.ErrEntryStoreUnavailable
+	}
+	return nil
 }
 
 func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
@@ -872,7 +992,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "", "")
 		return true
 	} else if admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository); ok {
 		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, targetStep.ID, targetStep.WIPLimit)
@@ -890,7 +1010,7 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			s.publishTaskEvent(ctx, events.TaskStateChanged, candidate, &oldState)
 		}
 		s.recordQueuedPromotion(ctx, candidate.ID, fromStepID, targetStep.ID)
-		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "", "")
 		return true
 	}
 	// ctx here still carries the identity of whoever triggered the move that
@@ -1043,13 +1163,47 @@ func skippedTaskIDs(skipped map[string]struct{}) []string {
 	return ids
 }
 
-func (s *Service) updateMovedTask(ctx context.Context, task *models.Task, oldStepID string, targetStep *wfmodels.WorkflowStep, admittedState *v1.TaskState) (bool, error) {
+func (s *Service) updateMovedTask(
+	ctx context.Context,
+	task *models.Task,
+	oldStepID string,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+	entry *workflowmove.Entry,
+) (bool, error) {
 	if targetStep == nil || oldStepID == targetStep.ID {
+		if entry != nil {
+			return false, workflowmove.ErrEntryTargetUnavailable
+		}
 		if err := s.tasks.UpdateTask(ctx, task); err != nil {
 			return false, err
 		}
 		return task.WIPAdmitted, nil
 	}
+	if atomicAdmission, ok := s.tasks.(workflowMoveAtomicAdmissionRepository); ok {
+		admitted, applied, err := atomicAdmission.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+			ctx, task, oldStepID, targetStep.ID, targetStep.WIPLimit, admittedState, true, entry,
+		)
+		if err != nil {
+			return false, err
+		}
+		if !applied {
+			return false, workflowmove.ErrMoveConflict
+		}
+		return admitted, nil
+	}
+	if entry != nil {
+		return false, workflowmove.ErrEntryStoreUnavailable
+	}
+	return s.updateMovedTaskWithLegacyAdmission(ctx, task, targetStep, admittedState)
+}
+
+func (s *Service) updateMovedTaskWithLegacyAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	admittedState *v1.TaskState,
+) (bool, error) {
 	admissionRepo, ok := s.tasks.(workflowMoveAdmissionRepository)
 	if !ok {
 		return false, fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)

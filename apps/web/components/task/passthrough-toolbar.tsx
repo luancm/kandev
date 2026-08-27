@@ -7,10 +7,10 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type RefObject,
   type SetStateAction,
 } from "react";
 import {
-  IconArrowRight,
   IconMessageCircle,
   IconMessageDots,
   IconSend,
@@ -26,7 +26,7 @@ import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { PRMergedBanner } from "./chat/pr-archive-banners";
-import { type ChatInputContainerHandle } from "./chat/chat-input-container";
+import { type ChatInputContainerHandle, type ChatSubmitPayload } from "./chat/chat-input-container";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { useAppStore } from "@/components/state-provider";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
@@ -42,6 +42,8 @@ import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { Trans, useTranslation } from "react-i18next";
+import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 function isEditableElement(element: Element | null) {
   if (element instanceof HTMLElement && element.closest(".xterm")) return false;
@@ -71,6 +73,94 @@ function usePassthroughComposerShortcut({
       });
     }, [setComposerOpen]),
     { capture: true, enabled: !isUnboundShortcut(focusShortcut) },
+  );
+}
+
+type PassthroughToolbarSurfaceProps = {
+  sessionId: string | null | undefined;
+  taskId: string | null;
+  isMobile: boolean;
+  pendingComments: DiffComment[];
+  pendingCount: number;
+  openFile: ReturnType<typeof useFileEditors>["openFile"];
+  panelState: ReturnType<typeof useChatPanelState>;
+  chatInputRef: RefObject<ChatInputContainerHandle | null>;
+  handleSendMessage: (payload: ChatSubmitPayload) => Promise<void>;
+  isSending: boolean;
+  composerOpen: boolean;
+  commentsOpen: boolean;
+  focusShortcut: KeyboardShortcut;
+  planActions: ReturnType<typeof usePlanActions>;
+  showProceed: boolean;
+  implementPlanHandler: ReturnType<typeof usePlanActions>["implementPlanHandler"];
+  onToggleComposer: () => void;
+  onCloseComposer: () => void;
+  onToggleComments: () => void;
+};
+
+function PassthroughToolbarSurface({
+  sessionId,
+  taskId,
+  isMobile,
+  pendingComments,
+  pendingCount,
+  openFile,
+  panelState,
+  chatInputRef,
+  handleSendMessage,
+  isSending,
+  composerOpen,
+  commentsOpen,
+  focusShortcut,
+  planActions,
+  showProceed,
+  implementPlanHandler,
+  onToggleComposer,
+  onCloseComposer,
+  onToggleComments,
+}: PassthroughToolbarSurfaceProps) {
+  return (
+    <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
+      <div className="flex-1 min-h-0">
+        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={isMobile} />
+      </div>
+
+      {commentsOpen && pendingCount > 0 && (
+        <CommentsPanel
+          comments={pendingComments}
+          openFile={openFile}
+          onSend={() => handleSendMessage({ message: "" })}
+        />
+      )}
+
+      {composerOpen && (
+        <PassthroughComposerPanel
+          refHandle={chatInputRef}
+          onSubmit={handleSendMessage}
+          onCancel={onCloseComposer}
+          panelState={panelState}
+          taskId={taskId}
+          isMoving={planActions.isMoving}
+          isSending={isSending}
+          onImplementPlan={implementPlanHandler}
+        />
+      )}
+
+      <PassthroughStatusRow
+        taskId={taskId}
+        sessionId={sessionId}
+        nextStepName={planActions.proceedStepName}
+        onProceed={planActions.proceed}
+        isMoving={planActions.isMoving}
+        showProceed={showProceed}
+        composerOpen={composerOpen}
+        focusShortcut={focusShortcut}
+        onToggleComposer={onToggleComposer}
+        commentsOpen={commentsOpen}
+        onToggleComments={onToggleComments}
+        pendingCommentsCount={pendingCount}
+      />
+    </div>
   );
 }
 
@@ -155,47 +245,27 @@ export function PassthroughToolbar({
   usePassthroughComposerShortcut({ focusShortcut, setComposerOpen });
 
   return (
-    <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
-      <div className="flex-1 min-h-0">
-        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={isMobile} />
-      </div>
-
-      {commentsOpen && pendingCount > 0 && (
-        <CommentsPanel
-          comments={pendingComments}
-          openFile={openFile}
-          onSend={() => handleSendMessage({ message: "" })}
-        />
-      )}
-
-      {composerOpen && (
-        <PassthroughComposerPanel
-          refHandle={chatInputRef}
-          onSubmit={handleSendMessage}
-          onCancel={() => setComposerOpen(false)}
-          panelState={panelState}
-          taskId={taskId}
-          isMoving={planActions.isMoving}
-          isSending={isSending}
-          onImplementPlan={implementPlanHandler}
-        />
-      )}
-
-      <PassthroughStatusRow
-        taskId={taskId}
-        sessionId={sessionId}
-        nextStepName={planActions.proceedStepName}
-        onProceed={planActions.proceed}
-        isMoving={planActions.isMoving}
-        showProceed={showProceed}
-        composerOpen={composerOpen}
-        focusShortcut={focusShortcut}
-        onToggleComposer={() => setComposerOpen((open) => !open)}
-        commentsOpen={commentsOpen}
-        onToggleComments={() => setCommentsOpen((open) => !open)}
-        pendingCommentsCount={pendingCount}
-      />
-    </div>
+    <PassthroughToolbarSurface
+      sessionId={sessionId}
+      taskId={taskId}
+      isMobile={isMobile}
+      pendingComments={pendingComments}
+      pendingCount={pendingCount}
+      openFile={openFile}
+      panelState={panelState}
+      chatInputRef={chatInputRef}
+      handleSendMessage={handleSendMessage}
+      isSending={isSending}
+      composerOpen={composerOpen}
+      commentsOpen={commentsOpen}
+      focusShortcut={focusShortcut}
+      planActions={planActions}
+      showProceed={showProceed}
+      implementPlanHandler={implementPlanHandler}
+      onToggleComposer={() => setComposerOpen((open) => !open)}
+      onCloseComposer={() => setComposerOpen(false)}
+      onToggleComments={() => setCommentsOpen((open) => !open)}
+    />
   );
 }
 
@@ -497,7 +567,7 @@ type StatusRowProps = {
   taskId: string | null;
   sessionId?: string | null;
   nextStepName: string | null;
-  onProceed: () => void;
+  onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isMoving: boolean;
   showProceed: boolean;
   composerOpen: boolean;
@@ -522,7 +592,6 @@ function PassthroughStatusRow({
   onToggleComments,
   pendingCommentsCount,
 }: StatusRowProps) {
-  const { t } = useTranslation();
   return (
     <div
       data-testid="passthrough-status-row"
@@ -547,23 +616,13 @@ function PassthroughStatusRow({
         <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 shrink-0 gap-1 px-2.5 text-xs cursor-pointer text-primary"
-                onClick={onProceed}
-                disabled={isMoving}
-                data-testid="passthrough-proceed-next-step"
-              >
-                {nextStepName}
-                <IconArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("task:moveTaskToTheNextWorkflow")}</TooltipContent>
-          </Tooltip>
+          <WorkflowMoveProceedButton
+            nextStepName={nextStepName}
+            onProceed={onProceed}
+            isMoving={isMoving}
+            className="h-6 shrink-0"
+            testId="passthrough-proceed-next-step"
+          />
         )}
       </div>
     </div>

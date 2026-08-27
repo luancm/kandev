@@ -446,6 +446,11 @@ func (sm *SessionManager) applyStartModelPolicyToEffectiveModel(
 	effective.model = profileModel
 	if runtimeModel != "" {
 		effective.model = runtimeModel
+		// A runtime model is an explicit session selection (including a
+		// workflow-move entry option), not a profile default. Never silently
+		// replace it with the profile's fallback or legacy auto-fallback path.
+		startModelPolicy.FallbackModel = ""
+		startModelPolicy.AutoFallback = false
 	}
 	if effective.model == "" || execution.agentctl == nil {
 		return effective

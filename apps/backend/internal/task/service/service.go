@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -341,6 +342,8 @@ type Service struct {
 	workflowStepGetter              WorkflowStepGetter
 	startStepResolver               StartStepResolver
 	stepHistoryRecorder             StepHistoryRecorder
+	moveEntryStore                  workflowmove.EntryStore
+	moveEntryPreflightValidator     func(context.Context, *models.Task, *wfmodels.WorkflowStep, *workflowmove.EntryOptions) error
 	contributionDestinationPreparer ContributionDestinationPreparer
 	prTaskResolver                  PRTaskResolver
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
@@ -429,6 +432,37 @@ func (s *Service) AttachmentRepository() repository.AttachmentRepository {
 // Workspace-scoped secret references are rejected before a profile is saved.
 func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
 	s.secretStore = secretStore
+}
+
+// SetMoveEntryStore wires the private one-shot workflow move payload store.
+// It is optional for callers that never submit entry options.
+func (s *Service) SetMoveEntryStore(store workflowmove.EntryStore) {
+	s.moveEntryStore = store
+}
+
+// SetMoveEntryPreflightValidator wires the runtime-owned profile/model
+// capability check used by optioned workflow moves. Keeping the callback
+// narrow avoids importing the orchestrator into task service while allowing
+// the move write to fail before it commits.
+func (s *Service) SetMoveEntryPreflightValidator(validator func(context.Context, *models.Task, *wfmodels.WorkflowStep, *workflowmove.EntryOptions) error) {
+	s.moveEntryPreflightValidator = validator
+}
+
+// ValidateMoveEntryOptions runs the optional runtime-owned preflight without
+// mutating the task. Deferred MCP moves use this before writing a pending move,
+// since they do not pass through MoveTaskWithOptions until the source turn
+// ends.
+func (s *Service) ValidateMoveEntryOptions(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep, options *workflowmove.EntryOptions) error {
+	if options == nil {
+		return nil
+	}
+	if s.moveEntryStore == nil {
+		return workflowmove.ErrEntryStoreUnavailable
+	}
+	if s.moveEntryPreflightValidator == nil {
+		return nil
+	}
+	return s.moveEntryPreflightValidator(ctx, task, targetStep, options)
 }
 
 // SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace

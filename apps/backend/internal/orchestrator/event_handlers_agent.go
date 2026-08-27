@@ -661,11 +661,32 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// Complete the current turn
 	s.completeTurnForSession(ctx, data.SessionID)
 
+	// A human move with one-shot entry options is committed while this turn is
+	// active, but its destination reset/profile/model/prompt must wait until the
+	// exact ready event above. The task marker and private entry store make this
+	// hand-off recoverable when the task.moved notification raced the turn end or
+	// the process restarted before destination entry began.
+	if s.resumeCommittedWorkflowMoveAfterTurn(ctx, data.TaskID, data.SessionID, session) {
+		return
+	}
+
 	// A move_task_kandev call during this turn deferred the actual move to
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular
 	// on_turn_complete evaluation against the (still old) step.
-	if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
+	if s.supportsTaskTransactionHandoff() {
+		pendingMove, err := s.messageQueue.LoadPendingMove(ctx, data.SessionID)
+		if err != nil {
+			s.logger.Error("failed to load durable pending workflow move",
+				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+			s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+			return
+		}
+		if pendingMove != nil {
+			s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
+			return
+		}
+	} else if pendingMove, exists := s.messageQueue.TakePendingMove(ctx, data.SessionID); exists {
 		s.applyPendingMove(ctx, data.TaskID, data.SessionID, session, pendingMove)
 		return
 	}
@@ -734,16 +755,17 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 }
 
 const githubPRAutomationOrigin = "github_pr_automation"
+const workflowMoveLifecycleOrigin = "workflow_move"
 
 // isLifecycleAutomationOrigin reports whether a queued message's "origin"
-// metadata identifies it as a durable lifecycle prompt (GitHub PR or GitLab
-// MR automation) rather than an ordinary queued message. Both producers
+// metadata identifies it as a durable lifecycle prompt (provider automation
+// or a workflow move hand-off) rather than an ordinary queued message. Producers
 // share the same durable-queue contract (QueueLifecycleMessageWithCoalesceKey,
 // AcknowledgeQueued on accepted delivery); this is the single place that
 // recognizes the set of origins entitled to that treatment, so adding a
 // future provider only needs a change here.
 func isLifecycleAutomationOrigin(origin interface{}) bool {
-	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin
+	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin || origin == workflowMoveLifecycleOrigin
 }
 
 func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
@@ -816,6 +838,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			zap.String("session_id", callerSessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID))
+		s.acknowledgeClaimedWorkflowMoveQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 		return
 	}
 
@@ -858,6 +881,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 				zap.String("session_id", callerSessionID),
 				zap.String("task_id", queuedMsg.TaskID),
 				zap.String("queue_id", queuedMsg.ID))
+			s.acknowledgeClaimedWorkflowMoveQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 			return
 		}
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
@@ -867,12 +891,23 @@ func (s *Service) executeQueuedMessageWithReservation(
 	// worker already claimed the handoff before visible side effects; promptTask
 	// revalidates that ownership while it marks the session RUNNING.
 	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
+	var afterDispatch func()
+	if lifecyclePrompt && queuedMsg.Metadata["origin"] == workflowMoveLifecycleOrigin {
+		moveID, _ := queuedMsg.Metadata[messagequeue.MetadataDeferredMoveID].(string)
+		afterDispatch = func() {
+			if !s.claimWorkflowMoveDispatch(promptCtx, moveID, queuedMsg.SessionID) {
+				s.logger.Error("failed to persist accepted queued workflow move prompt",
+					zap.String("move_id", moveID), zap.String("session_id", queuedMsg.SessionID))
+			}
+		}
+	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		promptTaskOptions{
 			claimEntryID:    claimEntryID,
 			lifecyclePrompt: lifecyclePrompt,
 			afterClaim:      afterClaim,
+			afterDispatch:   afterDispatch,
 		})
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
@@ -893,7 +928,10 @@ func (s *Service) queuedLifecycleAfterClaim(
 		if !s.lifecycleQueuedDispatchIsCurrent(ctx, queuedMsg) {
 			return errLifecyclePromptReservationSuperseded
 		}
-		return s.recordQueuedUserMessage(ctx, queuedMsg, attachments)
+		if err := s.recordQueuedUserMessage(ctx, queuedMsg, attachments); err != nil {
+			return err
+		}
+		return nil
 	}
 }
 
@@ -1058,12 +1096,25 @@ func (s *Service) lifecycleQueuedDispatchIsCurrent(
 	if dispatchTracked && !s.isCurrentQueuedDispatch(queuedMsg.SessionID, queuedMsg.ID) {
 		return false
 	}
+	if queuedMsg.Metadata["origin"] == workflowMoveLifecycleOrigin {
+		moveID, _ := queuedMsg.Metadata[messagequeue.MetadataDeferredMoveID].(string)
+		if !s.workflowMoveDispatchReplayable(ctx, moveID) {
+			return false
+		}
+	}
 	// Legacy/direct TakeQueued callers remove the row before execution, so
 	// there is no durable reservation left to validate. ReserveQueued marks
 	// its returned copy independently of persisted metadata so the check still
 	// applies after the final claim clears the dispatch token.
 	return !queuedMsg.IsReservedLifecycleDelivery() ||
 		(s.messageQueue != nil && s.messageQueue.IsCurrentLifecycleReservation(ctx, queuedMsg))
+}
+
+func (s *Service) acknowledgeClaimedWorkflowMoveQueueEntry(ctx context.Context, sessionID string, queuedMsg *messagequeue.QueuedMessage) {
+	if queuedMsg == nil || queuedMsg.Metadata["origin"] != workflowMoveLifecycleOrigin {
+		return
+	}
+	s.acknowledgeLifecycleQueueEntry(ctx, sessionID, queuedMsg)
 }
 
 func (s *Service) acknowledgeLifecycleQueueEntry(
@@ -1081,6 +1132,9 @@ func (s *Service) acknowledgeLifecycleQueueEntry(
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(err))
 		return
+	}
+	if moveID, _ := queuedMsg.Metadata[messagequeue.MetadataDeferredMoveID].(string); moveID != "" {
+		s.consumeMoveEntry(ctx, moveID, sessionID)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 }

@@ -118,27 +118,44 @@ func (g *testWorkflowStepGetter) GetStep(ctx context.Context, stepID string) (*w
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
 	workflowIDs := make([]string, 0, 1)
+	selectedWorkflowID := ""
 	derivedWorkflowID := strings.Replace(stepID, "step", "wf", 1)
 	for rows.Next() {
 		var workflowID string
 		if err := rows.Scan(&workflowID); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
 		if workflowID == derivedWorkflowID {
-			return &wfmodels.WorkflowStep{ID: stepID, WorkflowID: workflowID}, nil
+			selectedWorkflowID = workflowID
 		}
 		workflowIDs = append(workflowIDs, workflowID)
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return nil, err
 	}
-	if len(workflowIDs) > 0 {
-		return &wfmodels.WorkflowStep{ID: stepID, WorkflowID: workflowIDs[0]}, nil
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if selectedWorkflowID == "" && len(workflowIDs) > 0 {
+		selectedWorkflowID = workflowIDs[0]
+	}
+	if selectedWorkflowID != "" {
+		return g.persistStep(ctx, stepID, selectedWorkflowID, 0)
 	}
 	return nil, errors.New("workflow step not found")
+}
+
+func (g *testWorkflowStepGetter) persistStep(ctx context.Context, stepID, workflowID string, wipLimit int) (*wfmodels.WorkflowStep, error) {
+	if _, err := g.repo.DB().ExecContext(ctx, `
+		INSERT OR IGNORE INTO workflow_steps (id, workflow_id, name, position, wip_limit)
+		VALUES (?, ?, ?, 0, ?)
+	`, stepID, workflowID, stepID, wipLimit); err != nil {
+		return nil, err
+	}
+	return &wfmodels.WorkflowStep{ID: stepID, WorkflowID: workflowID, WIPLimit: wipLimit}, nil
 }
 
 func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, int) (*wfmodels.WorkflowStep, error) {

@@ -273,7 +273,7 @@ workflows:
         cancel_triggers_turn_complete: false
 ```
 
-After import, assign a workflow-level or Work-step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, the WIP rejection at capacity, explicit completion, and Review feedback before adopting it.
+After import, assign a workflow-level or Work-step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, visible queueing at capacity, explicit completion, and Review feedback before adopting it.
 
 </details>
 

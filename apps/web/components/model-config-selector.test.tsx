@@ -26,6 +26,25 @@ const makeModelOptions = (count: number) =>
   }));
 
 describe("ModelConfigSelector", () => {
+  it("renders nested picker content in the caller's interaction boundary", () => {
+    const portalContainer = document.createElement("div");
+    document.body.append(portalContainer);
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "gpt-5.5", name: "GPT-5.5" }]}
+        currentModel="gpt-5.5"
+        onModelChange={() => {}}
+        popoverPortalContainer={portalContainer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    expect(portalContainer.querySelector('[data-slot="popover-content"]')).not.toBeNull();
+    portalContainer.remove();
+  });
+
   it("passes custom trigger classes to the button", () => {
     render(
       <ModelConfigSelector

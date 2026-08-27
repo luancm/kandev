@@ -199,6 +199,10 @@ export type ModelConfigSelectorProps = {
 
   /** Optional title tooltip on the trigger (e.g. explains a live-only note). */
   triggerTitle?: string;
+  /** Keeps nested picker content inside an owning interaction surface. */
+  popoverPortal?: boolean;
+  /** Optional portal root supplied by an owning interaction surface. */
+  popoverPortalContainer?: HTMLElement | null;
 };
 
 type ModelConfigSelectorTriggerProps = Pick<
@@ -266,6 +270,22 @@ function triggerLabelOptions(
   return { summary: "changed", configBaseline, currentModelSuffix };
 }
 
+function resolveSelectorTriggerTitle(
+  triggerTitle: string | undefined,
+  currentModelSuffix: string | undefined,
+  t: TFunction,
+): string | undefined {
+  return triggerTitle ?? (currentModelSuffix ? t("settings:fallbackNoteLive") : undefined);
+}
+
+function shouldCloseAfterModelSelection(
+  keepOpenOnModelChange: boolean,
+  hasExtraConfigOptions: boolean,
+  configOptionsLoading: boolean,
+): boolean {
+  return !keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading;
+}
+
 export const ModelConfigSelector = memo(function ModelConfigSelector({
   modelOptions,
   currentModel,
@@ -284,6 +304,9 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   currentModelSuffix,
   configOptionsLoading = false,
   keepOpenOnModelChange = false,
+  popoverPortal = true,
+  popoverPortalContainer,
+  triggerTitle,
 }: ModelConfigSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -305,13 +328,19 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
       ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions, t)
       : undefined;
   // The fallback marker is live-only, so explain when it is active.
-  const triggerTitle = currentModelSuffix ? t("settings:fallbackNoteLive") : undefined;
+  const resolvedTriggerTitle = resolveSelectorTriggerTitle(triggerTitle, currentModelSuffix, t);
 
   const hasExtraConfigOptions = extraConfigOptions.length > 0;
   const onModelSelect = (value: string) => {
     if (!value) return;
     onModelChange(value);
-    if (!keepOpenOnModelChange && !hasExtraConfigOptions && !configOptionsLoading) {
+    if (
+      shouldCloseAfterModelSelection(
+        keepOpenOnModelChange,
+        hasExtraConfigOptions,
+        configOptionsLoading,
+      )
+    ) {
       setOpen(false);
     }
   };
@@ -332,10 +361,12 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         label={label}
         placeholder={placeholder ?? t("agents:selectModel")}
         triggerClassName={customTriggerClassName}
-        triggerTitle={triggerTitle}
+        triggerTitle={resolvedTriggerTitle}
         variant={variant}
       />
       <PopoverContent
+        portal={popoverPortal}
+        portalContainer={popoverPortalContainer}
         align={popoverAlign}
         side={popoverSide}
         className="w-[min(24rem,calc(100vw-1rem))] max-h-[min(32rem,calc(100vh-1rem))] gap-2 overflow-hidden p-2"

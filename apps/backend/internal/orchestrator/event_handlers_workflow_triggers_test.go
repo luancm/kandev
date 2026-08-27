@@ -831,6 +831,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("failed to persist context window metadata: %v", err)
 		}
+		session, _ = repo.GetTaskSession(ctx, "s1")
 		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-reset")
 
 		eventBus := &mockEventBus{}
@@ -872,7 +873,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 	})
 
-	t.Run("successful provider reset clears in-memory usage when metadata persistence fails", func(t *testing.T) {
+	t.Run("fails closed when reset metadata persistence fails", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		session, _ := repo.GetTaskSession(ctx, "s1")
@@ -881,6 +882,7 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("failed to persist context window metadata: %v", err)
 		}
+		session, _ = repo.GetTaskSession(ctx, "s1")
 		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-reset")
 
 		svc := createTestServiceWithAgent(
@@ -890,11 +892,11 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 			&mockAgentManager{repoForExecutionLookup: repo},
 		)
 		svc.repo = failSetSessionMetadataRepo{repoStore: repo}
-		if !svc.resetAgentContext(ctx, "t1", session, "test") {
-			t.Fatal("expected provider reset to remain successful")
+		if svc.resetAgentContext(ctx, "t1", session, "test") {
+			t.Fatal("expected reset to fail when reset metadata cleanup cannot persist")
 		}
-		if session.Metadata["context_window"] != nil {
-			t.Fatalf("expected in-memory context_window to clear, got %#v", session.Metadata["context_window"])
+		if session.Metadata["context_window"] == nil {
+			t.Fatal("failed durable cleanup must retain the in-memory context_window for retry")
 		}
 		persisted, err := repo.GetTaskSession(ctx, "s1")
 		if err != nil {

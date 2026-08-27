@@ -112,6 +112,11 @@ const (
 	// after queue promotion. It prevents duplicate task.queue_promoted events
 	// from repeating on_enter or auto-start behavior.
 	MetaKeyQueuePromotionPending = "queue_promotion_pending"
+	// MetaKeyWorkflowMovePending identifies a committed workflow move whose
+	// private one-shot entry payload has not reached the destination session
+	// yet. Its value records the source step and move ID only; instructions,
+	// profile IDs, and model IDs remain in the private move-entry store.
+	MetaKeyWorkflowMovePending = "workflow_move_pending"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.

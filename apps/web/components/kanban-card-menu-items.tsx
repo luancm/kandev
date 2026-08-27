@@ -3,27 +3,13 @@
 import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
+  IconAdjustments,
   IconArrowRight,
   IconLoader,
   IconLogicBuffer,
   IconTrash,
   IconUnlink,
 } from "@tabler/icons-react";
-import {
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-} from "@kandev/ui/context-menu";
-import {
-  DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import type { WorkflowStep } from "@/components/kanban-card";
 import {
@@ -36,6 +22,7 @@ import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./plugins/task-menu-actions";
+import { ContextEntry, DropdownEntry } from "./kanban-card-menu-renderers";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -49,7 +36,8 @@ type ItemEntry = {
   disabled?: boolean;
   destructive?: boolean;
   testId?: string;
-  onSelect?: () => void;
+  onSelect?: (anchor?: HTMLElement | null) => void;
+  keepMenuOpen?: boolean;
 };
 
 type SeparatorEntry = { kind: "separator"; key: string };
@@ -62,6 +50,7 @@ type SubmenuEntry = {
   disabled?: boolean;
   testId?: string;
   className?: string;
+  onSelect?: (anchor?: HTMLElement | null) => void;
   children: KanbanCardMenuEntry[];
 };
 
@@ -104,6 +93,7 @@ type BuildKanbanCardMenuEntriesArgs = {
   onLinkSentryIssue?: () => void;
   pluginLinkActions?: KanbanPluginLinkAction[];
   onMoveToStep?: (stepId: string) => void;
+  onMoveToStepWithOptions?: (stepId: string, anchor?: HTMLElement | null) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
   /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
   pluginMenuContext?: PluginTaskMenuContext;
@@ -121,7 +111,15 @@ function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMe
   return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
 }
 
-function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
+function StepBadges({
+  step,
+  isCurrent,
+  testIdPrefix = "task-context-step",
+}: {
+  step: TaskMoveStep;
+  isCurrent: boolean;
+  testIdPrefix?: string;
+}) {
   const { t } = useTranslation();
   const hasAutoStart = stepHasAutoStart(step);
   if (!isCurrent && !hasAutoStart) return null;
@@ -129,10 +127,10 @@ function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolea
   return (
     <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
       {isCurrent && (
-        <span data-testid={`task-context-step-current-${step.id}`}>{t("kanban:current")}</span>
+        <span data-testid={`${testIdPrefix}-current-${step.id}`}>{t("kanban:current")}</span>
       )}
       {hasAutoStart && (
-        <span data-testid={`task-context-step-autostart-${step.id}`}>{t("kanban:autoStart")}</span>
+        <span data-testid={`${testIdPrefix}-autostart-${step.id}`}>{t("kanban:autoStart")}</span>
       )}
     </span>
   );
@@ -142,19 +140,49 @@ function buildStepEntry(
   step: TaskMoveStep,
   currentStepId: string | null | undefined,
   onSelect: (stepId: string) => void,
+  options: {
+    keyPrefix?: string;
+    testIdPrefix?: string;
+    onMoveToStepWithOptions?: (stepId: string, anchor?: HTMLElement | null) => void;
+  } = {},
 ): KanbanCardMenuEntry {
   const isCurrent = step.id === currentStepId;
-  return {
-    kind: "item",
-    key: `step-${step.id}`,
-    testId: `task-context-step-${step.id}`,
+  const keyPrefix = options.keyPrefix ?? "step";
+  const testIdPrefix = options.testIdPrefix ?? "task-context-step";
+  const stepEntry = {
+    key: `${keyPrefix}-${step.id}`,
+    testId: `${testIdPrefix}-${step.id}`,
     disabled: isCurrent,
     leading: <span className={cn("block h-2 w-2 rounded-full shrink-0", step.color ?? "")} />,
     label: <span className="flex-1 truncate">{step.title}</span>,
-    trailing: <StepBadges step={step} isCurrent={isCurrent} />,
+    trailing: <StepBadges step={step} isCurrent={isCurrent} testIdPrefix={testIdPrefix} />,
     onSelect: () => {
       if (!isCurrent) onSelect(step.id);
     },
+  };
+
+  if (!options.onMoveToStepWithOptions) {
+    return { kind: "item", ...stepEntry };
+  }
+
+  return {
+    kind: "submenu",
+    ...stepEntry,
+    className: "w-48",
+    children: [
+      {
+        kind: "item",
+        key: `move-with-options-step-${step.id}`,
+        testId: `task-context-options-step-${step.id}`,
+        icon: <IconAdjustments className="mr-2 h-4 w-4" />,
+        label: t("task:moveWithOptions"),
+        disabled: isCurrent,
+        keepMenuOpen: true,
+        onSelect: (anchor) => {
+          if (!isCurrent) options.onMoveToStepWithOptions?.(step.id, anchor);
+        },
+      },
+    ],
   };
 }
 
@@ -163,11 +191,13 @@ function buildMoveToCurrentWorkflowSubmenu({
   currentStepId,
   disabled,
   onMoveToStep,
+  onMoveToStepWithOptions,
 }: {
   steps: TaskMoveStep[];
   currentStepId?: string | null;
   disabled?: boolean;
   onMoveToStep?: (stepId: string) => void;
+  onMoveToStepWithOptions?: (stepId: string, anchor?: HTMLElement | null) => void;
 }): KanbanCardMenuEntry | null {
   if (!onMoveToStep || steps.length <= 1) return null;
   return {
@@ -178,7 +208,9 @@ function buildMoveToCurrentWorkflowSubmenu({
     label: t("kanban:moveTo"),
     disabled,
     className: "w-48",
-    children: steps.map((step) => buildStepEntry(step, currentStepId, onMoveToStep)),
+    children: steps.map((step) =>
+      buildStepEntry(step, currentStepId, onMoveToStep, { onMoveToStepWithOptions }),
+    ),
   };
 }
 
@@ -277,6 +309,7 @@ export function buildKanbanCardMenuEntries({
   onLinkSentryIssue,
   pluginLinkActions,
   onMoveToStep,
+  onMoveToStepWithOptions,
   onSendToWorkflow,
   pluginMenuContext,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
@@ -296,6 +329,7 @@ export function buildKanbanCardMenuEntries({
     currentStepId,
     disabled: isProcessing,
     onMoveToStep,
+    onMoveToStepWithOptions,
   });
   if (moveToEntry) entries.push(moveToEntry);
 
@@ -416,6 +450,7 @@ export function useKanbanCardMoveTargets(
           id: step.id,
           title: step.title,
           color: step.color,
+          agent_profile_id: step.agent_profile_id,
           events: step.events,
         }));
     }
@@ -424,6 +459,7 @@ export function useKanbanCardMoveTargets(
         id: step.id,
         title: step.title,
         color: step.color,
+        agent_profile_id: step.agent_profile_id,
         events: step.events,
       }));
     }
@@ -431,89 +467,6 @@ export function useKanbanCardMoveTargets(
   }, [snapshots, currentWorkflowId, steps]);
 
   return { currentWorkflowId, workflowItems, stepsByWorkflowId };
-}
-
-function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
-  if (entry.kind === "separator") return <ContextMenuSeparator />;
-  if (entry.kind === "submenu") {
-    return (
-      <ContextMenuSub>
-        <ContextMenuSubTrigger data-testid={entry.testId} disabled={entry.disabled}>
-          {entry.icon}
-          {entry.label}
-        </ContextMenuSubTrigger>
-        <ContextMenuSubContent className={entry.className}>
-          {entry.children.map((child) => (
-            <ContextEntry key={child.key} entry={child} />
-          ))}
-        </ContextMenuSubContent>
-      </ContextMenuSub>
-    );
-  }
-
-  return (
-    <ContextMenuItem
-      data-testid={entry.testId}
-      disabled={entry.disabled}
-      className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
-      // React events bubble through the React tree even from a portal — stop here so the card's onClick doesn't navigate.
-      onClick={(event) => event.stopPropagation()}
-      onSelect={() => {
-        if (!entry.disabled) entry.onSelect?.();
-      }}
-    >
-      {entry.icon}
-      {entry.leading}
-      {entry.label}
-      {entry.trailing}
-    </ContextMenuItem>
-  );
-}
-
-function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
-  if (entry.kind === "separator") return <DropdownMenuSeparator />;
-  if (entry.kind === "submenu") {
-    return (
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger
-          data-testid={entry.testId}
-          disabled={entry.disabled}
-          onClick={(event) => event.stopPropagation()}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          {entry.icon}
-          {entry.label}
-        </DropdownMenuSubTrigger>
-        <DropdownMenuPortal>
-          <DropdownMenuSubContent className={entry.className}>
-            {entry.children.map((child) => (
-              <DropdownEntry key={child.key} entry={child} />
-            ))}
-          </DropdownMenuSubContent>
-        </DropdownMenuPortal>
-      </DropdownMenuSub>
-    );
-  }
-
-  return (
-    <DropdownMenuItem
-      data-testid={entry.testId}
-      disabled={entry.disabled}
-      className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
-      // React events bubble through the React tree even from a portal - stop here so click/pointer don't reach the parent Card's onClick or dnd-kit listeners.
-      onClick={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      onSelect={(event) => {
-        event.stopPropagation();
-        if (!entry.disabled) entry.onSelect?.();
-      }}
-    >
-      {entry.icon}
-      {entry.leading}
-      {entry.label}
-      {entry.trailing}
-    </DropdownMenuItem>
-  );
 }
 
 export function KanbanCardContextMenuItems({ entries }: { entries: KanbanCardMenuEntry[] }) {

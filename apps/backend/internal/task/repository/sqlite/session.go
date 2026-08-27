@@ -1739,6 +1739,61 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// ClearSessionResetMetadata atomically clears the provider session identity
+// and context-window snapshot while preserving every other metadata key.
+// Keeping both fields in one statement prevents a reset from becoming
+// partially durable between the provider reset and a later lazy resume.
+func (r *Repository) ClearSessionResetMetadata(ctx context.Context, sessionID string) error {
+	result, err := r.db.ExecContext(
+		ctx,
+		r.db.Rebind(clearSessionResetMetadataQuery(r.db.DriverName())),
+		r.nowUTC(),
+		sessionID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	return nil
+}
+
+//nolint:dupword // nested JSON setter calls are intentional in the atomic SQL.
+func clearSessionResetMetadataQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		base := postgresSessionMetadataJSONBase
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				jsonb_set(` + base + `, '{acp_session_id}', '""'::jsonb, true),
+				'{context_window}', 'null'::jsonb, true
+			)::text,
+			updated_at = ?
+			WHERE id = ?
+		`
+	}
+	base := sqliteSessionMetadataJSONBase
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(
+			` + base + `,
+			'$.acp_session_id', json('""'),
+			'$.context_window', json('null')
+		), updated_at = ?
+		WHERE id = ?
+	`
+}
+
+const (
+	postgresSessionMetadataJSONBase = "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+	sqliteSessionMetadataJSONBase   = "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+)
+
 // UpdateSessionContextWindow stores a context-window sample and atomically
 // increments the session's inferred compaction count when the new used-token
 // value is lower than the previous persisted sample.
@@ -1795,7 +1850,7 @@ func contextWindowUsed(contextWindow map[string]interface{}) (int64, error) {
 //nolint:dupword // nested JSON setter calls are intentional in the atomic SQL.
 func updateSessionContextWindowQuery(driver string) string {
 	if dialect.IsPostgres(driver) {
-		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		base := postgresSessionMetadataJSONBase
 		count := "GREATEST(COALESCE(NULLIF((" + base + ") #>> '{context_compaction_count}', '')::bigint, 0), 0)"
 		previousUsed := "(" + base + ") #>> '{context_window,used}'"
 		return `
@@ -1816,7 +1871,7 @@ func updateSessionContextWindowQuery(driver string) string {
 			RETURNING ((metadata::jsonb) #>> '{context_compaction_count}')::bigint
 		`
 	}
-	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	base := sqliteSessionMetadataJSONBase
 	count := "MAX(COALESCE(CAST(json_extract(" + base + ", '$.context_compaction_count') AS INTEGER), 0), 0)"
 	previousUsed := "json_extract(" + base + ", '$.context_window.used')"
 	return `
@@ -2085,7 +2140,7 @@ func setSessionMetadataKeyIfAbsentQuery(driver string) string {
 
 func setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver string) string {
 	if dialect.IsPostgres(driver) {
-		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		base := postgresSessionMetadataJSONBase
 		return `
 			UPDATE task_sessions
 			SET metadata = jsonb_set(
@@ -2099,7 +2154,7 @@ func setSessionMetadataKeyIfAbsentOrDifferentStepQuery(driver string) string {
 				AND jsonb_extract_path_text(` + base + `, ?, 'step_id') IS DISTINCT FROM ?
 		`
 	}
-	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	base := sqliteSessionMetadataJSONBase
 	return `
 		UPDATE task_sessions
 		SET metadata = json_set(` + base + `, ?, json(?)),

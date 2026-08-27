@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 func TestDeleteWorkspaceCascadeWithNameDeletesWorkspaceChildren(t *testing.T) {
@@ -118,6 +119,25 @@ func TestDeleteWorkspaceCascadePurgesLifecycleQueueAndMirror(t *testing.T) {
 	}
 	persistentQueue := messagequeue.NewService(persistentRepo, messagequeue.DefaultMaxPerSession, log)
 	mirrorQueue := messagequeue.NewServiceMemory(log)
+	if err := persistentRepo.SetPendingMove(ctx, "session-delete", &messagequeue.PendingMove{
+		MoveID: "move-delete", TaskID: "task-delete", WorkflowID: "wf-delete", WorkflowStepID: "step-target",
+		EntryOptions: &workflowmove.EntryOptions{Instructions: "must not survive workspace deletion"},
+	}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	entryStore, err := workflowmove.NewSQLiteEntryStore(repo.db, repo.db)
+	if err != nil {
+		t.Fatalf("new workflow move entry store: %v", err)
+	}
+	if err := entryStore.Save(ctx, &workflowmove.Entry{
+		ID: "move-delete", TaskID: "task-delete",
+		Options: workflowmove.EntryOptions{Instructions: "must not survive workspace deletion"},
+	}); err != nil {
+		t.Fatalf("save workflow move entry: %v", err)
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "task-delete", models.MetaKeyWorkflowMovePending, map[string]interface{}{"move_id": "move-delete"}); err != nil {
+		t.Fatalf("set workflow move marker: %v", err)
+	}
 	for _, queue := range []*messagequeue.Service{persistentQueue, mirrorQueue} {
 		_, _, accepted, err := queue.QueueLifecycleMessageWithCoalesceKey(
 			ctx, "session-delete", "task-delete", "merged lifecycle prompt", "", messagequeue.QueuedByWorkflow,
@@ -148,6 +168,16 @@ func TestDeleteWorkspaceCascadePurgesLifecycleQueueAndMirror(t *testing.T) {
 	}
 	if got := mirrorQueue.GetStatus(ctx, "session-delete").Count; got != 0 {
 		t.Fatalf("lifecycle mirror rows after workspace delete = %d, want 0", got)
+	}
+	var pending, entries int
+	if err := repo.db.GetContext(ctx, &pending, `SELECT COUNT(*) FROM pending_moves WHERE task_id = 'task-delete'`); err != nil {
+		t.Fatalf("count pending moves: %v", err)
+	}
+	if err := repo.db.GetContext(ctx, &entries, `SELECT COUNT(*) FROM workflow_move_entries WHERE task_id = 'task-delete'`); err != nil {
+		t.Fatalf("count workflow move entries: %v", err)
+	}
+	if pending != 0 || entries != 0 {
+		t.Fatalf("workspace-deleted workflow move state = pending:%d entries:%d, want zero", pending, entries)
 	}
 }
 

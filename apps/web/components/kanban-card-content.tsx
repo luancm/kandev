@@ -39,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
+import { keepWorkflowMoveSurfaceOpen } from "@/components/task/workflow-move-surface";
 
 const kanbanStatusDebug = createDebugLogger("kanban:task-status");
 
@@ -522,7 +523,11 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
           <IconDots className="h-4 w-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent
+        align="end"
+        className="w-56"
+        onInteractOutside={keepWorkflowMoveSurfaceOpen}
+      >
         <KanbanCardDropdownMenuItems entries={menuEntries} />
       </DropdownMenuContent>
     </DropdownMenu>

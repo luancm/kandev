@@ -18,6 +18,20 @@ func (r *failResumeTokenUpdateRepo) UpdateResumeToken(context.Context, string, s
 	return r.err
 }
 
+type failOnceClearResetMetadataRepo struct {
+	sessionExecutorStore
+	err    error
+	failed bool
+}
+
+func (r *failOnceClearResetMetadataRepo) ClearSessionResetMetadata(ctx context.Context, sessionID string) error {
+	if !r.failed {
+		r.failed = true
+		return r.err
+	}
+	return r.sessionExecutorStore.ClearSessionResetMetadata(ctx, sessionID)
+}
+
 // TestProcessOnEnterResetAgentContext_ClearsLazyResumeTokenWithoutLiveExecution
 // is the regression test for the lazy-resume reset: when no in-memory execution
 // exists, resetAgentContext must erase the stale resume token so the next lazy
@@ -127,6 +141,60 @@ func TestResetAgentContext_FailedProviderResetRetainsResumeToken(t *testing.T) {
 	}
 	if running.ResumeToken != "old-acp-session" {
 		t.Fatalf("failed reset must retain recovery token, got %q", running.ResumeToken)
+	}
+}
+
+func TestResetAgentContext_RetryAfterMetadataCleanupFailureIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-reset-retry", "s-reset-retry", "step1")
+	seedExecutorRunning(t, repo, "s-reset-retry", "t-reset-retry", "exec-reset-retry")
+	if err := repo.SetSessionMetadataKey(ctx, "s-reset-retry", "acp_session_id", "old-acp-session"); err != nil {
+		t.Fatalf("seed ACP session metadata: %v", err)
+	}
+	if err := repo.SetSessionMetadataKey(ctx, "s-reset-retry", "context_window", map[string]interface{}{
+		"size": int64(200000), "used": int64(190000),
+	}); err != nil {
+		t.Fatalf("seed context window metadata: %v", err)
+	}
+
+	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.repo = &failOnceClearResetMetadataRepo{
+		sessionExecutorStore: repo,
+		err:                  errors.New("reset metadata cleanup unavailable"),
+	}
+	session, err := repo.GetTaskSession(ctx, "s-reset-retry")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	if svc.resetAgentContext(ctx, "t-reset-retry", session, "review") {
+		t.Fatal("expected the first reset attempt to fail closed")
+	}
+	if len(agentManager.restartProcessCalls) != 1 {
+		t.Fatalf("expected one provider reset attempt, got %d", len(agentManager.restartProcessCalls))
+	}
+	failedSession, err := repo.GetTaskSession(ctx, "s-reset-retry")
+	if err != nil {
+		t.Fatalf("reload session after failed reset: %v", err)
+	}
+	if failedSession.Metadata["context_window"] == nil || failedSession.Metadata["acp_session_id"] != "old-acp-session" {
+		t.Fatalf("failed cleanup must retain durable reset metadata, got %#v", failedSession.Metadata)
+	}
+
+	if !svc.resetAgentContext(ctx, "t-reset-retry", session, "review") {
+		t.Fatal("expected retry to succeed after metadata cleanup recovers")
+	}
+	if len(agentManager.restartProcessCalls) != 2 {
+		t.Fatalf("expected one provider reset per attempt, got %d", len(agentManager.restartProcessCalls))
+	}
+	clearedSession, err := repo.GetTaskSession(ctx, "s-reset-retry")
+	if err != nil {
+		t.Fatalf("reload session after successful retry: %v", err)
+	}
+	if clearedSession.Metadata["context_window"] != nil || clearedSession.Metadata["acp_session_id"] != "" {
+		t.Fatalf("successful retry must clear reset metadata, got %#v", clearedSession.Metadata)
 	}
 }
 

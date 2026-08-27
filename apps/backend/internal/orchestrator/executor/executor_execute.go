@@ -270,16 +270,19 @@ func (e *Executor) stopStartedExecutionIfSessionTerminal(
 
 // startAgentProcessAsync starts the agent subprocess and transitions its session
 // to RUNNING before reconciling the owning task to IN_PROGRESS on success.
-func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
+func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onStarted ...func(context.Context)) {
 	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
-		if !e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
+		if len(onStarted) > 0 && onStarted[0] != nil {
+			onStarted[0](updCtx)
 			return
 		}
-		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, sessionID); updateErr != nil {
-			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(updateErr))
+		if e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
+			if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, sessionID); updateErr != nil {
+				e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(updateErr))
+			}
 		}
 	}, true, false)
 }
@@ -1124,7 +1127,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// overwrite the stale row.
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
-		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
+		result, err := e.startAgentOnExistingWorkspaceWithCallback(
+			ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.OnAgentStarted, opts.TurnID,
+		)
 		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
 			return result, err
 		}
@@ -1300,7 +1305,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.captureBaseCommit(captureCtx, sid)
 	}(sessionID)
 
-	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg, opts.OnAgentStarted)
 }
 
 func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentID string) (*models.TaskEnvironment, error) {
@@ -1520,7 +1525,7 @@ func (e *Executor) transitionLaunchFailure(
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
-func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
+func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, onAgentStarted func(context.Context)) (*TaskExecution, error) {
 	now := time.Now().UTC()
 	if err := e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
@@ -1545,7 +1550,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	}
 
 	if startAgent {
-		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
+		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID, onAgentStarted)
 	} else {
 		// Prepare-only launch: the workspace + agentctl are up but the agent
 		// process is intentionally not being started. The lifecycle manager
@@ -1898,6 +1903,10 @@ func dockerLocalCloneSource(repositoryPath string) string {
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
+	return e.startAgentOnExistingWorkspaceWithCallback(ctx, task, session, prompt, startAgent, mcpMode, env, nil, turnIDs...)
+}
+
+func (e *Executor) startAgentOnExistingWorkspaceWithCallback(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, onAgentStarted func(context.Context), turnIDs ...string) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -1972,7 +1981,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	}
 
 	// Start the agent process asynchronously
-	e.startAgentProcessAsync(ctx, task.ID, session.ID, executionID)
+	e.startAgentProcessAsync(ctx, task.ID, session.ID, executionID, onAgentStarted)
 
 	e.logger.Info("agent starting on existing workspace",
 		zap.String("task_id", task.ID),

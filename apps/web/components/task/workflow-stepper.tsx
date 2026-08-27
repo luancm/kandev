@@ -1,11 +1,38 @@
 "use client";
 
 import { memo, useCallback, useMemo, useRef, useState } from "react";
-import { cn } from "@kandev/ui/lib/utils";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@kandev/ui/lib/utils";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { IconArrowRight } from "@tabler/icons-react";
-import { moveTask } from "@/lib/api";
+import { useWorkflowMove } from "@/hooks/domains/kanban/use-workflow-move";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import {
+  useWorkflowMoveOptionsForm,
+  WorkflowMoveOptionsFields,
+  workflowMoveOptionsPayload,
+} from "./workflow-move-options";
+import {
+  AnchoredActionPopover,
+  ANCHORED_ACTION_POPOVER_WIDTH,
+} from "@/components/confirmation/anchored-action-popover";
+import {
+  useHoverIntentAffordance,
+  HOVER_INTENT_OPEN_DELAY_MS,
+} from "./use-hover-intent-affordance";
+import {
+  StepCircleIndicator,
+  StepConnector,
+  WorkflowStepTrigger,
+} from "./workflow-step-primitives";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
@@ -14,6 +41,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import { useTranslation } from "react-i18next";
+import { useToast } from "@/components/toast-provider";
 
 type Step = {
   id: string;
@@ -75,8 +103,21 @@ const WorkflowStepper = memo(function WorkflowStepper({
   isArchived,
 }: WorkflowStepperProps) {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
   const disablePlanMode = useDisablePlanMode();
+  const { move } = useWorkflowMove();
+
+  const notifyMoveFailure = useCallback(
+    (error: unknown) => {
+      toast({
+        title: t("task:failedToMoveTask"),
+        description: error instanceof Error ? error.message : t("task:failedToMoveTask"),
+        variant: "error",
+      });
+    },
+    [t, toast],
+  );
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
 
@@ -86,23 +127,30 @@ const WorkflowStepper = memo(function WorkflowStepper({
   );
 
   const handleMove = useCallback(
-    async (stepId: string) => {
-      if (!taskId || !workflowId) return;
-      disablePlanMode();
+    async (stepId: string, entryOptions?: WorkflowMoveEntryOptions): Promise<boolean> => {
+      if (!taskId || !workflowId) return false;
       setMovingToStepId(stepId);
       try {
-        await moveTask(taskId, {
+        const result = await move(taskId, {
           workflow_id: workflowId,
           workflow_step_id: stepId,
           position: 0,
+          entry_options: entryOptions,
         });
-      } catch (err) {
-        console.error("[WorkflowStepper] Failed to move task:", err);
+        if (result.disposition === "failed") {
+          notifyMoveFailure(result.error);
+          return false;
+        }
+        disablePlanMode();
+        return true;
+      } catch (error) {
+        notifyMoveFailure(error);
+        return false;
       } finally {
         setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, disablePlanMode],
+    [taskId, workflowId, disablePlanMode, move, notifyMoveFailure],
   );
 
   // Collapse to a minimal view when the full stepper can't fit (w-full keeps the measurement track-driven).
@@ -216,6 +264,71 @@ function canMoveToStep(params: {
   return params.isAdjacent || !!params.allowManualMove;
 }
 
+function WorkflowStepSurface({
+  step,
+  index,
+  isCurrent,
+  isCompleted,
+  usesTouchDrawer,
+  touchDrawerOpen,
+  onTouchDrawerOpenChange,
+  affordance,
+  canMove,
+  children,
+}: {
+  step: Step;
+  index: number;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  usesTouchDrawer: boolean;
+  touchDrawerOpen: boolean;
+  onTouchDrawerOpenChange: (open: boolean) => void;
+  affordance: ReturnType<typeof useHoverIntentAffordance>;
+  canMove: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center">
+      {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
+      {usesTouchDrawer ? (
+        <Drawer open={touchDrawerOpen} onOpenChange={onTouchDrawerOpenChange}>
+          <DrawerTrigger asChild>
+            <WorkflowStepTrigger
+              stepName={step.name}
+              isCurrent={isCurrent}
+              isCompleted={isCompleted}
+              isTouchSurface
+            />
+          </DrawerTrigger>
+          <DrawerContent className="!top-0 !bottom-auto !mt-0 !h-dvh !max-h-dvh min-h-0 overflow-hidden pb-[env(safe-area-inset-bottom,0px)]">
+            <DrawerHeader className="shrink-0 text-left">
+              <DrawerTitle>{step.name}</DrawerTitle>
+              <DrawerDescription className="sr-only">{step.name}</DrawerDescription>
+            </DrawerHeader>
+            <div
+              className="min-h-0 flex-1 overflow-y-auto px-4 pb-5"
+              data-vaul-no-drag
+              data-testid="workflow-step-drawer-body"
+            >
+              {children}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <StepPopover
+          affordance={affordance}
+          step={step}
+          isCurrent={isCurrent}
+          isCompleted={isCompleted}
+          canMove={canMove}
+        >
+          {children}
+        </StepPopover>
+      )}
+    </div>
+  );
+}
+
 /** Individual step in the workflow stepper */
 function WorkflowStepItem({
   step,
@@ -234,7 +347,7 @@ function WorkflowStepItem({
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
-  onMove: (stepId: string) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
@@ -249,120 +362,177 @@ function WorkflowStepItem({
     allowManualMove: step.allow_manual_move,
   });
 
+  const usesTouchDrawer = useTouchDrawer();
+  const affordance = useHoverIntentAffordance({ openDelayMs: HOVER_INTENT_OPEN_DELAY_MS });
+  const [touchDrawerOpen, setTouchDrawerOpen] = useState(false);
+
+  const closeSurface = useCallback(() => {
+    affordance.requestClose();
+    setTouchDrawerOpen(false);
+  }, [affordance]);
+
+  const stepActions = (
+    <StepHoverContent
+      step={step}
+      isCurrent={isCurrent}
+      canMove={canMove}
+      isMoving={movingToStepId === step.id}
+      onMove={onMove}
+      onSurfaceClose={closeSurface}
+    />
+  );
+
   return (
-    <div className="flex items-center">
-      {index > 0 && <StepConnector isActive={isCompleted || isCurrent} />}
-      <HoverCard openDelay={200} closeDelay={100}>
-        <HoverCardTrigger asChild>
-          <div
-            data-testid={`workflow-step-${step.name}`}
-            aria-current={isCurrent ? "step" : undefined}
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs whitespace-nowrap transition-colors cursor-default",
-              isCurrent ? "bg-muted/40" : "hover:bg-muted/30",
-            )}
-          >
-            <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
-            <span className={cn("text-xs leading-none", getStepLabelClass(isCurrent, isCompleted))}>
-              {step.name}
-            </span>
-          </div>
-        </HoverCardTrigger>
-        <StepHoverContent
-          step={step}
-          isCurrent={isCurrent}
-          canMove={canMove}
-          isMoving={movingToStepId === step.id}
-          onMove={onMove}
-        />
-      </HoverCard>
-    </div>
+    <WorkflowStepSurface
+      step={step}
+      index={index}
+      isCurrent={isCurrent}
+      isCompleted={isCompleted}
+      usesTouchDrawer={usesTouchDrawer}
+      touchDrawerOpen={touchDrawerOpen}
+      onTouchDrawerOpenChange={setTouchDrawerOpen}
+      affordance={affordance}
+      canMove={canMove}
+    >
+      {stepActions}
+    </WorkflowStepSurface>
   );
 }
 
-/** Connector line between steps */
-function StepConnector({ isActive }: { isActive: boolean }) {
+/** Fine-pointer surface: hover/focus opens the compact step popover. */
+function StepPopover({
+  affordance,
+  step,
+  isCurrent,
+  isCompleted,
+  canMove,
+  children,
+}: {
+  affordance: ReturnType<typeof useHoverIntentAffordance>;
+  step: Step;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  canMove: boolean;
+  children: React.ReactNode;
+}) {
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
   return (
-    <div className={cn("h-px w-6 shrink-0", isActive ? "bg-muted-foreground/40" : "bg-border")} />
+    <>
+      <WorkflowStepTrigger
+        ref={anchorRef}
+        stepName={step.name}
+        isCurrent={isCurrent}
+        isCompleted={isCompleted}
+        onPointerEnter={affordance.triggerProps.onPointerEnter}
+        onPointerLeave={affordance.triggerProps.onPointerLeave}
+        onFocus={affordance.triggerProps.onFocus}
+      />
+      <AnchoredActionPopover
+        open={affordance.open}
+        anchorRef={anchorRef}
+        contentRef={affordance.contentRef}
+        focusReturnRef={anchorRef}
+        compact
+        title={step.name}
+        body={children}
+        widthClassName={
+          canMove
+            ? ANCHORED_ACTION_POPOVER_WIDTH
+            : "w-auto min-w-28 max-w-[min(24rem,calc(100vw-1rem))]"
+        }
+        testId="workflow-step-popover"
+        interactionProps={{
+          onPointerEnter: affordance.contentProps.onPointerEnter,
+          onPointerLeave: affordance.contentProps.onPointerLeave,
+          onPointerDownCapture: affordance.contentProps.onPointerDownCapture,
+          onFocusCapture: affordance.contentProps.onFocusCapture,
+        }}
+        onOpenChange={(open) => {
+          if (!open) affordance.requestClose(true);
+        }}
+      />
+    </>
   );
 }
 
-/** Hover content for a workflow step */
+/** Step popover/drawer body: the one-shot options, a direct move, status info. */
 function StepHoverContent({
   step,
   isCurrent,
   canMove,
   isMoving,
   onMove,
+  onSurfaceClose,
 }: {
   step: Step;
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
-  onMove: (stepId: string) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+  onSurfaceClose: () => void;
 }) {
   const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const form = useWorkflowMoveOptionsForm();
+  const [submitting, setSubmitting] = useState(false);
+  const busy = isMoving || submitting;
+  // Untouched options normalize to undefined, so the same button stays the
+  // direct move; anything the user filled becomes this entry's options.
+  const entryOptions = workflowMoveOptionsPayload(form.draft);
+
+  const submitMove = async () => {
+    if (busy) return;
+    setSubmitting(true);
+    try {
+      const moved = await onMove(step.id, entryOptions);
+      if (moved) onSurfaceClose();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Desktop hover card keeps the compact h-6 action; the coarse-pointer Drawer body keeps 44px targets.
+  const actionClass = usesTouchDrawer
+    ? "min-h-11 cursor-pointer text-xs px-2.5 rounded-sm"
+    : "cursor-pointer text-xs h-6 px-2.5 rounded-sm";
+
   return (
-    <HoverCardContent
-      side="bottom"
-      align="center"
-      className="w-auto min-w-28 p-1.5 flex flex-col items-center gap-1.5"
+    <div
+      className={cn(
+        "flex w-auto min-w-28 flex-col items-center gap-1.5",
+        usesTouchDrawer ? "p-1.5" : "p-0",
+      )}
     >
       {canMove && (
-        <Button
-          size="sm"
-          variant="default"
-          className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
-          disabled={isMoving}
-          onClick={() => onMove(step.id)}
-        >
-          <IconArrowRight className="h-3 w-3" />
-          {isMoving ? t("task:moving") : t("task:moveHere")}
-        </Button>
+        <>
+          <Button
+            size="sm"
+            variant="default"
+            className={actionClass}
+            disabled={busy}
+            onClick={submitMove}
+            data-testid="workflow-step-move-here"
+          >
+            <IconArrowRight className="h-3 w-3" />
+            {busy ? t("task:moving") : t("task:moveHere")}
+          </Button>
+          <div className="w-full min-w-0 text-left" data-testid="workflow-step-move-options">
+            <WorkflowMoveOptionsFields
+              draft={form.draft}
+              onDraftChange={form.patchDraft}
+              profileOptions={form.profileOptions}
+              isTouchSurface={usesTouchDrawer}
+              instructionsRows={3}
+            />
+          </div>
+        </>
       )}
       {isCurrent && (
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
-    </HoverCardContent>
+    </div>
   );
-}
-
-/** Circle indicator for step state */
-function StepCircleIndicator({
-  isCurrent,
-  isCompleted,
-}: {
-  isCurrent: boolean;
-  isCompleted: boolean;
-}) {
-  if (isCurrent) {
-    return (
-      <span className="relative flex items-center justify-center shrink-0">
-        <span className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary/40" />
-        <span className="h-2 w-2 rounded-full bg-primary" />
-      </span>
-    );
-  }
-  if (isCompleted) {
-    return (
-      <span className="relative flex items-center justify-center shrink-0">
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-      </span>
-    );
-  }
-  return (
-    <span className="relative flex items-center justify-center shrink-0">
-      <span className="h-2 w-2 rounded-full border border-muted-foreground/40" />
-    </span>
-  );
-}
-
-/** Get CSS class for step label based on state */
-function getStepLabelClass(isCurrent: boolean, isCompleted: boolean): string {
-  if (isCurrent) return "text-foreground font-medium";
-  if (isCompleted) return "text-muted-foreground";
-  return "text-muted-foreground/60";
 }
 
 export { WorkflowStepper };

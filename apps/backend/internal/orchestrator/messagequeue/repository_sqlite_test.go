@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jmoiron/sqlx"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -876,6 +877,101 @@ func TestSQLiteRepository_PendingMove(t *testing.T) {
 	got, err = repo.TakePendingMove(ctx, "s1")
 	if err != nil || got != nil {
 		t.Errorf("expected empty after take, got %+v err=%v", got, err)
+	}
+}
+
+func TestSQLiteRepository_PendingMoveRoundTripsEntryOptions(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	move := &PendingMove{
+		TaskID: "t1", WorkflowID: "w1", WorkflowStepID: "step-B", Position: 0, MoveID: "move-1",
+		FromWorkflowID: "w0", FromStepID: "step-A",
+		EntryOptions: &workflowmove.EntryOptions{ResetContext: true, Instructions: "ready for review", AgentProfileID: "qa"},
+	}
+	if err := repo.SetPendingMove(ctx, "s1", move); err != nil {
+		t.Fatalf("set pending: %v", err)
+	}
+	got, err := repo.TakePendingMove(ctx, "s1")
+	if err != nil {
+		t.Fatalf("take pending: %v", err)
+	}
+	if got == nil || got.MoveID != move.MoveID || got.EntryOptions == nil || *got.EntryOptions != *move.EntryOptions {
+		t.Fatalf("entry options = %+v, want %+v", got, move.EntryOptions)
+	}
+	if got.FromWorkflowID != move.FromWorkflowID || got.FromStepID != move.FromStepID {
+		t.Fatalf("source identity = (%q, %q), want (%q, %q)", got.FromWorkflowID, got.FromStepID, move.FromWorkflowID, move.FromStepID)
+	}
+}
+
+func TestSQLiteRepository_PendingMoveMalformedOptionsFailClosedWithoutDeletion(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	sqlRepo := repo.(*sqliteRepository)
+	ctx := context.Background()
+	if _, err := sqlRepo.db.ExecContext(ctx, `
+		INSERT INTO pending_moves (
+			id, move_id, session_id, task_id, workflow_id, workflow_step_id,
+			step_position, queued_at, entry_options_json
+		) VALUES ('row-bad', 'move-bad', 'session-bad', 'task-bad', 'workflow-b', 'step-b', 0, CURRENT_TIMESTAMP, '{bad')
+	`); err != nil {
+		t.Fatalf("insert malformed pending move: %v", err)
+	}
+
+	if move, err := repo.GetPendingMove(ctx, "session-bad"); err == nil || move != nil {
+		t.Fatalf("GetPendingMove = (%#v, %v), want strict decode error", move, err)
+	}
+	if move, err := repo.TakePendingMove(ctx, "session-bad"); err == nil || move != nil {
+		t.Fatalf("TakePendingMove = (%#v, %v), want strict decode error", move, err)
+	}
+	var count int
+	if err := sqlRepo.db.GetContext(ctx, &count, `SELECT COUNT(*) FROM pending_moves WHERE session_id = 'session-bad'`); err != nil {
+		t.Fatalf("count malformed pending move: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("malformed pending move rows = %d, want 1", count)
+	}
+}
+
+func TestSQLiteRepository_InsertPendingMoveIfAbsentChecksPersistedSource(t *testing.T) {
+	raw, err := sql.Open("sqlite3", "file:pending-move-source?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			workflow_id TEXT NOT NULL,
+			workflow_step_id TEXT NOT NULL,
+			archived_at TIMESTAMP NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
+		INSERT INTO tasks (id, workflow_id, workflow_step_id, updated_at)
+		VALUES ('task-source', 'workflow-source', 'step-current', CURRENT_TIMESTAMP);
+	`); err != nil {
+		t.Fatalf("seed task source: %v", err)
+	}
+	repo, err := NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	ctx := context.Background()
+	admitter := repo.(pendingMoveAdmitter)
+	stale := &PendingMove{
+		MoveID: "move-stale", TaskID: "task-source", FromWorkflowID: "workflow-source", FromStepID: "step-stale",
+		WorkflowID: "workflow-target", WorkflowStepID: "step-target",
+	}
+	if admitted, err := admitter.InsertPendingMoveIfAbsent(ctx, "session-source", stale); err != nil || admitted {
+		t.Fatalf("stale source admission = (%v, %v), want (false, nil)", admitted, err)
+	}
+	current := *stale
+	current.MoveID = "move-current"
+	current.FromStepID = "step-current"
+	if admitted, err := admitter.InsertPendingMoveIfAbsent(ctx, "session-source", &current); err != nil || !admitted {
+		t.Fatalf("current source admission = (%v, %v), want (true, nil)", admitted, err)
 	}
 }
 

@@ -779,6 +779,7 @@ export class ApiClient {
     position: number,
     opts?: {
       is_start_step?: boolean;
+      auto_advance_requires_signal?: boolean;
       events?: {
         on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -790,6 +791,9 @@ export class ApiClient {
       name,
       position,
       ...(opts?.is_start_step != null ? { is_start_step: opts.is_start_step } : {}),
+      ...(opts?.auto_advance_requires_signal != null
+        ? { auto_advance_requires_signal: opts.auto_advance_requires_signal }
+        : {}),
       ...(opts?.events != null ? { events: opts.events } : {}),
     });
   }
@@ -1108,10 +1112,21 @@ export class ApiClient {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
 
-  async moveTask(taskId: string, workflowId: string, workflowStepId: string): Promise<void> {
+  async moveTask(
+    taskId: string,
+    workflowId: string,
+    workflowStepId: string,
+    entryOptions?: {
+      reset_context?: boolean;
+      instructions?: string;
+      agent_profile_id?: string;
+      model?: string;
+    },
+  ): Promise<void> {
     await this.request("POST", `/api/v1/tasks/${taskId}/move`, {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
+      ...(entryOptions ? { entry_options: entryOptions } : {}),
     });
   }
 
@@ -1145,6 +1160,7 @@ export class ApiClient {
       wip_limit?: number;
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
+      auto_advance_requires_signal?: boolean;
       stage_type?: "work" | "review" | "approval" | "custom";
     },
   ): Promise<void> {
@@ -2093,6 +2109,16 @@ export class ApiClient {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }
 
+  async listWorkflowHistory(sessionId: string): Promise<{
+    history: Array<{
+      from_step_id?: string | null;
+      to_step_id: string;
+      trigger: string;
+    }>;
+  }> {
+    return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
+  }
+
   async getTaskSession(sessionId: string): Promise<{
     session: { id: string; last_read_message_id?: string };
   }> {
@@ -2213,6 +2239,8 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
+    wip_admitted?: boolean;
+    queued_for_step_id?: string;
     parent_id?: string;
     metadata?: Record<string, unknown> | null;
     repositories?: Array<{

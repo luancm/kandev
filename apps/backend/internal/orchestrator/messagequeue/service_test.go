@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -16,6 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type ownerlessTaskTransactionRepository struct{ Repository }
+
+func (ownerlessTaskTransactionRepository) UsesTaskTransactionHandoff() {}
+
+type ownedTaskTransactionRepository struct {
+	Repository
+	owner *sql.DB
+}
+
+func (ownedTaskTransactionRepository) UsesTaskTransactionHandoff()             {}
+func (r ownedTaskTransactionRepository) WorkflowMoveTransactionOwner() *sql.DB { return r.owner }
+
 func setupService(t *testing.T) *Service {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{
@@ -29,6 +42,28 @@ func setupService(t *testing.T) *Service {
 	// intentionally require separate compatible rows.
 	service.SetAutoMergeEnabled(false)
 	return service
+}
+
+func TestSupportsTaskTransactionHandoffFailsClosedWithoutSharedOwner(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	svc := NewService(ownerlessTaskTransactionRepository{Repository: NewMemoryRepository()}, 1, log)
+	if svc.SupportsTaskTransactionHandoff(nil) {
+		t.Fatal("ownerless repository reported transaction handoff support")
+	}
+}
+
+func TestSupportsTaskTransactionHandoffRequiresSameConcreteOwner(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	queueOwner := &sql.DB{}
+	svc := NewService(ownedTaskTransactionRepository{Repository: NewMemoryRepository(), owner: queueOwner}, 1, log)
+	if svc.SupportsTaskTransactionHandoff(&sql.DB{}) {
+		t.Fatal("separate task database reported transaction handoff support")
+	}
+	if !svc.SupportsTaskTransactionHandoff(queueOwner) {
+		t.Fatal("shared transaction owner did not report handoff support")
+	}
 }
 
 func TestQueueMessage(t *testing.T) {
@@ -899,6 +934,32 @@ func TestPendingMove(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "b", got.WorkflowStepID)
 	})
+}
+
+func TestService_AdmitPendingMovePreservesTheFirstRequest(t *testing.T) {
+	svc := setupService(t)
+	admitter, ok := interface{}(svc).(interface {
+		AdmitPendingMove(context.Context, string, *PendingMove) (bool, error)
+	})
+	if !ok {
+		t.Fatal("Service does not expose atomic pending-move admission")
+	}
+
+	ctx := context.Background()
+	first := &PendingMove{MoveID: "move-first", TaskID: "task-1", WorkflowStepID: "step-a"}
+	admitted, err := admitter.AdmitPendingMove(ctx, "session-1", first)
+	if err != nil || !admitted {
+		t.Fatalf("first admission = (%v, %v), want (true, nil)", admitted, err)
+	}
+	second := &PendingMove{MoveID: "move-second", TaskID: "task-1", WorkflowStepID: "step-b"}
+	admitted, err = admitter.AdmitPendingMove(ctx, "session-1", second)
+	if err != nil || admitted {
+		t.Fatalf("second admission = (%v, %v), want (false, nil)", admitted, err)
+	}
+	stored, exists := svc.GetPendingMove(ctx, "session-1")
+	if !exists || stored.MoveID != first.MoveID {
+		t.Fatalf("stored move = %#v, want first request", stored)
+	}
 }
 
 func TestConcurrentInsertCap(t *testing.T) {

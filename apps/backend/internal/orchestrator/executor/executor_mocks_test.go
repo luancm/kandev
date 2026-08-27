@@ -960,6 +960,19 @@ func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, k
 	session.Metadata[key] = value
 	return nil
 }
+
+func (m *mockRepository) ClearSessionResetMetadata(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if session := m.sessions[sessionID]; session != nil {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata["acp_session_id"] = ""
+		session.Metadata[models.SessionMetaKeyContextWindow] = nil
+	}
+	return nil
+}
 func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
 	return "", nil
 }

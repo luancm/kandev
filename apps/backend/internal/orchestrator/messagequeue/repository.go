@@ -201,9 +201,19 @@ type Repository interface {
 	// SetPendingMove upserts the deferred workflow move for a session.
 	SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error
 
+	// InsertPendingMoveIfAbsent atomically admits a deferred move only when the
+	// session has no pending move. It returns false without modifying the
+	// existing row when another request already won admission.
+	InsertPendingMoveIfAbsent(ctx context.Context, sessionID string, move *PendingMove) (bool, error)
+
 	// GetPendingMove returns the deferred move for a session without removing it.
 	// Returns nil, nil if absent.
 	GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error)
+
+	// DeletePendingMoveIfExact removes only the pending row still owned by the
+	// supplied move and task identity. A replacement admitted for the same
+	// session is left untouched.
+	DeletePendingMoveIfExact(ctx context.Context, sessionID, moveID, taskID string) (bool, error)
 
 	// TakePendingMove returns and removes the deferred move for a session.
 	// Returns nil, nil if absent.

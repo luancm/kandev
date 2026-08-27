@@ -1,14 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@kandev/ui/context-menu";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import {
   buildKanbanCardMenuEntries,
+  KanbanCardContextMenuItems,
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
 
+afterEach(cleanup);
+
 const PluginBitbucketIcon = () => null;
+const moveArgs = {
+  currentWorkflowId: "workflow-1",
+  currentStepId: "step-1",
+  workflows: [{ id: "workflow-1", name: "Workflow 1" }],
+  stepsByWorkflowId: {
+    "workflow-1": [
+      { id: "step-1", title: "Todo" },
+      { id: "step-2", title: "Review" },
+    ],
+  },
+};
 
 // Regression: React synthetic events bubble through the fiber tree from a Radix portal; without stopPropagation the parent Card's onClick fires instead of the confirm dialog.
 describe("KanbanCardDropdownMenuItems — click propagation", () => {
@@ -163,6 +178,205 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
       expect((bitbucket.icon as { type?: unknown })?.type).toBe(PluginBitbucketIcon);
     }
   });
+});
+
+describe("buildKanbanCardMenuEntries — move options", () => {
+  it("nests move options under each direct step entry", () => {
+    const onMoveToStep = vi.fn();
+    const onMoveToStepWithOptions = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      ...moveArgs,
+      onMoveToStep,
+      onMoveToStepWithOptions,
+    });
+
+    const moveToIndex = entries.findIndex((entry) => entry.key === "move-to");
+    expect(moveToIndex).toBeGreaterThanOrEqual(0);
+    expect(entries.some((entry) => entry.key === "move-with-options")).toBe(false);
+
+    const directMenu = entries[moveToIndex];
+    expect(directMenu.kind).toBe("submenu");
+    if (directMenu.kind !== "submenu") return;
+
+    const directStep = directMenu.children.find((entry) => entry.key === "step-step-2");
+    expect(directStep?.kind).toBe("submenu");
+    if (directStep?.kind !== "submenu") return;
+
+    expect(directStep.children).toHaveLength(1);
+    const optionsEntry = directStep.children[0];
+    expect(optionsEntry.kind).toBe("item");
+    if (optionsEntry.kind !== "item") return;
+    expect(optionsEntry.label).toBe("Move with options");
+
+    directStep.onSelect?.();
+    optionsEntry.onSelect?.();
+
+    expect(onMoveToStep).toHaveBeenCalledWith("step-2");
+    expect(onMoveToStepWithOptions).toHaveBeenCalledWith("step-2", undefined);
+  });
+
+  it("keeps plain direct step entries without a single-task options handler", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...moveArgs,
+      onMoveToStep: vi.fn(),
+    });
+
+    const moveTo = entries.find((entry) => entry.key === "move-to");
+    expect(moveTo?.kind).toBe("submenu");
+    if (moveTo?.kind !== "submenu") return;
+    expect(moveTo.children.every((entry) => entry.kind === "item")).toBe(true);
+  });
+
+  it("keeps the current step disabled when options are available", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...moveArgs,
+      onMoveToStep: vi.fn(),
+      onMoveToStepWithOptions: vi.fn(),
+    });
+
+    const moveTo = entries.find((entry) => entry.key === "move-to");
+    expect(moveTo?.kind).toBe("submenu");
+    if (moveTo?.kind !== "submenu") return;
+
+    const currentStep = moveTo.children.find((entry) => entry.key === "step-step-1");
+    expect(currentStep?.kind).toBe("submenu");
+    if (currentStep?.kind !== "submenu") return;
+    expect(currentStep.disabled).toBe(true);
+    expect(currentStep.children[0].kind === "item" && currentStep.children[0].disabled).toBe(true);
+  });
+});
+
+function renderNestedMoveOptionsMenu(
+  type: "context" | "dropdown",
+  onMoveToStep: (stepId: string) => void,
+  onMoveToStepWithOptions: (stepId: string) => void,
+  parentOnClick: () => void,
+) {
+  const entries = buildKanbanCardMenuEntries({
+    ...moveArgs,
+    onMoveToStep,
+    onMoveToStepWithOptions,
+  });
+
+  if (type === "context") {
+    render(
+      <div onClick={parentOnClick}>
+        <ContextMenu>
+          <ContextMenuTrigger data-testid="context-trigger">Task</ContextMenuTrigger>
+          <ContextMenuContent>
+            <KanbanCardContextMenuItems entries={entries} />
+          </ContextMenuContent>
+        </ContextMenu>
+      </div>,
+    );
+    fireEvent.contextMenu(screen.getByTestId("context-trigger"));
+    return;
+  }
+
+  render(
+    <div onClick={parentOnClick}>
+      <DropdownMenu defaultOpen>
+        <DropdownMenuTrigger>open</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <KanbanCardDropdownMenuItems entries={entries} />
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>,
+  );
+}
+
+async function openNestedMoveOptionsStep() {
+  fireEvent.pointerMove(screen.getByTestId("task-context-move-to"), {
+    pointerType: "mouse",
+  });
+  const step = await screen.findByTestId("task-context-step-step-2");
+  fireEvent.pointerMove(step, { pointerType: "mouse" });
+  return step;
+}
+
+describe("KanbanCardMenuItems — nested move options renderers", () => {
+  const renderMenu = renderNestedMoveOptionsMenu;
+  const openStep = openNestedMoveOptionsStep;
+
+  it.each(["context", "dropdown"] as const)(
+    "keeps direct and optioned actions on the same step row for %s menus",
+    async (type) => {
+      const onMoveToStep = vi.fn();
+      const onMoveToStepWithOptions = vi.fn();
+      const parentOnClick = vi.fn();
+      renderMenu(type, onMoveToStep, onMoveToStepWithOptions, parentOnClick);
+
+      const step = await openStep();
+      fireEvent.click(step);
+
+      expect(onMoveToStep).toHaveBeenCalledOnce();
+      expect(onMoveToStep).toHaveBeenCalledWith("step-2");
+      expect(onMoveToStepWithOptions).not.toHaveBeenCalled();
+      expect(parentOnClick).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["context", "dropdown"] as const)(
+    "keeps a touch tap on the step label direct for %s menus",
+    async (type) => {
+      const onMoveToStep = vi.fn();
+      const onMoveToStepWithOptions = vi.fn();
+      renderMenu(type, onMoveToStep, onMoveToStepWithOptions, vi.fn());
+
+      const step = await openStep();
+      fireEvent.pointerDown(step, { pointerType: "touch", clientX: 0 });
+      fireEvent.click(step, { clientX: 0 });
+
+      expect(onMoveToStep).toHaveBeenCalledOnce();
+      expect(onMoveToStepWithOptions).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["context", "dropdown"] as const)(
+    "opens nested options from the step chevron on touch for %s menus",
+    async (type) => {
+      const onMoveToStep = vi.fn();
+      const onMoveToStepWithOptions = vi.fn();
+      renderMenu(type, onMoveToStep, onMoveToStepWithOptions, vi.fn());
+
+      const step = await openStep();
+      vi.spyOn(step, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 44,
+        top: 0,
+        right: 100,
+        bottom: 44,
+        left: 0,
+        toJSON: () => ({}),
+      });
+      fireEvent.pointerDown(step, { pointerType: "touch", clientX: 96 });
+      fireEvent.click(step, { clientX: 96 });
+
+      expect(await screen.findByTestId("task-context-options-step-step-2")).toBeTruthy();
+      expect(onMoveToStep).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["context", "dropdown"] as const)(
+    "opens and selects the nested options leaf for %s menus",
+    async (type) => {
+      const onMoveToStep = vi.fn();
+      const onMoveToStepWithOptions = vi.fn();
+      renderMenu(type, onMoveToStep, onMoveToStepWithOptions, vi.fn());
+
+      const step = await openStep();
+      const options = await screen.findByTestId("task-context-options-step-step-2");
+      expect(step.getAttribute("aria-haspopup")).toBe("menu");
+      fireEvent.click(options);
+
+      expect(onMoveToStepWithOptions).toHaveBeenCalledOnce();
+      expect(onMoveToStepWithOptions.mock.calls[0]?.[0]).toBe("step-2");
+      expect(onMoveToStepWithOptions.mock.calls[0]?.[1]).toBeInstanceOf(HTMLElement);
+      expect(onMoveToStep).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit actions", () => {

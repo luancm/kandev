@@ -534,6 +534,11 @@ type LaunchOptions struct {
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
+	// OnAgentStarted runs after the runtime process starts successfully instead
+	// of the default RUNNING reconciliation. The callback owns the promptable
+	// state transition and dispatch for work that must not be embedded in the
+	// launch request before runtime readiness.
+	OnAgentStarted func(context.Context)
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride

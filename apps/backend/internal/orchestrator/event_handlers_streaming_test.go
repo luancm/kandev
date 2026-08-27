@@ -324,6 +324,10 @@ func (r failSetSessionMetadataRepo) SetSessionMetadataKey(
 	return errors.New("set session metadata failed")
 }
 
+func (r failSetSessionMetadataRepo) ClearSessionResetMetadata(context.Context, string) error {
+	return errors.New("clear session reset metadata failed")
+}
+
 func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
 	b.events = append(b.events, recordedEvent{subject: subject, event: event})
 	return nil

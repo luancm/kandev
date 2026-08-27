@@ -2,10 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -15,8 +19,228 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type pendingMoveEntryStore struct {
+	mu      sync.Mutex
+	entries map[string]*workflowmove.Entry
+}
+
+type workflowMovePhaseClaim struct {
+	expected workflowmove.EntryPhase
+	next     workflowmove.EntryPhase
+	target   string
+}
+
+type recordingWorkflowMoveStore struct {
+	workflowmove.LifecycleStore
+
+	mu            sync.Mutex
+	claims        []workflowMovePhaseClaim
+	finalizeCalls int
+}
+
+func (s *recordingWorkflowMoveStore) ClaimPhase(
+	ctx context.Context,
+	id string,
+	expected workflowmove.EntryPhase,
+	next workflowmove.EntryPhase,
+	targetSessionID string,
+) (bool, error) {
+	claimed, err := s.LifecycleStore.ClaimPhase(ctx, id, expected, next, targetSessionID)
+	if claimed {
+		s.mu.Lock()
+		s.claims = append(s.claims, workflowMovePhaseClaim{
+			expected: expected,
+			next:     next,
+			target:   targetSessionID,
+		})
+		s.mu.Unlock()
+	}
+	return claimed, err
+}
+
+func (s *recordingWorkflowMoveStore) Finalize(ctx context.Context, taskID, moveID string) error {
+	s.mu.Lock()
+	s.finalizeCalls++
+	s.mu.Unlock()
+	return s.LifecycleStore.Finalize(ctx, taskID, moveID)
+}
+
+func (s *recordingWorkflowMoveStore) successfulClaims() []workflowMovePhaseClaim {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]workflowMovePhaseClaim(nil), s.claims...)
+}
+
+func (s *recordingWorkflowMoveStore) finalizeCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.finalizeCalls
+}
+
+type failingPendingMoveStepGetter struct {
+	WorkflowStepGetter
+	targetID string
+	err      error
+}
+
+type retryingPendingMoveStepGetter struct {
+	WorkflowStepGetter
+	targetID  string
+	failures  int
+	mu        sync.Mutex
+	calls     int
+	lookupErr error
+}
+
+type retryingPendingMoveCommitter struct {
+	sessionExecutorStore
+	delegate pendingWorkflowMoveCommitter
+	err      error
+	failures int
+	mu       sync.Mutex
+	calls    int
+}
+
+func (r *retryingPendingMoveCommitter) CommitPendingWorkflowMove(
+	ctx context.Context,
+	sessionID, moveID, taskID, fromWorkflowID, fromStepID, workflowID, workflowStepID string,
+	limit int,
+	state *v1.TaskState,
+) (*models.Task, *workflowmove.EntryOptions, bool, bool, error) {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.mu.Unlock()
+	if call <= r.failures {
+		return nil, nil, false, false, r.err
+	}
+	return r.delegate.CommitPendingWorkflowMove(
+		ctx, sessionID, moveID, taskID, fromWorkflowID, fromStepID,
+		workflowID, workflowStepID, limit, state,
+	)
+}
+
+func (r *retryingPendingMoveCommitter) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+func (r *retryingPendingMoveCommitter) WorkflowMoveTransactionOwner() *sql.DB {
+	owner, _ := r.sessionExecutorStore.(workflowMoveTaskTransactionOwner)
+	if owner == nil {
+		return nil
+	}
+	return owner.WorkflowMoveTransactionOwner()
+}
+
+type retryingPendingMoveQueueRepository struct {
+	messagequeue.Repository
+	err      error
+	failures int
+	mu       sync.Mutex
+	calls    int
+}
+
+func (r *retryingPendingMoveQueueRepository) GetPendingMove(ctx context.Context, sessionID string) (*messagequeue.PendingMove, error) {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.mu.Unlock()
+	if call <= r.failures {
+		return nil, r.err
+	}
+	return r.Repository.GetPendingMove(ctx, sessionID)
+}
+
+func (*retryingPendingMoveQueueRepository) UsesTaskTransactionHandoff() {}
+
+func (r *retryingPendingMoveQueueRepository) WorkflowMoveTransactionOwner() *sql.DB {
+	owner, _ := r.Repository.(interface{ WorkflowMoveTransactionOwner() *sql.DB })
+	if owner == nil {
+		return nil
+	}
+	return owner.WorkflowMoveTransactionOwner()
+}
+
+func (r *retryingPendingMoveQueueRepository) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+func (g *retryingPendingMoveStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	if stepID != g.targetID {
+		return g.WorkflowStepGetter.GetStep(ctx, stepID)
+	}
+	g.mu.Lock()
+	g.calls++
+	call := g.calls
+	g.mu.Unlock()
+	if call <= g.failures {
+		return nil, g.lookupErr
+	}
+	return g.WorkflowStepGetter.GetStep(ctx, stepID)
+}
+
+func (g *retryingPendingMoveStepGetter) callCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.calls
+}
+
+type failingSessionTransferRepository struct {
+	messagequeue.Repository
+	err error
+}
+
+func (r failingSessionTransferRepository) TransferSession(context.Context, string, string) error {
+	return r.err
+}
+
+func (g *failingPendingMoveStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	if stepID == g.targetID {
+		return nil, g.err
+	}
+	return g.WorkflowStepGetter.GetStep(ctx, stepID)
+}
+
+func newPendingMoveEntryStore() *pendingMoveEntryStore {
+	return &pendingMoveEntryStore{entries: make(map[string]*workflowmove.Entry)}
+}
+
+func (s *pendingMoveEntryStore) Save(_ context.Context, entry *workflowmove.Entry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copy := *entry
+	s.entries[entry.ID] = &copy
+	return nil
+}
+
+func (s *pendingMoveEntryStore) Load(_ context.Context, id string) (*workflowmove.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[id]
+	if entry == nil {
+		return nil, nil
+	}
+	copy := *entry
+	return &copy, nil
+}
+
+func (s *pendingMoveEntryStore) Delete(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.entries[id]; !ok {
+		return workflowmove.ErrEntryNotFound
+	}
+	delete(s.entries, id)
+	return nil
+}
 
 // TestPendingMove_ReviewToInProgress_OneTransitionOnly reproduces the production bug
 // observed at task a99d863e ("buggy fibo"): a QA agent calls move_task_kandev to send
@@ -42,7 +266,7 @@ import (
 //     when the workflow first transitioned to Review) and an "In Review" session
 //     (profile-review, currently RUNNING, primary).
 //   - QA called move_task_kandev mid-turn → handleMoveTask set a PendingMove
-//     pointing at "In Progress" and queued the hand-off prompt.
+//     pointing at "In Progress" and queued the legacy hand-off prompt.
 //   - QA's turn ends → agent.ready fires → handleAgentReady is invoked.
 //
 // Expected outcome:
@@ -304,13 +528,1448 @@ func TestPendingMove_DropsForeignWorkflowStepWithoutMovingTask(t *testing.T) {
 		t.Fatalf("session state = %q, want unchanged RUNNING", session.State)
 	}
 
-	// Regression: the workflow-mismatch drop must clean up any hand-off prompt
-	// queued by handleMoveTask before the deferred move was applied. Without
-	// this cleanup, the queued prompt (authored for the foreign-workflow
-	// target step) would still be sitting in the queue and could be
-	// misdelivered to the review session's agent on a future turn.
+	// Regression: the workflow-mismatch drop must clean up the legacy hand-off
+	// prompt queued before EntryOptions was introduced. Without this cleanup,
+	// that prompt (authored for the foreign-workflow target step) would still be
+	// sitting in the queue and could be misdelivered on a future turn.
 	if status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID); status.Count != 0 {
 		t.Fatalf("queued message count = %d, want 0 after workflow-mismatch drop", status.Count)
+	}
+}
+
+func TestPendingMoveWithEntryOptionsPreservesUnrelatedQueuedMessageOnFailure(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps["foreign-step"] = &wfmodels.WorkflowStep{
+		ID: "foreign-step", WorkflowID: "wf-other", Name: "Foreign", Position: 1,
+	}
+	if _, err := sc.svc.messageQueue.CancelAll(sc.ctx, sc.reviewSessionID); err != nil {
+		t.Fatalf("clear seeded queue: %v", err)
+	}
+	if _, err := sc.svc.messageQueue.QueueMessage(sc.ctx, sc.reviewSessionID, "task-1", "user follow-up", "", messagequeue.QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue unrelated message: %v", err)
+	}
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "foreign-step",
+		EntryOptions:   &workflowmove.EntryOptions{Instructions: "handoff"},
+	})
+
+	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
+	if status.Count != 1 || status.Entries[0].Content != "user follow-up" {
+		t.Fatalf("queue after failed move = %+v, want unrelated message preserved", status.Entries)
+	}
+}
+
+func TestPendingMoveWithEntryOptionsSurvivesWIPQueueUntilPromotion(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps[stepInProgressID].AgentProfileID = profileReview
+	sc.stepGetter.steps[stepInProgressID].WIPLimit = 1
+	entryStore := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(entryStore)
+	sc.agentMgr.isAgentRunning = true
+	sc.agentMgr.isAgentReadyFn = func(context.Context, string) bool { return true }
+	messages := &mockMessageCreator{}
+	sc.svc.messageCreator = messages
+	seedExecutorRunning(t, sc.repo, sc.reviewSessionID, "task-1", "ae-review")
+
+	if err := sc.repo.CreateTask(sc.ctx, &models.Task{
+		ID: "progress-occupant", WorkspaceID: "ws1", WorkflowID: "wf1",
+		WorkflowStepID: stepInProgressID, State: v1.TaskStateTODO, WIPAdmitted: true,
+	}); err != nil {
+		t.Fatalf("create WIP occupant: %v", err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load source session: %v", err)
+	}
+	moveID := "deferred-options-move"
+	options := &workflowmove.EntryOptions{
+		ResetContext:   true,
+		Instructions:   "Create the PR ready for review, not as a draft.",
+		AgentProfileID: profileReview,
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID:         "task-1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+		MoveID:         moveID,
+		EntryOptions:   options,
+	})
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload queued task: %v", err)
+	}
+	if task.WorkflowStepID != stepInProgressID || task.WIPAdmitted || task.QueuedForStepID != stepInProgressID {
+		t.Fatalf("queued task placement = step=%q admitted=%v queue=%q", task.WorkflowStepID, task.WIPAdmitted, task.QueuedForStepID)
+	}
+	if got := queuedMoveEntryID(task); got != moveID {
+		t.Fatalf("queued move id = %q, want %q", got, moveID)
+	}
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry == nil || entry.Options != *options {
+		t.Fatalf("private entry = %+v err=%v, want options retained while queued", entry, loadErr)
+	}
+
+	// The source-exit barrier runs asynchronously after the transition. Wait
+	// for its durable completion before making the destination appear admitted.
+	deadline := time.Now().Add(time.Second)
+	for {
+		task, err = sc.repo.GetTask(sc.ctx, "task-1")
+		if err != nil {
+			t.Fatalf("reload source-exit state: %v", err)
+		}
+		if queuedMoveExitCompleted(task) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queued source-exit barrier did not complete: %#v", task.Metadata)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Reload after the asynchronous source-exit barrier so the promotion write
+	// preserves its durable completion marker instead of overwriting it with
+	// the pre-barrier task snapshot.
+	task, err = sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload task before promotion: %v", err)
+	}
+
+	// Duplicate task.moved deliveries for a queued move must not consume the
+	// private options or run destination entry before WIP admission. The source
+	// exit has already completed, so these are real replay deliveries rather
+	// than a second attempt to perform the source barrier.
+	queuedMoveEvent := watcher.TaskMovedEventData{
+		TaskID:          "task-1",
+		FromStepID:      stepInReviewID,
+		ToStepID:        stepInProgressID,
+		SessionID:       sc.reviewSessionID,
+		WorkflowID:      "wf1",
+		MoveID:          moveID,
+		WIPAdmitted:     false,
+		QueuedForStepID: stepInProgressID,
+	}
+	sc.svc.handleTaskMoved(sc.ctx, queuedMoveEvent)
+	sc.svc.handleTaskMoved(sc.ctx, queuedMoveEvent)
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry == nil || entry.Options != *options {
+		t.Fatalf("private entry after duplicate queued deliveries = %+v err=%v, want retained options", entry, loadErr)
+	}
+	if got := len(capturedPromptsForExecution(sc.agentMgr, "ae-review")); got != 0 {
+		t.Fatalf("prompts before WIP promotion = %d, want 0", got)
+	}
+
+	// Promotion is normally performed by the WIP reconciler. This simulates
+	// the durable promotion write and then delivers its event twice. Both
+	// deliveries must reuse the same private move row, while only one claims
+	// destination entry.
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.QueuedAt = nil
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	task.Metadata[models.MetaKeyQueuePromotionPending] = true
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("persist simulated promotion: %v", err)
+	}
+	entryCompleted := make(chan struct{})
+	var entryCompleteOnce sync.Once
+	var entryCallsMu sync.Mutex
+	entryCalls := 0
+	sc.svc.onTaskQueuePromotionEntryComplete = func() {
+		entryCallsMu.Lock()
+		entryCalls++
+		entryCallsMu.Unlock()
+		entryCompleteOnce.Do(func() { close(entryCompleted) })
+	}
+	sc.svc.handleTaskQueuePromoted(sc.ctx, watcher.TaskEventData{TaskID: "task-1"})
+	sc.svc.handleTaskQueuePromoted(sc.ctx, watcher.TaskEventData{TaskID: "task-1"})
+	select {
+	case <-entryCompleted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("destination entry did not complete after queue promotion")
+	}
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry != nil {
+		t.Fatalf("private entry after promotion = %+v err=%v, want consumed", entry, loadErr)
+	}
+	entryCallsMu.Lock()
+	gotEntryCalls := entryCalls
+	entryCallsMu.Unlock()
+	if gotEntryCalls != 1 {
+		t.Fatalf("destination entry calls = %d, want 1", gotEntryCalls)
+	}
+	if got := len(sc.agentMgr.capturedPrompts); got != 1 {
+		t.Fatalf("prompts after duplicate promotion = %d, want 1", got)
+	}
+	if got := len(messages.userMessages); got != 1 {
+		t.Fatalf("user messages after duplicate promotion = %d, want 1", got)
+	}
+	latest, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload promoted task: %v", err)
+	}
+	if _, pending := latest.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("workflow move marker remained after destination entry: %#v", latest.Metadata)
+	}
+}
+
+func TestStartupReconcilesPendingMoveAfterRestart(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	entryStore := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(entryStore)
+	move := &messagequeue.PendingMove{
+		MoveID:          "restart-pending-move",
+		TaskID:          "task-1",
+		WorkflowID:      "wf1",
+		WorkflowStepID:  stepInProgressID,
+		FromWorkflowID:  "wf1",
+		FromStepID:      stepInReviewID,
+		SenderSessionID: sc.reviewSessionID,
+		EntryOptions: &workflowmove.EntryOptions{
+			ResetContext:   true,
+			Instructions:   "Preserve this restart handoff.",
+			AgentProfileID: profileImpl,
+		},
+	}
+	sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, move)
+	seedExecutorRunning(t, sc.repo, sc.reviewSessionID, "task-1", "ae-review")
+
+	sc.svc.reconcileExecutorSessionsOnStartup(sc.ctx)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		task, err := sc.repo.GetTask(sc.ctx, "task-1")
+		if err != nil {
+			t.Fatalf("reload task after startup recovery: %v", err)
+		}
+		if task.WorkflowStepID == stepInProgressID {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload task after startup recovery timeout: %v", err)
+	}
+	t.Fatalf("workflow step after startup recovery = %q, want %q", task.WorkflowStepID, stepInProgressID)
+}
+
+func TestWorkflowMoveDuplicateTaskMovedDeliveryAppliesOnce(t *testing.T) {
+	sc, entryStore, messages, moveID := prepareDuplicateWorkflowMoveScenario(t)
+	event := watcher.TaskMovedEventData{
+		TaskID:          "task-1",
+		FromStepID:      stepInReviewID,
+		ToStepID:        stepInProgressID,
+		SessionID:       sc.reviewSessionID,
+		WorkflowID:      "wf1",
+		MoveID:          moveID,
+		WIPAdmitted:     true,
+		TaskDescription: "duplicate move delivery",
+	}
+	sc.svc.handleTaskMoved(sc.ctx, event)
+	sc.svc.handleTaskMoved(sc.ctx, event)
+
+	assertWorkflowMoveConsumedOnce(t, sc, entryStore, messages, moveID)
+}
+
+func TestWorkflowMoveDuplicateRecoveryDeliveryAppliesOnce(t *testing.T) {
+	sc, entryStore, messages, moveID := prepareDuplicateWorkflowMoveScenario(t)
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load recovery task: %v", err)
+	}
+	sc.svc.recoverWorkflowMoveEntry(sc.ctx, task)
+	sc.svc.recoverWorkflowMoveEntry(sc.ctx, task)
+
+	assertWorkflowMoveConsumedOnce(t, sc, entryStore, messages, moveID)
+}
+
+func TestPendingMoveDuplicateAgentReadyAppliesOnce(t *testing.T) {
+	sc, _ := buildRetryablePendingMoveScenario(t)
+	sc.stepGetter.steps[stepInProgressID].AgentProfileID = profileReview
+
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	baseStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	lifecycleStore, ok := baseStore.(workflowmove.LifecycleStore)
+	if !ok {
+		t.Fatal("SQLite move entry store does not implement LifecycleStore")
+	}
+	entryStore := &recordingWorkflowMoveStore{LifecycleStore: lifecycleStore}
+	sc.svc.SetMoveEntryStore(entryStore)
+	sc.agentMgr.isAgentRunning = true
+	sc.agentMgr.isAgentReadyFn = func(context.Context, string) bool { return true }
+	seedExecutorRunning(t, sc.repo, sc.reviewSessionID, "task-1", "ae-review")
+	messages := &mockMessageCreator{}
+	sc.svc.messageCreator = messages
+
+	const moveID = "duplicate-ready-move"
+	move := &messagequeue.PendingMove{
+		MoveID:         moveID,
+		TaskID:         "task-1",
+		FromWorkflowID: "wf1",
+		FromStepID:     stepInReviewID,
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepInProgressID,
+		EntryOptions: &workflowmove.EntryOptions{
+			ResetContext:   true,
+			Instructions:   "Preserve this ready-signal handoff.",
+			AgentProfileID: profileReview,
+		},
+	}
+	admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move)
+	if err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want (true, nil)", admitted, err)
+	}
+	ready := watcher.AgentEventData{
+		TaskID:           "task-1",
+		SessionID:        sc.reviewSessionID,
+		AgentExecutionID: "ae-review",
+		AgentProfileID:   profileReview,
+	}
+	sc.svc.handleAgentReady(sc.ctx, ready)
+	sc.svc.handleAgentReady(sc.ctx, ready)
+
+	assertWorkflowMoveConsumedOnce(t, sc, entryStore, messages, moveID)
+}
+
+func TestPendingMovePersistentHandoffCommitsTaskEntryAndClaimAtomically(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps[stepInProgressID].AgentProfileID = profileReview
+	sc.stepGetter.steps[stepInProgressID].WIPLimit = 1
+	if _, err := sc.repo.DB().Exec(`ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatalf("add authoritative WIP column: %v", err)
+	}
+	for position, stepID := range []string{stepInProgressID, stepInReviewID, stepReviewedID} {
+		if _, err := sc.repo.DB().Exec(`INSERT OR IGNORE INTO workflow_steps (id, workflow_id, name, position) VALUES (?, 'wf1', ?, ?)`, stepID, stepID, position); err != nil {
+			t.Fatalf("seed authoritative workflow step: %v", err)
+		}
+	}
+	if _, err := sc.repo.DB().Exec(`UPDATE workflow_steps SET wip_limit = 1 WHERE id = ?`, stepInProgressID); err != nil {
+		t.Fatalf("persist authoritative WIP limit: %v", err)
+	}
+	if err := sc.repo.CreateTask(sc.ctx, &models.Task{
+		ID: "persistent-progress-occupant", WorkspaceID: "ws1", WorkflowID: "wf1",
+		WorkflowStepID: stepInProgressID, State: v1.TaskStateTODO, WIPAdmitted: true,
+	}); err != nil {
+		t.Fatalf("create WIP occupant: %v", err)
+	}
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	entryStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	sc.svc.SetMoveEntryStore(entryStore)
+	sc.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
+		ProfileID: profileReview, AgentID: "agent-review", Model: "model-qa",
+	}
+	move := &messagequeue.PendingMove{
+		MoveID: "persistent-deferred-move", TaskID: "task-1",
+		FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+		EntryOptions: &workflowmove.EntryOptions{
+			ResetContext: true, Instructions: "handoff", AgentProfileID: profileReview,
+		},
+	}
+	admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move)
+	if err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want (true, nil)", admitted, err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+
+	pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID)
+	if err != nil || pending != nil {
+		t.Fatalf("pending claim after handoff = (%#v, %v), want nil", pending, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != stepInProgressID || task.WIPAdmitted || task.QueuedForStepID != stepInProgressID {
+		t.Fatalf("committed task placement = step=%q admitted=%v queued=%q", task.WorkflowStepID, task.WIPAdmitted, task.QueuedForStepID)
+	}
+	if got := queuedMoveEntryID(task); got != move.MoveID {
+		t.Fatalf("committed move marker = %q, want %q", got, move.MoveID)
+	}
+	entry, err := entryStore.Load(sc.ctx, move.MoveID)
+	if err != nil || entry == nil || entry.Options != *move.EntryOptions {
+		t.Fatalf("committed private entry = (%#v, %v)", entry, err)
+	}
+}
+
+func TestPendingMovePersistentHandoffDoesNotMarkSessionWaitingBeforeCommit(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		MoveID: "move-not-admitted", TaskID: "task-1",
+		FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	})
+	stored, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after rejected commit: %v", err)
+	}
+	if stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING until pending move commits", stored.State)
+	}
+}
+
+func TestPendingMovePersistentHandoffDropsExactPermanentlyInvalidTarget(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	move := &messagequeue.PendingMove{
+		MoveID: "move-invalid-target", TaskID: "task-1", FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: "missing-step",
+	}
+	if admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want (true, nil)", admitted, err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending != nil {
+		t.Fatalf("pending invalid move = (%#v, %v), want nil", pending, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil || task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("task after invalid move = (%#v, %v), want source step", task, err)
+	}
+}
+
+func TestPendingMovePersistentHandoffRetainsTargetLookupFailure(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	sc.svc.workflowStepGetter = &failingPendingMoveStepGetter{
+		WorkflowStepGetter: sc.svc.workflowStepGetter,
+		targetID:           stepInProgressID,
+		err:                errors.New("temporary target lookup failure"),
+	}
+	move := &messagequeue.PendingMove{
+		MoveID: "move-target-retry", TaskID: "task-1", FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	}
+	if admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want (true, nil)", admitted, err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending == nil || pending.MoveID != move.MoveID {
+		t.Fatalf("pending retryable move = (%#v, %v), want retained exact row", pending, err)
+	}
+	stored, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil || stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("session after lookup failure = (%#v, %v), want RUNNING", stored, err)
+	}
+}
+
+func TestPendingMoveRetryableLookupReconcilesWithoutAnotherAgentReady(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool { return true }
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	getter := &retryingPendingMoveStepGetter{
+		WorkflowStepGetter: sc.svc.workflowStepGetter,
+		targetID:           stepInProgressID,
+		failures:           1,
+		lookupErr:          errors.New("temporary target lookup failure"),
+	}
+	sc.svc.workflowStepGetter = getter
+	move := admitRetryablePendingMove(t, sc)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move reconciliation did not complete")
+	}
+	if getter.callCount() < 2 {
+		t.Fatalf("target lookup calls = %d, want scheduled reconciliation", getter.callCount())
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending != nil {
+		t.Fatalf("pending move after successful reconciliation = (%#v, %v), want nil", pending, err)
+	}
+}
+
+func TestPendingMoveRetryableProfileValidationReconcilesWithoutAnotherAgentReady(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	sc.agentMgr.resolveProfileErr = errors.New("temporary profile lookup failure")
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool {
+		sc.agentMgr.resolveProfileErr = nil
+		sc.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
+			ProfileID: profileReview,
+			AgentID:   "agent-review",
+			Model:     "model-qa",
+		}
+		return true
+	}
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	move := &messagequeue.PendingMove{
+		MoveID: "move-profile-reconcile", TaskID: "task-1", FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+		EntryOptions: &workflowmove.EntryOptions{AgentProfileID: profileReview},
+	}
+	if admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want admitted", admitted, err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move profile reconciliation did not complete")
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending != nil {
+		t.Fatalf("pending move after successful profile reconciliation = (%#v, %v), want nil", pending, err)
+	}
+}
+
+func TestPendingMoveRetryableCommitErrorReconcilesWithoutAnotherAgentReady(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool { return true }
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	delegate := sc.svc.repo.(pendingWorkflowMoveCommitter)
+	committer := &retryingPendingMoveCommitter{
+		sessionExecutorStore: sc.svc.repo,
+		delegate:             delegate,
+		err:                  errors.New("temporary commit failure"),
+		failures:             1,
+	}
+	sc.svc.repo = committer
+	move := admitRetryablePendingMove(t, sc)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move commit reconciliation was not scheduled")
+	}
+	if got := committer.callCount(); got != 2 {
+		t.Fatalf("commit attempts = %d, want initial failure plus one successful retry", got)
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending != nil {
+		t.Fatalf("pending move after commit retry = (%#v, %v), want nil", pending, err)
+	}
+}
+
+func TestPendingMoveReconciliationRetriesTransientPendingRowLoadError(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool { return true }
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	getter := &retryingPendingMoveStepGetter{
+		WorkflowStepGetter: sc.svc.workflowStepGetter,
+		targetID:           stepInProgressID,
+		failures:           1,
+		lookupErr:          errors.New("temporary target lookup failure"),
+	}
+	sc.svc.workflowStepGetter = getter
+	queueWithFailure := &retryingPendingMoveQueueRepository{
+		Repository: queueRepo,
+		err:        errors.New("temporary pending row load failure"),
+		failures:   1,
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueWithFailure, messagequeue.DefaultMaxPerSession, testLogger())
+	move := admitRetryablePendingMove(t, sc)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move reconciliation did not complete after transient row load failure")
+	}
+	if got := queueWithFailure.callCount(); got < 2 {
+		t.Fatalf("pending row load attempts = %d, want retry after transient failure", got)
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending != nil {
+		t.Fatalf("pending move after row-load retry = (%#v, %v), want nil", pending, err)
+	}
+}
+
+// Reviewer-requested contract coverage: persistent row-load failures consume
+// the same bounded budget and settle the source session without deleting the
+// row whose identity could not be authoritatively read.
+func TestPendingMoveReconciliationLoadErrorsExhaustAndSettleSession(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool { return true }
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	getter := &retryingPendingMoveStepGetter{
+		WorkflowStepGetter: sc.svc.workflowStepGetter,
+		targetID:           stepInProgressID,
+		failures:           1,
+		lookupErr:          errors.New("temporary target lookup failure"),
+	}
+	sc.svc.workflowStepGetter = getter
+	queueWithFailure := &retryingPendingMoveQueueRepository{
+		Repository: queueRepo,
+		err:        errors.New("persistent pending row load failure"),
+		failures:   100,
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueWithFailure, messagequeue.DefaultMaxPerSession, testLogger())
+	move := admitRetryablePendingMove(t, sc)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move reconciliation did not exhaust row-load retries")
+	}
+	if got := queueWithFailure.callCount(); got != pendingMoveReconciliationAttempts {
+		t.Fatalf("pending row load attempts = %d, want bounded %d", got, pendingMoveReconciliationAttempts)
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending == nil {
+		t.Fatalf("pending move after row-load exhaustion = (%#v, %v), want retained", pending, err)
+	}
+	stored, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil || stored.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session after row-load exhaustion = (%#v, %v), want WAITING_FOR_INPUT", stored, err)
+	}
+}
+
+func TestPendingMoveReconciliationDoesNotMoveUnderSuccessorTurn(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	turns := &repoTurnService{repo: sc.repo}
+	sc.svc.turnService = turns
+	sc.agentMgr.isPassthrough = true
+	getter := &retryingPendingMoveStepGetter{
+		WorkflowStepGetter: sc.svc.workflowStepGetter,
+		targetID:           stepInProgressID,
+		failures:           1,
+		lookupErr:          errors.New("temporary target lookup failure"),
+	}
+	sc.svc.workflowStepGetter = getter
+	var startErr error
+	var startOnce sync.Once
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool {
+		startOnce.Do(func() {
+			_, startErr = turns.StartTurn(sc.ctx, sc.reviewSessionID)
+		})
+		return true
+	}
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	move := admitRetryablePendingMove(t, sc)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move reconciliation did not observe successor turn")
+	}
+	if startErr != nil {
+		t.Fatalf("start successor turn: %v", startErr)
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending == nil {
+		t.Fatalf("pending move under successor turn = (%#v, %v), want retained", pending, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil || task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("task moved under successor turn = (%#v, %v), want source step", task, err)
+	}
+	stored, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil || stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("successor session was settled = (%#v, %v), want RUNNING", stored, err)
+	}
+}
+
+func TestPendingMoveRetryableLookupExhaustionSettlesSession(t *testing.T) {
+	sc, queueRepo := buildRetryablePendingMoveScenario(t)
+	done := make(chan struct{})
+	sc.svc.pendingMoveReconciliationWait = func(context.Context) bool { return true }
+	sc.svc.onPendingMoveReconciliationComplete = func() { close(done) }
+	getter := &retryingPendingMoveStepGetter{
+		WorkflowStepGetter: sc.svc.workflowStepGetter,
+		targetID:           stepInProgressID,
+		failures:           100,
+		lookupErr:          errors.New("persistent target lookup failure"),
+	}
+	sc.svc.workflowStepGetter = getter
+	move := admitRetryablePendingMove(t, sc)
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pending move reconciliation did not exhaust")
+	}
+	if got := getter.callCount(); got != 4 {
+		t.Fatalf("target lookup calls after exhaustion = %d, want 4 bounded attempts", got)
+	}
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending == nil {
+		t.Fatalf("pending move after exhausted reconciliation = (%#v, %v), want retained", pending, err)
+	}
+	stored, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil || stored.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session after exhausted reconciliation = (%#v, %v), want WAITING_FOR_INPUT", stored, err)
+	}
+}
+
+func buildRetryablePendingMoveScenario(t *testing.T) (*pendingMoveScenario, messagequeue.Repository) {
+	t.Helper()
+	sc := buildPendingMoveScenario(t)
+	if _, err := sc.repo.DB().Exec(`ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+		t.Fatal(err)
+	}
+	for position, stepID := range []string{stepInProgressID, stepInReviewID, stepReviewedID} {
+		if _, err := sc.repo.DB().Exec(`INSERT OR IGNORE INTO workflow_steps (id, workflow_id, name, position) VALUES (?, 'wf1', ?, ?)`, stepID, stepID, position); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	entryStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.SetMoveEntryStore(entryStore)
+	return sc, queueRepo
+}
+
+func admitRetryablePendingMove(t *testing.T, sc *pendingMoveScenario) *messagequeue.PendingMove {
+	t.Helper()
+	move := &messagequeue.PendingMove{
+		MoveID: "move-target-reconcile", TaskID: "task-1", FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	}
+	if admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want admitted", admitted, err)
+	}
+	return move
+}
+
+func TestPendingMovePersistentHandoffRevalidatesOptionsBeforeCommit(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteRepository: %v", err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	sc.agentMgr.resolveProfileErr = errors.New("profile was removed after admission")
+	move := &messagequeue.PendingMove{
+		MoveID: "move-revalidate-options", TaskID: "task-1", FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+		EntryOptions: &workflowmove.EntryOptions{AgentProfileID: "profile-removed"},
+	}
+	if admitted, err := sc.svc.messageQueue.AdmitPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil || !admitted {
+		t.Fatalf("AdmitPendingMove = (%v, %v), want (true, nil)", admitted, err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
+	if pending, err := queueRepo.GetPendingMove(sc.ctx, sc.reviewSessionID); err != nil || pending == nil || pending.MoveID != move.MoveID {
+		t.Fatalf("pending move after failed revalidation = (%#v, %v), want retained", pending, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil || task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("task after failed revalidation = (%#v, %v), want source step", task, err)
+	}
+	stored, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil || stored.State != models.TaskSessionStateRunning {
+		t.Fatalf("session after failed revalidation = (%#v, %v), want RUNNING", stored, err)
+	}
+}
+
+func TestWorkflowMoveEntryLockIsReleasedFromRegistry(t *testing.T) {
+	svc := &Service{}
+	release := svc.lockWorkflowMoveEntry("move-lock-lifecycle")
+	release()
+	retained := 0
+	svc.workflowMoveEntryLocks.Range(func(_, _ interface{}) bool {
+		retained++
+		return true
+	})
+	if retained != 0 {
+		t.Fatalf("retained workflow move locks = %d, want 0", retained)
+	}
+}
+
+func TestWorkflowMoveQueueOriginUsesDurableLifecycleDispatch(t *testing.T) {
+	if !isLifecycleAutomationOrigin("workflow_move") {
+		t.Fatal("workflow move origin is not recognized as durable lifecycle dispatch")
+	}
+}
+
+func TestWorkflowMoveQueueAcknowledgementFinalizesEntryAndMarker(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	baseStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	sc.svc.SetMoveEntryStore(baseStore)
+	const moveID = "move-ack-finalizes"
+	if err := baseStore.Save(sc.ctx, &workflowmove.Entry{ID: moveID, TaskID: "task-1", Options: workflowmove.EntryOptions{Instructions: "handoff"}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := sc.repo.SetTaskMetadataKey(sc.ctx, "task-1", models.MetaKeyWorkflowMovePending, map[string]interface{}{
+		"from_step_id": stepInReviewID, "move_id": moveID,
+	}); err != nil {
+		t.Fatalf("SetTaskMetadataKey: %v", err)
+	}
+	if !sc.svc.markWorkflowMoveDispatchReady(sc.ctx, moveID, sc.reviewSessionID) ||
+		!sc.svc.claimWorkflowMoveDispatch(sc.ctx, moveID, sc.reviewSessionID) {
+		t.Fatal("failed to prepare and claim workflow move prompt boundary")
+	}
+	metadata := map[string]interface{}{
+		"origin":                            workflowMoveLifecycleOrigin,
+		messagequeue.MetadataDeferredMoveID: moveID,
+	}
+	if _, err := sc.svc.messageQueue.CancelAll(sc.ctx, sc.reviewSessionID); err != nil {
+		t.Fatalf("CancelAll: %v", err)
+	}
+	queued, _, accepted, err := sc.svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		sc.ctx, sc.reviewSessionID, "task-1", "handoff", "", messagequeue.QueuedByServer,
+		false, nil, metadata, "workflow-move:"+moveID, true,
+	)
+	if err != nil || !accepted {
+		t.Fatalf("QueueLifecycleMessageWithCoalesceKey = (%#v, %v, %v)", queued, accepted, err)
+	}
+	reserved, ok := sc.svc.messageQueue.ReserveQueued(sc.ctx, sc.reviewSessionID)
+	if !ok {
+		t.Fatal("ReserveQueued did not return workflow move prompt")
+	}
+	sc.svc.acknowledgeLifecycleQueueEntry(sc.ctx, sc.reviewSessionID, reserved)
+	if entry, err := baseStore.Load(sc.ctx, moveID); err != nil || entry != nil {
+		t.Fatalf("entry after acknowledgement = (%#v, %v), want nil", entry, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, pending := task.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("workflow move marker survived acknowledgement: %#v", task.Metadata)
+	}
+}
+
+func TestWorkflowMoveQueuedPreDispatchClaimStaysReplayable(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	store, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.SetMoveEntryStore(store)
+	const moveID = "move-queued-pre-dispatch"
+	if err := store.Save(sc.ctx, &workflowmove.Entry{ID: moveID, TaskID: "task-1", Options: workflowmove.EntryOptions{Instructions: "handoff"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !sc.svc.markWorkflowMoveDispatchReady(sc.ctx, moveID, sc.reviewSessionID) {
+		t.Fatal("markWorkflowMoveDispatchReady failed")
+	}
+	queued := &messagequeue.QueuedMessage{
+		SessionID: sc.reviewSessionID, TaskID: "task-1", Content: "handoff",
+		Metadata: map[string]interface{}{
+			"origin":                            workflowMoveLifecycleOrigin,
+			messagequeue.MetadataDeferredMoveID: moveID,
+		},
+	}
+	afterClaim := sc.svc.queuedLifecycleAfterClaim(sc.ctx, queued, nil, true)
+	if err := afterClaim(); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := store.Load(sc.ctx, moveID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry == nil || entry.Phase != workflowmove.EntryPhaseDispatchReady {
+		t.Fatalf("phase before runtime acceptance = %#v, want dispatch_ready", entry)
+	}
+}
+
+func TestWorkflowMovePassthroughFinalizesOnlyAfterPTYAcceptance(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		writeErr  error
+		wantPhase workflowmove.EntryPhase
+		wantEntry bool
+	}{
+		{name: "accepted", wantEntry: false},
+		{name: "rejected", writeErr: errors.New("pty rejected prompt"), wantPhase: workflowmove.EntryPhaseDispatchReady, wantEntry: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sc := buildPendingMoveScenario(t)
+			sc.agentMgr.isPassthrough = true
+			sc.agentMgr.passthroughStdinErr = tc.writeErr
+			db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+			store, err := workflowmove.NewSQLiteEntryStore(db, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sc.svc.SetMoveEntryStore(store)
+			moveID := "move-passthrough-" + tc.name
+			options := &workflowmove.EntryOptions{Instructions: "handoff over PTY"}
+			if err := store.Save(sc.ctx, &workflowmove.Entry{ID: moveID, TaskID: "task-1", Options: *options}); err != nil {
+				t.Fatal(err)
+			}
+			if err := sc.repo.SetTaskMetadataKey(sc.ctx, "task-1", models.MetaKeyWorkflowMovePending, map[string]interface{}{
+				"move_id": moveID, "from_step_id": stepInReviewID,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !sc.svc.markWorkflowMoveDispatchReady(sc.ctx, moveID, sc.reviewSessionID) {
+				t.Fatal("markWorkflowMoveDispatchReady failed")
+			}
+			session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sc.svc.autoStartPassthroughOnEnter(
+				withWorkflowMoveEntryID(sc.ctx, moveID), "task-1", session,
+				sc.stepGetter.steps[stepInReviewID], "task", moveID, options,
+			)
+			entry, err := store.Load(sc.ctx, moveID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantEntry {
+				if entry != nil {
+					t.Fatalf("entry after PTY acceptance = %#v, want finalized", entry)
+				}
+				return
+			}
+			if entry == nil || entry.Phase != tc.wantPhase {
+				t.Fatalf("entry after definite PTY rejection = %#v, want %s", entry, tc.wantPhase)
+			}
+		})
+	}
+}
+
+func TestWorkflowMoveDispatchClaimAndFinalizationAreIdempotent(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	baseStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	sc.svc.SetMoveEntryStore(baseStore)
+	const moveID = "move-dispatch-once"
+	if err := baseStore.Save(sc.ctx, &workflowmove.Entry{
+		ID: moveID, TaskID: "task-1", Options: workflowmove.EntryOptions{ResetContext: true, Instructions: "handoff", AgentProfileID: profileReview},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := sc.repo.SetTaskMetadataKey(sc.ctx, "task-1", models.MetaKeyWorkflowMovePending, map[string]interface{}{
+		"from_step_id": stepInReviewID, "move_id": moveID,
+	}); err != nil {
+		t.Fatalf("SetTaskMetadataKey: %v", err)
+	}
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			<-start
+			results <- sc.svc.claimWorkflowMoveDispatch(sc.ctx, moveID, sc.reviewSessionID)
+		}()
+	}
+	close(start)
+	winners := 0
+	for range 2 {
+		if <-results {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("dispatch claim winners = %d, want 1", winners)
+	}
+	sc.svc.consumeMoveEntry(sc.ctx, moveID, sc.reviewSessionID)
+	if entry, err := baseStore.Load(sc.ctx, moveID); err != nil || entry != nil {
+		t.Fatalf("entry after finalization = (%#v, %v), want nil", entry, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, pending := task.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("workflow move marker survived finalization: %#v", task.Metadata)
+	}
+}
+
+func TestWorkflowMoveSessionlessAutoStartWaitsForRuntimePromptAcceptance(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "task-sessionless-move", stepInProgressID)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task-sessionless-move"] = &v1.Task{
+		ID:          "task-sessionless-move",
+		Title:       "Sessionless workflow move",
+		Description: "Start only after the runtime accepts this prompt.",
+		State:       v1.TaskStateInProgress,
+	}
+
+	processStarted := make(chan struct{})
+	allowProcessStart := make(chan struct{})
+	firstPromptEntered := make(chan struct{})
+	retryPromptEntered := make(chan struct{})
+	allowPromptAcceptance := make(chan struct{})
+	promptRejected := errors.New("runtime rejected prompt before acceptance")
+	var promptMu sync.Mutex
+	promptAttempts := 0
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-sessionless-move", nil
+		},
+		launchAgentFunc: func(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "running-sessionless-move", SessionID: req.SessionID, TaskID: req.TaskID,
+				AgentExecutionID: "exec-sessionless-move", Status: "starting",
+			}); err != nil {
+				return nil, err
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-sessionless-move", Status: v1.AgentStatusStarting}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(processStarted)
+			<-allowProcessStart
+			return nil
+		},
+		promptAgentFunc: func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+			promptMu.Lock()
+			promptAttempts++
+			attempt := promptAttempts
+			promptMu.Unlock()
+			if attempt == 1 {
+				close(firstPromptEntered)
+				return nil, promptRejected
+			}
+			close(retryPromptEntered)
+			<-allowPromptAcceptance
+			return &executor.PromptResult{StopReason: "dispatched"}, nil
+		},
+	}
+	stepGetter := newMockStepGetter()
+	step := &wfmodels.WorkflowStep{
+		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
+		AgentProfileID: "profile-sessionless-move",
+		Events:         wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+	}
+	stepGetter.steps[step.ID] = step
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	db := sqlx.NewDb(repo.DB(), "sqlite3")
+	entryStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	svc.SetMoveEntryStore(entryStore)
+
+	const moveID = "move-sessionless-runtime-boundary"
+	if err := entryStore.Save(ctx, &workflowmove.Entry{
+		ID: moveID, TaskID: "task-sessionless-move",
+		Options: workflowmove.EntryOptions{Instructions: "Preserve this private handoff."},
+	}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if !svc.markWorkflowMoveDispatchReady(ctx, moveID, "") {
+		t.Fatal("markWorkflowMoveDispatchReady failed")
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "task-sessionless-move", models.MetaKeyWorkflowMovePending, map[string]interface{}{
+		"from_step_id": stepInReviewID, "move_id": moveID,
+	}); err != nil {
+		t.Fatalf("SetTaskMetadataKey: %v", err)
+	}
+	task, err := repo.GetTask(ctx, "task-sessionless-move")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		moveCtx := withWorkflowMoveEntryID(ctx, moveID)
+		svc.startTaskForLoadedStep(
+			moveCtx, task, step, "workflow_move_test", false, moveID,
+			&workflowmove.EntryOptions{Instructions: "Preserve this private handoff."},
+			"", "profile-sessionless-move", "", "", false,
+		)
+	}()
+
+	select {
+	case <-processStarted:
+	case <-time.After(time.Second):
+		t.Fatal("runtime process did not start")
+	}
+	entry, err := entryStore.Load(ctx, moveID)
+	if err != nil {
+		t.Fatalf("Load before runtime readiness: %v", err)
+	}
+	if entry == nil || entry.Phase != workflowmove.EntryPhaseDispatchReady {
+		t.Fatalf("entry before runtime readiness = %#v, want dispatch_ready", entry)
+	}
+	if entry.TargetSessionID == "" {
+		t.Fatal("dispatch_ready entry did not durably bind the prepared target session")
+	}
+
+	close(allowProcessStart)
+	select {
+	case <-firstPromptEntered:
+	case <-time.After(time.Second):
+		t.Fatal("runtime prompt was not dispatched after process start")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		entry, err = entryStore.Load(ctx, moveID)
+		if err != nil {
+			t.Fatalf("Load after definite prompt rejection: %v", err)
+		}
+		if entry == nil {
+			t.Fatal("definite prompt rejection finalized the workflow move entry")
+		}
+		session, sessionErr := repo.GetTaskSession(ctx, entry.TargetSessionID)
+		if sessionErr == nil && session.State == models.TaskSessionStateWaitingForInput {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session did not roll back after definite prompt rejection: entry=%#v session=%#v err=%v", entry, session, sessionErr)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if entry == nil || entry.Phase != workflowmove.EntryPhaseDispatchReady {
+		t.Fatalf("entry after definite prompt rejection = %#v, want dispatch_ready", entry)
+	}
+
+	recoveredTask, err := repo.GetTask(ctx, "task-sessionless-move")
+	if err != nil {
+		t.Fatalf("GetTask for recovery: %v", err)
+	}
+	recoveryDone := make(chan struct{})
+	go func() {
+		defer close(recoveryDone)
+		svc.recoverWorkflowMoveEntry(ctx, recoveredTask)
+	}()
+	select {
+	case <-retryPromptEntered:
+	case <-time.After(time.Second):
+		t.Fatal("target-bound recovery did not retry the rejected prompt")
+	}
+	entry, err = entryStore.Load(ctx, moveID)
+	if err != nil {
+		t.Fatalf("Load before retry acceptance: %v", err)
+	}
+	if entry == nil || entry.Phase != workflowmove.EntryPhaseDispatchReady {
+		t.Fatalf("entry before retry acceptance = %#v, want dispatch_ready", entry)
+	}
+	close(allowPromptAcceptance)
+	select {
+	case <-recoveryDone:
+	case <-time.After(time.Second):
+		t.Fatal("sessionless recovery did not return after prompt acceptance")
+	}
+	deadline = time.Now().Add(time.Second)
+	for {
+		entry, err = entryStore.Load(ctx, moveID)
+		if err != nil {
+			t.Fatalf("Load after prompt acceptance: %v", err)
+		}
+		if entry == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("entry after prompt acceptance = %#v, want finalized", entry)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestWorkflowMoveEntryRecoveryRetainsPrivateOptionsUntilQueueAcknowledgement(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	entryStore := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(entryStore)
+
+	// Recovery must be able to resume an already-committed move without the
+	// original task.moved notification. Keep the target session idle and use a
+	// target step with no auto-start action so the test isolates the durable
+	// entry hand-off and queue delivery.
+	sc.stepGetter.steps[stepInProgressID] = &wfmodels.WorkflowStep{
+		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
+		AgentProfileID: profileReview,
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := sc.repo.UpdateTaskSession(sc.ctx, session); err != nil {
+		t.Fatalf("persist idle review session: %v", err)
+	}
+
+	const moveID = "restart-recovered-move"
+	options := &workflowmove.EntryOptions{Instructions: "Continue from the durable move."}
+	if err := entryStore.Save(sc.ctx, &workflowmove.Entry{ID: moveID, TaskID: "task-1", Options: *options}); err != nil {
+		t.Fatalf("save private move entry: %v", err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WorkflowStepID = stepInProgressID
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.Metadata = map[string]interface{}{
+		models.MetaKeyWorkflowMovePending: map[string]interface{}{
+			"from_step_id": stepInReviewID,
+			"move_id":      moveID,
+		},
+	}
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("persist committed move marker: %v", err)
+	}
+	if err := sc.svc.messageQueue.SetAutoRun(sc.ctx, sc.reviewSessionID, false); err != nil {
+		t.Fatalf("pause queue auto-run: %v", err)
+	}
+
+	// This is the startup reconciliation action for the durable marker.
+	sc.svc.recoverWorkflowMoveEntry(sc.ctx, task)
+
+	if entry, loadErr := entryStore.Load(sc.ctx, moveID); loadErr != nil || entry == nil {
+		t.Fatalf("private entry after recovery = %+v err=%v, want retained until prompt acknowledgement", entry, loadErr)
+	}
+	recovered, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload recovered task: %v", err)
+	}
+	if _, pending := recovered.Metadata[models.MetaKeyWorkflowMovePending]; !pending {
+		t.Fatalf("workflow move marker cleared before prompt acknowledgement: %#v", recovered.Metadata)
+	}
+	status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID)
+	if status.Count == 0 || !strings.Contains(status.Entries[len(status.Entries)-1].Content, options.Instructions) {
+		t.Fatalf("recovered queue = %+v, want one-time instructions", status.Entries)
+	}
+}
+
+func TestWorkflowMoveRecoveryRevivesFailedBoundTargetSession(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	store := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(store)
+	sc.stepGetter.steps[stepInProgressID] = &wfmodels.WorkflowStep{
+		ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1,
+		AgentProfileID: profileReview,
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.State = models.TaskSessionStateFailed
+	session.ErrorMessage = "previous runtime failed"
+	if err := sc.repo.UpdateTaskSession(sc.ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	const moveID = "move-revive-failed-target"
+	if err := store.Save(sc.ctx, &workflowmove.Entry{
+		ID: moveID, TaskID: "task-1", TargetSessionID: session.ID,
+		Options: workflowmove.EntryOptions{Instructions: "retry destination"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkflowStepID = stepInProgressID
+	task.QueuedForStepID = ""
+	task.Metadata = map[string]interface{}{models.MetaKeyWorkflowMovePending: map[string]interface{}{
+		"from_step_id": stepInReviewID, "move_id": moveID,
+	}}
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.recoverWorkflowMoveEntry(sc.ctx, task)
+	reloaded, err := sc.repo.GetTaskSession(sc.ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.State == models.TaskSessionStateFailed {
+		t.Fatalf("target session state = %s, want revived for retry", reloaded.State)
+	}
+}
+
+func TestWorkflowMoveRecoveryDoesNotReviveCancelledBoundTargetSession(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	store := newPendingMoveEntryStore()
+	sc.svc.SetMoveEntryStore(store)
+	sc.stepGetter.steps[stepInProgressID] = &wfmodels.WorkflowStep{ID: stepInProgressID, WorkflowID: "wf1", Name: "In Progress", Position: 1}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.State = models.TaskSessionStateCancelled
+	if err := sc.repo.UpdateTaskSession(sc.ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	const moveID = "move-cancelled-target"
+	if err := store.Save(sc.ctx, &workflowmove.Entry{
+		ID: moveID, TaskID: "task-1", TargetSessionID: session.ID,
+		Options: workflowmove.EntryOptions{Instructions: "must not replay"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkflowStepID = stepInProgressID
+	task.QueuedForStepID = ""
+	task.Metadata = map[string]interface{}{models.MetaKeyWorkflowMovePending: map[string]interface{}{
+		"from_step_id": stepInReviewID, "move_id": moveID,
+	}}
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.recoverWorkflowMoveEntry(sc.ctx, task)
+	reloaded, err := sc.repo.GetTaskSession(sc.ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.State != models.TaskSessionStateCancelled {
+		t.Fatalf("cancelled target state = %s, want CANCELLED", reloaded.State)
+	}
+	if entry, err := store.Load(sc.ctx, moveID); err != nil || entry == nil {
+		t.Fatalf("cancelled target entry = (%#v, %v), want retained fail-closed", entry, err)
+	}
+}
+
+// Reviewer-requested contract coverage: the destination must not acquire
+// ownership when durable queue transfer fails.
+func TestReuseSessionForStepTransferFailurePreservesSourceOwnership(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	transferErr := errors.New("queue transfer unavailable")
+	sc.svc.messageQueue = messagequeue.NewService(
+		failingSessionTransferRepository{Repository: messagequeue.NewMemoryRepository(), err: transferErr},
+		messagequeue.DefaultMaxPerSession,
+		testLogger(),
+	)
+	source, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := sc.repo.GetTaskSession(sc.ctx, sc.implSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sc.svc.reuseSessionForStep(sc.ctx, "task-1", source, target); !errors.Is(err, transferErr) {
+		t.Fatalf("reuseSessionForStep error = %v, want transfer failure", err)
+	}
+	reloadedSource, err := sc.repo.GetTaskSession(sc.ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedTarget, err := sc.repo.GetTaskSession(sc.ctx, target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloadedSource.IsPrimary || reloadedSource.State != models.TaskSessionStateRunning {
+		t.Fatalf("source ownership changed after transfer failure: %#v", reloadedSource)
+	}
+	if reloadedTarget.IsPrimary || reloadedTarget.State != models.TaskSessionStateCompleted {
+		t.Fatalf("destination ownership changed after transfer failure: %#v", reloadedTarget)
+	}
+}
+
+func TestApplyPendingMovePermanentCommitMismatchDeletesExactRow(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	queueRepo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.messageQueue = messagequeue.NewService(queueRepo, messagequeue.DefaultMaxPerSession, testLogger())
+	sc.svc.workflowStore = &workflowStore{}
+	move := &messagequeue.PendingMove{
+		MoveID: "move-permanent-source-mismatch", TaskID: "task-1",
+		FromWorkflowID: "wf1", FromStepID: stepInReviewID,
+		WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	}
+	if admitted, err := queueRepo.InsertPendingMoveIfAbsent(sc.ctx, sc.reviewSessionID, move); err != nil || !admitted {
+		t.Fatalf("InsertPendingMoveIfAbsent = (%v, %v)", admitted, err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkflowStepID = stepReviewedID
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, task.ID, session.ID, session, move)
+	stored, err := queueRepo.GetPendingMove(sc.ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != nil {
+		t.Fatalf("permanently invalid pending row survived: %#v", stored)
 	}
 }
 
@@ -345,7 +2004,7 @@ type pendingMoveScenario struct {
 //   - Task currently at "In Review", with two sessions: an Impl session that
 //     was completed earlier (revivable — has executors_running), and a Review
 //     session that's currently RUNNING and primary.
-//   - PendingMove + hand-off prompt seeded as if the QA agent just called
+//   - PendingMove + legacy hand-off prompt seeded as if the QA agent just called
 //     move_task_kandev mid-turn.
 //   - Mock LaunchAgent that fires the boot signal asynchronously so the
 //     resume path can complete in tests without a real agent process.
@@ -424,6 +2083,118 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		implSessionID:    implSessionID,
 		reviewSessionID:  reviewSessionID,
 		implRelaunchExec: implRelaunchExec,
+	}
+}
+
+func prepareDuplicateWorkflowMoveScenario(t *testing.T) (*pendingMoveScenario, *recordingWorkflowMoveStore, *mockMessageCreator, string) {
+	t.Helper()
+	sc := buildPendingMoveScenario(t)
+	sc.stepGetter.steps[stepInProgressID].AgentProfileID = profileReview
+
+	db := sqlx.NewDb(sc.repo.DB(), "sqlite3")
+	baseStore, err := workflowmove.NewSQLiteEntryStore(db, db)
+	if err != nil {
+		t.Fatalf("NewSQLiteEntryStore: %v", err)
+	}
+	lifecycleStore, ok := baseStore.(workflowmove.LifecycleStore)
+	if !ok {
+		t.Fatal("SQLite move entry store does not implement LifecycleStore")
+	}
+	entryStore := &recordingWorkflowMoveStore{LifecycleStore: lifecycleStore}
+	sc.svc.SetMoveEntryStore(entryStore)
+	sc.agentMgr.isAgentRunning = true
+	sc.agentMgr.isAgentReadyFn = func(context.Context, string) bool { return true }
+	seedExecutorRunning(t, sc.repo, sc.reviewSessionID, "task-1", "ae-review")
+	messages := &mockMessageCreator{}
+	sc.svc.messageCreator = messages
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load move session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := sc.repo.UpdateTaskSession(sc.ctx, session); err != nil {
+		t.Fatalf("persist move session: %v", err)
+	}
+
+	const moveID = "duplicate-workflow-move"
+	options := workflowmove.EntryOptions{
+		ResetContext:   true,
+		Instructions:   "Preserve this duplicate-safe handoff.",
+		AgentProfileID: profileReview,
+	}
+	if err := entryStore.Save(sc.ctx, &workflowmove.Entry{ID: moveID, TaskID: "task-1", Options: options}); err != nil {
+		t.Fatalf("save private move entry: %v", err)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("load move task: %v", err)
+	}
+	task.WorkflowStepID = stepInProgressID
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.Metadata = map[string]interface{}{
+		models.MetaKeyWorkflowMovePending: map[string]interface{}{
+			"from_step_id": stepInReviewID,
+			"move_id":      moveID,
+		},
+	}
+	if err := sc.repo.UpdateTask(sc.ctx, task); err != nil {
+		t.Fatalf("persist committed move: %v", err)
+	}
+	return sc, entryStore, messages, moveID
+}
+
+func assertWorkflowMoveConsumedOnce(t *testing.T, sc *pendingMoveScenario, entryStore *recordingWorkflowMoveStore, messages *mockMessageCreator, moveID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entry, err := entryStore.Load(sc.ctx, moveID)
+		if err != nil {
+			t.Fatalf("load replay entry: %v", err)
+		}
+		if entry == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("replay entry remained at phase %q: %#v", entry.Phase, entry)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := len(capturedPromptsForExecution(sc.agentMgr, "ae-review")); got != 1 {
+		t.Fatalf("prompt deliveries = %d, want 1", got)
+	}
+	if got := len(messages.userMessages); got != 1 {
+		t.Fatalf("user messages = %d, want 1", got)
+	}
+	claims := entryStore.successfulClaims()
+	wantClaims := []workflowmove.EntryPhase{
+		workflowmove.EntryPhaseExitApplied,
+		workflowmove.EntryPhaseProfileApplied,
+		workflowmove.EntryPhaseResetApplied,
+		workflowmove.EntryPhaseConfigApplied,
+		workflowmove.EntryPhaseActionsApplied,
+		workflowmove.EntryPhaseDispatchReady,
+		workflowmove.EntryPhaseDispatchClaimed,
+		workflowmove.EntryPhaseDispatchAccepted,
+	}
+	if len(claims) != len(wantClaims) {
+		t.Fatalf("successful move phases = %#v, want %#v", claims, wantClaims)
+	}
+	for i, claim := range claims {
+		if claim.next != wantClaims[i] {
+			t.Fatalf("successful move phase %d = %q, want %q", i, claim.next, wantClaims[i])
+		}
+	}
+	if got := entryStore.finalizeCount(); got != 1 {
+		t.Fatalf("workflow move finalizations = %d, want 1", got)
+	}
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	if err != nil {
+		t.Fatalf("reload finalized move task: %v", err)
+	}
+	if _, pending := task.Metadata[models.MetaKeyWorkflowMovePending]; pending {
+		t.Fatalf("workflow move marker remained after finalization: %#v", task.Metadata)
 	}
 }
 

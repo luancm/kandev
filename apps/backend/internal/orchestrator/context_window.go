@@ -33,11 +33,24 @@ func (s *Service) captureContextWindowGeneration(sessionID string) uint64 {
 // clearContextWindowForReset advances the session's context generation while
 // holding the same lock used by asynchronous context-window persistence.
 func (s *Service) clearContextWindowForReset(ctx context.Context, sessionID string) error {
+	return s.withContextWindowReset(sessionID, func() error {
+		return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+	})
+}
+
+// withContextWindowReset serializes a durable reset boundary with context
+// window writers. The generation advances only after the durable cleanup
+// succeeds, so a failed reset remains retryable without discarding the in-
+// memory snapshot or invalidating a still-persisted value.
+func (s *Service) withContextWindowReset(sessionID string, clear func() error) error {
 	guard := s.contextWindowGuard(sessionID)
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
+	if err := clear(); err != nil {
+		return err
+	}
 	guard.generation++
-	return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+	return nil
 }
 
 // ResetContextWindow clears the persisted context-window reading while

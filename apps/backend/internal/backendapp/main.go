@@ -1134,6 +1134,10 @@ func startGatewayAndServe(
 	// TestPublishReadinessFlipsReadyBeforeSwappingHandler for the regression
 	// test pinning it.
 	publishReadiness(func() { ready.Store(true) }, func() { handler.Store(builtServer.Handler) })
+	// Replay durable lifecycle markers only after the real router is ready.
+	// Recovery may launch an agent and must not compete with route construction
+	// during a restart.
+	orchestratorSvc.StartStartupLifecycleRecovery()
 
 	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true

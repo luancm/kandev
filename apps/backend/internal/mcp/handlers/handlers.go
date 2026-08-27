@@ -219,6 +219,7 @@ type TaskTitleBranchRenamer interface {
 type MessageQueuer interface {
 	QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, error)
 	SetPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove)
+	AdmitPendingMove(ctx context.Context, sessionID string, move *messagequeue.PendingMove) (bool, error)
 	TakeQueued(ctx context.Context, sessionID string) (*messagequeue.QueuedMessage, bool)
 }
 

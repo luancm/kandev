@@ -60,6 +60,11 @@ func (r *memoryRepository) PurgeTask(_ context.Context, taskID string) (int, err
 		}
 		r.entries[sessionID] = kept
 	}
+	for sessionID, move := range r.pendingMoves {
+		if move != nil && move.TaskID == taskID {
+			delete(r.pendingMoves, sessionID)
+		}
+	}
 	r.generation[taskID]++
 	return removed, nil
 }
@@ -1008,7 +1013,12 @@ func (r *memoryRepository) TransferSession(_ context.Context, oldSessionID, newS
 		delete(r.nextPosition, oldSessionID)
 	}
 	if move, ok := r.pendingMoves[oldSessionID]; ok {
-		r.pendingMoves[newSessionID] = move
+		clone := *move
+		if move.EntryOptions != nil {
+			options := *move.EntryOptions
+			clone.EntryOptions = &options
+		}
+		r.pendingMoves[newSessionID] = &clone
 		delete(r.pendingMoves, oldSessionID)
 	}
 	r.autoRun[newSessionID] = destinationAutoRun
@@ -1042,6 +1052,10 @@ func (r *memoryRepository) ReplaceSession(_ context.Context, sessionID string, e
 		return nil
 	}
 	clone := *pendingMove
+	if pendingMove.EntryOptions != nil {
+		options := *pendingMove.EntryOptions
+		clone.EntryOptions = &options
+	}
 	r.pendingMoves[sessionID] = &clone
 	return nil
 }
@@ -1054,8 +1068,31 @@ func (r *memoryRepository) SetPendingMove(_ context.Context, sessionID string, m
 		move.QueuedAt = time.Now().UTC()
 	}
 	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
 	r.pendingMoves[sessionID] = &clone
 	return nil
+}
+
+// InsertPendingMoveIfAbsent atomically admits one deferred move per session.
+func (r *memoryRepository) InsertPendingMoveIfAbsent(_ context.Context, sessionID string, move *PendingMove) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.pendingMoves[sessionID]; exists {
+		return false, nil
+	}
+	if move.QueuedAt.IsZero() {
+		move.QueuedAt = time.Now().UTC()
+	}
+	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
+	r.pendingMoves[sessionID] = &clone
+	return true, nil
 }
 
 // GetPendingMove returns the deferred workflow move for a session, or nil when absent.
@@ -1067,7 +1104,22 @@ func (r *memoryRepository) GetPendingMove(_ context.Context, sessionID string) (
 		return nil, nil
 	}
 	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
 	return &clone, nil
+}
+
+func (r *memoryRepository) DeletePendingMoveIfExact(_ context.Context, sessionID, moveID, taskID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	move := r.pendingMoves[sessionID]
+	if move == nil || move.MoveID != moveID || move.TaskID != taskID {
+		return false, nil
+	}
+	delete(r.pendingMoves, sessionID)
+	return true, nil
 }
 
 // TakePendingMove returns and removes the deferred workflow move for a session.
@@ -1079,5 +1131,10 @@ func (r *memoryRepository) TakePendingMove(_ context.Context, sessionID string) 
 		return nil, nil
 	}
 	delete(r.pendingMoves, sessionID)
-	return move, nil
+	clone := *move
+	if move.EntryOptions != nil {
+		options := *move.EntryOptions
+		clone.EntryOptions = &options
+	}
+	return &clone, nil
 }

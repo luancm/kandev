@@ -228,6 +228,21 @@ Task B processes each incoming message as a normal turn. When it receives Agent 
 
 **Avoid loops.** Do not enter an infinite exchange. Agree on a clear stopping condition (e.g. "reply with 'agreed' or a specific counter-proposal") and implement after at most two or three rounds.
 
+### Move a task with entry options
+
+`move_task_kandev` accepts an optional nested `entry_options` object for a one-time destination exception:
+
+```json
+{
+  "reset_context": true,
+  "instructions": "Start QA by reproducing the failing checkout test.",
+  "agent_profile_id": "profile-qa",
+  "model": "gpt-5.6-sol"
+}
+```
+
+The server normalizes this object once and omits empty optional strings. Profile selection takes precedence over the destination profile, an explicit model takes precedence over the selected profile's default, reset is additive with the destination reset policy, and instructions are appended once after the normal destination prompt. The destination and options are validated together. Model capability checks fail closed: an unavailable or unsupported model, including an unsupported Office or passthrough combination, rejects the move before the task changes rather than silently dropping the option. A move requested while the current agent is running returns `disposition: "deferred"` and persists all options through the turn boundary, WIP queue promotion, and backend restart; an idle move returns `disposition: "committed"`. The legacy top-level `prompt` argument remains accepted as an alias for `entry_options.instructions`; when both are non-empty, validation fails. Pull-request draft/readiness is not a generic move option.
+
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.
 
 **Failed/cancelled tasks cannot receive messages.** If `message_task_kandev` returns an error, the target task is in a terminal state. Create a fresh task with `create_task_kandev` and start over.
@@ -244,7 +259,7 @@ These tools complement cross-task communication for common coordination patterns
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
 | `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |
-| `move_task_kandev` | Hand off a task to the next workflow step with an optional prompt for the receiving agent |
+| `move_task_kandev` | Hand off a task to a workflow step with optional one-time entry options for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
 | `get_task_plan_kandev` | Read a task's plan; useful before messaging to share a structured proposal |
 | `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |

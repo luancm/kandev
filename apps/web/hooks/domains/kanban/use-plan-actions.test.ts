@@ -21,6 +21,8 @@ const mockContextFilesStore = vi.hoisted(() => ({
   },
 }));
 
+const WORKFLOW_ID = "workflow-1";
+
 vi.mock("@/lib/state/context-files-store", () => ({
   useContextFilesStore: Object.assign(
     (selector: (state: typeof mockContextFilesStore.value) => unknown) =>
@@ -155,33 +157,36 @@ describe("collectImplementPlanInput", () => {
   });
 });
 
-describe("usePlanActions", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockMoveTask.mockResolvedValue(undefined);
-    mockAppState.value = {
-      ...mockAppState.value,
-      kanban: {
-        workflowId: "workflow-1",
-        steps: [
-          {
-            id: "plan-step",
-            title: "Plan",
-            position: 1,
-            events: { on_enter: [{ type: "enable_plan_mode" }] },
-          },
-          {
-            id: "work-step",
-            title: "Work",
-            position: 2,
-            events: { on_enter: [{ type: "auto_start_agent" }] },
-          },
-        ],
-        tasks: [{ id: "task-1", workflowStepId: "plan-step" }],
-      },
-    };
-  });
+function resetPlanActionState() {
+  vi.clearAllMocks();
+  mockMoveTask.mockResolvedValue(undefined);
+  mockAppState.value = {
+    ...mockAppState.value,
+    workflows: { items: [], activeId: null },
+    kanban: {
+      workflowId: WORKFLOW_ID,
+      steps: [
+        {
+          id: "plan-step",
+          title: "Plan",
+          position: 1,
+          events: { on_enter: [{ type: "enable_plan_mode" }] },
+        },
+        {
+          id: "work-step",
+          title: "Work",
+          position: 2,
+          events: { on_enter: [{ type: "auto_start_agent" }] },
+        },
+      ],
+      tasks: [{ id: "task-1", workflowStepId: "plan-step" }],
+    },
+  };
+}
 
+beforeEach(resetPlanActionState);
+
+describe("usePlanActions handlers", () => {
   it("keeps the implement handler available in plan mode before an auto-start work step", () => {
     const chatInputRef = {
       current: {
@@ -220,13 +225,15 @@ describe("usePlanActions", () => {
     });
 
     expect(mockMoveTask).toHaveBeenCalledWith("task-1", {
-      workflow_id: "workflow-1",
+      workflow_id: WORKFLOW_ID,
       workflow_step_id: "work-step",
       position: 0,
     });
     expect(mockAppState.value.setPlanMode).toHaveBeenCalledWith("session-1", false);
   });
+});
 
+describe("usePlanActions failures", () => {
   it("keeps plan mode enabled when moving to the work step fails", async () => {
     mockMoveTask.mockRejectedValueOnce(new Error("move failed"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);

@@ -36,5 +36,6 @@ The following specification was added after this migration and remains in the le
 
 - [Task Cost & Token Ledger](task-cost-ledger/spec.md) (draft)
 - [Startup listener before recovery](startup-listener-before-recovery/spec.md) (draft)
+- [Workflow Step Move Overrides](workflow-step-move-overrides/spec.md) (approved)
 
 ## Authoring rule

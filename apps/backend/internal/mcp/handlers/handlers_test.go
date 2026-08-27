@@ -30,6 +30,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/worktree"
@@ -140,6 +141,9 @@ func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo
 		Environments:     repo,
 		Reviews:          repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
+	moveStore, err := workflowmove.NewSQLiteEntryStore(sqlxDB, sqlxDB)
+	require.NoError(t, err)
+	svc.SetMoveEntryStore(moveStore)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
 	return svc, repo, workflowcontroller.NewController(workflowSvc), workflowRepo

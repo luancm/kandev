@@ -19,7 +19,10 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
 
-var ErrDynamicRoutingDisabled = errors.New("dynamic agent routing is disabled")
+var (
+	ErrDynamicRoutingDisabled       = errors.New("dynamic agent routing is disabled")
+	ErrProfileUnavailableForNewWork = errors.New("agent profile unavailable for new work")
+)
 
 // ProfileExecution is the caller-facing result of resolving a logical
 // profile. Concrete callers receive the same ID for both fields. Dynamic
@@ -103,6 +106,52 @@ func (r *ProfileExecutionResolver) ValidateProfile(ctx context.Context, profileI
 	}
 	if agent.Name == agents.DynamicAgentID && !r.enabled.Load() {
 		return ErrDynamicRoutingDisabled
+	}
+	return nil
+}
+
+// ValidateProfileForNewWork validates a profile before a caller creates new
+// task or session work. Unlike ValidateProfile, this rejects profiles that are
+// disabled, soft-deleted, or scoped to another workspace. It intentionally
+// returns one sentinel for every unavailable case so callers cannot disclose
+// whether a profile exists outside their scope.
+func (r *ProfileExecutionResolver) ValidateProfileForNewWork(ctx context.Context, profileID, workspaceID string) error {
+	if err := r.validateProfileVisibility(ctx, profileID, workspaceID, false); err != nil {
+		return err
+	}
+	if err := r.ValidateProfile(ctx, profileID); err != nil {
+		return ErrProfileUnavailableForNewWork
+	}
+	return nil
+}
+
+// ValidateProfileWorkspace checks the durable profile identity and workspace
+// scope while allowing a disabled profile to continue serving an existing
+// session. New-work callers must use ValidateProfileForNewWork instead.
+func (r *ProfileExecutionResolver) ValidateProfileWorkspace(ctx context.Context, profileID, workspaceID string) error {
+	if err := r.validateProfileVisibility(ctx, profileID, workspaceID, true); err != nil {
+		return err
+	}
+	return r.ValidateProfile(ctx, profileID)
+}
+
+func (r *ProfileExecutionResolver) validateProfileVisibility(
+	ctx context.Context,
+	profileID, workspaceID string,
+	allowDisabled bool,
+) error {
+	if profileID == "" || r.profiles == nil {
+		return ErrProfileUnavailableForNewWork
+	}
+	profile, err := r.profiles.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.DeletedAt != nil {
+		return ErrProfileUnavailableForNewWork
+	}
+	if !allowDisabled && !profile.Enabled {
+		return ErrProfileUnavailableForNewWork
+	}
+	if profile.WorkspaceID != "" && profile.WorkspaceID != workspaceID {
+		return ErrProfileUnavailableForNewWork
 	}
 	return nil
 }

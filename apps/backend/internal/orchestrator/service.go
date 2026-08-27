@@ -37,6 +37,7 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -277,6 +278,7 @@ type sessionExecutorStore interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	ClearSessionResetMetadata(ctx context.Context, sessionID string) error
 	SetSessionMetadataKeyIfAbsent(ctx context.Context, sessionID, key string, value interface{}) (bool, error)
 	UpdateSessionContextWindow(ctx context.Context, sessionID string, contextWindow map[string]interface{}) (int64, error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
@@ -489,6 +491,10 @@ type Service struct {
 	// Message queue service for queueing messages while agent is running
 	messageQueue *messagequeue.Service
 
+	// moveEntryStore holds one-shot workflow entry options separately from the
+	// public task.moved event. The event carries only move_id.
+	moveEntryStore workflowmove.EntryStore
+
 	// Message creator for saving agent responses
 	messageCreator MessageCreator
 
@@ -578,6 +584,10 @@ type Service struct {
 	// onManualMoveLifecycleStart blocks the admitted manual-move lifecycle in
 	// package tests so feeder promotion ordering can be asserted.
 	onManualMoveLifecycleStart func()
+	// pending-move reconciliation hooks let package tests drive retry
+	// boundaries with channels instead of wall-clock sleeps.
+	pendingMoveReconciliationWait       func(context.Context) bool
+	onPendingMoveReconciliationComplete func()
 	// onQueuedMessageExecutionComplete is a package-test hook that fires after
 	// an asynchronous queued-message worker has released its dispatch
 	// reservation. It lets tests wait for the full worker lifecycle instead of
@@ -586,6 +596,17 @@ type Service struct {
 	// queuedMoveLifecycleLocks serializes source-exit work per task. The
 	// completion marker remains durable so a restart can safely resume work.
 	queuedMoveLifecycleLocks sync.Map
+	// workflowMoveEntryLocks serializes destination entry for one-shot move
+	// payloads. The durable private row is reloaded while holding this lock so
+	// duplicate task.moved/promotion deliveries cannot apply reset or prompts
+	// twice after the first delivery consumes the row.
+	workflowMoveEntryLocksMu sync.Mutex
+	workflowMoveEntryLocks   sync.Map
+	// pendingMoveReconciliations deduplicates bounded retries for durable
+	// deferred moves that could not yet revalidate their target/profile.
+	// Workers use the service-owned sendNow context and wait group so Stop
+	// cancels and joins them with the other durable handoff workers.
+	pendingMoveReconciliations sync.Map
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -771,6 +792,11 @@ type Service struct {
 	// before scheduler/watcher teardown on Stop.
 	reservedPromptCallbacksMu sync.Mutex
 	reservedPromptCallbacks   *reservedPromptCallbackOwner
+	// startupLifecycleRecovery owns the post-readiness replay of durable task
+	// lifecycle markers. It is separate from prompt reservations because replay
+	// may launch agents and must be cancelled before the repository closes.
+	startupLifecycleRecoveryMu sync.Mutex
+	startupLifecycleRecovery   *reservedPromptCallbackOwner
 
 	// dispatchingQueued tracks the pre-acceptance reservation for the exact
 	// queued message handed to an async worker. acceptedQueuedDispatch keeps
@@ -1157,6 +1183,7 @@ func NewService(
 		gitSnapshotCache:             newGitSnapshotCache(),
 		dynamicRecoveryTimers:        make(map[string]*time.Timer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
+		startupLifecycleRecovery:     newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,
 		idleReaper:                   newIdleSessionReaper(),
@@ -1670,6 +1697,259 @@ func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
 	s.reinitWorkflowEngine()
 }
 
+// SetMoveEntryStore wires the private one-shot workflow move payload store.
+func (s *Service) SetMoveEntryStore(store workflowmove.EntryStore) {
+	s.moveEntryStore = store
+}
+
+// ValidateWorkflowMoveEntryOptions performs runtime-owned preflight for the
+// task service's optioned move command. It validates against the exact
+// effective destination profile.
+func (s *Service) ValidateWorkflowMoveEntryOptions(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	options *workflowmove.EntryOptions,
+) error {
+	if options == nil {
+		return nil
+	}
+	if task == nil {
+		if options.AgentProfileID != "" {
+			return workflowmove.ErrProfileUnavailable
+		}
+		return nil
+	}
+
+	source, isPassthrough, err := s.workflowMoveValidationSource(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	if err := validateWorkflowMoveModes(task, source, isPassthrough, options); err != nil {
+		return err
+	}
+
+	effectiveProfile, err := s.effectiveWorkflowMoveProfile(
+		ctx, task, targetStep, options, source, isPassthrough,
+	)
+	if err != nil {
+		return err
+	}
+	return s.validateWorkflowMoveProfile(
+		ctx,
+		task,
+		effectiveProfile,
+		options.AgentProfileID != "",
+		source,
+	)
+}
+
+func (s *Service) validateWorkflowMoveProfile(
+	ctx context.Context,
+	task *models.Task,
+	profileID string,
+	explicit bool,
+	source *models.TaskSession,
+) error {
+	if profileID == "" {
+		return nil
+	}
+	if s.profileExecutionResolver != nil {
+		if err := s.validateWorkflowMoveProfileExecution(ctx, task, profileID, explicit, source); err != nil {
+			return err
+		}
+	}
+	_, err := s.resolveMoveProfile(ctx, profileID)
+	return err
+}
+
+func (s *Service) validateWorkflowMoveProfileExecution(
+	ctx context.Context,
+	task *models.Task,
+	profileID string,
+	explicit bool,
+	source *models.TaskSession,
+) error {
+	workspaceID := ""
+	if task != nil {
+		workspaceID = task.WorkspaceID
+	}
+	if explicit && workspaceID == "" {
+		return workflowmove.ErrProfileUnavailable
+	}
+	validate := s.profileExecutionResolver.ValidateProfileWorkspace
+	if explicit || !s.workflowMoveReusesProfile(ctx, task, profileID, source) {
+		validate = s.profileExecutionResolver.ValidateProfileForNewWork
+	}
+	if err := validate(ctx, profileID, workspaceID); err != nil {
+		return workflowmove.ErrProfileUnavailable
+	}
+	return nil
+}
+
+func (s *Service) workflowMoveReusesProfile(
+	ctx context.Context,
+	task *models.Task,
+	profileID string,
+	source *models.TaskSession,
+) bool {
+	if task == nil || profileID == "" {
+		return false
+	}
+	if source != nil && source.AgentProfileID == profileID {
+		return true
+	}
+	destination, err := s.workflowMoveReusableSession(ctx, task.ID, profileID, source)
+	return err == nil && destination != nil
+}
+
+func (s *Service) workflowMoveValidationSource(
+	ctx context.Context,
+	taskID string,
+) (*models.TaskSession, bool, error) {
+	source, err := s.workflowMoveSourceSession(ctx, taskID)
+	if err != nil {
+		return nil, false, err
+	}
+	isPassthrough := source != nil && source.IsPassthrough
+	if source != nil && s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, source.ID) {
+		isPassthrough = true
+	}
+	return source, isPassthrough, nil
+}
+
+func (s *Service) effectiveWorkflowMoveProfile(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	options *workflowmove.EntryOptions,
+	source *models.TaskSession,
+	isPassthrough bool,
+) (string, error) {
+	if isPassthrough && source != nil {
+		// Passthrough entry keeps the source PTY and therefore its profile;
+		// workflow target defaults cannot change the process being reused.
+		return source.AgentProfileID, nil
+	}
+	return s.workflowMoveDestinationProfile(ctx, task, targetStep, options, source)
+}
+
+func validateWorkflowMoveModes(task *models.Task, source *models.TaskSession, isPassthrough bool, options *workflowmove.EntryOptions) error {
+	// Passthrough entry keeps the source PTY. A profile override would be
+	// silently ignored by the lifecycle path, so reject it before admission.
+	if isPassthrough && options.AgentProfileID != "" && source != nil &&
+		options.AgentProfileID != source.AgentProfileID {
+		return fmt.Errorf("%w: passthrough sessions cannot switch profiles", workflowmove.ErrProfileUnavailable)
+	}
+	if !task.IsFromOffice {
+		return nil
+	}
+	// Office entry currently has no path to apply one-shot options. Reject all
+	// options rather than persisting values that the Office runner drops. A
+	// different explicit Office profile gets the stable profile classification.
+	officeProfile := task.AssigneeAgentProfileID
+	if officeProfile == "" && source != nil {
+		officeProfile = source.AgentProfileID
+	}
+	if options.AgentProfileID != "" && officeProfile != "" && options.AgentProfileID != officeProfile {
+		return fmt.Errorf("%w: Office task uses its assigned profile", workflowmove.ErrProfileUnavailable)
+	}
+	return fmt.Errorf("%w: Office entry options are not supported", workflowmove.ErrEntryOptionsUnsupported)
+}
+
+func (s *Service) resolveMoveProfile(ctx context.Context, profileID string) (*executor.AgentProfileInfo, error) {
+	if s.agentManager == nil {
+		return nil, fmt.Errorf("%w: profile resolver is unavailable", workflowmove.ErrProfileUnavailable)
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil || profile == nil {
+		return nil, fmt.Errorf("%w: profile could not be resolved", workflowmove.ErrProfileUnavailable)
+	}
+	return profile, nil
+}
+
+func (s *Service) workflowMoveSourceSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	if s.repo == nil || taskID == "" {
+		return nil, nil
+	}
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load active source sessions: %w", err)
+	}
+	if len(sessions) == 0 {
+		return nil, nil
+	}
+	var newest *models.TaskSession
+	var primary *models.TaskSession
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if session.IsPrimary && (primary == nil || session.UpdatedAt.After(primary.UpdatedAt)) {
+			primary = session
+		}
+		if newest == nil || session.StartedAt.After(newest.StartedAt) ||
+			(session.StartedAt.Equal(newest.StartedAt) && session.UpdatedAt.After(newest.UpdatedAt)) {
+			newest = session
+		}
+	}
+	if primary != nil {
+		return primary, nil
+	}
+	return newest, nil
+}
+
+func (s *Service) workflowMoveDestinationProfile(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+	options *workflowmove.EntryOptions,
+	source *models.TaskSession,
+) (string, error) {
+	if options != nil && options.AgentProfileID != "" {
+		return options.AgentProfileID, nil
+	}
+	if targetStep != nil && targetStep.AgentProfileID != "" {
+		return targetStep.AgentProfileID, nil
+	}
+	if targetStep != nil && targetStep.WorkflowID != "" {
+		meta, err := s.getWorkflowMeta(ctx, targetStep.WorkflowID)
+		if err != nil {
+			return "", fmt.Errorf("load destination workflow profile: %w", err)
+		}
+		if meta.AgentProfileID != "" {
+			return meta.AgentProfileID, nil
+		}
+	}
+	if source != nil && source.AgentProfileID != "" {
+		return source.AgentProfileID, nil
+	}
+	if task != nil && task.Metadata != nil {
+		return models.StringFromAny(task.Metadata[models.MetaKeyAgentProfileID]), nil
+	}
+	return "", nil
+}
+
+func (s *Service) workflowMoveReusableSession(ctx context.Context, taskID, profileID string, source *models.TaskSession) (*models.TaskSession, error) {
+	if s.repo == nil || profileID == "" {
+		return nil, nil
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load reusable destination sessions: %w", err)
+	}
+	var best *models.TaskSession
+	for _, session := range sessions {
+		if session == nil || (source != nil && session.ID == source.ID) || session.AgentProfileID != profileID || session.State == models.TaskSessionStateCancelled {
+			continue
+		}
+		if best == nil || session.UpdatedAt.After(best.UpdatedAt) {
+			best = session
+		}
+	}
+	return best, nil
+}
+
 // SetEngineDecisionStore wires the engine's DecisionStore.
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
 	s.engineDecisions = store
@@ -1881,6 +2161,30 @@ func (s *Service) stopReservedPromptCallbacks() {
 	s.reservedPromptCallbacksMu.Lock()
 	owner := s.reservedPromptCallbacks
 	s.reservedPromptCallbacksMu.Unlock()
+	owner.stop()
+}
+
+// StartStartupLifecycleRecovery begins durable lifecycle replay after the
+// backend has published readiness. Keeping the launch point outside Start
+// prevents replay work from competing with HTTP route construction.
+func (s *Service) StartStartupLifecycleRecovery() {
+	s.startupLifecycleRecoveryMu.Lock()
+	owner := s.startupLifecycleRecovery
+	if owner == nil {
+		owner = newReservedPromptCallbackOwner()
+		s.startupLifecycleRecovery = owner
+	}
+	s.startupLifecycleRecoveryMu.Unlock()
+
+	owner.launch(func(ctx context.Context) {
+		s.reconcileTaskLifecycleTokens(withStartupLifecycleRecovery(ctx))
+	})
+}
+
+func (s *Service) stopStartupLifecycleRecovery() {
+	s.startupLifecycleRecoveryMu.Lock()
+	owner := s.startupLifecycleRecovery
+	s.startupLifecycleRecoveryMu.Unlock()
 	owner.stop()
 }
 
@@ -2255,7 +2559,6 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
-	s.reconcileTaskLifecycleTokens(ctx)
 	// Chains whose predecessor completed while the process was down: the
 	// dependencies_resolved event is in-memory and is not replayed, so without
 	// this sweep a chain stalls silently across a restart. Runs after the WIP
@@ -2346,6 +2649,7 @@ func (s *Service) Stop() error {
 
 	s.logger.Info("stopping orchestrator service")
 	s.stopDynamicPolicyRecovery()
+	s.stopStartupLifecycleRecovery()
 
 	// Stop components in reverse order
 	var errs []error
@@ -2435,6 +2739,7 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 			})
 		}
 		s.reconcileOneSessionOnStartup(ctx, running, report)
+		s.reconcilePendingMoveOnStartup(ctx, running)
 	}
 	report.flush(s.logger)
 
@@ -2442,6 +2747,38 @@ func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	if len(remoteRecords) > 0 && s.agentManager != nil {
 		s.agentManager.PollRemoteStatusForRecords(ctx, remoteRecords)
 	}
+}
+
+// reconcilePendingMoveOnStartup resumes a deferred move whose source turn was
+// interrupted by the backend restart. Pending moves live in the durable
+// message queue until the matching agent.ready event, so they are not covered
+// by the task lifecycle-marker sweep below. Session reconciliation has already
+// changed a previously active source to WAITING_FOR_INPUT, making it safe to
+// apply the move without waiting for a runtime event that was lost with the
+// old process.
+func (s *Service) reconcilePendingMoveOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+	if s.messageQueue == nil || running == nil || running.SessionID == "" {
+		return
+	}
+	pending, err := s.messageQueue.LoadPendingMove(ctx, running.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load pending workflow move during startup recovery",
+			zap.String("session_id", running.SessionID), zap.Error(err))
+		return
+	}
+	if pending == nil || pending.TaskID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, running.SessionID)
+	if err != nil || session == nil {
+		s.logger.Warn("failed to load pending workflow move session during startup recovery",
+			zap.String("session_id", running.SessionID), zap.Error(err))
+		return
+	}
+	if session.State != models.TaskSessionStateWaitingForInput && session.State != models.TaskSessionStateIdle {
+		return
+	}
+	s.applyPendingMove(ctx, pending.TaskID, running.SessionID, session, pending)
 }
 
 // reconcileOneSessionOnStartup adjusts DB state for a single session without launching agents.

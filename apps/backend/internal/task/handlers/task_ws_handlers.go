@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -379,10 +380,11 @@ func (h *TaskHandlers) wsArchiveTask(ctx context.Context, msg *ws.Message) (*ws.
 }
 
 type wsMoveTaskRequest struct {
-	ID             string `json:"id"`
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
-	Position       int    `json:"position"`
+	ID             string                     `json:"id"`
+	WorkflowID     string                     `json:"workflow_id"`
+	WorkflowStepID string                     `json:"workflow_step_id"`
+	Position       int                        `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
 
 func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -406,20 +408,39 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		req.WorkflowID,
 		req.WorkflowStepID,
 		req.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
+		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman, EntryOptions: req.EntryOptions},
 	)
 	if err != nil {
-		h.logger.Error("failed to move task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
+		code := classifyWSMoveTaskError(err)
+		if code == ws.ErrorCodeInternalError {
+			h.logger.Error("failed to move task", zap.Error(err))
+		}
+		return ws.NewError(msg.ID, msg.Action, code, "Failed to move task", nil)
 	}
 
 	response := dto.MoveTaskResponse{
-		Task: dto.FromTask(result.Task),
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		Disposition:  "committed",
+		EntryOptions: result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func classifyWSMoveTaskError(err error) string {
+	switch {
+	case isNotFound(err):
+		return ws.ErrorCodeNotFound
+	case isMoveConflict(err):
+		return ws.ErrorCodeConflict
+	case isValidationError(err):
+		return ws.ErrorCodeValidation
+	default:
+		return ws.ErrorCodeInternalError
+	}
 }
 
 type wsUpdateTaskStateRequest struct {

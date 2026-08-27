@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -17,7 +18,7 @@ func TestService_MoveTaskPromotesMovedTaskFromFeederAndRefreshesResult(t *testin
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {
@@ -55,7 +56,7 @@ func TestService_MoveTaskWithActiveSessionDefersFeederPullUntilLifecycleComplete
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {
@@ -90,7 +91,7 @@ func TestService_MoveTaskLeavesFeederTaskWhenPullTargetIsFull(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {
@@ -133,7 +134,7 @@ func TestService_MoveTaskSameStepReorderDoesNotWakeFeederPull(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {
 			ID: "step-b", WorkflowID: "wf-source", Name: "B", Position: 1,
@@ -158,7 +159,7 @@ func TestService_MoveTaskFeederPullPublishesMovesInCausalOrder(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {
@@ -235,11 +236,30 @@ func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmission
 	}
 	return admitted, err
 }
+
+func (r *failAfterMoveRefreshTaskRepository) UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	entry *workflowmove.Entry,
+) (bool, bool, error) {
+	admitted, applied, err := r.Repository.UpdateTaskWithWorkflowStepAdmissionAndStateIfAtStep(
+		ctx, task, expectedStepID, targetStepID, limit, admittedState, queueExitPending, entry,
+	)
+	if err == nil && applied {
+		r.failRefresh.Store(true)
+	}
+	return admitted, applied, err
+}
 func TestService_MoveTaskReturnsErrorWhenFeederRefreshFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {

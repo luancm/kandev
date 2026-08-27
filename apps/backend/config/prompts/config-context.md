@@ -41,7 +41,7 @@ MCP CONFIG TOOLS:
 
 TASK TOOLS:
 - list_tasks_kandev: List all tasks in a workflow. Required: workflow_id.
-- move_task_kandev: Move a task to a different workflow step. Required: task_id, workflow_step_id.
+- move_task_kandev: Move a task to a different workflow step. Required: task_id, workflow_step_id. Optional: workflow_id, position, and normalized one-shot entry_options {reset_context, instructions, agent_profile_id, model}; empty optional strings are omitted. Profile selection wins over the destination profile, an explicit model wins over the selected profile default, reset is additive, and instructions append once after the normal destination prompt. The legacy top-level prompt is an alias for entry_options.instructions; conflicting non-empty values are rejected. Model and runtime capability validation is fail-closed, so unavailable models and unsupported Office/passthrough combinations reject before the task changes. Moves requested during an active turn are deferred and return disposition=deferred; the complete options persist through WIP queue promotion and backend restart, then apply once. Entry options do not change workflow defaults.
 - delete_task_kandev: Delete a task. Required: task_id.
 - archive_task_kandev: Archive a task. Required: task_id.
 - update_task_state_kandev: Update task state. Required: task_id, state (TODO, CREATED, SCHEDULING, IN_PROGRESS, REVIEW, BLOCKED, WAITING_FOR_INPUT, COMPLETED, FAILED, CANCELLED).

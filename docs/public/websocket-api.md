@@ -204,6 +204,28 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
+`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, `agent_profile_id`, and `model`; empty optional strings are omitted. Profile and model overrides have precedence for this entry, reset is additive, and instructions are appended after the destination step's normal prompt. The values do not mutate workflow defaults. Model validation is fail-closed against the destination capability boundary, including Office and passthrough restrictions, so unsupported combinations reject before the task changes. A successful response includes `disposition: "committed"` and, when supplied, the normalized `entry_options`. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Moves requested by an active agent use the deferred MCP path and persist the complete options through turn completion, WIP promotion, and backend restart before returning `disposition: "deferred"`.
+
+```json
+{
+  "id": "move-1",
+  "type": "request",
+  "action": "task.move",
+  "payload": {
+    "id": "task-uuid",
+    "workflow_id": "workflow-uuid",
+    "workflow_step_id": "qa-step-uuid",
+    "position": 0,
+    "entry_options": {
+      "reset_context": true,
+      "instructions": "Run the checkout regression first.",
+      "agent_profile_id": "profile-qa",
+      "model": "gpt-5.6-sol"
+    }
+  }
+}
+```
+
 ### Launch a session
 
 `session.launch` always requires `task_id`. Explicit `intent` values are `prepare`, `start`, `start_created`, `resume`, `workflow_step`, and `restore_workspace`. Other fields are `session_id`, `agent_profile_id`, `executor_id`, `executor_profile_id`, `prompt`, `plan_mode`, `workflow_step_id`, `priority`, `launch_workspace`, `skip_message_record`, `auto_start`, and `attachments`.

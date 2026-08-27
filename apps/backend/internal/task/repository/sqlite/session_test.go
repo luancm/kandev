@@ -900,6 +900,16 @@ func TestSetSessionMetadataKeyIfAbsentOrDifferentStepQueryUsesPostgresJSONB(t *t
 	}
 }
 
+func TestClearSessionResetMetadataQueryUsesPostgresJSONB(t *testing.T) {
+	query := clearSessionResetMetadataQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres reset cleanup query uses SQLite JSON functions: %s", query)
+	}
+	if strings.Count(query, "jsonb_set") != 2 || !strings.Contains(query, "{acp_session_id}") || !strings.Contains(query, "{context_window}") {
+		t.Fatalf("postgres reset cleanup query must atomically update both JSONB keys: %s", query)
+	}
+}
+
 func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1593,6 +1603,26 @@ func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *
 	if got.Metadata["keep"] != "yes" {
 		t.Fatalf("metadata keep = %v, want yes", got.Metadata["keep"])
 	}
+}
+
+func TestClearSessionResetMetadataSQLitePreservesUnrelatedMetadata(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-reset-metadata", "session-reset-metadata", "turn-reset-metadata")
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "session-reset-metadata", map[string]interface{}{
+		"acp_session_id":                            "old-acp",
+		models.SessionMetaKeyContextWindow:          map[string]interface{}{"size": 200000, "used": 190000},
+		models.SessionMetaKeyContextCompactionCount: float64(2),
+		"unrelated": "keep",
+	}))
+
+	require.NoError(t, repo.ClearSessionResetMetadata(ctx, "session-reset-metadata"))
+	stored, err := repo.GetTaskSession(ctx, "session-reset-metadata")
+	require.NoError(t, err)
+	require.Equal(t, "", stored.Metadata["acp_session_id"])
+	require.Nil(t, stored.Metadata[models.SessionMetaKeyContextWindow])
+	require.Equal(t, "keep", stored.Metadata["unrelated"])
+	require.Equal(t, float64(2), stored.Metadata[models.SessionMetaKeyContextCompactionCount])
 }
 
 func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys(t *testing.T) {

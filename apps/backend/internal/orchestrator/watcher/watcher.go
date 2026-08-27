@@ -85,6 +85,7 @@ type TaskMovedEventData struct {
 	SessionID       string     `json:"session_id"`
 	WorkflowID      string     `json:"workflow_id"`
 	TaskDescription string     `json:"task_description"`
+	MoveID          string     `json:"move_id,omitempty"`
 	WIPAdmitted     bool       `json:"wip_admitted"`
 	QueuedForStepID string     `json:"queued_for_step_id,omitempty"`
 	QueuedAt        *time.Time `json:"queued_at,omitempty"`

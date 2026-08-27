@@ -56,6 +56,7 @@ interface ComboboxProps {
   popoverSide?: "top" | "right" | "bottom" | "left";
   popoverAlign?: "start" | "center" | "end";
   popoverPortal?: boolean;
+  popoverPortalContainer?: HTMLElement | null;
   /** When true, the trigger always renders the plain label text instead of renderLabel. */
   plainTrigger?: boolean;
   /** Optional custom filter; defaults to cmdk's built-in command-score. */
@@ -153,6 +154,7 @@ function OptionsList({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- the shared combobox keeps its trigger, portal, and command-list behavior in one reusable surface.
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -171,6 +173,7 @@ export const Combobox = memo(function Combobox({
   popoverSide,
   popoverAlign = "start",
   popoverPortal = false,
+  popoverPortalContainer,
   plainTrigger = false,
   filter,
   headerAction,
@@ -223,7 +226,7 @@ export const Combobox = memo(function Combobox({
         side={popoverSide}
         align={popoverAlign}
         portal={popoverPortal}
-        portalContainer={portalContainer}
+        portalContainer={popoverPortalContainer ?? portalContainer}
         onWheel={(event) => event.stopPropagation()}
       >
         <Command

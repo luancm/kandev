@@ -29,7 +29,7 @@ import (
 func seedAuthzWorkflowFixture(t *testing.T, svc *Service, repo *sqliterepo.Repository) string {
 	t.Helper()
 	ctx := context.Background()
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-b-1": {ID: "step-b-1", WorkflowID: "wf-b", Name: "First", Position: 0},
 		"step-b-2": {ID: "step-b-2", WorkflowID: "wf-b", Name: "Second", Position: 1},
 	}})
@@ -163,7 +163,7 @@ func TestUpdateRepositoryBaseBranchDeniesForeignTask(t *testing.T) {
 func TestScopedMoveStillPromotesFeederQueuedTask(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-b-feed": {ID: "step-b-feed", WorkflowID: "wf-b", Name: "Backlog", Position: 0},
 		"step-b-wip": {
 			ID: "step-b-wip", WorkflowID: "wf-b", Name: "Doing", Position: 1,

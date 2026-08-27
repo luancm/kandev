@@ -11,6 +11,7 @@ package messagequeue
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -1032,6 +1033,25 @@ func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *Pe
 		zap.String("workflow_step_id", move.WorkflowStepID))
 }
 
+// AdmitPendingMove atomically records a deferred move only when the session
+// does not already own one. A false result is a normal admission conflict.
+func (s *Service) AdmitPendingMove(ctx context.Context, sessionID string, move *PendingMove) (bool, error) {
+	admitted, err := s.repo.InsertPendingMoveIfAbsent(ctx, sessionID, move)
+	if err != nil {
+		s.logger.Error("admit pending move failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false, err
+	}
+	if admitted {
+		s.logger.Info("pending move admitted",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", move.TaskID),
+			zap.String("workflow_step_id", move.WorkflowStepID))
+	}
+	return admitted, nil
+}
+
 // GetPendingMove retrieves the pending move for a session without removing it.
 func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
 	move, err := s.repo.GetPendingMove(ctx, sessionID)
@@ -1045,6 +1065,40 @@ func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*Pendin
 		return nil, false
 	}
 	return move, true
+}
+
+// LoadPendingMove retrieves a pending move without hiding persistence or
+// decode errors. Lifecycle callers use it so malformed durable state blocks
+// normal turn completion instead of being mistaken for an empty queue.
+func (s *Service) LoadPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return move, nil
+}
+
+// DeletePendingMoveIfExact drops one permanently invalid deferred move without
+// risking deletion of a newer replacement for the same session.
+func (s *Service) DeletePendingMoveIfExact(ctx context.Context, sessionID, moveID, taskID string) (bool, error) {
+	var deleted bool
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		deleted, err = s.repo.DeletePendingMoveIfExact(admittedCtx, sessionID, moveID, taskID)
+		return err
+	})
+	return deleted, err
+}
+
+// SupportsTaskTransactionHandoff reports whether the queue rows share the
+// production task database and can be consumed by the task repository's move
+// transaction. The in-memory repository intentionally uses the legacy path.
+func (s *Service) SupportsTaskTransactionHandoff(taskOwner *sql.DB) bool {
+	queueOwner, ok := s.repo.(interface {
+		UsesTaskTransactionHandoff()
+		WorkflowMoveTransactionOwner() *sql.DB
+	})
+	return ok && taskOwner != nil && queueOwner.WorkflowMoveTransactionOwner() == taskOwner
 }
 
 // TakePendingMove retrieves and removes the pending move for a session.

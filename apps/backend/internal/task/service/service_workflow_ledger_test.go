@@ -162,6 +162,14 @@ func TestPullNextTaskOnVacatePromotesFeederTaskWithWIPPull(t *testing.T) {
 		"step-elsewhere": {ID: "step-elsewhere", WorkflowID: "wf-stamp"},
 		"step-feeder":    {ID: "step-feeder", WorkflowID: "wf-stamp"},
 	}})
+	for position, stepID := range []string{"step-vacate", "step-elsewhere", "step-feeder"} {
+		if _, err := repo.DB().ExecContext(ctx, `
+			INSERT OR IGNORE INTO workflow_steps (id, workflow_id, name, position)
+			VALUES (?, 'wf-stamp', ?, ?)
+		`, stepID, stepID, position); err != nil {
+			t.Fatalf("seed authoritative workflow step %s: %v", stepID, err)
+		}
+	}
 
 	setupStepStampTask(t, repo, "task-occupant-wip", "step-vacate")
 	feederTask := &models.Task{
@@ -215,7 +223,7 @@ func TestService_MoveTaskFeederPullRecordsManualLedgerBeforeWIPPull(t *testing.T
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	seedMoveWorkflows(t, ctx, repo)
-	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+	setFakeWorkflowStepGetter(svc, &fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
 		"step-c": {ID: "step-c", WorkflowID: "wf-source", Name: "C", Position: 2},
 		"step-a": {ID: "step-a", WorkflowID: "wf-source", Name: "A", Position: 0},
 		"step-b": {

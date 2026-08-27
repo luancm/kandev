@@ -15,6 +15,7 @@ import type {
   ChatInputContainerHandle,
   MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -30,11 +31,11 @@ export function useNextWorkflowStep(taskId: string | null) {
     const task = s.kanban.tasks.find((t) => t.id === taskId);
     return task?.workflowStepId ?? null;
   });
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
 
   // Track agent switching: isMoving stays true from "proceed" click until the
   // new session is adopted (activeSessionId changes from the original).
   const [moveFromSessionId, setMoveFromSessionId] = useState<string | null>(null);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const isMoving = moveFromSessionId != null && activeSessionId === moveFromSessionId;
 
   const sortedSteps = useMemo(() => [...steps].sort((a, b) => a.position - b.position), [steps]);
@@ -66,30 +67,34 @@ export function useNextWorkflowStep(taskId: string | null) {
     return hasAutoStart && !hasPlanMode;
   }, [nextStep]);
 
-  const proceed = useCallback(async () => {
-    if (!taskId || !workflowId || !nextStep) return false;
-    const capturedSessionId = activeSessionId;
-    setMoveFromSessionId(capturedSessionId);
-    try {
-      await moveTask(taskId, {
-        workflow_id: workflowId,
-        workflow_step_id: nextStep.id,
-        position: 0,
-      });
-      // Safety: if the next step reuses the same session (no agent-profile
-      // override), activeSessionId never changes and isMoving would be stuck.
-      // Clear after 10 s if no session handoff occurred.
-      setTimeout(() => {
-        setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
-      }, 10_000);
-      return true;
-    } catch (err) {
-      console.error("Failed to proceed to next step:", err);
-      toast({ description: t("task:failedToProceedToNextStep"), variant: "error" });
-      setMoveFromSessionId(null);
-      return false;
-    }
-  }, [taskId, workflowId, nextStep, activeSessionId, t, toast]);
+  const proceed = useCallback(
+    async (entryOptions?: WorkflowMoveEntryOptions) => {
+      if (!taskId || !workflowId || !nextStep) return false;
+      const capturedSessionId = activeSessionId;
+      setMoveFromSessionId(capturedSessionId);
+      try {
+        await moveTask(taskId, {
+          workflow_id: workflowId,
+          workflow_step_id: nextStep.id,
+          position: 0,
+          entry_options: entryOptions,
+        });
+        // Safety: if the next step reuses the same session (no agent-profile
+        // override), activeSessionId never changes and isMoving would be stuck.
+        // Clear after 10 s if no session handoff occurred.
+        setTimeout(() => {
+          setMoveFromSessionId((prev) => (prev === capturedSessionId ? null : prev));
+        }, 10_000);
+        return true;
+      } catch (err) {
+        console.error("Failed to proceed to next step:", err);
+        toast({ description: t("task:failedToProceedToNextStep"), variant: "error" });
+        setMoveFromSessionId(null);
+        return false;
+      }
+    },
+    [taskId, workflowId, nextStep, activeSessionId, t, toast],
+  );
 
   const proceedStepName = nextStep && !currentStepAutoTransitions ? nextStep.title : null;
 
@@ -277,13 +282,18 @@ export function usePlanActions(opts: {
   const disablePlanMode = useDirectDisablePlanMode(opts.resolvedSessionId);
   const { planModeEnabled } = opts;
   // Disable plan mode only after a successful move. A failed workflow move
-  // should leave the plan layout and context intact for retry.
-  const proceed = useCallback(async () => {
-    const moved = await rawProceed();
-    if (moved && planModeEnabled) {
-      disablePlanMode();
-    }
-  }, [planModeEnabled, disablePlanMode, rawProceed]);
+  // should leave the plan layout and context intact for retry, and the failure
+  // must propagate so move-options surfaces keep their draft open.
+  const proceed = useCallback(
+    async (entryOptions?: WorkflowMoveEntryOptions) => {
+      const moved = await rawProceed(entryOptions);
+      if (moved && planModeEnabled) {
+        disablePlanMode();
+      }
+      return moved;
+    },
+    [planModeEnabled, disablePlanMode, rawProceed],
+  );
 
   const showImplement = opts.planModeEnabled;
   const implementPlanHandler = showImplement

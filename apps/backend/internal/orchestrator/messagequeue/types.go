@@ -3,6 +3,8 @@ package messagequeue
 import (
 	"errors"
 	"time"
+
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // DefaultMaxPerSession is the default cap for queued messages per session
@@ -217,15 +219,18 @@ type PendingMove struct {
 	// needs a durable identity to reject that stale replay.
 	MoveID         string    `json:"move_id"`
 	TaskID         string    `json:"task_id"`
+	FromWorkflowID string    `json:"from_workflow_id,omitempty"`
+	FromStepID     string    `json:"from_step_id,omitempty"`
 	WorkflowID     string    `json:"workflow_id"`
 	WorkflowStepID string    `json:"workflow_step_id"`
 	Position       int       `json:"position"`
 	QueuedAt       time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
-	Actor string `json:"actor,omitempty"`
 	// SenderSessionID identifies the session that requested the move. It is
 	// distinct from the session owning this queue, which is only the execution
 	// context used to apply the deferred move.
-	SenderSessionID string `json:"sender_session_id,omitempty"`
+	SenderSessionID string                     `json:"sender_session_id,omitempty"`
+	Actor           string                     `json:"actor,omitempty"`
+	EntryOptions    *workflowmove.EntryOptions `json:"entry_options,omitempty"`
 }
