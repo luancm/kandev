@@ -991,6 +991,67 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Empty(t, queue.calls, "legacy prompt is carried in the private move options, not a source-session queue entry")
 }
 
+func TestDeferMoveTask_RejectsArchivedTaskBeforeAdmission(t *testing.T) {
+	svc, repo, wfCtrl, wfRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	seedRunningTask(t, repo, "ws-defer-archived", "wf-defer-archived", "task-defer-archived", "sess-defer-archived", "src-defer-archived")
+
+	now := time.Now().UTC()
+	task, err := svc.GetTask(ctx, "task-defer-archived")
+	require.NoError(t, err)
+	task.ArchivedAt = &now
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: "src-defer-archived", WorkflowID: "wf-defer-archived", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: "dst-defer-archived", WorkflowID: "wf-defer-archived", Name: "Target", Position: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	queue := &pendingMoveRecordingQueuer{}
+	h := &Handlers{taskSvc: svc, workflowCtrl: wfCtrl, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-defer-archived",
+		"workflow_id":      "wf-defer-archived",
+		"workflow_step_id": "dst-defer-archived",
+	})
+
+	resp, err := h.handleMoveTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	assert.Empty(t, queue.pendingMoves, "archived tasks must not admit deferred moves")
+}
+
+func TestDeferMoveTask_RejectsWhenSecondarySessionIsActive(t *testing.T) {
+	svc, repo, wfCtrl, wfRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	seedRunningTask(t, repo, "ws-defer-secondary", "wf-defer-secondary", "task-defer-secondary", "sess-defer-secondary-primary", "src-defer-secondary")
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-defer-secondary-other", TaskID: "task-defer-secondary", State: models.TaskSessionStateRunning,
+		IsPrimary: false, StartedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: "src-defer-secondary", WorkflowID: "wf-defer-secondary", Name: "Source", Position: 0, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
+		ID: "dst-defer-secondary", WorkflowID: "wf-defer-secondary", Name: "Target", Position: 1, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	queue := &pendingMoveRecordingQueuer{}
+	h := &Handlers{taskSvc: svc, workflowCtrl: wfCtrl, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-defer-secondary",
+		"workflow_id":      "wf-defer-secondary",
+		"workflow_step_id": "dst-defer-secondary",
+	})
+
+	resp, err := h.handleMoveTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeConflict)
+	assert.Empty(t, queue.pendingMoves, "deferred moves must not bypass the all-session active guard")
+}
+
 func TestDeferMoveTask_UsesAtomicPendingMoveAdmission(t *testing.T) {
 	svc, repo, wfCtrl, wfRepo := newTestTaskServiceWithWorkflow(t)
 	ctx := context.Background()

@@ -32,6 +32,7 @@ beforeEach(() => {
 });
 
 const INSTRUCTIONS_TEST_ID = "workflow-move-instructions";
+const SUBMIT_TEST_ID = "workflow-move-submit";
 const PROCEED_TEST_ID = "proceed-next-step";
 const OPTIONS_TEST_ID = "proceed-next-step-options";
 
@@ -106,7 +107,7 @@ describe("WorkflowMoveProceedButton", () => {
     fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
       target: { value: "create the PR ready for review" },
     });
-    fireEvent.click(screen.getByTestId("workflow-move-submit"));
+    fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
     await act(async () => {});
 
     expect(onProceed).toHaveBeenCalledWith({
@@ -114,6 +115,37 @@ describe("WorkflowMoveProceedButton", () => {
     });
     // A successful optioned move closes the popover form.
     expect(screen.queryByTestId(OPTIONS_TEST_ID)).toBeNull();
+  });
+
+  it("clears a successful desktop options draft before the next target", async () => {
+    const onProceed = vi.fn().mockResolvedValue(true);
+    const { rerender } = render(
+      <WorkflowMoveProceedButton
+        nextStepName="Review"
+        onProceed={onProceed}
+        isMoving={false}
+        testId={PROCEED_TEST_ID}
+      />,
+    );
+    openHoveredForm();
+
+    fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
+      target: { value: "only for Review" },
+    });
+    fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
+    await act(async () => {});
+
+    rerender(
+      <WorkflowMoveProceedButton
+        nextStepName="QA"
+        onProceed={onProceed}
+        isMoving={false}
+        testId={PROCEED_TEST_ID}
+      />,
+    );
+    openHoveredForm();
+
+    expect((screen.getByTestId(INSTRUCTIONS_TEST_ID) as HTMLTextAreaElement).value).toBe("");
   });
 
   it("keeps the popover form and its draft open when the move fails", async () => {
@@ -124,7 +156,7 @@ describe("WorkflowMoveProceedButton", () => {
     fireEvent.change(screen.getByTestId(INSTRUCTIONS_TEST_ID), {
       target: { value: "retry after capacity opens" },
     });
-    fireEvent.click(screen.getByTestId("workflow-move-submit"));
+    fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
     await act(async () => {});
 
     expect(onProceed).toHaveBeenCalledOnce();
@@ -245,7 +277,7 @@ describe("WorkflowMoveProceedButton — coarse pointer", () => {
     fireEvent.pointerDown(proceed, touchPointer());
     act(() => vi.advanceTimersByTime(WORKFLOW_MOVE_LONG_PRESS_MS));
 
-    fireEvent.click(screen.getByTestId("workflow-move-submit"));
+    fireEvent.click(screen.getByTestId(SUBMIT_TEST_ID));
 
     expect(onProceed).not.toHaveBeenCalled();
   });
