@@ -4,6 +4,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 
 const mockGetState = vi.fn();
 const mockMoveTask = vi.hoisted(() => vi.fn());
+const mockToast = vi.hoisted(() => vi.fn());
 const mockAppState = vi.hoisted(() => ({
   value: {
     kanban: { workflowId: "workflow-1", steps: [], tasks: [] },
@@ -37,7 +38,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/components/toast-provider", () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mockToast }),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
@@ -157,6 +158,7 @@ describe("collectImplementPlanInput", () => {
   });
 });
 
+/** Plan step followed by an auto-start work step, with task-1 sitting on Plan. */
 function resetPlanActionState() {
   vi.clearAllMocks();
   mockMoveTask.mockResolvedValue(undefined);
@@ -183,7 +185,6 @@ function resetPlanActionState() {
     },
   };
 }
-
 beforeEach(resetPlanActionState);
 
 describe("usePlanActions handlers", () => {
@@ -267,5 +268,36 @@ describe("usePlanActions failures", () => {
     );
 
     expect(result.current.implementPlanHandler).toBeUndefined();
+  });
+});
+
+describe("usePlanActions proceed failures", () => {
+  beforeEach(resetPlanActionState);
+
+  it("puts the backend's refusal reason in the proceed toast", async () => {
+    // A phone has no console to fall back on: if the toast drops the reason the
+    // user is told the step failed and nothing about why.
+    mockMoveTask.mockRejectedValueOnce(new Error("task has an active session (RUNNING)"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { result } = renderHook(() =>
+      usePlanActions({
+        resolvedSessionId: "session-1",
+        taskId: "task-1",
+        planModeEnabled: true,
+        handlePlanModeChange: vi.fn(),
+        chatInputRef: { current: null },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.proceed();
+    });
+
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "task has an active session (RUNNING)",
+        variant: "error",
+      }),
+    );
   });
 });

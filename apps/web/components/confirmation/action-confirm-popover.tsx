@@ -6,8 +6,11 @@ import { Button } from "@kandev/ui/button";
 
 import { AnchoredActionPopover } from "./anchored-action-popover";
 
+export type ActionConfirmPopoverSize = "default" | "wide";
+
 export type ActionConfirmPopoverProps = {
   open: boolean;
+  size?: ActionConfirmPopoverSize;
   disabled?: boolean;
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
@@ -33,6 +36,7 @@ export type ActionConfirmPopoverProps = {
  */
 export function ActionConfirmPopover({
   open,
+  size = "default",
   disabled = false,
   anchorRef,
   focusReturnRef,
@@ -82,6 +86,7 @@ export function ActionConfirmPopover({
     <AnchoredActionPopover
       open={open}
       anchorRef={anchorRef}
+      widthClassName={size === "wide" ? "w-72" : "w-64"}
       focusReturnRef={focusReturnRef}
       focusBoundaryRef={focusBoundaryRef}
       title={title}

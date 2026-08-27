@@ -276,6 +276,8 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		return nil, errors.New("cannot create completed turn without a session")
 	}
 	now := time.Now().UTC()
+	metadata := turnStartRuntimeMetadata(session)
+	metadata[models.TurnMetaKeyLifecycleOnly] = true
 	turn := &models.Turn{
 		ID:                 uuid.New().String(),
 		TaskSessionID:      session.ID,
@@ -284,7 +286,7 @@ func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskS
 		RouteGeneration:    session.RouteGeneration,
 		StartedAt:          now,
 		CompletedAt:        &now,
-		Metadata:           turnStartRuntimeMetadata(session),
+		Metadata:           metadata,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -960,11 +962,15 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
 		taskRepository, repository := projection.taskRepository, projection.repository
+		branchTemplate := repository.WorktreeBranchTemplate
+		if taskRepository.BranchPolicyBranchTemplate != "" {
+			branchTemplate = taskRepository.BranchPolicyBranchTemplate
+		}
 		spec := lifecycle.WorkspaceRepositorySpec{
 			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+			WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 		}
 		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
 			spec.WorktreeID = worktree.WorktreeID
