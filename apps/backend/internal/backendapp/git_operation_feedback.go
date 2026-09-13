@@ -134,31 +134,6 @@ func metadataInt(metadata map[string]interface{}, key string) int {
 	return 0
 }
 
-// resolveGitOperationErrorsForSuccessfulPush retires legacy unresolved push
-// errors after an affirmative push response. Current-format errors are
-// resolved by the accompanying fresh status evidence, which carries branch,
-// remote, and HEAD identity. The single-repository guard is intentional: a
-// callback without repository identity must never clear a notice belonging to
-// an ambiguous multi-repository task.
-func resolveGitOperationErrorsForSuccessfulPush(
-	ctx context.Context,
-	taskRepo gitOperationFeedbackTaskRepository,
-	messageStore gitOperationFeedbackStore,
-	sessionID, taskID string,
-) (int, error) {
-	if taskRepo == nil || messageStore == nil || sessionID == "" || taskID == "" {
-		return 0, nil
-	}
-	repositories, err := taskRepo.ListTaskRepositories(ctx, taskID)
-	if err != nil {
-		return 0, err
-	}
-	if len(repositories) != 1 {
-		return 0, nil
-	}
-	return resolveGitOperationErrors(ctx, messageStore, sessionID, time.Now().UTC(), gitOperationResolutionPushSuccess, nil, true)
-}
-
 // resolveGitOperationErrorsForSuccessfulPushResult retires current-format
 // errors for an explicit push destination. The fresh status endpoint reports
 // the branch's configured upstream, which can differ from a destination named
@@ -193,7 +168,6 @@ func resolveGitOperationErrorsForSuccessfulPushResult(
 		sessionID,
 		observedAt,
 		gitOperationResolutionPushSuccess,
-		false,
 		func(message *models.Message) bool {
 			return gitPushErrorMatchesSuccessfulDestination(message, remote, branch, observedAt)
 		},
@@ -226,7 +200,7 @@ func resolveGitOperationErrorsForStatus(
 	if observedAt.IsZero() {
 		observedAt = time.Now().UTC()
 	}
-	return resolveGitOperationErrors(ctx, messageStore, sessionID, observedAt, gitOperationResolutionGitStatus, &evidence, false)
+	return resolveGitOperationErrors(ctx, messageStore, sessionID, observedAt, gitOperationResolutionGitStatus, &evidence)
 }
 
 func validGitPushRecoveryEvidence(evidence gitOperationRecoveryEvidence) bool {
@@ -261,7 +235,6 @@ func resolveGitOperationErrors(
 	observedAt time.Time,
 	resolution string,
 	evidence *gitOperationRecoveryEvidence,
-	legacyOnly bool,
 ) (int, error) {
 	var matches func(*models.Message) bool
 	if evidence != nil {
@@ -269,7 +242,7 @@ func resolveGitOperationErrors(
 			return gitPushErrorMatchesEvidence(message, *evidence)
 		}
 	}
-	return resolveGitOperationErrorsMatching(ctx, messageStore, sessionID, observedAt, resolution, legacyOnly, matches)
+	return resolveGitOperationErrorsMatching(ctx, messageStore, sessionID, observedAt, resolution, matches)
 }
 
 func resolveGitOperationErrorsMatching(
@@ -278,7 +251,6 @@ func resolveGitOperationErrorsMatching(
 	sessionID string,
 	observedAt time.Time,
 	resolution string,
-	legacyOnly bool,
 	matches func(*models.Message) bool,
 ) (int, error) {
 	messages, err := messageStore.ListMessages(ctx, sessionID)
@@ -289,9 +261,6 @@ func resolveGitOperationErrorsMatching(
 	var firstErr error
 	for _, message := range messages {
 		if !isUnresolvedGitPushError(message) || !messageCreatedBefore(message, observedAt) {
-			continue
-		}
-		if legacyOnly && hasGitOperationFeedbackScope(message) {
 			continue
 		}
 		if matches != nil && !matches(message) {
@@ -342,16 +311,18 @@ func gitPushErrorMatchesEvidence(message *models.Message, evidence gitOperationR
 }
 
 // gitPushErrorMatchesSuccessfulDestination uses the affirmative push result
-// as stronger evidence than a later status query. A rewritten or amended HEAD
-// is still a repair when it publishes to the same remote and branch, so this
-// matcher deliberately omits HEAD equality while requiring the failure to
-// predate the successful operation.
+// as stronger evidence than a later status query. Legacy rows are deliberately
+// excluded because they do not identify the destination, so only the
+// same-remote-and-branch scope recorded by current rows can be matched here.
+// A rewritten or amended HEAD is still a repair when it publishes to the same
+// remote and branch, so this matcher deliberately omits HEAD equality while
+// requiring the failure to predate the successful operation.
 func gitPushErrorMatchesSuccessfulDestination(message *models.Message, remote, branch string, successfulAt time.Time) bool {
 	if message == nil || message.Metadata == nil {
 		return false
 	}
 	if !hasGitOperationFeedbackScope(message) {
-		return true
+		return false
 	}
 	metadata := message.Metadata
 	attemptedRemote := strings.TrimSpace(metadataString(metadata, "git_operation_attempted_remote"))

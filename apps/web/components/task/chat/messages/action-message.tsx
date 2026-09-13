@@ -6,14 +6,11 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import type { MessageAction } from "@/components/task/chat/types";
+import { isResolvedGitOperationError, type MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-import {
-  hasSessionRecoveryResolutionAfter,
-  isResolvedGitOperationError,
-} from "@/hooks/processed-message-filtering";
+import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
 import { ActionButtons } from "./action-message-actions";
 import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
 import {
@@ -81,7 +78,6 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     comment.session_id,
   );
   const metadata = comment.metadata as ActionMeta | undefined;
-  if (isResolvedGitOperationError(comment)) return null;
   const message = comment.content || t("task:anErrorOccurred");
   const isRecoveryMessage = metadata?.recovery_actions === true;
   // The recovery acknowledgment lives here, on the message row that stays
@@ -123,6 +119,11 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     recoveryFailedAgain,
     sessionState,
   });
+
+  // Keep this after every hook call. A live message can receive its durable
+  // resolution marker without changing its list key, so returning before the
+  // remaining hooks would change the hook order on the next render.
+  if (isResolvedGitOperationError(comment)) return null;
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {

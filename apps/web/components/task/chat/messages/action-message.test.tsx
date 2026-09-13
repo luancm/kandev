@@ -229,8 +229,8 @@ const resolvedGitOperationError = retryMessage({
 });
 
 it("hides resolved Git errors and their Fix action", () => {
-  renderAction(resolvedGitOperationError, "WAITING_FOR_INPUT");
-  expect(screen.queryByText(/Provider overloaded/)).toBeNull();
+  const { rerender } = renderAction(retryMessage(), "WAITING_FOR_INPUT");
+  rerender(<ActionMessage comment={resolvedGitOperationError} />);
   expect(screen.queryByTestId("git-fix-button")).toBeNull();
 });
 

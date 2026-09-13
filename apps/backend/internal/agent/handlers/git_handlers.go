@@ -45,10 +45,6 @@ type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, ope
 // and the structured result is needed for durable reconciliation metadata.
 type GitOperationFailedWithResultCallback func(ctx context.Context, sessionID, taskID, operation string, result *client.GitOperationResult)
 
-// GitOperationSucceededCallback is called after a git operation succeeds.
-// Parameters: ctx, sessionID, taskID, operation name.
-type GitOperationSucceededCallback func(ctx context.Context, sessionID, taskID, operation string)
-
 // GitOperationSucceededWithStatusCallback is called after a successful git
 // operation when a fresh status observation is available for reconciliation.
 type GitOperationSucceededWithStatusCallback func(ctx context.Context, sessionID, taskID, operation string, status *client.GitStatusResult)
@@ -99,7 +95,6 @@ type GitHandlers struct {
 	onPRCreated                       PRCreatedCallback
 	onGitOperationFailed              GitOperationFailedCallback
 	onGitOperationFailedWithResult    GitOperationFailedWithResultCallback
-	onGitOperationSucceeded           GitOperationSucceededCallback
 	onGitOperationSucceededWithStatus GitOperationSucceededWithStatusCallback
 	onGitOperationSucceededWithResult GitOperationSucceededWithResultCallback
 	onBranchRenamed                   BranchRenamedCallback
@@ -151,11 +146,6 @@ func (h *GitHandlers) SetOnGitOperationFailedWithResult(cb GitOperationFailedWit
 	h.onGitOperationFailedWithResult = cb
 }
 
-// SetOnGitOperationSucceeded sets a callback invoked when a git operation succeeds.
-func (h *GitHandlers) SetOnGitOperationSucceeded(cb GitOperationSucceededCallback) {
-	h.onGitOperationSucceeded = cb
-}
-
 // SetOnGitOperationSucceededWithStatus sets a callback invoked with a fresh
 // status observation after a successful git operation.
 func (h *GitHandlers) SetOnGitOperationSucceededWithStatus(cb GitOperationSucceededWithStatusCallback) {
@@ -171,20 +161,6 @@ func (h *GitHandlers) SetOnGitOperationSucceededWithResult(cb GitOperationSuccee
 // SetOnBranchRenamed sets a callback invoked after a branch is successfully renamed.
 func (h *GitHandlers) SetOnBranchRenamed(cb BranchRenamedCallback) {
 	h.onBranchRenamed = cb
-}
-
-func (h *GitHandlers) notifyGitOperationSucceeded(sessionID, operation string) {
-	if h.onGitOperationSucceeded == nil || h.lifecycleMgr == nil {
-		return
-	}
-	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !ok || execution.TaskID == "" {
-		return
-	}
-	taskID := execution.TaskID
-	callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	h.onGitOperationSucceeded(callbackCtx, sessionID, taskID, operation)
 }
 
 func (h *GitHandlers) notifyGitOperationSucceededWithStatus(sessionID, operation string, status *client.GitStatusResult) {
@@ -219,11 +195,10 @@ func (h *GitHandlers) notifyGitOperationSucceededWithResult(sessionID, operation
 // the result is available. Callbacks are ordered with the handler response so
 // a later success cannot race a preceding failure message into persistence.
 func (h *GitHandlers) notifyGitOperationFailed(sessionID, operation string, result *client.GitOperationResult) {
-	if result == nil || h.lifecycleMgr == nil || (h.onGitOperationFailed == nil && h.onGitOperationFailedWithResult == nil && h.onGitOperationSucceeded == nil && h.onGitOperationSucceededWithStatus == nil) {
+	if result == nil || h.lifecycleMgr == nil || (h.onGitOperationFailed == nil && h.onGitOperationFailedWithResult == nil) {
 		return
 	}
 	if result.Success {
-		h.notifyGitOperationSucceeded(sessionID, operation)
 		return
 	}
 	if h.onGitOperationFailed == nil && h.onGitOperationFailedWithResult == nil {
@@ -468,7 +443,6 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 				h.notifyGitOperationSucceededWithStatus(req.SessionID, "push", status)
 			}
 		}
-		h.notifyGitOperationSucceeded(req.SessionID, "push")
 		return ws.NewResponse(msg.ID, msg.Action, result)
 	}
 
@@ -873,7 +847,6 @@ func (h *GitHandlers) notifyCreatePRPushSuccess(
 			h.notifyGitOperationSucceededWithStatus(sessionID, gitOperationPush, status)
 		}
 	}
-	h.notifyGitOperationSucceeded(sessionID, gitOperationPush)
 }
 
 func newCreatePRResponse(msg *ws.Message, result *client.PRCreateResult) (*ws.Message, error) {

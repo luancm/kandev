@@ -306,17 +306,6 @@ func provideGateway(
 					zap.Error(err))
 			}
 		})
-		gitHandlers.SetOnGitOperationSucceeded(func(ctx context.Context, sessionID, taskID, operation string) {
-			if operation != gitOperationPush {
-				return
-			}
-			if _, err := resolveGitOperationErrorsForSuccessfulPush(ctx, taskRepo, taskSvc, sessionID, taskID); err != nil {
-				log.Warn("failed to resolve git operation error after successful push",
-					zap.String("session_id", sessionID),
-					zap.String("task_id", taskID),
-					zap.Error(err))
-			}
-		})
 		gitHandlers.SetOnGitOperationSucceededWithResult(func(ctx context.Context, sessionID, taskID, operation string, result *runtimeapi.GitOperationResult, _ string) {
 			if operation != gitOperationPush || result == nil {
 				return

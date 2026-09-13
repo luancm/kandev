@@ -3,13 +3,17 @@ import {
   type Message,
   type MessageType,
 } from "@/lib/types/http";
-import type { RichMetadata, ToolCallMetadata, TodoSnapshot } from "@/components/task/chat/types";
+import {
+  isResolvedGitOperationError,
+  type RichMetadata,
+  type ToolCallMetadata,
+  type TodoSnapshot,
+} from "@/components/task/chat/types";
 import {
   findPendingClarification,
   isPendingClarificationMessage,
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
-import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 const VISIBLE_MESSAGE_TYPES: Set<string> = new Set([
   "message",
@@ -244,19 +248,6 @@ export function hasSessionRecoveryResolutionAfter(
   );
   const failedAt = Date.parse(afterCreatedAt ?? "");
   return !Number.isNaN(resolvedAt) && !Number.isNaN(failedAt) && resolvedAt > failedAt;
-}
-
-/** True when a persisted Git operation error has been resolved after it was emitted. */
-export function isResolvedGitOperationError(message: Message): boolean {
-  const metadata = message.metadata as Record<string, unknown> | undefined;
-  if (metadata?.git_operation_error !== true) return false;
-  const resolvedAt = parseTurnTimestamp(
-    typeof metadata.git_operation_resolved_at === "string"
-      ? metadata.git_operation_resolved_at
-      : undefined,
-  );
-  const createdAt = parseTurnTimestamp(message.created_at);
-  return resolvedAt !== null && createdAt !== null && resolvedAt > createdAt;
 }
 
 export function isSetupScriptMessage(message: Message): boolean {

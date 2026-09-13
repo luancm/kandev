@@ -266,14 +266,10 @@ func TestGitCreatePRBranchPushNotifiesSuccessWhenPRCreationFails(t *testing.T) {
 		_, _ = w.Write([]byte(`{"success":false,"branch_pushed":true,"pushed_remote":"origin","pushed_branch":"feature/work","pushed_head_commit":"rewritten-head","error":"PR creation failed"}`))
 	})
 	defer server.Close()
-	callback := make(chan []string, 1)
 	resultCallback := make(chan struct {
 		result      *client.GitOperationResult
 		currentHead string
 	}, 1)
-	h.SetOnGitOperationSucceeded(func(_ context.Context, sessionID, taskID, operation string) {
-		callback <- []string{sessionID, taskID, operation}
-	})
 	h.SetOnGitOperationSucceededWithResult(func(_ context.Context, _, _, _ string, result *client.GitOperationResult, currentHead string) {
 		resultCallback <- struct {
 			result      *client.GitOperationResult
@@ -283,15 +279,6 @@ func TestGitCreatePRBranchPushNotifiesSuccessWhenPRCreationFails(t *testing.T) {
 	msg, _ := ws.NewRequest("id", "action", GitCreatePRRequest{SessionID: "s", Title: "Title"})
 	if _, err := h.wsCreatePR(context.Background(), msg); err != nil {
 		t.Fatalf("wsCreatePR: %v", err)
-	}
-	select {
-	case got := <-callback:
-		want := []string{"s", "task", "push"}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("callback = %v, want %v", got, want)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for branch-push callback")
 	}
 	select {
 	case got := <-resultCallback:
@@ -331,10 +318,6 @@ func TestGitPushSuccessNotifiesWithFreshStatus(t *testing.T) {
 		result      *client.GitOperationResult
 		currentHead string
 	}, 1)
-	legacyCalled := false
-	h.SetOnGitOperationSucceeded(func(context.Context, string, string, string) {
-		legacyCalled = true
-	})
 	h.SetOnGitOperationSucceededWithStatus(func(_ context.Context, sessionID, taskID, operation string, status *client.GitStatusResult) {
 		if sessionID != "s" || taskID != "task" || operation != "push" {
 			t.Errorf("callback scope = (%q, %q, %q)", sessionID, taskID, operation)
@@ -369,9 +352,6 @@ func TestGitPushSuccessNotifiesWithFreshStatus(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for result callback")
-	}
-	if !legacyCalled {
-		t.Fatal("legacy success callback should run for legacy message cleanup")
 	}
 }
 
@@ -681,31 +661,6 @@ func TestNotifyGitOperationFailed_SuccessResult(t *testing.T) {
 	})
 	if called {
 		t.Error("callback should not be called for successful result")
-	}
-}
-
-func TestNotifyGitOperationSucceeded_SuccessResult(t *testing.T) {
-	log := newTestLogger()
-	type callbackResult struct{ sessionID, taskID, operation string }
-	callback := make(chan callbackResult, 1)
-	lookup := &mockExecutionLookup{
-		executions: map[string]*lifecycle.AgentExecution{
-			"session-1": {ID: "exec-1", SessionID: "session-1", TaskID: "task-1"},
-		},
-	}
-	h := NewGitHandlers(lookup, nil, log)
-	h.SetOnGitOperationSucceeded(func(_ context.Context, sessionID, taskID, operation string) {
-		callback <- callbackResult{sessionID: sessionID, taskID: taskID, operation: operation}
-	})
-
-	h.notifyGitOperationFailed("session-1", "push", &client.GitOperationResult{Success: true})
-	select {
-	case got := <-callback:
-		if got != (callbackResult{sessionID: "session-1", taskID: "task-1", operation: "push"}) {
-			t.Fatalf("success callback = %+v, want (session-1, task-1, push)", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for success callback")
 	}
 }
 

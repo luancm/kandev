@@ -2,6 +2,7 @@
 
 import type { ClarificationRequestMetadata, Message, TaskPendingAction } from "@/lib/types/http";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { extractKandevStem } from "./messages/kandev/parse";
 
 export type SubagentTaskPayload = {
@@ -113,6 +114,19 @@ export function hasProjectedShellOutput(output: ShellExecOutputSummary | undefin
     (output?.stdout_bytes ?? 0) > 0 ||
     (output?.stderr_bytes ?? 0) > 0
   );
+}
+
+/** True when a persisted Git operation error has been resolved after it was emitted. */
+export function isResolvedGitOperationError(message: Message): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (metadata?.git_operation_error !== true) return false;
+  const resolvedAt = parseTurnTimestamp(
+    typeof metadata.git_operation_resolved_at === "string"
+      ? metadata.git_operation_resolved_at
+      : undefined,
+  );
+  const createdAt = parseTurnTimestamp(message.created_at);
+  return resolvedAt !== null && createdAt !== null && resolvedAt > createdAt;
 }
 
 /** Shared composer eligibility predicates belong to the chat domain, not a rendering surface. */
