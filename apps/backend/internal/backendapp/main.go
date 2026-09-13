@@ -1084,8 +1084,8 @@ func startGatewayAndServe(
 	if cfg.Features.Canvases {
 		gateways.RegisterCanvasNotifications(ctx, eventBus, gateway.Hub, log)
 	}
-	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
-	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, services.Task, log))
+	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, services.Task, log))
 	gateway.Hub.SetConversationSourceReader(services.Task)
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 

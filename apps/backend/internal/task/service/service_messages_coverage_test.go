@@ -494,6 +494,45 @@ func TestUpdateMessagePublishesUpdatedEvent(t *testing.T) {
 	}
 }
 
+func TestResolveGitOperationErrorMessageHandlesLegacyPushMetadata(t *testing.T) {
+	svc, bus, repo := newMessageTestService(t)
+	ctx := context.Background()
+	message := seedMessage(t, repo, &models.Message{
+		ID: "git-error-legacy", AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeError,
+		Content: "Git push failed", Metadata: map[string]interface{}{
+			"git_operation_error": true, "operation": "push", "error_output": "rejected",
+		},
+	})
+	bus.ClearEvents()
+
+	if err := svc.ResolveGitOperationErrorMessage(ctx, message.ID, "push confirmed"); err != nil {
+		t.Fatalf("ResolveGitOperationErrorMessage: %v", err)
+	}
+	updated, err := repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if updated.Metadata["git_operation_error"] != true || updated.Metadata["git_operation_resolved"] != true {
+		t.Fatalf("metadata = %#v, want error marker preserved and resolved", updated.Metadata)
+	}
+	if updated.Metadata["error_output"] != "rejected" || updated.Metadata["resolution"] != "push confirmed" {
+		t.Fatalf("metadata lost diagnostics or resolution: %#v", updated.Metadata)
+	}
+	if _, ok := updated.Metadata["git_operation_resolved_at"].(string); !ok {
+		t.Fatalf("git_operation_resolved_at = %#v, want timestamp", updated.Metadata["git_operation_resolved_at"])
+	}
+	if updated.Metadata["git_operation_resolution_source"] != "push confirmed" {
+		t.Fatalf("git_operation_resolution_source = %#v, want push confirmed", updated.Metadata["git_operation_resolution_source"])
+	}
+	if err := svc.ResolveGitOperationErrorMessage(ctx, message.ID, "duplicate evidence"); err != nil {
+		t.Fatalf("duplicate ResolveGitOperationErrorMessage: %v", err)
+	}
+	published := bus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != events.MessageUpdated {
+		t.Fatalf("events = %#v, want one message.updated", published)
+	}
+}
+
 func TestAppendMessageContentAccumulatesAndPublishes(t *testing.T) {
 	svc, bus, repo := newMessageTestService(t)
 	ctx := context.Background()

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -151,6 +152,26 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetGitStatusRecoveryCallback(func(ctx context.Context, sessionID, taskID, taskEnvironmentID string, status *lifecycle.GitStatusData, observedAt time.Time) {
+		if taskRepo == nil || taskSvc == nil || status == nil || sessionID == "" || taskEnvironmentID == "" {
+			return
+		}
+		session, err := taskRepo.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil || session.TaskEnvironmentID != taskEnvironmentID {
+			return
+		}
+		if taskID == "" {
+			taskID = session.TaskID
+		} else if session.TaskID != taskID {
+			return
+		}
+		if _, err := resolveGitOperationErrorsForStatus(ctx, taskRepo, taskSvc, sessionID, taskID, gitOperationRecoveryEvidenceFromLifecycleStatus(status, observedAt)); err != nil {
+			log.Warn("failed to resolve git operation error from status event",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", taskID),
+				zap.Error(err))
+		}
+	})
 	orchestratorSvc.SetCanvasesEnabled(cfg != nil && cfg.Features.Canvases)
 	orchestratorSvc.SetAgentProfileRecentUseRecorder(userSvc)
 	if gitCredentialBroker != nil {

@@ -1200,6 +1200,11 @@ type Service struct {
 	// snapshot (used by handleGitStatusUpdate -> persistGitStatusSnapshot).
 	gitSnapshotCache *gitSnapshotCache
 
+	// gitStatusRecoveryCallback receives status observations for durable Git
+	// operation feedback reconciliation. It is optional so focused
+	// orchestrator compositions remain independent of the task service.
+	gitStatusRecoveryCallback GitStatusRecoveryCallback
+
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 	// reservedPromptTurns keeps durably created turns private until agentctl

@@ -122,6 +122,39 @@ describe("isSuccessfulScriptExecutionMetadata", () => {
   });
 });
 
+describe("git operation error resolution", () => {
+  it("removes a git error when a newer durable resolution is attached", () => {
+    const error = baseMessage({
+      id: "git-error",
+      type: "error",
+      content: "Git push failed",
+      created_at: ERROR_AT,
+      metadata: {
+        git_operation_error: true,
+        git_operation_resolved_at: AFTER,
+        git_operation_resolution_source: "change_request_created",
+      },
+    });
+
+    expect(
+      filterVisibleMessages([error], new Set(), new Set()).some(
+        (message) => message.id === error.id,
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps an unresolved git error actionable", () => {
+    const error = baseMessage({
+      id: "git-error",
+      type: "error",
+      content: "Git push failed",
+      metadata: { git_operation_error: true },
+    });
+
+    expect(filterVisibleMessages([error], new Set(), new Set())).toEqual([error]);
+  });
+});
+
 function baseMessage(overrides: Partial<Message>): Message {
   return {
     id: "m",

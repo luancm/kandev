@@ -66,11 +66,15 @@ func TestPersistGitStatusSnapshotScopesSiblingSessionsByEnvironmentAndRepository
 	svc.gitSnapshotCache = newGitSnapshotCache()
 
 	first := &lifecycle.GitStatusData{
-		RepositoryName: "backend",
-		Branch:         "feature/a",
-		HeadCommit:     "commit-a",
-		BaseCommit:     "base",
-		Ahead:          2,
+		RepositoryName:   "backend",
+		Branch:           "feature/a",
+		RemoteBranch:     "origin/feature/a",
+		HeadCommit:       "commit-a",
+		RemoteHeadCommit: "remote-a",
+		BaseCommit:       "base",
+		Ahead:            2,
+		RemoteAhead:      1,
+		RemoteBehind:     2,
 	}
 	svc.persistGitStatusSnapshot(ctx, watcher.GitEventData{
 		TaskEnvironmentID: "env-git-live",
@@ -93,4 +97,7 @@ func TestPersistGitStatusSnapshotScopesSiblingSessionsByEnvironmentAndRepository
 	require.Equal(t, "env-git-live", current[0].TaskEnvironmentID)
 	require.Equal(t, "session-live-b", current[0].SessionID)
 	require.Equal(t, "backend", current[0].Metadata["repository_name"])
+	require.Equal(t, "remote-a", current[0].Metadata["remote_head_commit"])
+	require.Equal(t, float64(1), current[0].Metadata["remote_ahead"])
+	require.Equal(t, float64(2), current[0].Metadata["remote_behind"])
 }

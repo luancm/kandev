@@ -10,7 +10,10 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
+import {
+  hasSessionRecoveryResolutionAfter,
+  isResolvedGitOperationError,
+} from "@/hooks/processed-message-filtering";
 import { ActionButtons } from "./action-message-actions";
 import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
 import {
@@ -78,6 +81,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     comment.session_id,
   );
   const metadata = comment.metadata as ActionMeta | undefined;
+  if (isResolvedGitOperationError(comment)) return null;
   const message = comment.content || t("task:anErrorOccurred");
   const isRecoveryMessage = metadata?.recovery_actions === true;
   // The recovery acknowledgment lives here, on the message row that stays

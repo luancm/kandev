@@ -261,6 +261,153 @@ func TestGitCreatePRAssociatesSupportedChange(t *testing.T) {
 	}
 }
 
+func TestGitCreatePRBranchPushNotifiesSuccessWhenPRCreationFails(t *testing.T) {
+	h, server := gitHandlerServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"success":false,"branch_pushed":true,"pushed_remote":"origin","pushed_branch":"feature/work","pushed_head_commit":"rewritten-head","error":"PR creation failed"}`))
+	})
+	defer server.Close()
+	callback := make(chan []string, 1)
+	resultCallback := make(chan struct {
+		result      *client.GitOperationResult
+		currentHead string
+	}, 1)
+	h.SetOnGitOperationSucceeded(func(_ context.Context, sessionID, taskID, operation string) {
+		callback <- []string{sessionID, taskID, operation}
+	})
+	h.SetOnGitOperationSucceededWithResult(func(_ context.Context, _, _, _ string, result *client.GitOperationResult, currentHead string) {
+		resultCallback <- struct {
+			result      *client.GitOperationResult
+			currentHead string
+		}{result: result, currentHead: currentHead}
+	})
+	msg, _ := ws.NewRequest("id", "action", GitCreatePRRequest{SessionID: "s", Title: "Title"})
+	if _, err := h.wsCreatePR(context.Background(), msg); err != nil {
+		t.Fatalf("wsCreatePR: %v", err)
+	}
+	select {
+	case got := <-callback:
+		want := []string{"s", "task", "push"}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("callback = %v, want %v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for branch-push callback")
+	}
+	select {
+	case got := <-resultCallback:
+		if got.result.PushedRemote != "origin" || got.result.PushedBranch != "feature/work" || got.result.PushedHeadCommit != "rewritten-head" || got.currentHead != "rewritten-head" {
+			t.Fatalf("result/current head = (%+v, %q)", got.result, got.currentHead)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for branch-push result callback")
+	}
+}
+
+func TestGitPushSuccessNotifiesWithFreshStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/git/push":
+			_, _ = w.Write([]byte(`{"success":true,"operation":"push","pushed_remote":"backup","pushed_branch":"feature/work","pushed_head_commit":"push-head"}`))
+		case "/api/v1/git/status":
+			_, _ = w.Write([]byte(`{"success":true,"branch":"main","remote_branch":"origin/main","head_commit":"status-head","remote_head_commit":"status-head","remote_ahead":0,"remote_behind":0}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	u, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &lifecycle.AgentExecution{SessionID: "s", TaskID: "task"}
+	execution.SetAgentCtlClientForTesting(client.NewClient(u.Hostname(), port, newTestLogger()))
+	h := NewGitHandlers(&mockExecutionLookup{executions: map[string]*lifecycle.AgentExecution{"s": execution}}, nil, newTestLogger())
+	statusCh := make(chan *client.GitStatusResult, 1)
+	resultCh := make(chan struct {
+		result      *client.GitOperationResult
+		currentHead string
+	}, 1)
+	legacyCalled := false
+	h.SetOnGitOperationSucceeded(func(context.Context, string, string, string) {
+		legacyCalled = true
+	})
+	h.SetOnGitOperationSucceededWithStatus(func(_ context.Context, sessionID, taskID, operation string, status *client.GitStatusResult) {
+		if sessionID != "s" || taskID != "task" || operation != "push" {
+			t.Errorf("callback scope = (%q, %q, %q)", sessionID, taskID, operation)
+		}
+		statusCh <- status
+	})
+	h.SetOnGitOperationSucceededWithResult(func(_ context.Context, sessionID, taskID, operation string, result *client.GitOperationResult, currentHead string) {
+		if sessionID != "s" || taskID != "task" || operation != "push" {
+			t.Errorf("result callback scope = (%q, %q, %q)", sessionID, taskID, operation)
+		}
+		resultCh <- struct {
+			result      *client.GitOperationResult
+			currentHead string
+		}{result: result, currentHead: currentHead}
+	})
+	msg, _ := ws.NewRequest("id", "action", GitPushRequest{SessionID: "s", Remote: "backup", ExpectedBranch: "feature/work"})
+	if _, err := h.wsPush(context.Background(), msg); err != nil {
+		t.Fatalf("wsPush: %v", err)
+	}
+	select {
+	case status := <-statusCh:
+		if status.HeadCommit != "status-head" || status.RemoteHeadCommit != "status-head" {
+			t.Fatalf("status = %+v", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fresh status callback")
+	}
+	select {
+	case got := <-resultCh:
+		if got.result.PushedRemote != "backup" || got.result.PushedBranch != "feature/work" || got.result.PushedHeadCommit != "push-head" || got.currentHead != "push-head" {
+			t.Fatalf("result/current head = (%+v, %q)", got.result, got.currentHead)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result callback")
+	}
+	if !legacyCalled {
+		t.Fatal("legacy success callback should run for legacy message cleanup")
+	}
+}
+
+func TestGitPushSuccessResultCallbackDoesNotRequireStatus(t *testing.T) {
+	h, server := gitHandlerServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/git/push" {
+			_, _ = w.Write([]byte(`{"success":true,"operation":"push","pushed_remote":"backup","pushed_branch":"feature/work","pushed_head_commit":"push-head"}`))
+			return
+		}
+		http.Error(w, "status unavailable", http.StatusBadGateway)
+	})
+	defer server.Close()
+	callback := make(chan struct {
+		result      *client.GitOperationResult
+		currentHead string
+	}, 1)
+	h.SetOnGitOperationSucceededWithResult(func(_ context.Context, _, _, _ string, result *client.GitOperationResult, currentHead string) {
+		callback <- struct {
+			result      *client.GitOperationResult
+			currentHead string
+		}{result: result, currentHead: currentHead}
+	})
+	msg, _ := ws.NewRequest("id", "action", GitPushRequest{SessionID: "s", Remote: "backup", ExpectedBranch: "feature/work"})
+	if _, err := h.wsPush(context.Background(), msg); err != nil {
+		t.Fatalf("wsPush: %v", err)
+	}
+	select {
+	case got := <-callback:
+		if got.result.PushedRemote != "backup" || got.result.PushedBranch != "feature/work" || got.currentHead != "push-head" {
+			t.Fatalf("result/current head = (%+v, %q)", got.result, got.currentHead)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result callback")
+	}
+}
+
 func TestGitCreatePRValidationAndDependencyFailure(t *testing.T) {
 	h := NewGitHandlers(nil, nil, newTestLogger())
 	for _, request := range []GitCreatePRRequest{{}, {SessionID: "s"}} {
@@ -534,6 +681,64 @@ func TestNotifyGitOperationFailed_SuccessResult(t *testing.T) {
 	})
 	if called {
 		t.Error("callback should not be called for successful result")
+	}
+}
+
+func TestNotifyGitOperationSucceeded_SuccessResult(t *testing.T) {
+	log := newTestLogger()
+	type callbackResult struct{ sessionID, taskID, operation string }
+	callback := make(chan callbackResult, 1)
+	lookup := &mockExecutionLookup{
+		executions: map[string]*lifecycle.AgentExecution{
+			"session-1": {ID: "exec-1", SessionID: "session-1", TaskID: "task-1"},
+		},
+	}
+	h := NewGitHandlers(lookup, nil, log)
+	h.SetOnGitOperationSucceeded(func(_ context.Context, sessionID, taskID, operation string) {
+		callback <- callbackResult{sessionID: sessionID, taskID: taskID, operation: operation}
+	})
+
+	h.notifyGitOperationFailed("session-1", "push", &client.GitOperationResult{Success: true})
+	select {
+	case got := <-callback:
+		if got != (callbackResult{sessionID: "session-1", taskID: "task-1", operation: "push"}) {
+			t.Fatalf("success callback = %+v, want (session-1, task-1, push)", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for success callback")
+	}
+}
+
+func TestNotifyGitOperationFailedWithResultPreservesAttemptScope(t *testing.T) {
+	log := newTestLogger()
+	callback := make(chan *client.GitOperationResult, 1)
+	lookup := &mockExecutionLookup{
+		executions: map[string]*lifecycle.AgentExecution{
+			"session-1": {ID: "exec-1", SessionID: "session-1", TaskID: "task-1"},
+		},
+	}
+	h := NewGitHandlers(lookup, nil, log)
+	h.SetOnGitOperationFailedWithResult(func(_ context.Context, sessionID, taskID, operation string, result *client.GitOperationResult) {
+		if sessionID != "session-1" || taskID != "task-1" || operation != "push" {
+			t.Errorf("callback scope = (%q, %q, %q)", sessionID, taskID, operation)
+		}
+		callback <- result
+	})
+	want := &client.GitOperationResult{
+		Success:             false,
+		Operation:           "push",
+		AttemptedRemote:     "origin",
+		AttemptedBranch:     "main",
+		AttemptedHeadCommit: "abc",
+	}
+	h.notifyGitOperationFailed("session-1", "push", want)
+	select {
+	case got := <-callback:
+		if got != want {
+			t.Fatalf("result = %+v, want %+v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result callback")
 	}
 }
 

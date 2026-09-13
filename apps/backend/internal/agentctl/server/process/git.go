@@ -50,15 +50,25 @@ type GitOperationResult struct {
 	PreflightReason string   `json:"preflight_reason,omitempty"`
 	ConflictFiles   []string `json:"conflict_files,omitempty"`
 	RecoveryBranch  string   `json:"recovery_branch,omitempty"`
-	// PushedRemote and PushedBranch name the destination a push or preflight
-	// validated. A push reports them only when the request carried an explicit
-	// push target, so a request that named none keeps its existing shape.
+	// PushedRemote and PushedBranch name the resolved destination a successful
+	// push or preflight validated.
 	PushedRemote string `json:"pushed_remote,omitempty"`
 	PushedBranch string `json:"pushed_branch,omitempty"`
+	// PushedHeadCommit is the local HEAD that a successful push published. It is
+	// captured while the push lock is held so reconciliation does not depend on
+	// a later status query observing the same checkout state.
+	PushedHeadCommit string `json:"pushed_head_commit,omitempty"`
 	// ExpectedBranch and CurrentBranch accompany a branch-mismatch refusal.
 	// CurrentBranch is empty for a detached HEAD.
 	ExpectedBranch string `json:"expected_branch,omitempty"`
 	CurrentBranch  string `json:"current_branch,omitempty"`
+	// Attempted* identify the local push operation that failed. They are
+	// omitted from successful responses so the public result shape stays
+	// compatible while failure messages can be reconciled against a later
+	// status observation.
+	AttemptedRemote     string `json:"attempted_remote,omitempty"`
+	AttemptedBranch     string `json:"attempted_branch,omitempty"`
+	AttemptedHeadCommit string `json:"attempted_head_commit,omitempty"`
 	// BaselinePublished marks a mismatch refused after empty-remote first
 	// publication already published the baseline in this request.
 	BaselinePublished bool `json:"baseline_published,omitempty"`
@@ -522,6 +532,11 @@ func (g *GitOperator) Push(ctx context.Context, opts PushOptions) (*GitOperation
 		refusal.apply(result)
 		return result, nil
 	}
+	result.AttemptedRemote = plan.remote
+	result.AttemptedBranch = plan.branch
+	if head, headErr := g.runGitCommand(ctx, "rev-parse", "HEAD"); headErr == nil {
+		result.AttemptedHeadCommit = strings.TrimSpace(head)
+	}
 
 	basePublication := emptyRemotePublication{}
 	if plan.baselineEligible {
@@ -567,6 +582,10 @@ func (g *GitOperator) Push(ctx context.Context, opts PushOptions) (*GitOperation
 	result.Output = combineGitOutputs(basePublication.output, output)
 
 	result.Success = true
+	result.PushedHeadCommit = result.AttemptedHeadCommit
+	result.AttemptedRemote = ""
+	result.AttemptedBranch = ""
+	result.AttemptedHeadCommit = ""
 	plan.reportDestination(result)
 	g.logger.Info("push completed",
 		zap.String("branch", plan.branch),
@@ -1409,13 +1428,27 @@ func (g *GitOperator) unlock() {
 
 // PRCreateResult represents the result of a PR creation operation.
 type PRCreateResult struct {
-	Success      bool   `json:"success"`
-	BranchPushed bool   `json:"branch_pushed,omitempty"`
-	PRURL        string `json:"pr_url,omitempty"`
-	Provider     string `json:"provider,omitempty"`
-	Output       string `json:"output,omitempty"`
-	Error        string `json:"error,omitempty"`
-	ErrorCode    string `json:"error_code,omitempty"`
+	Success          bool   `json:"success"`
+	BranchPushed     bool   `json:"branch_pushed,omitempty"`
+	PushedRemote     string `json:"pushed_remote,omitempty"`
+	PushedBranch     string `json:"pushed_branch,omitempty"`
+	PushedHeadCommit string `json:"pushed_head_commit,omitempty"`
+	PRURL            string `json:"pr_url,omitempty"`
+	Provider         string `json:"provider,omitempty"`
+	Output           string `json:"output,omitempty"`
+	Error            string `json:"error,omitempty"`
+	ErrorCode        string `json:"error_code,omitempty"`
+}
+
+func (g *GitOperator) setPushedPRDestination(ctx context.Context, result *PRCreateResult, remote, branch string) {
+	if result == nil {
+		return
+	}
+	result.PushedRemote = strings.TrimSpace(remote)
+	result.PushedBranch = strings.TrimSpace(branch)
+	if head, err := g.runGitCommand(ctx, "rev-parse", "HEAD"); err == nil {
+		result.PushedHeadCommit = strings.TrimSpace(head)
+	}
 }
 
 // CreatePR creates a pull request using the repository host's CLI.
@@ -1449,6 +1482,7 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 		}
 		result.Success = true
 		result.BranchPushed = true
+		g.setPushedPRDestination(ctx, result, g.remoteContribution.ContributionRemoteName(), g.remoteContribution.HeadBranch)
 		result.PRURL = g.remoteContribution.CanonicalURL
 		result.Provider = g.remoteContribution.Provider
 		result.Output = g.sanitizeGitPushOutput(output)
@@ -1523,6 +1557,7 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	}
 	result.Output = combineGitOutputs(basePublication.output, g.sanitizeGitPushOutput(pushOutput))
 	result.BranchPushed = true
+	g.setPushedPRDestination(ctx, result, "origin", branch)
 	g.logger.Debug("pushed branch to remote", zap.String("output", g.sanitizeGitPushOutput(pushOutput)))
 
 	switch provider {
@@ -1579,6 +1614,7 @@ func (g *GitOperator) createManagedContributionPR(
 	}
 	result.Provider = string(prProviderGitHub)
 	result.BranchPushed = true
+	g.setPushedPRDestination(ctx, result, g.contributionDestination.ContributionRemoteName(), branch)
 	return g.createPRWithRetryAfterPush(ctx, result, title, body,
 		func() (*PRCreateResult, error) {
 			return g.createGitHubPR(ctx, result, branch, title, body, baseBranch, draft)
@@ -1624,6 +1660,15 @@ func (g *GitOperator) createPRWithRetryAfterPush(
 		}
 		if result.BranchPushed {
 			attemptResult.BranchPushed = true
+		}
+		if result.PushedRemote != "" {
+			attemptResult.PushedRemote = result.PushedRemote
+		}
+		if result.PushedBranch != "" {
+			attemptResult.PushedBranch = result.PushedBranch
+		}
+		if result.PushedHeadCommit != "" {
+			attemptResult.PushedHeadCommit = result.PushedHeadCommit
 		}
 		last, lastErr = attemptResult, attemptErr
 		if lastErr == nil && last != nil && last.Success {

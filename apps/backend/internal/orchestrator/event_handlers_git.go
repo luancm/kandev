@@ -28,6 +28,22 @@ const gitSnapshotPersistInterval = 30 * time.Second
 
 const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
 
+// GitStatusRecoveryCallback receives accepted Git status observations so the
+// backend can reconcile durable operation feedback independently of PR
+// association. The callback must apply its own evidence and scope checks.
+type GitStatusRecoveryCallback func(
+	ctx context.Context,
+	sessionID, taskID, taskEnvironmentID string,
+	status *lifecycle.GitStatusData,
+	observedAt time.Time,
+)
+
+// SetGitStatusRecoveryCallback wires durable Git operation feedback
+// reconciliation into accepted status observations.
+func (s *Service) SetGitStatusRecoveryCallback(callback GitStatusRecoveryCallback) {
+	s.gitStatusRecoveryCallback = callback
+}
+
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
@@ -117,10 +133,11 @@ func (c *gitSnapshotCache) forget(taskEnvironmentID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d",
 		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
-		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
+		s.RemoteHeadCommit, s.Ahead, s.Behind, s.RemoteAhead, s.RemoteBehind,
+		s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -168,6 +185,13 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	}
 	if data.TaskEnvironmentID == "" {
 		data.TaskEnvironmentID, _ = s.resolveGitSnapshotEnvironmentID(ctx, data.SessionID)
+	}
+	if s.gitStatusRecoveryCallback != nil {
+		observedAt := time.Now().UTC()
+		if parsed, err := time.Parse(time.RFC3339Nano, data.Timestamp); err == nil {
+			observedAt = parsed
+		}
+		s.gitStatusRecoveryCallback(ctx, data.SessionID, data.TaskID, data.TaskEnvironmentID, data.Status, observedAt)
 	}
 
 	// Forward status_update event to WebSocket subject for frontend
@@ -235,6 +259,9 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			"deleted":               st.Deleted,
 			"untracked":             st.Untracked,
 			"renamed":               st.Renamed,
+			"remote_head_commit":    st.RemoteHeadCommit,
+			"remote_ahead":          st.RemoteAhead,
+			"remote_behind":         st.RemoteBehind,
 			"timestamp":             data.Timestamp,
 		},
 	}

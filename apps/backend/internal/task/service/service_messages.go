@@ -1132,6 +1132,38 @@ func (s *Service) updateMessageWithReceipt(ctx context.Context, message *models.
 	return nil, s.messages.UpdateMessage(ctx, message)
 }
 
+// ResolveGitOperationErrorMessage records that a previously persisted Git
+// operation error has been resolved while retaining its original diagnostics.
+// The marker is intentionally tolerant of legacy messages that only contain
+// git_operation_error, operation, and error_output.
+func (s *Service) ResolveGitOperationErrorMessage(ctx context.Context, messageID, resolution string) error {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	if message == nil || message.Metadata == nil {
+		return nil
+	}
+	failed, ok := message.Metadata["git_operation_error"].(bool)
+	if !ok || !failed {
+		return nil
+	}
+	if resolved, _ := message.Metadata["git_operation_resolved"].(bool); resolved {
+		return nil
+	}
+	metadata := make(map[string]interface{}, len(message.Metadata)+3)
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	metadata["git_operation_resolved"] = true
+	metadata["resolution"] = resolution
+	resolvedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	metadata["git_operation_resolved_at"] = resolvedAt
+	metadata["git_operation_resolution_source"] = resolution
+	message.Metadata = metadata
+	return s.UpdateMessage(ctx, message)
+}
+
 // AppendMessageContent appends additional content to an existing message.
 // This is used for streaming agent responses where content arrives incrementally.
 func (s *Service) AppendMessageContent(ctx context.Context, messageID, additionalContent string) error {

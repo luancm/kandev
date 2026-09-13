@@ -220,6 +220,20 @@ function renderActionWithStore(
   return { ...utils, setSessionState };
 }
 
+const resolvedGitOperationError = retryMessage({
+  metadata: {
+    git_operation_error: true,
+    git_operation_resolved_at: "2026-05-30T00:01:00Z",
+    actions: [{ type: "ws_request", label: "Fix", test_id: "git-fix-button" }],
+  },
+});
+
+it("hides resolved Git errors and their Fix action", () => {
+  renderAction(resolvedGitOperationError, "WAITING_FOR_INPUT");
+  expect(screen.queryByText(/Provider overloaded/)).toBeNull();
+  expect(screen.queryByTestId("git-fix-button")).toBeNull();
+});
+
 describe("ActionMessage — transient retry (warning variant)", () => {
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");

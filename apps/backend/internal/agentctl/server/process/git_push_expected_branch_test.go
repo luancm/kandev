@@ -104,9 +104,8 @@ func TestGitOperatorPushWithoutOptionsIsUnchanged(t *testing.T) {
 	if got := remoteBranchSHA(t, backupDir, "feature/work"); got != "" {
 		t.Errorf("backup gained %q, want untouched", got)
 	}
-	// A request naming no target keeps the result shape it has today.
-	if result.PushedRemote != "" || result.PushedBranch != "" {
-		t.Errorf("destination fields = (%q, %q), want both empty", result.PushedRemote, result.PushedBranch)
+	if result.PushedRemote != "origin" || result.PushedBranch != "feature/work" || result.PushedHeadCommit != local {
+		t.Errorf("resolved push destination = (%q, %q, %q), want (origin, feature/work, %q)", result.PushedRemote, result.PushedBranch, result.PushedHeadCommit, local)
 	}
 	// The default path still sets upstream on first publication.
 	if upstream := operator.getUpstreamRef(context.Background()); upstream != "origin/feature/work" {
@@ -114,7 +113,7 @@ func TestGitOperatorPushWithoutOptionsIsUnchanged(t *testing.T) {
 	}
 }
 
-func TestGitOperatorPushOmitsTargetFieldsWithoutExplicitTarget(t *testing.T) {
+func TestGitOperatorPushReportsResolvedDestinationWithoutExplicitTarget(t *testing.T) {
 	_, _, _, operator := setupPushRemotesRepo(t)
 
 	result, err := operator.Push(context.Background(), PushOptions{ExpectedBranch: "feature/work"})
@@ -124,8 +123,8 @@ func TestGitOperatorPushOmitsTargetFieldsWithoutExplicitTarget(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("Push() result = %+v, want success", result)
 	}
-	if result.PushedRemote != "" || result.PushedBranch != "" {
-		t.Errorf("destination fields = (%q, %q), want both empty", result.PushedRemote, result.PushedBranch)
+	if result.PushedRemote != "origin" || result.PushedBranch != "feature/work" || result.PushedHeadCommit == "" {
+		t.Errorf("resolved push destination = (%q, %q, %q), want origin/feature/work and a head", result.PushedRemote, result.PushedBranch, result.PushedHeadCommit)
 	}
 }
 
@@ -151,6 +150,9 @@ func TestGitOperatorPushPublishesHeadToExpectedBranch(t *testing.T) {
 	}
 	if result.PushedRemote != "backup" || result.PushedBranch != "feature/work" {
 		t.Errorf("destination fields = (%q, %q), want (backup, feature/work)", result.PushedRemote, result.PushedBranch)
+	}
+	if result.PushedHeadCommit != local {
+		t.Errorf("pushed head = %q, want %q", result.PushedHeadCommit, local)
 	}
 }
 
@@ -197,6 +199,7 @@ func TestGitOperatorPushDoesNotEscalateRejectedNonForcePush(t *testing.T) {
 	runGit(t, repoDir, "push", "--force", "backup", "HEAD:refs/heads/feature/work")
 	runGit(t, repoDir, "checkout", "feature/work")
 	remoteBefore := remoteBranchSHA(t, backupDir, "feature/work")
+	localHead := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 
 	result, err := operator.Push(context.Background(), PushOptions{Remote: "backup"})
 	if err != nil {
@@ -207,6 +210,9 @@ func TestGitOperatorPushDoesNotEscalateRejectedNonForcePush(t *testing.T) {
 	}
 	if got := remoteBranchSHA(t, backupDir, "feature/work"); got != remoteBefore {
 		t.Errorf("backup moved to %q, want %q", got, remoteBefore)
+	}
+	if result.AttemptedRemote != "backup" || result.AttemptedBranch != "feature/work" || result.AttemptedHeadCommit != localHead {
+		t.Errorf("attempted push scope = (%q, %q, %q), want (backup, feature/work, %q)", result.AttemptedRemote, result.AttemptedBranch, result.AttemptedHeadCommit, localHead)
 	}
 }
 

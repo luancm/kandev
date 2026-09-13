@@ -25,14 +25,25 @@ type GitOperationResult struct {
 	PreflightReason string   `json:"preflight_reason,omitempty"`
 	ConflictFiles   []string `json:"conflict_files,omitempty"`
 	RecoveryBranch  string   `json:"recovery_branch,omitempty"`
-	// Destination a push or preflight validated. A push populates these only
-	// when the request carried an explicit push target.
+	// Destination a push or preflight validated. Successful pushes report the
+	// resolved destination, including the default upstream target.
 	PushedRemote string `json:"pushed_remote,omitempty"`
 	PushedBranch string `json:"pushed_branch,omitempty"`
+	// PushedHeadCommit is the local HEAD that a successful push published. It is
+	// captured while the push lock is held so reconciliation does not depend on
+	// a later status query observing the same checkout state.
+	PushedHeadCommit string `json:"pushed_head_commit,omitempty"`
 	// Branches accompanying a mismatch refusal. CurrentBranch is empty for a
 	// detached HEAD.
 	ExpectedBranch string `json:"expected_branch,omitempty"`
 	CurrentBranch  string `json:"current_branch,omitempty"`
+	// Attempted* identify the local push operation that failed. They are
+	// omitted from successful responses so the public result shape stays
+	// compatible while failure messages can be reconciled against a later
+	// status observation.
+	AttemptedRemote     string `json:"attempted_remote,omitempty"`
+	AttemptedBranch     string `json:"attempted_branch,omitempty"`
+	AttemptedHeadCommit string `json:"attempted_head_commit,omitempty"`
 	// BaselinePublished marks a mismatch refusal after empty-remote first
 	// publication already published the baseline in this request.
 	BaselinePublished bool `json:"baseline_published,omitempty"`
@@ -65,13 +76,16 @@ type ContributionHistoryExplanationResult struct {
 // PRCreateResult represents the result of a PR creation operation.
 // This matches the server-side process.PRCreateResult.
 type PRCreateResult struct {
-	Success      bool   `json:"success"`
-	BranchPushed bool   `json:"branch_pushed,omitempty"`
-	PRURL        string `json:"pr_url,omitempty"`
-	Provider     string `json:"provider,omitempty"`
-	Output       string `json:"output,omitempty"`
-	Error        string `json:"error,omitempty"`
-	ErrorCode    string `json:"error_code,omitempty"`
+	Success          bool   `json:"success"`
+	BranchPushed     bool   `json:"branch_pushed,omitempty"`
+	PushedRemote     string `json:"pushed_remote,omitempty"`
+	PushedBranch     string `json:"pushed_branch,omitempty"`
+	PushedHeadCommit string `json:"pushed_head_commit,omitempty"`
+	PRURL            string `json:"pr_url,omitempty"`
+	Provider         string `json:"provider,omitempty"`
+	Output           string `json:"output,omitempty"`
+	Error            string `json:"error,omitempty"`
+	ErrorCode        string `json:"error_code,omitempty"`
 }
 
 // GitPull performs a git pull operation on the worktree.

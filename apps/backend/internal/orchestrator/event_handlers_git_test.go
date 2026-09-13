@@ -96,6 +96,28 @@ func TestGitStatusHashIncludesRepositoryName(t *testing.T) {
 	}
 }
 
+func TestGitStatusHashIncludesUpstreamEvidence(t *testing.T) {
+	status := &lifecycle.GitStatusData{
+		RepositoryName:   "backend",
+		Branch:           "feature/x",
+		RemoteBranch:     "origin/feature/x",
+		HeadCommit:       "abc",
+		RemoteHeadCommit: "abc",
+		RemoteAhead:      0,
+		RemoteBehind:     0,
+	}
+	changed := *status
+	changed.RemoteHeadCommit = "def"
+	if gitStatusHash(status) == gitStatusHash(&changed) {
+		t.Fatal("snapshot hash must change when upstream head changes")
+	}
+	changed = *status
+	changed.RemoteAhead = 1
+	if gitStatusHash(status) == gitStatusHash(&changed) {
+		t.Fatal("snapshot hash must change when upstream divergence changes")
+	}
+}
+
 func TestHandleGitStatusUpdateResolvesEnvironmentForRecoveredEvent(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -114,6 +136,11 @@ func TestHandleGitStatusUpdateResolvesEnvironmentForRecoveredEvent(t *testing.T)
 	eventBus := &recordingEventBus{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.eventBus = eventBus
+	var callbackEnvironment, callbackSession, callbackTask string
+	var callbackObservedAt time.Time
+	svc.SetGitStatusRecoveryCallback(func(_ context.Context, sessionID, taskID, environmentID string, _ *lifecycle.GitStatusData, observedAt time.Time) {
+		callbackSession, callbackTask, callbackEnvironment, callbackObservedAt = sessionID, taskID, environmentID, observedAt
+	})
 	svc.handleGitStatusUpdate(ctx, watcher.GitEventData{
 		TaskID:    "t-recovered-git",
 		SessionID: "s-recovered-git",
@@ -124,6 +151,10 @@ func TestHandleGitStatusUpdateResolvesEnvironmentForRecoveredEvent(t *testing.T)
 	payload, ok := eventBus.events[0].event.Data.(*watcher.GitEventData)
 	require.True(t, ok)
 	require.Equal(t, "env-recovered-git", payload.TaskEnvironmentID)
+	require.Equal(t, "s-recovered-git", callbackSession)
+	require.Equal(t, "t-recovered-git", callbackTask)
+	require.Equal(t, "env-recovered-git", callbackEnvironment)
+	require.False(t, callbackObservedAt.IsZero())
 }
 
 func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testing.T) {

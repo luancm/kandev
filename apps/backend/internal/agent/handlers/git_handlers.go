@@ -25,7 +25,10 @@ import (
 // timeout floor. Generous enough to survive a slow agentctl round-trip
 // under git-pool contention, short enough that a wedged execution can't
 // pin the singleflight slot indefinitely.
-const singleflightComputeTimeout = 60 * time.Second
+const (
+	singleflightComputeTimeout = 60 * time.Second
+	gitOperationPush           = "push"
+)
 
 // PRCreatedCallback is called after a PR is successfully created. `repo` is
 // the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
@@ -37,6 +40,23 @@ type PRCreatedCallback func(ctx context.Context, sessionID, taskID, provider, pr
 // GitOperationFailedCallback is called when a git operation fails.
 // Parameters: ctx, sessionID, taskID, operation name, error output.
 type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, operation, errorOutput string)
+
+// GitOperationFailedWithResultCallback is called when a git operation fails
+// and the structured result is needed for durable reconciliation metadata.
+type GitOperationFailedWithResultCallback func(ctx context.Context, sessionID, taskID, operation string, result *client.GitOperationResult)
+
+// GitOperationSucceededCallback is called after a git operation succeeds.
+// Parameters: ctx, sessionID, taskID, operation name.
+type GitOperationSucceededCallback func(ctx context.Context, sessionID, taskID, operation string)
+
+// GitOperationSucceededWithStatusCallback is called after a successful git
+// operation when a fresh status observation is available for reconciliation.
+type GitOperationSucceededWithStatusCallback func(ctx context.Context, sessionID, taskID, operation string, status *client.GitStatusResult)
+
+// GitOperationSucceededWithResultCallback is called after a successful git
+// operation with the operation result and the current local HEAD. The result
+// carries the resolved push destination.
+type GitOperationSucceededWithResultCallback func(ctx context.Context, sessionID, taskID, operation string, result *client.GitOperationResult, currentHead string)
 
 // BranchRenamedCallback is called after a branch is successfully renamed.
 // Parameters: ctx, sessionID, new branch name, repo subpath.
@@ -73,14 +93,18 @@ type SessionReader interface {
 // the agentctl-side throttle. Reproduced in PR #1216 trace: ~10
 // session.git.commits arrived for the same sessionID inside 30ms.
 type GitHandlers struct {
-	lifecycleMgr         ExecutionLookup
-	sessionReader        SessionReader
-	logger               *logger.Logger
-	onPRCreated          PRCreatedCallback
-	onGitOperationFailed GitOperationFailedCallback
-	onBranchRenamed      BranchRenamedCallback
-	commitsGroup         singleflight.Group
-	diffGroup            singleflight.Group
+	lifecycleMgr                      ExecutionLookup
+	sessionReader                     SessionReader
+	logger                            *logger.Logger
+	onPRCreated                       PRCreatedCallback
+	onGitOperationFailed              GitOperationFailedCallback
+	onGitOperationFailedWithResult    GitOperationFailedWithResultCallback
+	onGitOperationSucceeded           GitOperationSucceededCallback
+	onGitOperationSucceededWithStatus GitOperationSucceededWithStatusCallback
+	onGitOperationSucceededWithResult GitOperationSucceededWithResultCallback
+	onBranchRenamed                   BranchRenamedCallback
+	commitsGroup                      singleflight.Group
+	diffGroup                         singleflight.Group
 }
 
 // NewGitHandlers creates a new GitHandlers instance.
@@ -121,14 +145,88 @@ func (h *GitHandlers) SetOnGitOperationFailed(cb GitOperationFailedCallback) {
 	h.onGitOperationFailed = cb
 }
 
+// SetOnGitOperationFailedWithResult sets a callback invoked with the
+// structured result after a git operation fails.
+func (h *GitHandlers) SetOnGitOperationFailedWithResult(cb GitOperationFailedWithResultCallback) {
+	h.onGitOperationFailedWithResult = cb
+}
+
+// SetOnGitOperationSucceeded sets a callback invoked when a git operation succeeds.
+func (h *GitHandlers) SetOnGitOperationSucceeded(cb GitOperationSucceededCallback) {
+	h.onGitOperationSucceeded = cb
+}
+
+// SetOnGitOperationSucceededWithStatus sets a callback invoked with a fresh
+// status observation after a successful git operation.
+func (h *GitHandlers) SetOnGitOperationSucceededWithStatus(cb GitOperationSucceededWithStatusCallback) {
+	h.onGitOperationSucceededWithStatus = cb
+}
+
+// SetOnGitOperationSucceededWithResult sets a callback invoked with a
+// successful operation's result and current local HEAD.
+func (h *GitHandlers) SetOnGitOperationSucceededWithResult(cb GitOperationSucceededWithResultCallback) {
+	h.onGitOperationSucceededWithResult = cb
+}
+
 // SetOnBranchRenamed sets a callback invoked after a branch is successfully renamed.
 func (h *GitHandlers) SetOnBranchRenamed(cb BranchRenamedCallback) {
 	h.onBranchRenamed = cb
 }
 
-// notifyGitOperationFailed fires the failure callback asynchronously if the result indicates failure.
+func (h *GitHandlers) notifyGitOperationSucceeded(sessionID, operation string) {
+	if h.onGitOperationSucceeded == nil || h.lifecycleMgr == nil {
+		return
+	}
+	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok || execution.TaskID == "" {
+		return
+	}
+	taskID := execution.TaskID
+	callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	h.onGitOperationSucceeded(callbackCtx, sessionID, taskID, operation)
+}
+
+func (h *GitHandlers) notifyGitOperationSucceededWithStatus(sessionID, operation string, status *client.GitStatusResult) {
+	if h.onGitOperationSucceededWithStatus == nil || h.lifecycleMgr == nil || status == nil {
+		return
+	}
+	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok || execution.TaskID == "" {
+		return
+	}
+	taskID := execution.TaskID
+	callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	h.onGitOperationSucceededWithStatus(callbackCtx, sessionID, taskID, operation, status)
+}
+
+func (h *GitHandlers) notifyGitOperationSucceededWithResult(sessionID, operation string, result *client.GitOperationResult, currentHead string) {
+	if h.onGitOperationSucceededWithResult == nil || h.lifecycleMgr == nil || result == nil {
+		return
+	}
+	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !ok || execution.TaskID == "" {
+		return
+	}
+	taskID := execution.TaskID
+	callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	h.onGitOperationSucceededWithResult(callbackCtx, sessionID, taskID, operation, result, currentHead)
+}
+
+// notifyGitOperationFailed fires the matching operation outcome callback after
+// the result is available. Callbacks are ordered with the handler response so
+// a later success cannot race a preceding failure message into persistence.
 func (h *GitHandlers) notifyGitOperationFailed(sessionID, operation string, result *client.GitOperationResult) {
-	if result == nil || result.Success || h.onGitOperationFailed == nil {
+	if result == nil || h.lifecycleMgr == nil || (h.onGitOperationFailed == nil && h.onGitOperationFailedWithResult == nil && h.onGitOperationSucceeded == nil && h.onGitOperationSucceededWithStatus == nil) {
+		return
+	}
+	if result.Success {
+		h.notifyGitOperationSucceeded(sessionID, operation)
+		return
+	}
+	if h.onGitOperationFailed == nil && h.onGitOperationFailedWithResult == nil {
 		return
 	}
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
@@ -140,11 +238,13 @@ func (h *GitHandlers) notifyGitOperationFailed(sessionID, operation string, resu
 	if errorOutput == "" {
 		errorOutput = result.Output
 	}
-	go func() {
-		callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		h.onGitOperationFailed(callbackCtx, sessionID, taskID, operation, errorOutput)
-	}()
+	callbackCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if h.onGitOperationFailedWithResult != nil {
+		h.onGitOperationFailedWithResult(callbackCtx, sessionID, taskID, operation, result)
+		return
+	}
+	h.onGitOperationFailed(callbackCtx, sessionID, taskID, operation, errorOutput)
 }
 
 // RegisterHandlers registers git handlers with the WebSocket dispatcher
@@ -360,6 +460,16 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("push failed: %w", err)
+	}
+	if result != nil && result.Success {
+		h.notifyGitOperationSucceededWithResult(req.SessionID, "push", result, strings.TrimSpace(result.PushedHeadCommit))
+		if h.onGitOperationSucceededWithStatus != nil {
+			if status, statusErr := agentClient.GetGitStatusFresh(ctx); statusErr == nil && status != nil && status.Success {
+				h.notifyGitOperationSucceededWithStatus(req.SessionID, "push", status)
+			}
+		}
+		h.notifyGitOperationSucceeded(req.SessionID, "push")
+		return ws.NewResponse(msg.ID, msg.Action, result)
 	}
 
 	h.notifyGitOperationFailed(req.SessionID, "push", result)
@@ -708,16 +818,17 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 		return nil, fmt.Errorf("title is required")
 	}
 
-	client, releaseClient, err := h.getAgentCtlClient(ctx, req.SessionID)
+	agentClient, releaseClient, err := h.getAgentCtlClient(ctx, req.SessionID)
 	defer releaseClient()
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := client.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft, req.Repo)
+	result, err := agentClient.GitCreatePR(ctx, req.Title, req.Body, req.BaseBranch, req.Draft, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
 	}
+	h.notifyCreatePRPushSuccess(ctx, req.SessionID, agentClient, result)
 
 	// On success, notify callback to associate PR with task. The repo subpath
 	// flows through so the orchestrator can scope the resulting TaskPR /
@@ -740,6 +851,29 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 	}
 
 	return newCreatePRResponse(msg, result)
+}
+
+func (h *GitHandlers) notifyCreatePRPushSuccess(
+	ctx context.Context,
+	sessionID string,
+	agentClient *client.Client,
+	result *client.PRCreateResult,
+) {
+	if result == nil || !result.BranchPushed {
+		return
+	}
+	h.notifyGitOperationSucceededWithResult(sessionID, gitOperationPush, &client.GitOperationResult{
+		Success:          true,
+		PushedRemote:     result.PushedRemote,
+		PushedBranch:     result.PushedBranch,
+		PushedHeadCommit: result.PushedHeadCommit,
+	}, result.PushedHeadCommit)
+	if h.onGitOperationSucceededWithStatus != nil {
+		if status, statusErr := agentClient.GetGitStatusFresh(ctx); statusErr == nil && status != nil && status.Success {
+			h.notifyGitOperationSucceededWithStatus(sessionID, gitOperationPush, status)
+		}
+	}
+	h.notifyGitOperationSucceeded(sessionID, gitOperationPush)
 }
 
 func newCreatePRResponse(msg *ws.Message, result *client.PRCreateResult) (*ws.Message, error) {

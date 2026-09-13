@@ -250,9 +250,9 @@ type pushPlan struct {
 	remote  string
 	branch  string
 	refspec string
-	// explicit records that the request named a push target. A push reports
-	// the destination fields only in that case, so a request naming none keeps
-	// the result shape it has today.
+	// explicit records that the request named a push target. It controls target
+	// validation and upstream behavior; successful results report the resolved
+	// destination for both explicit and default pushes.
 	explicit bool
 	// routed records that contribution routing selected the destination.
 	routed bool
@@ -407,13 +407,9 @@ func (g *GitOperator) verifyExpectedBranch(ctx context.Context, expected string,
 	return nil
 }
 
-// reportDestination populates the destination fields a successful push reports.
-// A push that named no explicit target omits them so an existing consumer sees
-// an unchanged result shape.
+// reportDestination populates the resolved destination fields a successful
+// push reports.
 func (p *pushPlan) reportDestination(result *GitOperationResult) {
-	if !p.explicit {
-		return
-	}
 	result.PushedRemote = p.remote
 	result.PushedBranch = p.branch
 }

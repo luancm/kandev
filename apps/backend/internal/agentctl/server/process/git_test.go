@@ -127,6 +127,9 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			if !result.Success || !result.BranchPushed || result.PRURL != binding.CanonicalURL || result.Provider != binding.Provider {
 				t.Fatalf("CreatePR = %+v, want reuse of existing contribution", result)
 			}
+			if result.PushedRemote != binding.ContributionRemoteName() || result.PushedBranch != binding.HeadBranch || result.PushedHeadCommit != headSHA {
+				t.Fatalf("CreatePR push destination = (%q, %q, %q), want (%q, %q, %q)", result.PushedRemote, result.PushedBranch, result.PushedHeadCommit, binding.ContributionRemoteName(), binding.HeadBranch, headSHA)
+			}
 		})
 	}
 }

@@ -11,6 +11,7 @@ import (
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/registry"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -259,35 +260,82 @@ func provideGateway(
 					zap.Error(err))
 			}
 		})
-		gitHandlers.SetOnGitOperationFailed(func(ctx context.Context, sessionID, taskID, operation, errorOutput string) {
+		gitHandlers.SetOnGitOperationFailedWithResult(func(ctx context.Context, sessionID, taskID, operation string, result *runtimeapi.GitOperationResult) {
+			errorOutput := result.Error
+			if errorOutput == "" {
+				errorOutput = result.Output
+			}
 			fixPrompt := fmt.Sprintf("The git %s command failed with the following error:\n\n```\n%s\n```\n\nPlease fix the issues reported above.", operation, errorOutput)
+			metadata := map[string]interface{}{
+				"git_operation_error": true,
+				"operation":           operation,
+				"error_output":        errorOutput,
+				"session_id":          sessionID,
+				"task_id":             taskID,
+				"variant":             "error",
+				"actions": []map[string]interface{}{{
+					"type": "ws_request", "label": "Fix", "icon": "sparkles",
+					"tooltip": "Ask the agent to fix the git error",
+					"test_id": "git-fix-button",
+					"params": map[string]interface{}{
+						"method":  "message.add",
+						"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "content": fixPrompt},
+					},
+				}},
+			}
+			if operation == gitOperationPush {
+				if result.AttemptedRemote != "" && result.AttemptedBranch != "" && result.AttemptedHeadCommit != "" {
+					metadata["git_operation_error_version"] = gitOperationFeedbackVersion
+					metadata["git_operation_failed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+					metadata["git_operation_attempted_remote"] = result.AttemptedRemote
+					metadata["git_operation_attempted_branch"] = result.AttemptedBranch
+					metadata["git_operation_attempted_head_commit"] = result.AttemptedHeadCommit
+				}
+			}
 			if _, err := taskSvc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 				TaskSessionID: sessionID,
 				TaskID:        taskID,
 				Content:       fmt.Sprintf("Git %s failed", operation),
 				AuthorType:    "agent",
 				Type:          "error",
-				Metadata: map[string]interface{}{
-					"git_operation_error": true,
-					"operation":           operation,
-					"error_output":        errorOutput,
-					"session_id":          sessionID,
-					"task_id":             taskID,
-					"variant":             "error",
-					"actions": []map[string]interface{}{{
-						"type": "ws_request", "label": "Fix", "icon": "sparkles",
-						"tooltip": "Ask the agent to fix the git error",
-						"test_id": "git-fix-button",
-						"params": map[string]interface{}{
-							"method":  "message.add",
-							"payload": map[string]interface{}{"task_id": taskID, "session_id": sessionID, "content": fixPrompt},
-						},
-					}},
-				},
+				Metadata:      metadata,
 			}); err != nil {
 				log.Error("failed to create git operation error message",
 					zap.String("session_id", sessionID),
 					zap.String("operation", operation),
+					zap.Error(err))
+			}
+		})
+		gitHandlers.SetOnGitOperationSucceeded(func(ctx context.Context, sessionID, taskID, operation string) {
+			if operation != gitOperationPush {
+				return
+			}
+			if _, err := resolveGitOperationErrorsForSuccessfulPush(ctx, taskRepo, taskSvc, sessionID, taskID); err != nil {
+				log.Warn("failed to resolve git operation error after successful push",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		})
+		gitHandlers.SetOnGitOperationSucceededWithResult(func(ctx context.Context, sessionID, taskID, operation string, result *runtimeapi.GitOperationResult, _ string) {
+			if operation != gitOperationPush || result == nil {
+				return
+			}
+			if _, err := resolveGitOperationErrorsForSuccessfulPushResult(ctx, taskRepo, taskSvc, sessionID, taskID, result); err != nil {
+				log.Warn("failed to resolve scoped git operation error after successful push",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
+					zap.Error(err))
+			}
+		})
+		gitHandlers.SetOnGitOperationSucceededWithStatus(func(ctx context.Context, sessionID, taskID, operation string, status *runtimeapi.GitStatusResult) {
+			if operation != gitOperationPush || status == nil || !status.Success {
+				return
+			}
+			if _, err := resolveGitOperationErrorsForStatus(ctx, taskRepo, taskSvc, sessionID, taskID, gitOperationRecoveryEvidenceFromStatus(*status)); err != nil {
+				log.Warn("failed to resolve git operation error from successful push status",
+					zap.String("session_id", sessionID),
+					zap.String("task_id", taskID),
 					zap.Error(err))
 			}
 		})
