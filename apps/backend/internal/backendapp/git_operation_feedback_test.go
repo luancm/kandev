@@ -122,6 +122,34 @@ func TestResolveGitOperationErrorsForStatusRequiresCurrentAttemptScope(t *testin
 	}
 }
 
+func TestResolveGitOperationErrorsForStatusLeavesForeignRepository(t *testing.T) {
+	now := time.Now().UTC()
+	message := legacyGitPushMessage("foreign-repository", now.Add(-time.Minute))
+	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
+	message.Metadata["git_operation_attempted_remote"] = "origin"
+	message.Metadata["git_operation_attempted_branch"] = "main"
+	message.Metadata["git_operation_attempted_head_commit"] = "abc123"
+	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
+	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-a"}}}
+
+	count, err := resolveGitOperationErrorsForStatus(context.Background(), repo, store, "session-1", "task-1", gitOperationRecoveryEvidence{
+		RepositoryName:    "repo-b",
+		Branch:            "main",
+		RemoteBranch:      "origin/main",
+		HeadCommit:        "abc123",
+		RemoteHeadCommit:  "abc123",
+		RemoteAheadKnown:  true,
+		RemoteBehindKnown: true,
+		ObservedAt:        now,
+	})
+	if err != nil {
+		t.Fatalf("resolveGitOperationErrorsForStatus: %v", err)
+	}
+	if count != 0 || len(store.resolved) != 0 {
+		t.Fatalf("resolved = (%d, %v), want none", count, store.resolved)
+	}
+}
+
 func TestResolveGitOperationErrorsForStatusLeavesMismatchedCurrentAttempt(t *testing.T) {
 	now := time.Now().UTC()
 	message := legacyGitPushMessage("scoped-push", now.Add(-time.Minute))

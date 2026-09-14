@@ -186,7 +186,8 @@ func resolveGitOperationErrorsForStatus(
 	sessionID, taskID string,
 	evidence gitOperationRecoveryEvidence,
 ) (int, error) {
-	if taskRepo == nil || messageStore == nil || sessionID == "" || taskID == "" || !validGitPushRecoveryEvidence(evidence) {
+	if taskRepo == nil || messageStore == nil || sessionID == "" || taskID == "" ||
+		!gitOperationStatusEvidenceMatchesSingleRepositoryTask(evidence) || !validGitPushRecoveryEvidence(evidence) {
 		return 0, nil
 	}
 	repositories, err := taskRepo.ListTaskRepositories(ctx, taskID)
@@ -201,6 +202,13 @@ func resolveGitOperationErrorsForStatus(
 		observedAt = time.Now().UTC()
 	}
 	return resolveGitOperationErrors(ctx, messageStore, sessionID, observedAt, gitOperationResolutionGitStatus, &evidence)
+}
+
+// A status producer reports an empty repository name for the workspace root.
+// This resolver only handles tasks with one repository, so a named runtime
+// scope belongs to another repository even when its branch status is healthy.
+func gitOperationStatusEvidenceMatchesSingleRepositoryTask(evidence gitOperationRecoveryEvidence) bool {
+	return evidence.RepositoryName == ""
 }
 
 func validGitPushRecoveryEvidence(evidence gitOperationRecoveryEvidence) bool {
