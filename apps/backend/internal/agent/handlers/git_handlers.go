@@ -436,10 +436,12 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 	if err != nil {
 		return nil, fmt.Errorf("push failed: %w", err)
 	}
+	annotateGitPushResult(result, req.Repo)
 	if result != nil && result.Success {
 		h.notifyGitOperationSucceededWithResult(req.SessionID, "push", result, strings.TrimSpace(result.PushedHeadCommit))
 		if h.onGitOperationSucceededWithStatus != nil {
 			if status, statusErr := agentClient.GetGitStatusFresh(ctx); statusErr == nil && status != nil && status.Success {
+				status.Repository = strings.TrimSpace(req.Repo)
 				h.notifyGitOperationSucceededWithStatus(req.SessionID, "push", status)
 			}
 		}
@@ -802,7 +804,7 @@ func (h *GitHandlers) wsCreatePR(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if err != nil {
 		return nil, fmt.Errorf("create PR failed: %w", err)
 	}
-	h.notifyCreatePRPushSuccess(ctx, req.SessionID, agentClient, result)
+	h.notifyCreatePRPushSuccess(ctx, req.SessionID, agentClient, req.Repo, result)
 
 	// On success, notify callback to associate PR with task. The repo subpath
 	// flows through so the orchestrator can scope the resulting TaskPR /
@@ -831,6 +833,7 @@ func (h *GitHandlers) notifyCreatePRPushSuccess(
 	ctx context.Context,
 	sessionID string,
 	agentClient *client.Client,
+	repo string,
 	result *client.PRCreateResult,
 ) {
 	if result == nil || !result.BranchPushed {
@@ -841,12 +844,23 @@ func (h *GitHandlers) notifyCreatePRPushSuccess(
 		PushedRemote:     result.PushedRemote,
 		PushedBranch:     result.PushedBranch,
 		PushedHeadCommit: result.PushedHeadCommit,
+		Repository:       strings.TrimSpace(repo),
+		OccurredAt:       time.Now().UTC(),
 	}, result.PushedHeadCommit)
 	if h.onGitOperationSucceededWithStatus != nil {
 		if status, statusErr := agentClient.GetGitStatusFresh(ctx); statusErr == nil && status != nil && status.Success {
+			status.Repository = strings.TrimSpace(repo)
 			h.notifyGitOperationSucceededWithStatus(sessionID, gitOperationPush, status)
 		}
 	}
+}
+
+func annotateGitPushResult(result *client.GitOperationResult, repo string) {
+	if result == nil {
+		return
+	}
+	result.Repository = strings.TrimSpace(repo)
+	result.OccurredAt = time.Now().UTC()
 }
 
 func newCreatePRResponse(msg *ws.Message, result *client.PRCreateResult) (*ws.Message, error) {

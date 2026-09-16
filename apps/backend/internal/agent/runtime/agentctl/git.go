@@ -47,6 +47,13 @@ type GitOperationResult struct {
 	// BaselinePublished marks a mismatch refusal after empty-remote first
 	// publication already published the baseline in this request.
 	BaselinePublished bool `json:"baseline_published,omitempty"`
+	// Repository is the request's repository subpath as observed by the host
+	// handler. It is callback-only metadata and never crosses the agentctl
+	// response boundary.
+	Repository string `json:"-"`
+	// OccurredAt is when the host observed the operation result. It is used to
+	// order push alert transitions and is not part of the wire response.
+	OccurredAt time.Time `json:"-"`
 }
 
 // PushOptions carries the optional inputs of a push or push-preflight call.
@@ -683,6 +690,10 @@ type GitStatusResult struct {
 	BranchAdditions     int                    `json:"branch_additions,omitempty"`
 	BranchDeletions     int                    `json:"branch_deletions,omitempty"`
 	Error               string                 `json:"error,omitempty"`
+	// Repository is the request's repository subpath as observed by the host
+	// handler. It is callback-only metadata and never crosses the agentctl
+	// response boundary; RepositoryName remains the agentctl-reported name.
+	Repository string `json:"-"`
 }
 
 // fetchJSONResult performs a GET against `path` and decodes the response into
