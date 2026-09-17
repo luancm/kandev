@@ -619,6 +619,7 @@ type Service struct {
 	// shared by REST snapshots and semantic message events. Revisions are
 	// reserved before each repository read so delayed results stay ordered.
 	pendingActionProjectionMu       sync.Mutex
+	gitPushAlertMu                  sync.Mutex
 	pendingActionProjectionEpoch    string
 	pendingActionProjectionSequence uint64
 	lastPendingActionProjections    map[string]pendingActionProjectionState

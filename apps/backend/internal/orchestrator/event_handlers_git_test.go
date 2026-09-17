@@ -116,6 +116,11 @@ func TestGitStatusHashIncludesUpstreamEvidence(t *testing.T) {
 	if gitStatusHash(status) == gitStatusHash(&changed) {
 		t.Fatal("snapshot hash must change when upstream divergence changes")
 	}
+	changed = *status
+	changed.RemoteAheadKnown = true
+	if gitStatusHash(status) == gitStatusHash(&changed) {
+		t.Fatal("snapshot hash must change when upstream counter presence changes")
+	}
 }
 
 func TestHandleGitStatusUpdateResolvesEnvironmentForRecoveredEvent(t *testing.T) {

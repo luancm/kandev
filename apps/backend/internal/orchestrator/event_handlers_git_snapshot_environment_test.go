@@ -101,3 +101,31 @@ func TestPersistGitStatusSnapshotScopesSiblingSessionsByEnvironmentAndRepository
 	require.Equal(t, float64(1), current[0].Metadata["remote_ahead"])
 	require.Equal(t, float64(2), current[0].Metadata["remote_behind"])
 }
+
+func TestPersistGitStatusSnapshotOmitsUnknownZeroRemoteCounters(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSharedGitSnapshotEnvironment(t, repo, "task-git-unknown", "env-git-unknown", "session-git-unknown")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.gitSnapshotCache = newGitSnapshotCache()
+	svc.persistGitStatusSnapshot(ctx, watcher.GitEventData{
+		TaskEnvironmentID: "env-git-unknown",
+		SessionID:         "session-git-unknown",
+		Status: &lifecycle.GitStatusData{
+			RepositoryName:   "backend",
+			Branch:           "feature/unknown",
+			RemoteBranch:     "origin/feature/unknown",
+			HeadCommit:       "head",
+			RemoteHeadCommit: "",
+		},
+	})
+
+	snapshots, err := repo.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, []string{"env-git-unknown"})
+	require.NoError(t, err)
+	require.Len(t, snapshots, 1)
+	_, aheadPresent := snapshots[0].Metadata["remote_ahead"]
+	_, behindPresent := snapshots[0].Metadata["remote_behind"]
+	require.False(t, aheadPresent, "unknown zero remote-ahead must not become durable evidence")
+	require.False(t, behindPresent, "unknown zero remote-behind must not become durable evidence")
+}

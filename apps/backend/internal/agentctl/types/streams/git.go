@@ -1,6 +1,9 @@
 package streams
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // GitStatusUpdate is the message type streamed via the git status stream.
 // Represents the current git state of the workspace.
@@ -69,6 +72,11 @@ type GitStatusUpdate struct {
 	// captured with RemoteAhead and RemoteBehind so consumers can compare the
 	// checkout with an upstream snapshot without confusing it with the base.
 	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
+	// Remote*Known records whether the corresponding upstream divergence field
+	// was present on the wire. A missing field must not be treated as a proven
+	// zero during durable alert reconciliation.
+	RemoteAheadKnown  bool `json:"-"`
+	RemoteBehindKnown bool `json:"-"`
 
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`
@@ -95,6 +103,24 @@ type GitStatusUpdate struct {
 	// BranchDeletions is the total number of deleted lines across all changes on
 	// this branch compared to the merge-base (committed + staged + unstaged).
 	BranchDeletions int `json:"branch_deletions,omitempty"`
+}
+
+// UnmarshalJSON keeps field-presence information for upstream divergence
+// counters while preserving the public stream shape.
+func (update *GitStatusUpdate) UnmarshalJSON(data []byte) error {
+	type gitStatusUpdate GitStatusUpdate
+	var decoded gitStatusUpdate
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*update = GitStatusUpdate(decoded)
+	_, update.RemoteAheadKnown = fields["remote_ahead"]
+	_, update.RemoteBehindKnown = fields["remote_behind"]
+	return nil
 }
 
 // FileChangeFacet is one layer of a mixed file change. A mixed path can have

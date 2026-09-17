@@ -5671,7 +5671,7 @@ func archiveGitStatusMetadata(status *client.GitStatusResult, files map[string]i
 	if status == nil {
 		return nil
 	}
-	return map[string]interface{}{
+	metadata := map[string]interface{}{
 		"timestamp": status.Timestamp,
 		// The archive's files map is a cumulative diff, while these status
 		// lists describe the working tree at capture time. Keep an explicit
@@ -5682,12 +5682,17 @@ func archiveGitStatusMetadata(status *client.GitStatusResult, files map[string]i
 		"deleted":            status.Deleted,
 		"untracked":          status.Untracked,
 		"renamed":            status.Renamed,
-		"remote_ahead":       status.RemoteAhead,
-		"remote_behind":      status.RemoteBehind,
 		"remote_head_commit": status.RemoteHeadCommit,
 		"branch_additions":   status.BranchAdditions,
 		"branch_deletions":   status.BranchDeletions,
 	}
+	if status.RemoteAheadKnown || status.RemoteAhead != 0 {
+		metadata["remote_ahead"] = status.RemoteAhead
+	}
+	if status.RemoteBehindKnown || status.RemoteBehind != 0 {
+		metadata["remote_behind"] = status.RemoteBehind
+	}
+	return metadata
 }
 
 // parseCommitTime parses a commit timestamp from git log output.

@@ -834,6 +834,24 @@ func TestGetGitStatusFresh_SendsFreshQueryParam(t *testing.T) {
 	assertFullGitStatus(t, result)
 }
 
+func TestGitStatusResultTracksRemoteCounterPresence(t *testing.T) {
+	var complete GitStatusResult
+	if err := json.Unmarshal([]byte(`{"remote_ahead":0,"remote_behind":0}`), &complete); err != nil {
+		t.Fatalf("unmarshal complete status: %v", err)
+	}
+	if !complete.RemoteAheadKnown || !complete.RemoteBehindKnown {
+		t.Fatalf("complete status knownness = %v/%v, want true/true", complete.RemoteAheadKnown, complete.RemoteBehindKnown)
+	}
+
+	var incomplete GitStatusResult
+	if err := json.Unmarshal([]byte(`{"remote_head_commit":"head"}`), &incomplete); err != nil {
+		t.Fatalf("unmarshal incomplete status: %v", err)
+	}
+	if incomplete.RemoteAheadKnown || incomplete.RemoteBehindKnown {
+		t.Fatalf("incomplete status knownness = %v/%v, want false/false", incomplete.RemoteAheadKnown, incomplete.RemoteBehindKnown)
+	}
+}
+
 func TestGetGitStatusMultiFresh_UsesMultiEndpointAndDecodesPerRepoEntries(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
 		"success":true,

@@ -48,3 +48,13 @@ func TestArchiveGitStatusMetadataPreservesStatusSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestArchiveGitStatusMetadataOmitsUnknownZeroRemoteCounters(t *testing.T) {
+	metadata := archiveGitStatusMetadata(&client.GitStatusResult{}, nil)
+	if _, ok := metadata["remote_ahead"]; ok {
+		t.Fatal("unknown zero remote-ahead must not be persisted")
+	}
+	if _, ok := metadata["remote_behind"]; ok {
+		t.Fatal("unknown zero remote-behind must not be persisted")
+	}
+}

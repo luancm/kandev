@@ -89,3 +89,70 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		t.Fatal("timed out waiting for git status event")
 	}
 }
+
+func TestPublishGitStatusPreservesRemoteCounterPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		json string
+		want bool
+	}{
+		{
+			name: "complete zero counters",
+			json: `{"timestamp":"2026-09-16T12:00:00Z","branch":"main","remote_ahead":0,"remote_behind":0}`,
+			want: true,
+		},
+		{
+			name: "omitted counters",
+			json: `{"timestamp":"2026-09-16T12:00:00Z","branch":"main"}`,
+			want: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var update agentctl.GitStatusUpdate
+			if err := json.Unmarshal([]byte(tc.json), &update); err != nil {
+				t.Fatalf("decode status update: %v", err)
+			}
+			if update.RemoteAheadKnown != tc.want || update.RemoteBehindKnown != tc.want {
+				t.Fatalf("decoded knownness = %v/%v, want %v", update.RemoteAheadKnown, update.RemoteBehindKnown, tc.want)
+			}
+
+			log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			eventBus := bus.NewMemoryEventBus(log)
+			pub := NewEventPublisher(eventBus, log)
+			received := make(chan *bus.Event, 1)
+			sub, err := eventBus.Subscribe(events.BuildGitEventSubject("sess-counter-presence"), func(_ context.Context, ev *bus.Event) error {
+				received <- ev
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+			defer func() { _ = sub.Unsubscribe() }()
+
+			pub.PublishGitStatus(&AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "sess-counter-presence"}, &update)
+			select {
+			case ev := <-received:
+				payload, ok := ev.Data.(*GitEventPayload)
+				if !ok || payload == nil || payload.Status == nil {
+					t.Fatalf("expected git status payload, got %T", ev.Data)
+				}
+				if payload.Status.RemoteAheadKnown != tc.want || payload.Status.RemoteBehindKnown != tc.want {
+					t.Fatalf("published knownness = %v/%v, want %v", payload.Status.RemoteAheadKnown, payload.Status.RemoteBehindKnown, tc.want)
+				}
+				encodedPayload, err := json.Marshal(payload)
+				if err != nil {
+					t.Fatalf("marshal published payload: %v", err)
+				}
+				var roundTripped GitEventPayload
+				if err := json.Unmarshal(encodedPayload, &roundTripped); err != nil {
+					t.Fatalf("round-trip published payload: %v", err)
+				}
+				if roundTripped.Status == nil || roundTripped.Status.RemoteAheadKnown != tc.want || roundTripped.Status.RemoteBehindKnown != tc.want {
+					t.Fatalf("round-tripped knownness = %#v, want %v", roundTripped.Status, tc.want)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for git status event")
+			}
+		})
+	}
+}

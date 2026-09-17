@@ -165,7 +165,11 @@ func provideOrchestrator(
 		} else if session.TaskID != taskID {
 			return
 		}
-		if _, err := resolveGitOperationErrorsForStatus(ctx, taskRepo, taskSvc, sessionID, taskID, gitOperationRecoveryEvidenceFromLifecycleStatus(status, observedAt)); err != nil {
+		taskRepositoryID := resolveTaskRepositoryIDForStatus(ctx, taskRepo, sessionID, taskID, status.RepositoryName, log)
+		if taskRepositoryID == "" {
+			return
+		}
+		if err := taskSvc.ReconcileGitPushStatus(ctx, sessionID, gitPushStatusObservationFromLifecycleStatus(status, taskRepositoryID, observedAt)); err != nil {
 			log.Warn("failed to resolve git operation error from status event",
 				zap.String("session_id", sessionID),
 				zap.String("task_id", taskID),

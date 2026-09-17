@@ -2,344 +2,160 @@ package backendapp
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
-	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-type gitOperationFeedbackTaskRepositoryStub struct {
-	repositories []*models.TaskRepository
-	err          error
+type gitPushScopeFixture struct {
+	repo      *bootStateTestHarness
+	taskID    string
+	sessionID string
 }
 
-func (s *gitOperationFeedbackTaskRepositoryStub) ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error) {
-	return s.repositories, s.err
-}
-
-type gitOperationFeedbackStoreStub struct {
-	messages   []*models.Message
-	resolved   []string
-	listErr    error
-	resolveErr error
-}
-
-func (s *gitOperationFeedbackStoreStub) ListMessages(context.Context, string) ([]*models.Message, error) {
-	if s.listErr != nil {
-		return nil, s.listErr
+func newGitPushScopeFixture(t *testing.T) gitPushScopeFixture {
+	t.Helper()
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	const (
+		workspaceID = "git-push-scope-workspace"
+		taskID      = "git-push-scope-task"
+		environment = "git-push-scope-environment"
+		sessionID   = "git-push-scope-session"
+		repoA       = "git-push-scope-repo-a"
+		repoB       = "git-push-scope-repo-b"
+		taskRepoA   = "git-push-scope-task-repo-a"
+		taskRepoB   = "git-push-scope-task-repo-b"
+		envRepoA    = "git-push-scope-env-repo-a"
+		envRepoB    = "git-push-scope-env-repo-b"
+	)
+	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	if err := harness.taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: workspaceID}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	return s.messages, nil
-}
-
-func (s *gitOperationFeedbackStoreStub) ResolveGitOperationErrorMessage(_ context.Context, messageID, resolution string) error {
-	if s.resolveErr != nil {
-		return s.resolveErr
+	if err := harness.taskRepo.CreateTask(ctx, &models.Task{
+		ID: taskID, WorkspaceID: workspaceID, Title: taskID, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
 	}
-	for _, message := range s.messages {
-		if message != nil && message.ID == messageID {
-			if message.Metadata == nil {
-				message.Metadata = map[string]interface{}{}
-			}
-			message.Metadata["git_operation_resolved"] = true
-			message.Metadata["resolution"] = resolution
+	for _, repository := range []*models.Repository{
+		{ID: repoA, WorkspaceID: workspaceID, Name: "repo-a", SourceType: "local"},
+		{ID: repoB, WorkspaceID: workspaceID, Name: "repo-b", SourceType: "local"},
+	} {
+		if err := harness.taskRepo.CreateRepository(ctx, repository); err != nil {
+			t.Fatalf("CreateRepository(%s): %v", repository.ID, err)
 		}
 	}
-	s.resolved = append(s.resolved, messageID)
-	return nil
-}
-
-func legacyGitPushMessage(id string, createdAt time.Time) *models.Message {
-	return &models.Message{
-		ID:        id,
-		CreatedAt: createdAt,
-		Metadata: map[string]interface{}{
-			"git_operation_error": true,
-			"operation":           "push",
-		},
-	}
-}
-
-func TestResolveGitOperationErrorsForStatusResolvesOnlyOlderPushErrors(t *testing.T) {
-	now := time.Now().UTC()
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{
-		legacyGitPushMessage("old-push", now.Add(-time.Minute)),
-		legacyGitPushMessage("new-push", now.Add(time.Minute)),
-		{ID: "pull", CreatedAt: now.Add(-time.Minute), Metadata: map[string]interface{}{
-			"git_operation_error": true,
-			"operation":           "pull",
-		}},
-	}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForStatus(context.Background(), repo, store, "session-1", "task-1", gitOperationRecoveryEvidence{
-		Branch:            "main",
-		RemoteBranch:      "origin/main",
-		HeadCommit:        "abc",
-		RemoteHeadCommit:  "abc",
-		RemoteAheadKnown:  true,
-		RemoteBehindKnown: true,
-		ObservedAt:        now,
-	})
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForStatus: %v", err)
-	}
-	if count != 1 || len(store.resolved) != 1 || store.resolved[0] != "old-push" {
-		t.Fatalf("resolved = (%d, %v), want old-push only", count, store.resolved)
-	}
-	if store.messages[1].Metadata["git_operation_resolved"] == true {
-		t.Fatal("newer push error must remain unresolved")
-	}
-	if store.messages[2].Metadata["git_operation_resolved"] == true {
-		t.Fatal("pull error must remain unresolved")
-	}
-}
-
-func TestResolveGitOperationErrorsForStatusRequiresCurrentAttemptScope(t *testing.T) {
-	now := time.Now().UTC()
-	message := legacyGitPushMessage("scoped-push", now.Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_attempted_remote"] = "origin"
-	message.Metadata["git_operation_attempted_branch"] = "main"
-	message.Metadata["git_operation_attempted_head_commit"] = "abc"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	evidence := gitOperationRecoveryEvidence{
-		Branch:            "main",
-		RemoteBranch:      "origin/main",
-		HeadCommit:        "abc",
-		RemoteHeadCommit:  "abc",
-		RemoteAheadKnown:  true,
-		RemoteBehindKnown: true,
-		ObservedAt:        now,
-	}
-	count, err := resolveGitOperationErrorsForStatus(context.Background(), repo, store, "session-1", "task-1", evidence)
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForStatus: %v", err)
-	}
-	if count != 1 || len(store.resolved) != 1 || store.resolved[0] != "scoped-push" {
-		t.Fatalf("resolved = (%d, %v), want scoped-push", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsForStatusLeavesForeignRepository(t *testing.T) {
-	now := time.Now().UTC()
-	message := legacyGitPushMessage("foreign-repository", now.Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_attempted_remote"] = "origin"
-	message.Metadata["git_operation_attempted_branch"] = "main"
-	message.Metadata["git_operation_attempted_head_commit"] = "abc123"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-a"}}}
-
-	count, err := resolveGitOperationErrorsForStatus(context.Background(), repo, store, "session-1", "task-1", gitOperationRecoveryEvidence{
-		RepositoryName:    "repo-b",
-		Branch:            "main",
-		RemoteBranch:      "origin/main",
-		HeadCommit:        "abc123",
-		RemoteHeadCommit:  "abc123",
-		RemoteAheadKnown:  true,
-		RemoteBehindKnown: true,
-		ObservedAt:        now,
-	})
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForStatus: %v", err)
-	}
-	if count != 0 || len(store.resolved) != 0 {
-		t.Fatalf("resolved = (%d, %v), want none", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsForStatusLeavesMismatchedCurrentAttempt(t *testing.T) {
-	now := time.Now().UTC()
-	message := legacyGitPushMessage("scoped-push", now.Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_attempted_remote"] = "origin"
-	message.Metadata["git_operation_attempted_branch"] = "feature"
-	message.Metadata["git_operation_attempted_head_commit"] = "abc"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForStatus(context.Background(), repo, store, "session-1", "task-1", gitOperationRecoveryEvidence{
-		Branch:            "main",
-		RemoteBranch:      "origin/main",
-		HeadCommit:        "abc",
-		RemoteHeadCommit:  "abc",
-		RemoteAheadKnown:  true,
-		RemoteBehindKnown: true,
-		ObservedAt:        now,
-	})
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForStatus: %v", err)
-	}
-	if count != 0 || len(store.resolved) != 0 {
-		t.Fatalf("resolved = (%d, %v), want none", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsForStatusRejectsWeakEvidence(t *testing.T) {
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{legacyGitPushMessage("push", time.Now().Add(-time.Minute))}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	for name, evidence := range map[string]gitOperationRecoveryEvidence{
-		"missing remote head": {
-			Branch: "main", RemoteBranch: "origin/main", HeadCommit: "abc",
-		},
-		"base relative counters": {
-			Branch: "main", RemoteBranch: "origin/main", HeadCommit: "abc", RemoteHeadCommit: "abc", RemoteAheadKnown: true, RemoteBehindKnown: true, RemoteAhead: 1,
-		},
-		"different branch": {
-			Branch: "feature", RemoteBranch: "origin/main", HeadCommit: "abc", RemoteHeadCommit: "abc",
-		},
-		"different heads": {
-			Branch: "main", RemoteBranch: "origin/main", HeadCommit: "abc", RemoteHeadCommit: "def",
-		},
+	for _, link := range []*models.TaskRepository{
+		{ID: taskRepoA, TaskID: taskID, RepositoryID: repoA, BaseBranch: "main", Position: 0},
+		{ID: taskRepoB, TaskID: taskID, RepositoryID: repoB, BaseBranch: "main", Position: 1},
 	} {
-		t.Run(name, func(t *testing.T) {
-			store.messages[0].Metadata["git_operation_resolved"] = false
-			store.resolved = nil
-			count, err := resolveGitOperationErrorsForStatus(context.Background(), repo, store, "session-1", "task-1", evidence)
-			if err != nil {
-				t.Fatalf("resolveGitOperationErrorsForStatus: %v", err)
-			}
-			if count != 0 || len(store.resolved) != 0 {
-				t.Fatalf("resolved = (%d, %v), want none", count, store.resolved)
-			}
-		})
+		if err := harness.taskRepo.CreateTaskRepository(ctx, link); err != nil {
+			t.Fatalf("CreateTaskRepository(%s): %v", link.ID, err)
+		}
 	}
-}
-
-func TestResolveGitOperationErrorsForSuccessfulPushResultUsesExplicitDestination(t *testing.T) {
-	message := legacyGitPushMessage("scoped-push", time.Now().Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_attempted_remote"] = "backup"
-	message.Metadata["git_operation_attempted_branch"] = "feature/work"
-	message.Metadata["git_operation_attempted_head_commit"] = "abc"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForSuccessfulPushResult(
-		context.Background(), repo, store, "session-1", "task-1",
-		&client.GitOperationResult{
-			Success:          true,
-			PushedRemote:     "backup",
-			PushedBranch:     "feature/work",
-			PushedHeadCommit: "abc",
+	if err := harness.taskRepo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: environment, TaskID: taskID, ExecutorType: string(models.ExecutorTypeLocal),
+		WorkspacePath: "/tmp/git-push-scope", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: envRepoA, RepositoryID: repoA, WorktreePath: "/tmp/git-push-scope/repo-a", WorktreeBranch: "main", Position: 0},
+			{ID: envRepoB, RepositoryID: repoB, WorktreePath: "/tmp/git-push-scope/repo-b", WorktreeBranch: "main", Position: 1},
 		},
-	)
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForSuccessfulPushResult: %v", err)
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
 	}
-	if count != 1 || len(store.resolved) != 1 || store.resolved[0] != "scoped-push" {
-		t.Fatalf("resolved = (%d, %v), want scoped-push", count, store.resolved)
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environment,
+		WorkspacePath: "/tmp/git-push-scope", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	return gitPushScopeFixture{repo: &harness, taskID: taskID, sessionID: sessionID}
+}
+
+func TestResolveTaskRepositoryIDForSubpathUsesTaskRepositoryLinkID(t *testing.T) {
+	fixture := newGitPushScopeFixture(t)
+	ctx := context.Background()
+	log := newTestLogger()
+
+	if got := resolveTaskRepositoryIDForSubpath(ctx, fixture.repo.taskRepo, fixture.taskID, "repo-b", log); got != "git-push-scope-task-repo-b" {
+		t.Fatalf("named repository scope = %q, want task repository link ID", got)
+	}
+	if got := resolveTaskRepositoryIDForSubpath(ctx, fixture.repo.taskRepo, fixture.taskID, "", log); got != "" {
+		t.Fatalf("empty multi-repository scope = %q, want fail closed", got)
 	}
 }
 
-func TestResolveGitOperationErrorsForSuccessfulPushResultLeavesLegacyErrorsForStatus(t *testing.T) {
-	message := legacyGitPushMessage("legacy-push", time.Now().Add(-time.Minute))
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForSuccessfulPushResult(
-		context.Background(), repo, store, "session-1", "task-1",
-		&client.GitOperationResult{
-			Success:      true,
-			PushedRemote: "backup",
-			PushedBranch: "feature/work",
+func TestResolveTaskRepositoryIDForStatusRequiresEnvironmentScope(t *testing.T) {
+	fixture := newGitPushScopeFixture(t)
+	ctx := context.Background()
+	log := newTestLogger()
+
+	if got := resolveTaskRepositoryIDForStatus(ctx, fixture.repo.taskRepo, fixture.sessionID, fixture.taskID, "repo-b", log); got != "git-push-scope-task-repo-b" {
+		t.Fatalf("status repository scope = %q, want task repository link ID", got)
+	}
+	if got := resolveTaskRepositoryIDForStatus(ctx, fixture.repo.taskRepo, fixture.sessionID, fixture.taskID, "unrelated-repository", log); got != "" {
+		t.Fatalf("foreign status scope = %q, want fail closed", got)
+	}
+	if got := resolveTaskRepositoryIDForStatus(ctx, fixture.repo.taskRepo, fixture.sessionID, fixture.taskID, "", log); got != "" {
+		t.Fatalf("empty multi-repository status scope = %q, want fail closed", got)
+	}
+}
+
+func TestGitPushStatusObservationDoesNotAssumeMissingRemoteCountersAreKnown(t *testing.T) {
+	observation := gitPushStatusObservationFromStatus(runtimeapi.GitStatusResult{
+		Success:          true,
+		Branch:           "main",
+		RemoteBranch:     "origin/main",
+		HeadCommit:       "head",
+		RemoteHeadCommit: "head",
+	}, "task-repo")
+	if observation.RemoteAheadKnown || observation.RemoteBehindKnown {
+		t.Fatalf("missing remote counters marked known: %+v", observation)
+	}
+}
+
+func TestGitPushStatusObservationPrefersSourceTimestamp(t *testing.T) {
+	sourceAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	receivedAt := sourceAt.Add(time.Hour)
+	observation := gitPushStatusObservationFromStatus(runtimeapi.GitStatusResult{
+		Timestamp: sourceAt.Format(time.RFC3339Nano),
+	}, "task-repo", receivedAt)
+	if !observation.ObservedAt.Equal(sourceAt) {
+		t.Fatalf("source timestamp = %s, want %s", observation.ObservedAt, sourceAt)
+	}
+	observation = gitPushStatusObservationFromStatus(runtimeapi.GitStatusResult{}, "task-repo", receivedAt)
+	if !observation.ObservedAt.Equal(receivedAt) {
+		t.Fatalf("fallback timestamp = %s, want %s", observation.ObservedAt, receivedAt)
+	}
+}
+
+func TestGitPushStatusObservationFromSnapshotPreservesMissingRemoteCounters(t *testing.T) {
+	observation := gitPushStatusObservationFromSnapshot(&models.GitSnapshot{
+		Branch:       "main",
+		RemoteBranch: "origin/main",
+		HeadCommit:   "head",
+		Metadata:     map[string]interface{}{"remote_head_commit": "head"},
+		CreatedAt:    time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
+	}, "task-repo")
+	if observation.RemoteAheadKnown || observation.RemoteBehindKnown {
+		t.Fatalf("missing snapshot remote counters marked known: %+v", observation)
+	}
+}
+
+func TestGitPushStatusObservationFromSnapshotPrefersSourceTimestamp(t *testing.T) {
+	sourceAt := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	persistedAt := sourceAt.Add(time.Hour)
+	observation := gitPushStatusObservationFromSnapshot(&models.GitSnapshot{
+		CreatedAt: persistedAt,
+		Metadata: map[string]interface{}{
+			"timestamp": sourceAt.Format(time.RFC3339Nano),
 		},
-	)
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForSuccessfulPushResult: %v", err)
-	}
-	if count != 0 || len(store.resolved) != 0 {
-		t.Fatalf("resolved = (%d, %v), want none without destination metadata", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsForSuccessfulPushResultLeavesMismatchedDestination(t *testing.T) {
-	message := legacyGitPushMessage("scoped-push", time.Now().Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_attempted_remote"] = "origin"
-	message.Metadata["git_operation_attempted_branch"] = "main"
-	message.Metadata["git_operation_attempted_head_commit"] = "abc"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForSuccessfulPushResult(
-		context.Background(), repo, store, "session-1", "task-1",
-		&client.GitOperationResult{
-			Success:          true,
-			PushedRemote:     "backup",
-			PushedBranch:     "feature/work",
-			PushedHeadCommit: "different-head",
-		},
-	)
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForSuccessfulPushResult: %v", err)
-	}
-	if count != 0 || len(store.resolved) != 0 {
-		t.Fatalf("resolved = (%d, %v), want none", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsForSuccessfulPushResultAllowsRewrittenHead(t *testing.T) {
-	message := legacyGitPushMessage("scoped-push", time.Now().Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_failed_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
-	message.Metadata["git_operation_attempted_remote"] = "backup"
-	message.Metadata["git_operation_attempted_branch"] = "feature/work"
-	message.Metadata["git_operation_attempted_head_commit"] = "old-head"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForSuccessfulPushResult(
-		context.Background(), repo, store, "session-1", "task-1",
-		&client.GitOperationResult{
-			Success:          true,
-			PushedRemote:     "backup",
-			PushedBranch:     "feature/work",
-			PushedHeadCommit: "new-head",
-		},
-	)
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForSuccessfulPushResult: %v", err)
-	}
-	if count != 1 || len(store.resolved) != 1 || store.resolved[0] != "scoped-push" {
-		t.Fatalf("resolved = (%d, %v), want scoped-push", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsForSuccessfulPushResultLeavesFutureFailure(t *testing.T) {
-	now := time.Now().UTC()
-	message := legacyGitPushMessage("scoped-push", now.Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_failed_at"] = now.Add(time.Minute).Format(time.RFC3339Nano)
-	message.Metadata["git_operation_attempted_remote"] = "backup"
-	message.Metadata["git_operation_attempted_branch"] = "feature/work"
-	store := &gitOperationFeedbackStoreStub{messages: []*models.Message{message}}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForSuccessfulPushResult(
-		context.Background(), repo, store, "session-1", "task-1",
-		&client.GitOperationResult{Success: true, PushedRemote: "backup", PushedBranch: "feature/work"},
-	)
-	if err != nil {
-		t.Fatalf("resolveGitOperationErrorsForSuccessfulPushResult: %v", err)
-	}
-	if count != 0 || len(store.resolved) != 0 {
-		t.Fatalf("resolved = (%d, %v), want none", count, store.resolved)
-	}
-}
-
-func TestResolveGitOperationErrorsReturnsPersistenceErrorButContinues(t *testing.T) {
-	now := time.Now().UTC()
-	message := legacyGitPushMessage("push", now.Add(-time.Minute))
-	message.Metadata["git_operation_error_version"] = gitOperationFeedbackVersion
-	message.Metadata["git_operation_attempted_remote"] = "origin"
-	message.Metadata["git_operation_attempted_branch"] = "main"
-	store := &gitOperationFeedbackStoreStub{
-		messages:   []*models.Message{message},
-		resolveErr: errors.New("write failed"),
-	}
-	repo := &gitOperationFeedbackTaskRepositoryStub{repositories: []*models.TaskRepository{{ID: "repo-1"}}}
-	count, err := resolveGitOperationErrorsForSuccessfulPushResult(
-		context.Background(), repo, store, "session-1", "task-1",
-		&client.GitOperationResult{Success: true, PushedRemote: "origin", PushedBranch: "main"},
-	)
-	if count != 0 || err == nil || err.Error() != "write failed" {
-		t.Fatalf("result = (%d, %v), want persistence error", count, err)
+	}, "task-repo")
+	if !observation.ObservedAt.Equal(sourceAt) {
+		t.Fatalf("snapshot source timestamp = %s, want %s", observation.ObservedAt, sourceAt)
 	}
 }

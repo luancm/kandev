@@ -133,10 +133,10 @@ func (c *gitSnapshotCache) forget(taskEnvironmentID string) {
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d",
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%d|%d",
 		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
-		s.RemoteHeadCommit, s.Ahead, s.Behind, s.RemoteAhead, s.RemoteBehind,
+		s.RemoteHeadCommit, s.RemoteAheadKnown, s.RemoteBehindKnown, s.Ahead, s.Behind, s.RemoteAhead, s.RemoteBehind,
 		s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -260,10 +260,14 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			"untracked":             st.Untracked,
 			"renamed":               st.Renamed,
 			"remote_head_commit":    st.RemoteHeadCommit,
-			"remote_ahead":          st.RemoteAhead,
-			"remote_behind":         st.RemoteBehind,
 			"timestamp":             data.Timestamp,
 		},
+	}
+	if st.RemoteAheadKnown || st.RemoteAhead != 0 {
+		snapshot.Metadata["remote_ahead"] = st.RemoteAhead
+	}
+	if st.RemoteBehindKnown || st.RemoteBehind != 0 {
+		snapshot.Metadata["remote_behind"] = st.RemoteBehind
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Debug("failed to persist live git snapshot",

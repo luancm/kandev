@@ -9,6 +9,7 @@ import {
   type ToolCallMetadata,
   type TodoSnapshot,
 } from "@/components/task/chat/types";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import {
   findPendingClarification,
   isPendingClarificationMessage,
@@ -103,6 +104,80 @@ function recoveryMessageStamp(message: Message): string | null {
     if (typeof value === "string" && value !== "") return value;
   }
   return null;
+}
+
+function isLegacyGitPushError(message: Message): boolean {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  return (
+    metadata?.git_operation_error === true &&
+    metadata.operation === "push" &&
+    !Object.prototype.hasOwnProperty.call(metadata, "git_push_alert_active")
+  );
+}
+
+type CurrentGitPushAlertMarker = {
+  active: boolean;
+  legacySingleRepository: boolean;
+  revision: number;
+  resolvedAt: bigint | null;
+  updatedAt: bigint | null;
+};
+
+function readGitPushAlertRevision(metadata: Record<string, unknown>): number {
+  const value = metadata.git_push_alert_revision;
+  let revision = NaN;
+  if (typeof value === "number") revision = value;
+  if (typeof value === "string") revision = Number(value);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
+}
+
+function latestCurrentGitPushAlertMarker(messages: Message[]): CurrentGitPushAlertMarker | null {
+  let latest: CurrentGitPushAlertMarker | null = null;
+  for (const message of messages) {
+    const metadata = message.metadata as Record<string, unknown> | undefined;
+    if (metadata?.git_operation_error !== true) continue;
+    if (metadata.operation !== "push") continue;
+    if (typeof metadata.git_push_alert_active !== "boolean") continue;
+    const candidate: CurrentGitPushAlertMarker = {
+      active: metadata.git_push_alert_active,
+      legacySingleRepository: metadata.git_push_alert_legacy_single_repository === true,
+      revision: readGitPushAlertRevision(metadata),
+      resolvedAt:
+        typeof metadata.git_operation_resolved_at === "string"
+          ? parseTurnTimestamp(metadata.git_operation_resolved_at)
+          : null,
+      updatedAt: parseTurnTimestamp(message.updated_at),
+    };
+    if (!latest || candidate.revision > latest.revision) {
+      latest = candidate;
+      continue;
+    }
+    if (candidate.revision === latest.revision) {
+      if (
+        candidate.updatedAt !== null &&
+        (latest.updatedAt === null || candidate.updatedAt > latest.updatedAt)
+      ) {
+        latest = candidate;
+      }
+    }
+  }
+  return latest;
+}
+
+function isLegacyGitPushErrorCleared(
+  message: Message,
+  current: CurrentGitPushAlertMarker | null,
+): boolean {
+  if (
+    !current ||
+    current.active ||
+    !current.legacySingleRepository ||
+    current.resolvedAt === null
+  ) {
+    return false;
+  }
+  const createdAt = parseTurnTimestamp(message.created_at);
+  return createdAt !== null && createdAt <= current.resolvedAt;
 }
 
 function deduplicateRecoveryMessages(messages: Message[]): Message[] {
@@ -395,8 +470,15 @@ export function filterVisibleMessages(
   scope?: PendingClarificationScope,
 ): Message[] {
   const activeClarification = findActiveClarification(messages, scope);
+  const currentGitPushAlert = latestCurrentGitPushAlertMarker(messages);
   const filtered = messages.filter((message) => {
     if (isResolvedGitOperationError(message)) return false;
+    if (
+      isLegacyGitPushError(message) &&
+      isLegacyGitPushErrorCleared(message, currentGitPushAlert)
+    ) {
+      return false;
+    }
     if (subagentChildIds.has(message.id) || isSetupScriptMessage(message)) return false;
     if (message.type === "clarification_request") {
       return isClarificationVisible(message, activeClarification);

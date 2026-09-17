@@ -120,6 +120,8 @@ export function hasProjectedShellOutput(output: ShellExecOutputSummary | undefin
 export function isResolvedGitOperationError(message: Message): boolean {
   const metadata = message.metadata as Record<string, unknown> | undefined;
   if (metadata?.git_operation_error !== true) return false;
+  if (metadata.git_push_alert_active === false) return true;
+  if (metadata.git_push_alert_active === true) return false;
   const resolvedAt = parseTurnTimestamp(
     typeof metadata.git_operation_resolved_at === "string"
       ? metadata.git_operation_resolved_at

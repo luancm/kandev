@@ -365,12 +365,16 @@ type GitStatusData struct {
 	// (@{upstream}), unlike Ahead/Behind which are relative to the base
 	// branch and never reach zero just because the branch was pushed. Push
 	// detection (event_handlers_git.go) reads RemoteAhead, not Ahead.
-	RemoteAhead      int         `json:"remote_ahead"`
-	RemoteBehind     int         `json:"remote_behind"`
-	RemoteHeadCommit string      `json:"remote_head_commit,omitempty"`
-	Files            interface{} `json:"files,omitempty"`
-	BranchAdditions  int         `json:"branch_additions,omitempty"`
-	BranchDeletions  int         `json:"branch_deletions,omitempty"`
+	RemoteAhead      int    `json:"remote_ahead"`
+	RemoteBehind     int    `json:"remote_behind"`
+	RemoteHeadCommit string `json:"remote_head_commit,omitempty"`
+	// Remote*Known preserves upstream counter presence across event transport.
+	// Missing counters are not evidence of zero divergence.
+	RemoteAheadKnown  bool        `json:"-"`
+	RemoteBehindKnown bool        `json:"-"`
+	Files             interface{} `json:"files,omitempty"`
+	BranchAdditions   int         `json:"branch_additions,omitempty"`
+	BranchDeletions   int         `json:"branch_deletions,omitempty"`
 	// RepositoryName identifies which repository this status belongs to in
 	// multi-repo task workspaces. Empty for single-repo. Carried through to
 	// the frontend so the Changes panel can render per-repo group headers.
@@ -378,6 +382,45 @@ type GitStatusData struct {
 	// IsSubmodule identifies an initialized Git submodule repository so the
 	// frontend can render its scope boundary without guessing from its name.
 	IsSubmodule bool `json:"is_submodule,omitempty"`
+}
+
+// UnmarshalJSON preserves upstream counter presence when a lifecycle event is
+// rehydrated from its JSON representation.
+func (status *GitStatusData) UnmarshalJSON(data []byte) error {
+	type gitStatusData GitStatusData
+	var decoded gitStatusData
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*status = GitStatusData(decoded)
+	_, status.RemoteAheadKnown = fields["remote_ahead"]
+	_, status.RemoteBehindKnown = fields["remote_behind"]
+	return nil
+}
+
+// MarshalJSON omits unknown zero-valued upstream counters so a transport
+// round-trip cannot turn missing evidence into a proven synchronized state.
+func (status GitStatusData) MarshalJSON() ([]byte, error) {
+	type gitStatusData GitStatusData
+	encoded, err := json.Marshal(gitStatusData(status))
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return nil, err
+	}
+	if !status.RemoteAheadKnown && status.RemoteAhead == 0 {
+		delete(fields, "remote_ahead")
+	}
+	if !status.RemoteBehindKnown && status.RemoteBehind == 0 {
+		delete(fields, "remote_behind")
+	}
+	return json.Marshal(fields)
 }
 
 type GitCommitData struct {

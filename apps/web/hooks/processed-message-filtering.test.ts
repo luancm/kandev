@@ -12,6 +12,9 @@ import {
 const ERROR_AT = "2026-05-30T00:00:00Z";
 const AFTER = "2026-05-30T00:01:00Z";
 const BEFORE = "2026-05-29T23:59:00Z";
+const GIT_PUSH_FAILED = "Git push failed";
+const CURRENT_GIT_ALERT_ID = "git-current-state-error";
+const LEGACY_GIT_ERROR_ID = "git-legacy-error";
 
 function bootMessage(createdAt: string, metadata: Record<string, unknown> = {}): Message {
   return {
@@ -127,7 +130,7 @@ describe("git operation error resolution", () => {
     const error = baseMessage({
       id: "git-error",
       type: "error",
-      content: "Git push failed",
+      content: GIT_PUSH_FAILED,
       created_at: ERROR_AT,
       metadata: {
         git_operation_error: true,
@@ -147,11 +150,186 @@ describe("git operation error resolution", () => {
     const error = baseMessage({
       id: "git-error",
       type: "error",
-      content: "Git push failed",
+      content: GIT_PUSH_FAILED,
       metadata: { git_operation_error: true },
     });
 
     expect(filterVisibleMessages([error], new Set(), new Set())).toEqual([error]);
+  });
+
+  it("removes a Git push alert when the current-state marker is inactive", () => {
+    const error = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: false,
+        git_push_alert_legacy_single_repository: true,
+      },
+    });
+
+    expect(filterVisibleMessages([error], new Set(), new Set())).toEqual([]);
+  });
+
+  it("keeps an active current-state Git push alert even with an old resolution timestamp", () => {
+    const error = baseMessage({
+      id: "git-active-state-error",
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: true,
+        git_operation_resolved_at: AFTER,
+      },
+    });
+
+    expect(filterVisibleMessages([error], new Set(), new Set())).toEqual([error]);
+  });
+});
+
+describe("legacy Git push error visibility", () => {
+  it("hides unmarked legacy push errors after the current alert is cleared", () => {
+    const current = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: false,
+        git_push_alert_legacy_single_repository: true,
+        git_push_alert_revision: 2,
+        git_operation_resolved_at: AFTER,
+      },
+    });
+    const legacy = baseMessage({
+      id: LEGACY_GIT_ERROR_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+
+    expect(filterVisibleMessages([current, legacy], new Set(), new Set())).toEqual([]);
+  });
+
+  it("keeps a legacy push error created after the current alert was cleared", () => {
+    const current = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: false,
+        git_push_alert_legacy_single_repository: true,
+        git_push_alert_revision: 2,
+        git_operation_resolved_at: AFTER,
+      },
+    });
+    const newerLegacy = baseMessage({
+      id: "git-new-legacy-error",
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      created_at: "2026-05-30T00:02:00Z",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+
+    expect(filterVisibleMessages([current, newerLegacy], new Set(), new Set())).toEqual([
+      newerLegacy,
+    ]);
+  });
+});
+
+describe("legacy Git push error visibility", () => {
+  it("keeps legacy push errors visible while a newer current alert is active", () => {
+    const previous = baseMessage({
+      id: "git-previous-current-state-error",
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: false,
+        git_push_alert_legacy_single_repository: true,
+        git_push_alert_revision: 1,
+        git_operation_resolved_at: AFTER,
+      },
+    });
+    const current = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      updated_at: "2026-05-30T00:03:00Z",
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: true,
+        git_push_alert_legacy_single_repository: true,
+        git_push_alert_revision: 2,
+      },
+    });
+    const legacy = baseMessage({
+      id: LEGACY_GIT_ERROR_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+
+    expect(filterVisibleMessages([previous, current, legacy], new Set(), new Set())).toEqual([
+      current,
+      legacy,
+    ]);
+  });
+
+  it("does not hide a non-push legacy Git error", () => {
+    const current = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: false,
+        git_push_alert_legacy_single_repository: false,
+        git_push_alert_revision: 2,
+        git_operation_resolved_at: AFTER,
+      },
+    });
+    const pullError = baseMessage({
+      id: "git-pull-error",
+      type: "error",
+      content: "Git pull failed",
+      metadata: { git_operation_error: true, operation: "pull" },
+    });
+
+    expect(filterVisibleMessages([current, pullError], new Set(), new Set())).toEqual([pullError]);
+  });
+
+  it("keeps an ambiguous legacy push error visible for a multi-repository task", () => {
+    const current = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: false,
+        git_push_alert_legacy_single_repository: false,
+        git_push_alert_revision: 2,
+        git_operation_resolved_at: AFTER,
+      },
+    });
+    const legacy = baseMessage({
+      id: LEGACY_GIT_ERROR_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+
+    expect(filterVisibleMessages([current, legacy], new Set(), new Set())).toEqual([legacy]);
   });
 });
 

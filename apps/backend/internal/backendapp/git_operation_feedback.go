@@ -5,86 +5,70 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
-// gitOperationFeedbackStore is the task-service seam used to reconcile a
-// persisted Git operation notice. Keeping the interface small makes the
-// reconciliation logic independent from the service's other responsibilities
-// and keeps it straightforward to exercise with an in-memory store.
-type gitOperationFeedbackStore interface {
-	ListMessages(context.Context, string) ([]*models.Message, error)
-	ResolveGitOperationErrorMessage(context.Context, string, string) error
+const gitOperationPush = "push"
+
+// gitPushAlertReconciler is the narrow adapter boundary used by the gateway,
+// orchestrator, and hydration paths. Repository identity is resolved before a
+// call crosses this boundary, so the task service never matches display names.
+type gitPushAlertReconciler interface {
+	RecordGitPushFailure(context.Context, string, taskservice.GitPushFailure) error
+	RecordGitPushSuccess(context.Context, string, taskservice.GitPushSuccess) error
+	ReconcileGitPushStatus(context.Context, string, taskservice.GitPushStatusObservation) error
 }
 
-type gitOperationFeedbackTaskRepository interface {
-	ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
-}
-
-type gitOperationRecoveryEvidence struct {
-	RepositoryName    string
-	Branch            string
-	RemoteBranch      string
-	HeadCommit        string
-	RemoteHeadCommit  string
-	RemoteAhead       int
-	RemoteBehind      int
-	RemoteAheadKnown  bool
-	RemoteBehindKnown bool
-	ObservedAt        time.Time
-}
-
-const (
-	gitOperationPush                  = "push"
-	gitOperationFeedbackVersion       = 1
-	gitOperationResolutionPushSuccess = "push_success"
-	gitOperationResolutionGitStatus   = "git_status"
-)
-
-func gitOperationRecoveryEvidenceFromStatus(status runtimeapi.GitStatusResult) gitOperationRecoveryEvidence {
-	observedAt := time.Time{}
-	if status.Timestamp != "" {
-		observedAt, _ = time.Parse(time.RFC3339Nano, status.Timestamp)
+func gitPushStatusObservationFromStatus(status runtimeapi.GitStatusResult, taskRepositoryID string, receivedAt ...time.Time) taskservice.GitPushStatusObservation {
+	observedAt := parseGitObservationTimestamp(status.Timestamp)
+	if observedAt.IsZero() && len(receivedAt) > 0 && !receivedAt[0].IsZero() {
+		observedAt = receivedAt[0]
 	}
-	return gitOperationRecoveryEvidence{
-		RepositoryName:    status.RepositoryName,
+	return taskservice.GitPushStatusObservation{
+		TaskRepositoryID:  taskRepositoryID,
 		Branch:            status.Branch,
 		RemoteBranch:      status.RemoteBranch,
 		HeadCommit:        status.HeadCommit,
 		RemoteHeadCommit:  status.RemoteHeadCommit,
 		RemoteAhead:       status.RemoteAhead,
 		RemoteBehind:      status.RemoteBehind,
-		RemoteAheadKnown:  true,
-		RemoteBehindKnown: true,
+		RemoteAheadKnown:  status.RemoteAheadKnown || status.RemoteAhead != 0,
+		RemoteBehindKnown: status.RemoteBehindKnown || status.RemoteBehind != 0,
 		ObservedAt:        observedAt,
 	}
 }
 
-func gitOperationRecoveryEvidenceFromLifecycleStatus(status *runtimeapi.GitStatusData, observedAt time.Time) gitOperationRecoveryEvidence {
+func gitPushStatusObservationFromLifecycleStatus(status *runtimeapi.GitStatusData, taskRepositoryID string, observedAt time.Time) taskservice.GitPushStatusObservation {
 	if status == nil {
-		return gitOperationRecoveryEvidence{}
+		return taskservice.GitPushStatusObservation{}
 	}
-	return gitOperationRecoveryEvidence{
-		RepositoryName:    status.RepositoryName,
+	return taskservice.GitPushStatusObservation{
+		TaskRepositoryID:  taskRepositoryID,
 		Branch:            status.Branch,
 		RemoteBranch:      status.RemoteBranch,
 		HeadCommit:        status.HeadCommit,
 		RemoteHeadCommit:  status.RemoteHeadCommit,
 		RemoteAhead:       status.RemoteAhead,
 		RemoteBehind:      status.RemoteBehind,
-		RemoteAheadKnown:  true,
-		RemoteBehindKnown: true,
+		RemoteAheadKnown:  status.RemoteAheadKnown || status.RemoteAhead != 0,
+		RemoteBehindKnown: status.RemoteBehindKnown || status.RemoteBehind != 0,
 		ObservedAt:        observedAt,
 	}
 }
 
-func gitOperationRecoveryEvidenceFromSnapshot(repositoryName string, snapshot *models.GitSnapshot) gitOperationRecoveryEvidence {
+func gitPushStatusObservationFromSnapshot(snapshot *models.GitSnapshot, taskRepositoryID string) taskservice.GitPushStatusObservation {
 	if snapshot == nil {
-		return gitOperationRecoveryEvidence{}
+		return taskservice.GitPushStatusObservation{}
 	}
-	return gitOperationRecoveryEvidence{
-		RepositoryName:    repositoryName,
+	return taskservice.GitPushStatusObservation{
+		TaskRepositoryID:  taskRepositoryID,
 		Branch:            snapshot.Branch,
 		RemoteBranch:      snapshot.RemoteBranch,
 		HeadCommit:        snapshot.HeadCommit,
@@ -93,8 +77,23 @@ func gitOperationRecoveryEvidenceFromSnapshot(repositoryName string, snapshot *m
 		RemoteBehind:      metadataInt(snapshot.Metadata, "remote_behind"),
 		RemoteAheadKnown:  metadataIntKnown(snapshot.Metadata, "remote_ahead"),
 		RemoteBehindKnown: metadataIntKnown(snapshot.Metadata, "remote_behind"),
-		ObservedAt:        gitStatusObservationTime(snapshot),
+		ObservedAt:        snapshotObservationTime(snapshot),
 	}
+}
+
+func snapshotObservationTime(snapshot *models.GitSnapshot) time.Time {
+	return gitStatusObservationTime(snapshot)
+}
+
+func parseGitObservationTimestamp(value string) time.Time {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 func metadataString(metadata map[string]interface{}, key string) string {
@@ -130,253 +129,153 @@ func metadataInt(metadata map[string]interface{}, key string) int {
 		return int(value)
 	case float32:
 		return int(value)
+	default:
+		return 0
 	}
-	return 0
 }
 
-// resolveGitOperationErrorsForSuccessfulPushResult retires current-format
-// errors for an explicit push destination. The fresh status endpoint reports
-// the branch's configured upstream, which can differ from a destination named
-// by the successful push, so direct-success matching uses that destination
-// and the failure timestamp rather than the branch's configured upstream.
-func resolveGitOperationErrorsForSuccessfulPushResult(
+// resolveTaskRepositoryIDForSubpath maps an operation's runtime repository
+// subpath to the task_repositories junction row. The junction ID is the
+// canonical scope for a task alert; repositories.id is only a global source.
+func resolveTaskRepositoryIDForSubpath(
 	ctx context.Context,
-	taskRepo gitOperationFeedbackTaskRepository,
-	messageStore gitOperationFeedbackStore,
-	sessionID, taskID string,
-	result *runtimeapi.GitOperationResult,
-) (int, error) {
-	if taskRepo == nil || messageStore == nil || sessionID == "" || taskID == "" || result == nil || !result.Success {
-		return 0, nil
+	taskRepo *sqliterepo.Repository,
+	taskID, subpath string,
+	log *logger.Logger,
+) string {
+	if taskRepo == nil || strings.TrimSpace(taskID) == "" {
+		return ""
 	}
-	remote := strings.TrimSpace(result.PushedRemote)
-	branch := strings.TrimSpace(result.PushedBranch)
-	if remote == "" || branch == "" {
-		return 0, nil
-	}
-	repositories, err := taskRepo.ListTaskRepositories(ctx, taskID)
+	links, err := taskRepo.ListTaskRepositories(ctx, taskID)
 	if err != nil {
-		return 0, err
+		log.Warn("task repositories lookup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return ""
 	}
-	if len(repositories) != 1 {
-		return 0, nil
-	}
-	observedAt := time.Now().UTC()
-	return resolveGitOperationErrorsMatching(
-		ctx,
-		messageStore,
-		sessionID,
-		observedAt,
-		gitOperationResolutionPushSuccess,
-		func(message *models.Message) bool {
-			return gitPushErrorMatchesSuccessfulDestination(message, remote, branch, observedAt)
-		},
-	)
-}
-
-// resolveGitOperationErrorsForStatus retires legacy and correlated notices
-// only when the current upstream state proves that a named branch is
-// synchronized. It deliberately requires upstream-relative counters and both
-// commit IDs; base-branch-relative counts or defaulted zero values are not
-// enough to establish that a push completed.
-func resolveGitOperationErrorsForStatus(
-	ctx context.Context,
-	taskRepo gitOperationFeedbackTaskRepository,
-	messageStore gitOperationFeedbackStore,
-	sessionID, taskID string,
-	evidence gitOperationRecoveryEvidence,
-) (int, error) {
-	if taskRepo == nil || messageStore == nil || sessionID == "" || taskID == "" ||
-		!gitOperationStatusEvidenceMatchesSingleRepositoryTask(evidence) || !validGitPushRecoveryEvidence(evidence) {
-		return 0, nil
-	}
-	repositories, err := taskRepo.ListTaskRepositories(ctx, taskID)
-	if err != nil {
-		return 0, err
-	}
-	if len(repositories) != 1 {
-		return 0, nil
-	}
-	observedAt := evidence.ObservedAt
-	if observedAt.IsZero() {
-		observedAt = time.Now().UTC()
-	}
-	return resolveGitOperationErrors(ctx, messageStore, sessionID, observedAt, gitOperationResolutionGitStatus, &evidence)
-}
-
-// A status producer reports an empty repository name for the workspace root.
-// This resolver only handles tasks with one repository, so a named runtime
-// scope belongs to another repository even when its branch status is healthy.
-func gitOperationStatusEvidenceMatchesSingleRepositoryTask(evidence gitOperationRecoveryEvidence) bool {
-	return evidence.RepositoryName == ""
-}
-
-func validGitPushRecoveryEvidence(evidence gitOperationRecoveryEvidence) bool {
-	branch := strings.TrimSpace(evidence.Branch)
-	remoteBranch := normalizeGitRemoteBranch(evidence.RemoteBranch)
-	headCommit := strings.TrimSpace(evidence.HeadCommit)
-	remoteHeadCommit := strings.TrimSpace(evidence.RemoteHeadCommit)
-	return branch != "" && remoteBranch != "" && branch == remoteBranch &&
-		headCommit != "" && remoteHeadCommit != "" && headCommit == remoteHeadCommit &&
-		evidence.RemoteAheadKnown && evidence.RemoteBehindKnown &&
-		evidence.RemoteAhead == 0 && evidence.RemoteBehind == 0
-}
-
-func normalizeGitRemoteBranch(remoteBranch string) string {
-	_, branch := splitGitRemoteBranch(remoteBranch)
-	return branch
-}
-
-func splitGitRemoteBranch(remoteBranch string) (string, string) {
-	remoteBranch = strings.TrimSpace(remoteBranch)
-	remoteBranch = strings.TrimPrefix(remoteBranch, "refs/remotes/")
-	if slash := strings.IndexByte(remoteBranch, '/'); slash >= 0 {
-		return remoteBranch[:slash], remoteBranch[slash+1:]
-	}
-	return "", remoteBranch
-}
-
-func resolveGitOperationErrors(
-	ctx context.Context,
-	messageStore gitOperationFeedbackStore,
-	sessionID string,
-	observedAt time.Time,
-	resolution string,
-	evidence *gitOperationRecoveryEvidence,
-) (int, error) {
-	var matches func(*models.Message) bool
-	if evidence != nil {
-		matches = func(message *models.Message) bool {
-			return gitPushErrorMatchesEvidence(message, *evidence)
+	name := strings.TrimSpace(subpath)
+	if name == "" {
+		if len(links) == 1 && links[0] != nil {
+			return links[0].ID
 		}
+		return ""
 	}
-	return resolveGitOperationErrorsMatching(ctx, messageStore, sessionID, observedAt, resolution, matches)
-}
-
-func resolveGitOperationErrorsMatching(
-	ctx context.Context,
-	messageStore gitOperationFeedbackStore,
-	sessionID string,
-	observedAt time.Time,
-	resolution string,
-	matches func(*models.Message) bool,
-) (int, error) {
-	messages, err := messageStore.ListMessages(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-	resolved := 0
-	var firstErr error
-	for _, message := range messages {
-		if !isUnresolvedGitPushError(message) || !messageCreatedBefore(message, observedAt) {
+	var match string
+	for _, link := range links {
+		if link == nil {
 			continue
 		}
-		if matches != nil && !matches(message) {
+		repository, lookupErr := taskRepo.GetRepository(ctx, link.RepositoryID)
+		if lookupErr != nil || repository == nil {
 			continue
 		}
-		if err := messageStore.ResolveGitOperationErrorMessage(ctx, message.ID, resolution); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+		if repository.Name != name && worktree.SanitizeRepoDirName(repository.Name) != name {
 			continue
 		}
-		resolved++
+		if match != "" {
+			return ""
+		}
+		match = link.ID
 	}
-	return resolved, firstErr
+	return match
 }
 
-func hasGitOperationFeedbackScope(message *models.Message) bool {
-	if message == nil || message.Metadata == nil {
-		return false
+// resolveTaskRepositoryIDForStatus maps a status repository name through the
+// session's environment worktrees and then back to the task repository link.
+// Requiring both rows prevents a healthy status from an unrelated runtime
+// repository from clearing the task's current alert.
+func resolveTaskRepositoryIDForStatus(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	sessionID, taskID, repositoryName string,
+	log *logger.Logger,
+) string {
+	if taskRepo == nil || strings.TrimSpace(sessionID) == "" {
+		return ""
 	}
-	_, ok := message.Metadata["git_operation_error_version"]
-	return ok
+	session, err := taskRepo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	taskID = statusTaskID(session, taskID)
+	if taskID == "" {
+		return ""
+	}
+	worktrees, err := taskRepo.ListTaskSessionWorktrees(ctx, sessionID)
+	if err != nil {
+		log.Warn("session worktrees lookup failed",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return ""
+	}
+	links, err := taskRepo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		log.Warn("task repositories lookup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return ""
+	}
+
+	globalRepositoryID := statusEnvironmentRepositoryID(ctx, taskRepo, worktrees, repositoryName)
+	if globalRepositoryID == "" {
+		return ""
+	}
+	return uniqueTaskRepositoryLinkID(links, globalRepositoryID)
 }
 
-// gitPushErrorMatchesEvidence keeps the broad synchronized-state fallback for
-// legacy rows, which have no operation scope. New rows carry the attempted
-// remote, branch, and HEAD and must match all available identity before a
-// status observation can retire them.
-func gitPushErrorMatchesEvidence(message *models.Message, evidence gitOperationRecoveryEvidence) bool {
-	if message == nil || message.Metadata == nil {
-		return false
+func statusTaskID(session *models.TaskSession, requestedTaskID string) string {
+	if requestedTaskID == "" {
+		return session.TaskID
 	}
-	if !hasGitOperationFeedbackScope(message) {
-		return true
+	if session.TaskID != requestedTaskID {
+		return ""
 	}
-	metadata := message.Metadata
-	attemptedRemote := strings.TrimSpace(metadataString(metadata, "git_operation_attempted_remote"))
-	attemptedBranch := strings.TrimSpace(metadataString(metadata, "git_operation_attempted_branch"))
-	attemptedHead := strings.TrimSpace(metadataString(metadata, "git_operation_attempted_head_commit"))
-	if attemptedRemote == "" || attemptedBranch == "" || attemptedHead == "" {
-		return false
-	}
-	remoteName, remoteBranch := splitGitRemoteBranch(evidence.RemoteBranch)
-	return strings.EqualFold(attemptedRemote, remoteName) &&
-		strings.EqualFold(attemptedBranch, strings.TrimSpace(evidence.Branch)) &&
-		strings.EqualFold(attemptedBranch, remoteBranch) &&
-		attemptedHead == strings.TrimSpace(evidence.HeadCommit)
+	return requestedTaskID
 }
 
-// gitPushErrorMatchesSuccessfulDestination uses the affirmative push result
-// as stronger evidence than a later status query. Legacy rows are deliberately
-// excluded because they do not identify the destination, so only the
-// same-remote-and-branch scope recorded by current rows can be matched here.
-// A rewritten or amended HEAD is still a repair when it publishes to the same
-// remote and branch, so this matcher deliberately omits HEAD equality while
-// requiring the failure to predate the successful operation.
-func gitPushErrorMatchesSuccessfulDestination(message *models.Message, remote, branch string, successfulAt time.Time) bool {
-	if message == nil || message.Metadata == nil {
-		return false
+func statusEnvironmentRepositoryID(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	worktrees []*models.TaskEnvironmentRepo,
+	repositoryName string,
+) string {
+	name := strings.TrimSpace(repositoryName)
+	if name == "" {
+		return singleEnvironmentRepositoryID(worktrees)
 	}
-	if !hasGitOperationFeedbackScope(message) {
-		return false
+	var match string
+	for _, worktreeRow := range worktrees {
+		if worktreeRow == nil || !repositoryMatchesName(ctx, taskRepo, worktreeRow.RepositoryID, name) {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = worktreeRow.RepositoryID
 	}
-	metadata := message.Metadata
-	attemptedRemote := strings.TrimSpace(metadataString(metadata, "git_operation_attempted_remote"))
-	attemptedBranch := strings.TrimSpace(metadataString(metadata, "git_operation_attempted_branch"))
-	if !strings.EqualFold(attemptedRemote, remote) || !strings.EqualFold(attemptedBranch, branch) {
-		return false
-	}
-	return gitOperationFailurePredates(message, successfulAt)
+	return match
 }
 
-func gitOperationFailurePredates(message *models.Message, successfulAt time.Time) bool {
-	if message == nil || message.Metadata == nil || successfulAt.IsZero() {
-		return false
+func singleEnvironmentRepositoryID(worktrees []*models.TaskEnvironmentRepo) string {
+	if len(worktrees) != 1 || worktrees[0] == nil {
+		return ""
 	}
-	raw, present := message.Metadata["git_operation_failed_at"]
-	if !present {
-		return true
-	}
-	failedAt, ok := raw.(string)
-	if !ok || strings.TrimSpace(failedAt) == "" {
-		return false
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, failedAt)
-	return err == nil && parsed.Before(successfulAt)
+	return worktrees[0].RepositoryID
 }
 
-func isUnresolvedGitPushError(message *models.Message) bool {
-	if message == nil || message.Metadata == nil {
-		return false
-	}
-	metadata := message.Metadata
-	failed, ok := metadata["git_operation_error"].(bool)
-	if !ok || !failed {
-		return false
-	}
-	operation, _ := metadata["operation"].(string)
-	if !strings.EqualFold(strings.TrimSpace(operation), "push") {
-		return false
-	}
-	resolved, _ := metadata["git_operation_resolved"].(bool)
-	return !resolved
+func repositoryMatchesName(ctx context.Context, taskRepo *sqliterepo.Repository, repositoryID, name string) bool {
+	repository, err := taskRepo.GetRepository(ctx, repositoryID)
+	return err == nil && repository != nil &&
+		(repository.Name == name || worktree.SanitizeRepoDirName(repository.Name) == name)
 }
 
-func messageCreatedBefore(message *models.Message, observedAt time.Time) bool {
-	if message == nil || observedAt.IsZero() || message.CreatedAt.IsZero() {
-		return true
+func uniqueTaskRepositoryLinkID(links []*models.TaskRepository, repositoryID string) string {
+	var match string
+	for _, link := range links {
+		if link == nil || link.RepositoryID != repositoryID {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = link.ID
 	}
-	return message.CreatedAt.Before(observedAt)
+	return match
 }

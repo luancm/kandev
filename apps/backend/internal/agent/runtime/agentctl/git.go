@@ -37,10 +37,9 @@ type GitOperationResult struct {
 	// detached HEAD.
 	ExpectedBranch string `json:"expected_branch,omitempty"`
 	CurrentBranch  string `json:"current_branch,omitempty"`
-	// Attempted* identify the local push operation that failed. They are
-	// omitted from successful responses so the public result shape stays
-	// compatible while failure messages can be reconciled against a later
-	// status observation.
+	// Attempted* preserve the destination and local head from a refused push
+	// for diagnostics. The current alert projection stores only optional
+	// remote/branch context and never correlates by the attempted head.
 	AttemptedRemote     string `json:"attempted_remote,omitempty"`
 	AttemptedBranch     string `json:"attempted_branch,omitempty"`
 	AttemptedHeadCommit string `json:"attempted_head_commit,omitempty"`
@@ -665,35 +664,58 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch
 
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
-	Success             bool                   `json:"success"`
-	RepositoryName      string                 `json:"repository_name,omitempty"`
-	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
-	Branch              string                 `json:"branch"`
-	RemoteBranch        string                 `json:"remote_branch"`
-	HeadCommit          string                 `json:"head_commit"`
-	BaseCommit          string                 `json:"base_commit"` // Merge-base with origin branch
-	ComparisonTarget    string                 `json:"comparison_target,omitempty"`
-	ComparisonStatus    string                 `json:"comparison_status,omitempty"`
-	ComparisonErrorCode string                 `json:"comparison_error_code,omitempty"`
-	Ahead               int                    `json:"ahead"`
-	Behind              int                    `json:"behind"`
-	RemoteAhead         int                    `json:"remote_ahead"`
-	RemoteBehind        int                    `json:"remote_behind"`
-	RemoteHeadCommit    string                 `json:"remote_head_commit,omitempty"`
-	Modified            []string               `json:"modified"`
-	Added               []string               `json:"added"`
-	Deleted             []string               `json:"deleted"`
-	Untracked           []string               `json:"untracked"`
-	Renamed             []string               `json:"renamed"`
-	Files               map[string]interface{} `json:"files"`
-	Timestamp           string                 `json:"timestamp"`
-	BranchAdditions     int                    `json:"branch_additions,omitempty"`
-	BranchDeletions     int                    `json:"branch_deletions,omitempty"`
-	Error               string                 `json:"error,omitempty"`
+	Success             bool   `json:"success"`
+	RepositoryName      string `json:"repository_name,omitempty"`
+	IsSubmodule         bool   `json:"is_submodule,omitempty"`
+	Branch              string `json:"branch"`
+	RemoteBranch        string `json:"remote_branch"`
+	HeadCommit          string `json:"head_commit"`
+	BaseCommit          string `json:"base_commit"` // Merge-base with origin branch
+	ComparisonTarget    string `json:"comparison_target,omitempty"`
+	ComparisonStatus    string `json:"comparison_status,omitempty"`
+	ComparisonErrorCode string `json:"comparison_error_code,omitempty"`
+	Ahead               int    `json:"ahead"`
+	Behind              int    `json:"behind"`
+	RemoteAhead         int    `json:"remote_ahead"`
+	RemoteBehind        int    `json:"remote_behind"`
+	RemoteHeadCommit    string `json:"remote_head_commit,omitempty"`
+	// Remote*Known records whether the corresponding upstream divergence field
+	// was present in the response. A missing field must not be treated as a
+	// proven zero during durable alert reconciliation.
+	RemoteAheadKnown  bool                   `json:"-"`
+	RemoteBehindKnown bool                   `json:"-"`
+	Modified          []string               `json:"modified"`
+	Added             []string               `json:"added"`
+	Deleted           []string               `json:"deleted"`
+	Untracked         []string               `json:"untracked"`
+	Renamed           []string               `json:"renamed"`
+	Files             map[string]interface{} `json:"files"`
+	Timestamp         string                 `json:"timestamp"`
+	BranchAdditions   int                    `json:"branch_additions,omitempty"`
+	BranchDeletions   int                    `json:"branch_deletions,omitempty"`
+	Error             string                 `json:"error,omitempty"`
 	// Repository is the request's repository subpath as observed by the host
 	// handler. It is callback-only metadata and never crosses the agentctl
 	// response boundary; RepositoryName remains the agentctl-reported name.
 	Repository string `json:"-"`
+}
+
+// UnmarshalJSON keeps field-presence information for the upstream divergence
+// counters while preserving the public numeric response shape.
+func (result *GitStatusResult) UnmarshalJSON(data []byte) error {
+	type gitStatusResult GitStatusResult
+	var decoded gitStatusResult
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*result = GitStatusResult(decoded)
+	_, result.RemoteAheadKnown = fields["remote_ahead"]
+	_, result.RemoteBehindKnown = fields["remote_behind"]
+	return nil
 }
 
 // fetchJSONResult performs a GET against `path` and decodes the response into
