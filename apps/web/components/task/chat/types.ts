@@ -116,7 +116,7 @@ export function hasProjectedShellOutput(output: ShellExecOutputSummary | undefin
   );
 }
 
-/** True when a persisted Git operation error has been resolved after it was emitted. */
+/** True when a persisted Git operation error has been resolved at or after it was emitted. */
 export function isResolvedGitOperationError(message: Message): boolean {
   const metadata = message.metadata as Record<string, unknown> | undefined;
   if (metadata?.git_operation_error !== true) return false;
@@ -128,7 +128,7 @@ export function isResolvedGitOperationError(message: Message): boolean {
       : undefined,
   );
   const createdAt = parseTurnTimestamp(message.created_at);
-  return resolvedAt !== null && createdAt !== null && resolvedAt > createdAt;
+  return resolvedAt !== null && createdAt !== null && resolvedAt >= createdAt;
 }
 
 /** Shared composer eligibility predicates belong to the chat domain, not a rendering surface. */

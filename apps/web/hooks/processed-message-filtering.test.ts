@@ -333,6 +333,39 @@ describe("legacy Git push error visibility", () => {
   });
 });
 
+describe("timestamp-tied Git push errors", () => {
+  it("hides a legacy push error resolved at its creation timestamp", () => {
+    const current = baseMessage({
+      id: CURRENT_GIT_ALERT_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      updated_at: AFTER,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_push_alert_active: true,
+        git_push_alert_revision: 2,
+      },
+    });
+    const resolvedLegacy = baseMessage({
+      id: LEGACY_GIT_ERROR_ID,
+      type: "error",
+      content: GIT_PUSH_FAILED,
+      created_at: ERROR_AT,
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_operation_resolved: true,
+        git_operation_resolved_at: ERROR_AT,
+      },
+    });
+
+    expect(filterVisibleMessages([resolvedLegacy, current], new Set(), new Set())).toEqual([
+      current,
+    ]);
+  });
+});
+
 function baseMessage(overrides: Partial<Message>): Message {
   return {
     id: "m",
