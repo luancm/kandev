@@ -193,20 +193,38 @@ func failedGitPushAlertState(current models.GitPushAlertState, failure GitPushFa
 }
 
 func (s *Service) persistGitPushFailure(ctx context.Context, session *models.TaskSession, current, next models.GitPushAlertState, hasCurrent bool) error {
+	presentationCreated := false
 	if hasCurrent && current.Active && current.MessageID != "" {
-		messageID, err := s.updateGitPushAlertMessage(ctx, next, session.TaskID, session.ID)
+		messageID, created, err := s.updateGitPushAlertMessage(ctx, next, session.TaskID, session.ID)
 		if err != nil {
 			return err
 		}
 		next.MessageID = messageID
+		presentationCreated = created
 	} else {
 		message, err := s.createGitPushAlertMessage(ctx, next, session.TaskID, session.ID)
 		if err != nil {
 			return err
 		}
 		next.MessageID = message.ID
+		presentationCreated = true
 	}
-	return s.storeGitPushAlertState(ctx, session.ID, next)
+	if err := s.storeGitPushAlertState(ctx, session.ID, next); err != nil {
+		if presentationCreated {
+			rollbackErr := s.resolveGitPushAlertMessage(
+				ctx,
+				next.MessageID,
+				"projection_write_rollback",
+				next.Revision,
+				next.OccurredAt,
+			)
+			if rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Service) storeGitPushAlertState(ctx context.Context, sessionID string, state models.GitPushAlertState) error {
@@ -265,13 +283,7 @@ func statusMatchesAlert(alert models.GitPushAlertState, observation GitPushStatu
 	return true
 }
 
-func pushSuccessMatchesAlert(alert models.GitPushAlertState, success GitPushSuccess) bool {
-	if alert.Branch != "" && success.Branch != "" && !strings.EqualFold(alert.Branch, success.Branch) {
-		return false
-	}
-	if alert.Remote != "" && success.Remote != "" && !strings.EqualFold(alert.Remote, success.Remote) {
-		return false
-	}
+func pushSuccessMatchesAlert(_ models.GitPushAlertState, _ GitPushSuccess) bool {
 	return true
 }
 
@@ -321,7 +333,7 @@ func (s *Service) importLegacyGitPushAlert(
 		return models.GitPushAlertState{}, false, err
 	}
 	state := importedGitPushAlertState(latest, taskRepositoryID)
-	messageID, err := s.updateGitPushAlertMessage(ctx, state, session.TaskID, session.ID)
+	messageID, _, err := s.updateGitPushAlertMessage(ctx, state, session.TaskID, session.ID)
 	if err != nil {
 		return models.GitPushAlertState{}, false, err
 	}
@@ -391,24 +403,24 @@ func (s *Service) createGitPushAlertMessage(ctx context.Context, state models.Gi
 	})
 }
 
-func (s *Service) updateGitPushAlertMessage(ctx context.Context, state models.GitPushAlertState, taskID, sessionID string) (string, error) {
+func (s *Service) updateGitPushAlertMessage(ctx context.Context, state models.GitPushAlertState, taskID, sessionID string) (string, bool, error) {
 	message, err := s.messages.GetMessage(ctx, state.MessageID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
+		return "", false, err
 	}
 	if message == nil {
 		created, createErr := s.createGitPushAlertMessage(ctx, state, taskID, sessionID)
 		if createErr != nil {
-			return "", createErr
+			return "", false, createErr
 		}
-		return created.ID, nil
+		return created.ID, true, nil
 	}
 	message.Content = "Git push failed"
 	message.Metadata = s.gitPushAlertMetadata(ctx, state, taskID, sessionID)
 	if err := s.UpdateMessage(ctx, message); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return message.ID, nil
+	return message.ID, false, nil
 }
 
 func (s *Service) gitPushAlertMetadata(ctx context.Context, state models.GitPushAlertState, taskID, sessionID string) map[string]interface{} {
