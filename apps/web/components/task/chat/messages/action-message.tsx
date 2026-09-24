@@ -24,6 +24,14 @@ function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
 }
 
+function isCurrentRunningTurn(
+  sessionState: TaskSessionState | undefined,
+  activeTurnId: string | undefined,
+  comment: Message,
+) {
+  return sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id;
+}
+
 function currentSessionRecoveryError(sessionMetadata: Record<string, unknown> | null) {
   if (!sessionMetadata) return null;
   return readLastAgentError(sessionMetadata);
@@ -126,7 +134,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   if (isResolvedGitOperationError(comment)) return null;
 
   if (metadata?.action_visibility === "running") {
-    if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
+    if (isCurrentRunningTurn(sessionState, activeTurnId, comment)) {
       return (
         <RunningActionNotice
           actions={metadata.actions}
