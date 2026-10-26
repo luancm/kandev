@@ -111,6 +111,7 @@ func taskSessionSummarySelectCols(driver string) string {
 		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError), modelID, modelName,
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
+		"ts.role", "ts.parent_session_id",
 	}, ", ")
 }
 
@@ -156,6 +157,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
 		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
 		&reviewStatus, &isPassthrough, &taskEnvironmentID, &name, &lastReadMessageID,
+		&observation.Role, &observation.ParentSessionID,
 	); err != nil {
 		return nil, err
 	}

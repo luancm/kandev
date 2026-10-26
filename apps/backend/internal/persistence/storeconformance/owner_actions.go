@@ -90,6 +90,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 				updateMethod: "UpdateWorkspace", deleteMethod: "DeleteWorkspace",
 			}),
 			taskAction(),
+			errandAction(),
 		}},
 		"workflow": {actions: []apiAction{
 			standardAction(reflectedSpec{

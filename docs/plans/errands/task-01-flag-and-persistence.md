@@ -1,7 +1,7 @@
 ---
 id: "01-flag-and-persistence"
 title: "Add the errands flag, session role, and errand persistence"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -120,4 +120,55 @@ None.
 
 ## Results
 
-Pending.
+Completed on 2026-10-26 in the primary session, test-first. No delegation.
+
+- Flag: `features.errands` / `KANDEV_FEATURES_ERRANDS`, `FeaturesConfig.Errands`,
+  `"false"` in `prod`, `dev`, and `e2e`, `RestartRequired: true`, experimental,
+  medium risk, and `errands: false` in the frontend defaults.
+- Sessions: `task_sessions.role` and `parent_session_id` (`TEXT NOT NULL
+  DEFAULT ''`) and `idx_task_sessions_parent_session_id`, added by
+  `migrateTaskSessionErrandColumns` right after the `task_sessions.name`
+  migration, so the two gated table rebuilds always run first. No inline
+  `CREATE TABLE` columns. `models.TaskSession.Role` (`models.SessionRole`) and
+  `ParentSessionID` are written by `createTaskSession`, read by every session
+  scanner and the summary observation, and never written by an update.
+- Errands: `initErrandsSchema` creates `task_session_errands` with the design
+  columns, `idx_task_session_errands_task_lifecycle`, and
+  `idx_task_session_errands_parent`. `models.Errand`, its closed state types,
+  `Validate`, `ErrErrandNotFound`, `ErrErrandVersionConflict`, and
+  `ErrInvalidErrand` are in `models/errand.go`.
+- Repository: `CreateErrand`, `GetErrand`, `ListErrandsByTask`,
+  `ListErrandsByParent`, `ListQueuedErrands`, `CountLiveErrandsByTask`,
+  `UpdateErrand` (compare-and-set on `Version`; immutable start fields are
+  never written), and `DeleteErrand` for rows without a session. The session
+  delete transaction removes the errand row; the task foreign key removes the
+  rest. Every method is a single statement, so no advisory lock is needed yet.
+- Projection: `TaskSession.ToAPI`, `TaskSessionDTO`, and
+  `TaskSessionSummaryDTO` project `role` and `parent_session_id` with
+  `omitempty`. `dto.ErrandDTO` and `dto.FromErrand(errand, status)` cut the
+  preview to 280 characters.
+- Stores: `task_session_errands` is in the `task` descriptor, `errandAction`
+  covers CRUD, boolean, timestamp, and duplicate and stale-version conflicts,
+  and the v0.93.0 manifest lists the table as known missing.
+
+Verification passed:
+
+- `go test -trimpath ./internal/runtimeflags ./internal/common/config ./internal/profiles -count=1`
+- `go test -trimpath ./internal/task/models ./internal/task/dto -run 'Errand|SessionRole' -count=1`
+- `go test -trimpath ./internal/task/repository/sqlite -run 'Errand|SessionRole' -count=1`,
+  also under `-race`; the PostgreSQL variants skipped because
+  `KANDEV_TEST_POSTGRES_DSN` was not available.
+- `go test -race -trimpath ./internal/persistence/requiredstores ./internal/persistence/storeconformance -count=1`
+  (SQLite only for the same reason). A mutation that dropped the version
+  guard failed the conformance conflict scenario.
+- `go run ./cmd/sqlguard ./internal`
+- `pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts` (9 tests)
+- `bash scripts/lint-go-changed <changed Go files>`: 0 issues with
+  `GOTOOLCHAIN=go1.26.3`. The local golangci-lint cannot read Go 1.27 export
+  data; CI uses Go 1.26.3.
+- `gofmt -l` on changed Go files, `pnpm run typecheck` (8 GiB heap), and
+  `git diff --check`.
+
+Broader runs of `./internal/task/...`, `./internal/office/service`, and
+`./internal/orchestrator/...` show only failures that reproduce identically on
+the base commit on this macOS host (workspace path and terminal tests).

@@ -330,7 +330,7 @@ Dependency order and parallel-safe candidates:
 
 Progress:
 
-- [ ] [Task 01: Add the errands flag, session role, and errand persistence](task-01-flag-and-persistence.md)
+- [x] [Task 01: Add the errands flag, session role, and errand persistence](task-01-flag-and-persistence.md)
 - [ ] [Task 02: Detach errand sessions from workflow, primary, and routing](task-02-workflow-isolation.md)
 - [ ] [Task 03: Add the errands frontend data layer and tab filter](task-03-frontend-data-layer.md)
 - [ ] [Task 04: Launch, admit, track, and cancel errands](task-04-errand-launch-and-admission.md)

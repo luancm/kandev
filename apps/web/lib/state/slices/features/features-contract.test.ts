@@ -35,6 +35,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 
+  it("keeps errands disabled by default", () => {
+    expect(defaultFeatureFlags).toHaveProperty("errands", false);
+  });
+
   it("keeps Integrated control opt-in in the frontend", () => {
     expect(defaultFeatureFlags.integratedControl).toBe(false);
   });

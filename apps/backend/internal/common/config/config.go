@@ -600,6 +600,12 @@ type FeaturesConfig struct {
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
+
+	// Errands gates agent-started errand sessions: the errand MCP tools,
+	// WebSocket actions, parent turn composition, and result delivery. Off in
+	// every shipped profile. Existing errand sessions stay workflow-detached
+	// whatever its value.
+	Errands bool `mapstructure:"errands" json:"errands"`
 }
 
 // LoggingConfig holds logging configuration.

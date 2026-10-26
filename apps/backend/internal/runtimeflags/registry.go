@@ -358,6 +358,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.errands",
+			EnvVar:      "KANDEV_FEATURES_ERRANDS",
+			Kind:        KindFeature,
+			Label:       "Errands",
+			Description: "Lets a task's agent start visible child sessions that work in the task's shared workspace and report their results back to it.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Errands run additional agents in the task's shared workspace at the same time as their parent, and the parent " +
+				"defers its workflow step until their results arrive. Errand sessions that already exist stay detached from workflow " +
+				"when this is turned off. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Errands },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Errands = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

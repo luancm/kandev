@@ -39,6 +39,8 @@ type TaskSessionSummaryObservation struct {
 	ReviewStatus       ReviewStatus
 	TaskEnvironmentID  string
 	LastReadMessageID  string
+	Role               SessionRole
+	ParentSessionID    string
 	Worktrees          []*TaskEnvironmentRepo
 }
 
@@ -60,6 +62,7 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		StartedAt: o.StartedAt, CompletedAt: o.CompletedAt, UpdatedAt: o.UpdatedAt,
 		IsPrimary: o.IsPrimary, IsPassthrough: o.IsPassthrough, ReviewStatus: o.ReviewStatus,
 		TaskEnvironmentID: o.TaskEnvironmentID, LastReadMessageID: o.LastReadMessageID,
+		Role: o.Role, ParentSessionID: o.ParentSessionID,
 		Worktrees: o.Worktrees,
 	}
 	if o.AgentProfileName != "" {

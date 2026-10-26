@@ -170,6 +170,14 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Errands: agent-started child sessions that run in the task's shared
+  # workspace and report results to their parent session. Off in every
+  # profile; e2e specs that need it set the env var per spec.
+  KANDEV_FEATURES_ERRANDS:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
