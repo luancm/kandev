@@ -110,7 +110,8 @@ func (h *Handlers) resolveMessageTargetSession(
 }
 
 // newestLiveSession returns the most recently started session on the task that
-// can still receive a message, or nil when every session is terminal.
+// can still receive a message, or nil when every session is terminal. An
+// errand is never a fallback target; it is reachable only by session_id.
 // ListTaskSessions orders by started_at DESC, so the first match is the newest.
 func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	sessions, err := h.taskSvc.ListTaskSessions(ctx, taskID)
@@ -118,7 +119,7 @@ func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*model
 		return nil, err
 	}
 	for _, session := range sessions {
-		if session != nil && !isTerminalMessageTargetState(session.State) {
+		if session != nil && !models.IsErrandSession(session) && !isTerminalMessageTargetState(session.State) {
 			return session, nil
 		}
 	}
@@ -126,16 +127,16 @@ func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*model
 }
 
 // newestCompletedSession returns the most recently started completed session
-// on a task. It is used only when the task has no primary and no live session;
-// a completed primary remains a dedicated terminal target so FAILED/CANCELLED
-// dispatch behavior is not changed.
+// on a task, never an errand. It is used only when the task has no primary and
+// no live session; a completed primary remains a dedicated terminal target so
+// FAILED/CANCELLED dispatch behavior is not changed.
 func (h *Handlers) newestCompletedSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	sessions, err := h.taskSvc.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	for _, session := range sessions {
-		if session != nil && session.State == models.TaskSessionStateCompleted {
+		if session != nil && !models.IsErrandSession(session) && session.State == models.TaskSessionStateCompleted {
 			return session, nil
 		}
 	}

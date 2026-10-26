@@ -7760,7 +7760,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 			zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
 		return false
 	}
-	if models.IsCompletionFollowUpSession(session.Metadata) {
+	if models.IsWorkflowDetachedSession(session) {
 		if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
 			s.logger.Warn("failed to record non-workflow completion outcome",
 				zap.String("task_id", taskID), zap.Error(err))
@@ -8583,7 +8583,7 @@ func (s *Service) processOnTurnStartViaEngineResult(
 	taskID string,
 	session *models.TaskSession,
 ) (bool, error) {
-	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
+	if session == nil || models.IsWorkflowDetachedSession(session) {
 		return false, nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)

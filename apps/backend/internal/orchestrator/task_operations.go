@@ -1356,7 +1356,7 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 }
 
 func (s *Service) promoteSessionIfTaskHasNoPrimary(ctx context.Context, taskID string, session *models.TaskSession) {
-	if session == nil || session.IsPrimary {
+	if session == nil || session.IsPrimary || models.IsErrandSession(session) {
 		return
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
@@ -6115,8 +6115,9 @@ func (s *Service) quiesceSessionExecutionBeforeDeletion(
 }
 
 // promoteNextPrimaryAfterRemoval picks the best remaining session as primary
-// after a session is deleted. Any nonterminal session is eligible; the shared
-// selector prefers the current step's profile and ranks a parked session last.
+// after a session is deleted. Any nonterminal session except an errand is
+// eligible; the shared selector prefers the current step's profile and ranks
+// a parked session last.
 func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, deletedSessionID string) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil || len(sessions) == 0 {

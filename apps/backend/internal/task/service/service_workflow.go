@@ -1274,10 +1274,12 @@ func (s *Service) feederCandidateSession(ctx context.Context, taskID string) (*m
 		if session == nil {
 			continue
 		}
+		// A running errand still blocks the move, but an errand is never the
+		// session the promotion is attributed to.
 		if isSessionMoveBlocked(session.State) {
 			return nil, true
 		}
-		if !isSessionActive(session.State) {
+		if !isSessionActive(session.State) || models.IsErrandSession(session) {
 			continue
 		}
 		if session.IsPrimary && primary == nil {

@@ -385,15 +385,15 @@ Every orchestrator `IsCompletionFollowUpSession` call site
 (`event_handlers_agent.go`, `event_handlers_workflow.go`,
 `event_handlers_streaming.go`, `workflow_move_preview.go`,
 `ci_automation_dispatch.go`) moves to it, except
-`prepareOnTurnStartSession`, which only marks follow-ups. These selectors also
-exclude errands:
+`prepareOnTurnStartSession` and `persistWorkflowSwitchTag`, which only set or
+clear the marker. These selectors also exclude errands:
 
 | Path | Change |
 | --- | --- |
 | `processOnTurnStartViaEngineResult`, `processOnTurnCompleteViaEngineWithCause` | Return early for detached sessions |
-| `runtimeSessionOwnsTaskState`, `writeTaskReviewState` callers | Errands never write task state |
+| `runtimeSessionOwnsTaskState`, `writeTaskReviewState` callers | Errands never write or block task state |
 | `bestPrimarySessionCandidate`, `promoteSessionIfTaskHasNoPrimary`, `promoteNextPrimaryAfterRemoval`, `Repository.SetSessionPrimary` | Never select or accept an errand |
-| `resolvePrimaryOrActiveSession`, `feederCandidateSession` | Skip errands |
+| `GetActiveTaskSessionByTaskID`, `resolvePrimaryOrActiveSession`, `feederCandidateSession` | Skip errands |
 | `resolveMessageTargetSession` fallback | Skip errands; explicit `session_id` still works |
 | `selectReusableWorkflowSession`, `ciAutomationSessionCanReceivePrompt` | Skip errands |
 | Generated-title ownership | Errands never claim it |

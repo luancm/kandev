@@ -557,7 +557,7 @@ func previewReusableSession(sessions []*models.TaskSession, profileID, excludeID
 
 // selectReusableWorkflowSession is the pure candidate selector shared by the
 // preview and the side-effecting workflow switch path. Both paths must reject
-// terminal and completion-follow-up conversations in the same way.
+// terminal and workflow-detached conversations in the same way.
 func selectReusableWorkflowSession(sessions []*models.TaskSession, profileID, excludeID string) *models.TaskSession {
 	if profileID == "" {
 		return nil
@@ -565,7 +565,7 @@ func selectReusableWorkflowSession(sessions []*models.TaskSession, profileID, ex
 	var best *models.TaskSession
 	for _, session := range sessions {
 		if session == nil || session.ID == excludeID || session.AgentProfileID != profileID ||
-			models.IsCompletionFollowUpSession(session.Metadata) || isTerminalSessionState(session.State) {
+			models.IsWorkflowDetachedSession(session) || isTerminalSessionState(session.State) {
 			continue
 		}
 		if best == nil || session.UpdatedAt.After(best.UpdatedAt) {
@@ -583,7 +583,7 @@ func previewCurrentSession(sessions []*models.TaskSession) *models.TaskSession {
 	}
 	var latest *models.TaskSession
 	for _, session := range sessions {
-		if session == nil || !isPreviewActiveSession(session.State) {
+		if session == nil || models.IsErrandSession(session) || !isPreviewActiveSession(session.State) {
 			continue
 		}
 		if latest == nil || session.StartedAt.After(latest.StartedAt) ||

@@ -1213,6 +1213,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
+	if models.IsErrandSession(session) {
+		session.IsPrimary = false
+	}
 	if tx, ok := exec.(*sqlx.Tx); ok {
 		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{session.ID}, nil); err != nil {
 			return fmt.Errorf("lock agent delivery identity before session creation: %w", err)
@@ -1800,13 +1803,16 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("agent session not found for task: %s", taskID))
 }
 
-// GetActiveTaskSessionByTaskID retrieves the active (running/waiting) agent session for a task
+// GetActiveTaskSessionByTaskID retrieves the active (running/waiting) agent session for a task.
+// An errand is never the task's active session; ListActiveTaskSessionsByTaskID
+// still returns errands so task-wide stops reach them.
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		 WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		   AND ts.role <> ?
 		 ORDER BY ts.started_at DESC LIMIT 1`,
-	), taskID)
+	), taskID, string(models.SessionRoleErrand))
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no active agent session for task: %s", taskID))
 }
 
@@ -5191,14 +5197,17 @@ func (r *Repository) setSessionPrimary(
 	// First, get the task_id for this session. Do not lock the target row here:
 	// every primary promotion must take the owning task lock first so concurrent
 	// promotions keep one lock order.
-	var taskID string
-	query := `SELECT task_id FROM task_sessions WHERE id = ?`
-	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
+	var taskID, role string
+	query := `SELECT task_id, role FROM task_sessions WHERE id = ?`
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID, &role)
 	if err == sql.ErrNoRows {
 		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
 	if err != nil {
 		return false, err
+	}
+	if models.SessionRole(role) == models.SessionRoleErrand {
+		return false, fmt.Errorf("%w: %s", models.ErrErrandSessionPrimary, sessionID)
 	}
 
 	// Serialize concurrent promotions for the same task across Postgres

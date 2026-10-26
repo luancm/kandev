@@ -14,6 +14,13 @@ type SessionRole string
 // SessionRoleErrand marks a session that a parent session started as an errand.
 const SessionRoleErrand SessionRole = "errand"
 
+// IsErrandSession reports whether session is an errand. An errand never owns
+// the primary role, the generated title, or task runtime state, and is never
+// a default target for task-level routing.
+func IsErrandSession(session *TaskSession) bool {
+	return session != nil && session.Role == SessionRoleErrand
+}
+
 // ErrandLifecycle is the errand-owned launch state, independent of the
 // errand session's runtime state.
 type ErrandLifecycle string
@@ -89,6 +96,7 @@ var (
 	ErrErrandNotFound        = errors.New("errand not found")
 	ErrErrandVersionConflict = errors.New("errand version changed")
 	ErrInvalidErrand         = errors.New("invalid errand")
+	ErrErrandSessionPrimary  = errors.New("an errand session cannot be primary")
 )
 
 // Errand is the bookkeeping row for one errand. ID equals the errand's

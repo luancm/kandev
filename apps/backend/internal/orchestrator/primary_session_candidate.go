@@ -63,7 +63,7 @@ func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *mod
 // bestPrimarySessionCandidate returns the session an automatic promotion
 // should take, or "" when no session is eligible.
 //
-// Terminal sessions are never candidates. activeOnly keeps each caller's
+// Terminal sessions and errands are never candidates. activeOnly keeps each caller's
 // eligibility: maybePromotePrimary passes true, so only an active session can
 // inherit the role after a stop; promoteNextPrimaryAfterRemoval passes false,
 // so any nonterminal session can inherit it after a deletion.
@@ -82,7 +82,8 @@ func (s *Service) bestPrimarySessionCandidate(
 		bestState int
 	)
 	for _, session := range sessions {
-		if session == nil || session.ID == excludeSessionID || isTerminalSessionState(session.State) {
+		if session == nil || session.ID == excludeSessionID || isTerminalSessionState(session.State) ||
+			models.IsErrandSession(session) {
 			continue
 		}
 		if activeOnly && !isActiveSessionState(session.State) {

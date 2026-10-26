@@ -49,3 +49,18 @@ func TestPostgresErrandListingAndLiveCount(t *testing.T) {
 func TestPostgresErrandRowIsDeletedWithItsSessionAndTask(t *testing.T) {
 	exerciseErrandDeletion(t, newPostgresErrandRepo(t))
 }
+
+// @covers AC-TASKS-ERRANDS-005.2
+func TestPostgresSetSessionPrimaryRefusesErrand(t *testing.T) {
+	exerciseErrandNeverPrimary(t, newPostgresErrandRepo(t))
+}
+
+// @covers AC-TASKS-ERRANDS-005.3
+func TestPostgresErrandSkippedByActiveSessionLookup(t *testing.T) {
+	exerciseActiveSessionLookupSkipsErrands(t, newPostgresErrandRepo(t))
+}
+
+// @covers AC-TASKS-ERRANDS-005.2
+func TestPostgresErrandNeverClaimsTaskTitle(t *testing.T) {
+	exerciseErrandNeverClaimsTaskTitle(t, newPostgresErrandRepo(t))
+}

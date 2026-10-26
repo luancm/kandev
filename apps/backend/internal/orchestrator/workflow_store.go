@@ -1026,19 +1026,38 @@ func queuedTaskBefore(left, right *models.Task) bool {
 
 func (s *workflowStore) feederCandidateBlocked(ctx context.Context, taskID string) bool {
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
-	if err != nil {
-		if errors.Is(err, models.ErrTaskSessionNotFound) {
-			return false
-		}
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
 		s.logger.Warn("skipping feeder task after active session lookup failed",
 			zap.String("task_id", taskID), zap.Error(err))
 		return true
 	}
-	if session == nil {
-		return false
+	if err == nil && session != nil && isFeederMoveBlockingState(session.State) {
+		return true
 	}
-	return session.State == models.TaskSessionStateStarting ||
-		session.State == models.TaskSessionStateRunning
+	return s.feederCandidateHasWorkingErrand(ctx, taskID)
+}
+
+// feederCandidateHasWorkingErrand keeps a running errand blocking the move,
+// because it writes to the task's shared workspace. The task's active session
+// lookup never returns errands, so they are checked separately; a failed
+// lookup fails closed.
+func (s *workflowStore) feederCandidateHasWorkingErrand(ctx context.Context, taskID string) bool {
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("skipping feeder task after errand session lookup failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return true
+	}
+	for _, session := range sessions {
+		if models.IsErrandSession(session) && isFeederMoveBlockingState(session.State) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFeederMoveBlockingState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning
 }
 
 func skippedTaskIDs(skipped map[string]struct{}) []string {

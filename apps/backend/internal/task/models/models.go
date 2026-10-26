@@ -767,6 +767,14 @@ func IsCompletionFollowUpSession(metadata map[string]interface{}) bool {
 	return ok && followUp
 }
 
+// IsWorkflowDetachedSession reports whether a session's turns are outside
+// workflow ownership: they never run workflow turn actions, complete a step,
+// or receive workflow-directed prompts. Errands are always detached; other
+// sessions are detached only while they carry the completion follow-up marker.
+func IsWorkflowDetachedSession(session *TaskSession) bool {
+	return session != nil && (IsErrandSession(session) || IsCompletionFollowUpSession(session.Metadata))
+}
+
 // WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
 // one exact runtime execution. Stamp is compared before the metadata value is
 // marked consumed, so a delayed event cannot consume a newer switch intent.

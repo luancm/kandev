@@ -2576,10 +2576,15 @@ func (r *Repository) removeTaskMetadataKeyWithExecutor(
 	return rows > 0, err
 }
 
+// titleClaimSessionNotErrand keeps an errand session from claiming the
+// generated-title handoff; a session ID without a row stays eligible.
+const titleClaimSessionNotErrand = `
+			  AND NOT EXISTS (SELECT 1 FROM task_sessions WHERE id = ? AND role = ?)`
+
 // ClaimTaskTitleSession atomically assigns the first eligible session as the
 // owner of a pending title handoff. Repeated calls by that same session are
 // idempotent; a different session observes the existing owner and returns
-// false.
+// false. An errand session is never eligible.
 func (r *Repository) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, bool, error) {
 	if sessionID == "" {
 		return false, false, nil
@@ -2621,6 +2626,8 @@ func (r *Repository) ClaimTaskTitleSession(ctx context.Context, taskID, sessionI
 		}
 		args = []interface{}{string(payload), time.Now().UTC(), taskID}
 	}
+	query += titleClaimSessionNotErrand
+	args = append(args, sessionID, string(models.SessionRoleErrand))
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, false, err
