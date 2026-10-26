@@ -185,6 +185,20 @@ export function shouldAdoptNewSession(
 }
 
 /**
+ * While the errands flag is on, an errand becomes the active session only by
+ * explicit user navigation, never by automatic adoption or hand-off.
+ */
+function isAutoSelectionExcludedErrand(
+  state: AppState,
+  taskId: string,
+  session: { id: string; role?: unknown },
+): boolean {
+  if (!state.features?.errands) return false;
+  if (session.role === "errand") return true;
+  return Boolean(state.errands?.byTaskId?.[taskId]?.[session.id]);
+}
+
+/**
  * Pick the newest non-terminal session for a task. Used when the currently
  * active session just reached a terminal state — we want to hand focus to the
  * session that replaced it (typically created by a workflow step transition).
@@ -194,6 +208,7 @@ export function pickReplacementSessionId(state: AppState, taskId: string): strin
   if (!sessions) return null;
   for (let i = sessions.length - 1; i >= 0; i -= 1) {
     const candidate = sessions[i];
+    if (isAutoSelectionExcludedErrand(state, taskId, candidate)) continue;
     if (!isTerminalSessionState(candidate.state)) return candidate.id;
   }
   return null;
@@ -967,14 +982,22 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         clearResumeAndLaunchWarnings(store, sessionId);
       }
 
-      maybeAdoptSessionOnTransition(
-        store,
-        taskId,
-        sessionId,
-        newState,
-        !!existingSession,
-        existingSession?.state,
-      );
+      const incomingRole = payload.role ?? existingSession?.role;
+      if (
+        !isAutoSelectionExcludedErrand(store.getState(), taskId, {
+          id: sessionId,
+          role: incomingRole,
+        })
+      ) {
+        maybeAdoptSessionOnTransition(
+          store,
+          taskId,
+          sessionId,
+          newState,
+          !!existingSession,
+          existingSession?.state,
+        );
+      }
 
       maybeNotifySessionFailure(store, {
         taskId,

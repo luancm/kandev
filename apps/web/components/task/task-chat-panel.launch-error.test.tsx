@@ -28,6 +28,7 @@ const priorTranscriptMessage = {
 } as unknown as Message;
 
 const appStoreState = {
+  features: { errands: false },
   connection: { status: "connected" },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },

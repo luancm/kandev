@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveSessionTabTitle } from "./session-tab-title";
+import type { AppState } from "@/lib/state/store";
+import { resolveSessionTabTitle, selectSessionTabTitle } from "./session-tab-title";
 
 const SPARK_MODEL_ID = "gpt-5.3-codex-spark";
 const SPARK_MODEL_NAME = "GPT-5.3-Codex-Spark";
@@ -171,5 +172,42 @@ describe("resolveSessionTabTitle fallbacks", () => {
         snapshotModel: "gpt-5.5",
       }),
     ).toBe(PROFILE_LABEL);
+  });
+});
+
+describe("selectSessionTabTitle errand title", () => {
+  const ERRAND_ID = "errand-1";
+
+  function state(errandsEnabled: boolean, name?: string): AppState {
+    return {
+      features: { errands: errandsEnabled },
+      taskSessions: {
+        items: {
+          [ERRAND_ID]: {
+            id: ERRAND_ID,
+            task_id: "task-1",
+            role: "errand",
+            agent_profile_id: "profile-1",
+            name,
+          },
+        },
+      },
+      errands: { byTaskId: { "task-1": { [ERRAND_ID]: { title: "API audit" } } } },
+      sessionModels: { bySessionId: {} },
+      activeModel: { bySessionId: {} },
+      agentProfiles: { items: [{ id: "profile-1", label: "Codex • Deep review" }] },
+    } as unknown as AppState;
+  }
+
+  it("names an errand tab after its errand while the flag is on", () => {
+    expect(selectSessionTabTitle(state(true), ERRAND_ID)).toBe("Errand: API audit");
+  });
+
+  it("keeps a user-supplied session name", () => {
+    expect(selectSessionTabTitle(state(true, "audit"), ERRAND_ID)).toBe("audit");
+  });
+
+  it("keeps the ordinary tab title while the flag is off", () => {
+    expect(selectSessionTabTitle(state(false), ERRAND_ID)).toBe("Deep review");
   });
 });

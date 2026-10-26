@@ -31,6 +31,7 @@ import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/ses
 import { mergeTaskSession, mergeWorkspaceRecoveryProjection } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
+import type { ErrandsSliceState } from "@/lib/state/slices/errands/types";
 import {
   readMcpAttachmentHistory,
   shouldReplaceMcpAttachmentHistory,
@@ -931,6 +932,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Cascade into the runtime slice (shell/process/git buffers + per-session
       // maps); this also removes the environmentIdBySessionId mapping.
       purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
+      // An errand's ID is its session ID.
+      const errands = (draft as unknown as Partial<ErrandsSliceState>).errands;
+      delete errands?.byTaskId[taskId]?.[sessionId];
     });
 }
 
