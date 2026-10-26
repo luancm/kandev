@@ -124,6 +124,7 @@
   "task:commits": "Git command name; the user types it and reads it in git's own output.",
   "task:control": "Names a physical keyboard key, as printed on the key.",
   "task:diff": "Git command name; the user types it and reads it in git's own output.",
+  "task:errandWorkspaceWithBranch": "Path and branch frame; the parenthesized form is the same in every language.",
   "task:executor2": "Technical term kept in English across localized developer tooling.",
   "task:executorTypeLocalWorktree": "Technical term kept in English across localized developer tooling.",
   "task:filterStateBacklog": "Technical term kept in English across localized developer tooling.",
