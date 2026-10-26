@@ -649,6 +649,7 @@
   "errandsChipRunning": "Ēŕŕàńďś: {{count}} ŕũńńĩńĝ",
   "errandSendResult": "Śēńď ŕēśũĺţ ţō ƥàŕēńţ",
   "errandSendResultFailed": "Ćōũĺď ńōţ śēńď ţĥē ŕēśũĺţ ţō ţĥē ƥàŕēńţ śēśśĩōń",
+  "errandsOfSession": "Ēŕŕàńďś ōƒ {{parent}}",
   "errandsPanelClose": "Ćĺōśē ēŕŕàńďś",
   "errandsPanelDescription": "Ēŕŕàńďś śţàŕţēď ĩń ţĥĩś ţàśķ, ĝŕōũƥēď ƀŷ ţĥē śēśśĩōń ţĥàţ śţàŕţēď ţĥēḿ.",
   "errandsPanelLoading": "Ĺōàďĩńĝ ēŕŕàńďś",

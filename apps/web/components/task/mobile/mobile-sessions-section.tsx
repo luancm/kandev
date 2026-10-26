@@ -1,26 +1,18 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconDotsVertical, IconPlus, IconStar } from "@tabler/icons-react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconPlus, IconStar } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+
 import { AgentLogo } from "@/components/agent-logo";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useTaskErrands } from "@/hooks/domains/session/use-task-errands";
+import { ErrandStatusLabel } from "../chat/errands/errand-status";
+import type { Errand } from "@/lib/types/errands";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import {
-  useSessionActions,
-  isSessionStoppable,
-  isSessionDeletable,
-  isSessionResumable,
-} from "@/hooks/domains/session/use-session-actions";
-import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
+import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
@@ -32,8 +24,10 @@ import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/ty
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { SessionActionsMenu } from "./session-actions-menu";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
-import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
+import { MobileErrandSessionRow } from "./mobile-errand-session-row";
+import { nestSessionRows } from "./mobile-session-nesting";
 
 type SessionRow = {
   id: string;
@@ -47,34 +41,50 @@ type SessionRow = {
    *  live (spec: docs/specs/disambiguate-waiting/spec.md). */
   parkedOnBackgroundWork: boolean;
   isPrimary: boolean;
+  /** The session's role is `errand`, independent of the errands flag. */
+  isErrand: boolean;
+  /** An errand shown nested under its parent (errands flag on). */
+  nested: boolean;
+  parentSessionId: string | null;
+  /** Position among the top-level sessions; 0 for a nested errand. */
   index: number;
   startedAt: string;
 };
+
+/** User-supplied session name wins over the derived profile label, like the desktop tab title. */
+function sessionAgentLabel(session: TaskSession, profile: AgentProfileOption | undefined): string {
+  const labelParts = profile?.label.split(" • ") ?? [];
+  return session.name || labelParts[1] || labelParts[0] || profile?.label || t("task:agent");
+}
 
 function buildSessionRows(
   sessions: TaskSession[],
   agentProfiles: AgentProfileOption[],
   primarySessionId: string | null | undefined,
   repositoryLabelsById: ReadonlyMap<string, string>,
+  errandsEnabled: boolean,
 ): SessionRow[] {
   const sorted = [...sessions].sort(
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
   );
-  return sorted.map((s, idx) => {
+  let ordinal = 0;
+  return sorted.map((s) => {
+    const isErrand = s.role === "errand";
+    const nested = errandsEnabled && isErrand;
     const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
-    const labelParts = profile?.label.split(" • ") ?? [];
     return {
       id: s.id,
       agentName: profile?.agent_name ?? null,
-      // User-supplied session name wins over the derived profile label,
-      // matching the desktop session tab title precedence.
-      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || t("task:agent"),
+      agentLabel: sessionAgentLabel(s, profile),
       repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
       state: (s.state as TaskSessionState | undefined) ?? null,
       foregroundActivity: s.foreground_activity ?? null,
       parkedOnBackgroundWork: !!s.parked_on_background_work,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
-      index: idx + 1,
+      isErrand,
+      nested,
+      parentSessionId: s.parent_session_id ?? null,
+      index: nested ? 0 : ++ordinal,
       startedAt: s.started_at,
     };
   });
@@ -144,112 +154,6 @@ function StateBadge({
   );
 }
 
-type SessionActionsMenuProps = {
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  taskId: string;
-  state: TaskSessionState | null;
-  isPrimary: boolean;
-  onSetPrimary: () => void;
-  onStop: () => void;
-  onResume: () => void;
-  onRestart: () => void;
-  isRestarting: boolean;
-  onAskDelete: () => void;
-  onHandoffProfile: (profileId: string) => void;
-};
-
-/** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
-function SessionActionsMenu({
-  triggerRef,
-  taskId,
-  state,
-  isPrimary,
-  onSetPrimary,
-  onStop,
-  onResume,
-  onRestart,
-  isRestarting,
-  onAskDelete,
-  onHandoffProfile,
-}: SessionActionsMenuProps) {
-  const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
-  const pendingDelete = useRef(false);
-  const { open, setOpen, triggerProps } = useSessionMenuOpeningGesture();
-  const hasLifecycleAction =
-    !!state &&
-    (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
-
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          ref={triggerRef}
-          variant="ghost"
-          size="icon-sm"
-          className="cursor-pointer h-11 w-11 md:h-7 md:w-7 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          {...triggerProps}
-          aria-label={t("task:sessionActions")}
-        >
-          <IconDotsVertical className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="end"
-        onClick={(e) => e.stopPropagation()}
-        onCloseAutoFocus={(event) => {
-          if (!pendingDelete.current) return;
-          event.preventDefault();
-          pendingDelete.current = false;
-          onAskDelete();
-        }}
-      >
-        <DropdownMenuItem
-          className="cursor-pointer"
-          onSelect={onSetPrimary}
-          disabled={isPrimary || !state}
-        >
-          {t("task:setAsPrimary")}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        {state && isSessionStoppable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onStop} disabled={isRestarting}>
-            {t("task:stop")}
-          </DropdownMenuItem>
-        )}
-        {(isRestarting || (state && isSessionStoppable(state))) && (
-          <DropdownMenuItem
-            className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-            onSelect={onRestart}
-            disabled={isRestarting}
-          >
-            {t("task:restartSession")}
-          </DropdownMenuItem>
-        )}
-        {state && isSessionResumable(state) && (
-          <DropdownMenuItem className="cursor-pointer" onSelect={onResume} disabled={isRestarting}>
-            {t("task:resume")}
-          </DropdownMenuItem>
-        )}
-        {state && isSessionDeletable(state) && (
-          <DropdownMenuItem
-            className="cursor-pointer text-destructive focus:text-destructive"
-            disabled={isRestarting}
-            onSelect={() => {
-              if (isMobile) pendingDelete.current = true;
-              else onAskDelete();
-            }}
-          >
-            {t("task:delete")}
-          </DropdownMenuItem>
-        )}
-        {hasLifecycleAction && <DropdownMenuSeparator />}
-        <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function SessionIdentity({ row }: { row: SessionRow }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -307,6 +211,7 @@ function SessionRowTrailingActions({
           taskId={taskId}
           state={row.state}
           isPrimary={row.isPrimary}
+          isErrand={row.isErrand}
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
@@ -417,6 +322,7 @@ function useSessionRows(taskId: string | null) {
   // `t`, so the language has to reach the memo below for that label to follow a
   // runtime locale switch.
   const { i18n } = useTranslation();
+  const errandsEnabled = useFeature("errands");
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const primarySessionId = useAppStore((s) => {
@@ -439,11 +345,115 @@ function useSessionRows(taskId: string | null) {
     return labels;
   }, [repositoriesByWorkspace, sessions]);
   const rows = useMemo(
-    () => buildSessionRows(sessions, agentProfiles, primarySessionId, repositoryLabelsById),
+    () =>
+      buildSessionRows(
+        sessions,
+        agentProfiles,
+        primarySessionId,
+        repositoryLabelsById,
+        errandsEnabled,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
-    [sessions, agentProfiles, primarySessionId, repositoryLabelsById, i18n.language],
+    [
+      sessions,
+      agentProfiles,
+      primarySessionId,
+      repositoryLabelsById,
+      errandsEnabled,
+      i18n.language,
+    ],
   );
   return { rows, isLoading, primarySessionId };
+}
+
+/** Errand sessions of a task by session ID; empty while the errands flag is off. */
+function useErrandsBySessionId(taskId: string | null): ReadonlyMap<string, Errand> {
+  const { errands } = useTaskErrands(taskId);
+  return useMemo(() => new Map(errands.map((errand) => [errand.errand_id, errand])), [errands]);
+}
+
+function SessionRowsTree({
+  rows,
+  taskId,
+  activeSessionId,
+  confirmDeleteSessionId,
+  onAskDelete,
+  onCancelDelete,
+  onSelect,
+}: {
+  rows: SessionRow[];
+  taskId: string;
+  activeSessionId: string | null;
+  confirmDeleteSessionId: string | null;
+  onAskDelete: (sessionId: string) => void;
+  onCancelDelete: () => void;
+  onSelect: (sessionId: string) => void;
+}) {
+  const { t } = useTranslation();
+  const errandsById = useErrandsBySessionId(taskId);
+  const groups = useMemo(
+    () =>
+      nestSessionRows(
+        rows.map((row) => {
+          const parent = errandsById.get(row.id)?.parent_session_id;
+          return parent ? { ...row, parentSessionId: parent } : row;
+        }),
+      ),
+    [rows, errandsById],
+  );
+  const topLevelCount = rows.filter((row) => !row.nested).length;
+  const renderErrand = (row: SessionRow) => {
+    const errand = errandsById.get(row.id);
+    return (
+      <MobileErrandSessionRow
+        key={row.id}
+        sessionId={row.id}
+        title={errand?.title || row.agentLabel}
+        isActive={row.id === activeSessionId}
+        onSelect={onSelect}
+        status={
+          errand ? (
+            <ErrandStatusLabel status={errand.status} />
+          ) : (
+            <StateBadge
+              sessionId={row.id}
+              state={row.state}
+              foregroundActivity={row.foregroundActivity}
+              parkedOnBackgroundWork={row.parkedOnBackgroundWork}
+            />
+          )
+        }
+      />
+    );
+  };
+  return groups.map(({ row, children }) => (
+    <Fragment key={row.id}>
+      {row.nested ? (
+        renderErrand(row)
+      ) : (
+        <SessionRowItem
+          row={row}
+          taskId={taskId}
+          isActive={row.id === activeSessionId}
+          totalSessions={topLevelCount}
+          isConfirming={row.id === confirmDeleteSessionId}
+          onAskDelete={() => onAskDelete(row.id)}
+          onCancelDelete={onCancelDelete}
+          onSelect={onSelect}
+        />
+      )}
+      {children.length > 0 && (
+        <div
+          role="group"
+          aria-label={t("task:errandsOfSession", { parent: row.agentLabel })}
+          data-testid={`mobile-errand-group-${row.id}`}
+          className="ml-4 flex flex-col gap-0.5 border-l border-border/60 pl-2"
+        >
+          {children.map(renderErrand)}
+        </div>
+      )}
+    </Fragment>
+  ));
 }
 
 const MobileSessionsList = memo(function MobileSessionsList({
@@ -489,7 +499,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
     <div className="flex flex-col gap-2 px-1">
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
-          {t("task:sessionCount", { count: rows.length })}
+          {t("task:sessionCount", { count: rows.filter((row) => !row.nested).length })}
         </span>
         <Button
           size="sm"
@@ -513,19 +523,15 @@ const MobileSessionsList = memo(function MobileSessionsList({
             {t("task:noSessionsYetLaunchOneTo")}
           </div>
         )}
-        {rows.map((row) => (
-          <SessionRowItem
-            key={row.id}
-            row={row}
-            taskId={taskId}
-            isActive={row.id === activeSessionId}
-            totalSessions={rows.length}
-            isConfirming={row.id === confirmDeleteSessionId}
-            onAskDelete={() => setConfirmDeleteSessionId(row.id)}
-            onCancelDelete={() => setConfirmDeleteSessionId(null)}
-            onSelect={handleSelect}
-          />
-        ))}
+        <SessionRowsTree
+          rows={rows}
+          taskId={taskId}
+          activeSessionId={activeSessionId}
+          confirmDeleteSessionId={confirmDeleteSessionId}
+          onAskDelete={setConfirmDeleteSessionId}
+          onCancelDelete={() => setConfirmDeleteSessionId(null)}
+          onSelect={handleSelect}
+        />
       </div>
       {launchOpen && (
         <NewSessionDialog open={launchOpen} onOpenChange={setLaunchOpen} taskId={taskId} />
@@ -549,7 +555,7 @@ function useActiveSessionPillLabel(
   const { rows } = useSessionRows(taskId);
   const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
   const activeRow = rows.find((r) => r.id === effectiveSessionId);
-  const total = rows.length;
+  const total = rows.filter((r) => !r.nested).length;
   const idx = activeRow?.index;
   let count: string | undefined;
   if (total > 1 && idx) count = `${idx}/${total}`;

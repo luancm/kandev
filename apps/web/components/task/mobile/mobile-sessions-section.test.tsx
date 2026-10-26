@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { repositoryId, type Repository, type TaskSession } from "@/lib/types/http";
+import type { Errand } from "@/lib/types/errands";
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
@@ -16,16 +17,27 @@ const mocks = vi.hoisted(() => ({
   removeSession: vi.fn(),
   restartSession: vi.fn(),
   isRestarting: false,
+  errandsEnabled: false,
+  errands: [] as Errand[],
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: () => ({ sessions: mocks.sessions, isLoading: false, isLoaded: true }),
 }));
 
+vi.mock("@/hooks/domains/session/use-task-errands", () => ({
+  useTaskErrands: () => ({
+    errands: mocks.errandsEnabled ? mocks.errands : [],
+    errandsByParent: {},
+    liveCount: 0,
+    isLoaded: true,
+  }),
+}));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
-      features: { dynamicAgentRouting: false },
+      features: { dynamicAgentRouting: false, errands: mocks.errandsEnabled },
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
@@ -138,6 +150,8 @@ beforeEach(() => {
   mocks.removeSession.mockReset();
   mocks.restartSession.mockReset();
   mocks.isRestarting = false;
+  mocks.errandsEnabled = false;
+  mocks.errands = [];
 });
 
 describe("MobileSessionsPicker selection", () => {

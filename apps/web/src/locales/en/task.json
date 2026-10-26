@@ -649,6 +649,7 @@
   "errandsChipRunning": "Errands: {{count}} running",
   "errandSendResult": "Send result to parent",
   "errandSendResultFailed": "Could not send the result to the parent session",
+  "errandsOfSession": "Errands of {{parent}}",
   "errandsPanelClose": "Close errands",
   "errandsPanelDescription": "Errands started in this task, grouped by the session that started them.",
   "errandsPanelLoading": "Loading errands",
