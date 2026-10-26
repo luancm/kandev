@@ -1,7 +1,7 @@
 ---
 id: "08-errand-ui"
 title: "Build the errand UI for desktop and phone"
-status: pending
+status: in_progress
 wave: 6
 depends_on:
   - "03-frontend-data-layer"
