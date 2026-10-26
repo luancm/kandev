@@ -1,0 +1,236 @@
+package errands
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// fakeTurns serves transcript evidence keyed by turn ID.
+type fakeTurns struct {
+	views map[string]TurnView
+}
+
+func (f *fakeTurns) ReadTurn(_ context.Context, _, turnID string) (TurnView, error) {
+	return f.views[turnID], nil
+}
+
+func (f *fakeTurns) LatestTurn(context.Context, string) (string, TurnView, error) {
+	return "", TurnView{}, nil
+}
+
+// settleFirstTurn starts an errand whose first turn is parent-initiated and
+// settles it with text. It returns the harness and the errand ID.
+func settleFirstTurn(t *testing.T, text string) (*harness, string) {
+	t.Helper()
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
+		errand.FirstTurnID: {LastAgentText: text, EarliestUserSender: testParent},
+	}})
+	h.store.setSessionState(errand.ID, models.TaskSessionStateWaitingForInput)
+	err := h.service.OnErrandTurnSettled(context.Background(), TurnSettlement{
+		SessionID: errand.ID, TurnID: errand.FirstTurnID, Outcome: models.ErrandOutcomeDone,
+	})
+	if err != nil {
+		t.Fatalf("OnErrandTurnSettled: %v", err)
+	}
+	return h, errand.ID
+}
+
+// @covers AC-TASKS-ERRANDS-003.1
+func TestParentInitiatedTurnCapturesItsFinalMessageAsOneResult(t *testing.T) {
+	h, id := settleFirstTurn(t, "the answer")
+	row, err := h.store.GetErrand(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetErrand: %v", err)
+	}
+	if row.ResultState != models.ErrandResultPending || row.ResultText != "the answer" || row.ResultTurnID == "" {
+		t.Fatalf("result = %q/%s turn %q, want one pending result", row.ResultText, row.ResultState, row.ResultTurnID)
+	}
+	if row.AwaitingResult {
+		t.Fatal("a settled parent-initiated turn left the errand awaiting its result")
+	}
+	if got := h.deliverer.delivered(); len(got) != 1 {
+		t.Fatalf("deliveries = %v, want one notification request", got)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.2
+func TestOversizedResultIsBoundedAtACharacterBoundary(t *testing.T) {
+	long := strings.Repeat("é", resultByteLimit)
+	bounded, truncated := boundResult(long)
+	if !truncated || len(bounded) > resultByteLimit || !utf8.ValidString(bounded) {
+		t.Fatalf("truncated=%v len=%d valid=%v, want a truncated valid result within 16 KiB",
+			truncated, len(bounded), utf8.ValidString(bounded))
+	}
+	if !strings.Contains(bounded, "get_task_conversation_kandev") {
+		t.Fatal("a truncated result does not say where the full transcript is")
+	}
+	if short, cut := boundResult("short"); cut || short != "short" {
+		t.Fatalf("short result = %q truncated=%v, want it unchanged", short, cut)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.3
+func TestUserTurnDoesNotProduceAResult(t *testing.T) {
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
+		"user-turn": {LastAgentText: "chatter", EarliestUserSender: "someone-else"},
+	}})
+	err := h.service.OnErrandTurnSettled(context.Background(), TurnSettlement{
+		SessionID: errand.ID, TurnID: "user-turn", Outcome: models.ErrandOutcomeDone,
+	})
+	if err != nil {
+		t.Fatalf("OnErrandTurnSettled: %v", err)
+	}
+	row, _ := h.store.GetErrand(context.Background(), errand.ID)
+	if row.ResultState == models.ErrandResultPending || row.ResultText != "" {
+		t.Fatalf("a user turn produced result %q/%s", row.ResultText, row.ResultState)
+	}
+	if row.LatestSettledTurnID != "user-turn" {
+		t.Fatalf("latest settled turn = %q, want the user turn recorded", row.LatestSettledTurnID)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.4
+func TestLaterParentTurnSupersedesAnUndeliveredResult(t *testing.T) {
+	h, id := settleFirstTurn(t, "first answer")
+	if err := h.service.OnParentPromptAdmitted(context.Background(), id, testParent); err != nil {
+		t.Fatalf("OnParentPromptAdmitted: %v", err)
+	}
+	row, _ := h.store.GetErrand(context.Background(), id)
+	if row.ResultState != models.ErrandResultSuperseded {
+		t.Fatalf("result state = %s, want superseded by the new parent turn", row.ResultState)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-004.9
+func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
+	h, id := settleFirstTurn(t, "the answer")
+	ctx := context.Background()
+	first, err := h.service.Await(ctx, AwaitRequest{
+		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-a",
+	})
+	if err != nil {
+		t.Fatalf("Await: %v", err)
+	}
+	if len(first.Errands) != 1 || first.Errands[0].Result != "the answer" {
+		t.Fatalf("first await = %+v, want the result", first.Errands)
+	}
+	second, err := h.service.Await(ctx, AwaitRequest{
+		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-b",
+	})
+	if err != nil {
+		t.Fatalf("second Await: %v", err)
+	}
+	if second.Errands[0].Result != "" || second.Errands[0].DeliveredVia != string(models.ErrandDeliveryAwait) {
+		t.Fatalf("second await = %+v, want no text and delivered via await", second.Errands[0])
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-004.9
+func TestReleasedAwaitMakesTheResultDeliverableAgain(t *testing.T) {
+	h, id := settleFirstTurn(t, "the answer")
+	ctx := context.Background()
+	if _, err := h.service.Await(ctx, AwaitRequest{
+		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-a",
+	}); err != nil {
+		t.Fatalf("Await: %v", err)
+	}
+	if err := h.service.ReleaseAwait(ctx, "token-a"); err != nil {
+		t.Fatalf("ReleaseAwait: %v", err)
+	}
+	row, _ := h.store.GetErrand(ctx, id)
+	if row.ResultState != models.ErrandResultPending || row.DeliveryToken != "" {
+		t.Fatalf("after release result = %s token %q, want pending with no token", row.ResultState, row.DeliveryToken)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-004.9
+func TestStatusBlockClaimsResultsAndReleaseReturnsThem(t *testing.T) {
+	h, id := settleFirstTurn(t, "the answer")
+	ctx := context.Background()
+	composition, err := h.service.ComposeParentTurn(ctx, testParent, models.ErrandDeliveryTurnContext)
+	if err != nil {
+		t.Fatalf("ComposeParentTurn: %v", err)
+	}
+	if composition.Token == "" || !strings.Contains(composition.Block, "the answer") || !strings.Contains(composition.Block, id) {
+		t.Fatalf("composition = %+v, want a block carrying the result", composition)
+	}
+	row, _ := h.store.GetErrand(ctx, id)
+	if row.ResultState != models.ErrandResultDelivered || row.DeliveryToken != composition.Token {
+		t.Fatalf("after compose result = %s token %q, want delivered under the token", row.ResultState, row.DeliveryToken)
+	}
+	if err := h.service.ReleaseTurnClaim(ctx, composition.Token); err != nil {
+		t.Fatalf("ReleaseTurnClaim: %v", err)
+	}
+	row, _ = h.store.GetErrand(ctx, id)
+	if row.ResultState != models.ErrandResultPending {
+		t.Fatalf("after release result = %s, want pending", row.ResultState)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-004.11
+func TestBlockedParentIsNotNotifiedUntilTheSweep(t *testing.T) {
+	h, _ := settleFirstTurn(t, "the answer")
+	h.deliverer.parents = nil
+	h.deliverer.blocked = true
+	if err := h.service.SweepDelivery(context.Background()); err != nil {
+		t.Fatalf("SweepDelivery: %v", err)
+	}
+	if got := h.deliverer.delivered(); len(got) != 0 {
+		t.Fatalf("deliveries while blocked = %v, want none", got)
+	}
+	h.deliverer.blocked = false
+	if err := h.service.SweepDelivery(context.Background()); err != nil {
+		t.Fatalf("SweepDelivery: %v", err)
+	}
+	if got := h.deliverer.delivered(); len(got) != 1 {
+		t.Fatalf("deliveries after unblock = %v, want one", got)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-006.1
+func TestOutstandingParentReportsOutstandingUntilTheResultIsDelivered(t *testing.T) {
+	h, _ := settleFirstTurn(t, "the answer")
+	ctx := context.Background()
+	outstanding, err := h.service.OnParentTurnSettled(ctx, testParent, SettleCauseTurnDone)
+	if err != nil || !outstanding {
+		t.Fatalf("OnParentTurnSettled = %v/%v, want outstanding while a result is pending", outstanding, err)
+	}
+	if _, err := h.service.ComposeParentTurn(ctx, testParent, models.ErrandDeliveryNotification); err != nil {
+		t.Fatalf("ComposeParentTurn: %v", err)
+	}
+	outstanding, err = h.service.ParentOutstanding(ctx, testParent)
+	if err != nil || outstanding {
+		t.Fatalf("ParentOutstanding after delivery = %v/%v, want false", outstanding, err)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.5
+func TestDeletedOutstandingErrandAdmitsItsCancellationNotice(t *testing.T) {
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	if err := h.service.PreserveCancellationNotice(context.Background(), errand.ID); err != nil {
+		t.Fatalf("PreserveCancellationNotice: %v", err)
+	}
+	if len(h.deliverer.prepared) != 1 || !strings.Contains(h.deliverer.prepared[0], cancellationNotice) {
+		t.Fatalf("admitted = %v, want one cancellation notice", h.deliverer.prepared)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.5
+func TestRefusedCancellationNoticeFailsTheDeleteInsteadOfLosingIt(t *testing.T) {
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	h.deliverer.admitErr = errors.New("queue full")
+	if err := h.service.PreserveCancellationNotice(context.Background(), errand.ID); err == nil {
+		t.Fatal("PreserveCancellationNotice succeeded although the notice was refused")
+	}
+}
