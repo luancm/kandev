@@ -103,6 +103,12 @@ func (s *memoryStore) ListQueuedErrands(_ context.Context) ([]*models.Errand, er
 	return s.sorted(func(e *models.Errand) bool { return e.Lifecycle == models.ErrandLifecycleQueued }), nil
 }
 
+func (s *memoryStore) ListErrands(context.Context) ([]*models.Errand, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sorted(func(*models.Errand) bool { return true }), nil
+}
+
 // CountLiveErrandsByTask counts errands whose projected status is live.
 func (s *memoryStore) CountLiveErrandsByTask(_ context.Context, taskID string) (int, error) {
 	s.mu.Lock()
@@ -287,14 +293,30 @@ func (p *recordingPublisher) statuses() []models.ErrandStatus {
 }
 
 type recordingDeliverer struct {
-	mu      sync.Mutex
-	parents []string
+	mu       sync.Mutex
+	parents  []string
+	prepared []string
+	blocked  bool
+	admitErr error
+}
+
+func (d *recordingDeliverer) NotificationBlocked(context.Context, string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.blocked
 }
 
 func (d *recordingDeliverer) DeliverPending(_ context.Context, parentSessionID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.parents = append(d.parents, parentSessionID)
+}
+
+func (d *recordingDeliverer) AdmitPrepared(_ context.Context, parentSessionID, content string, _ map[string]interface{}) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.prepared = append(d.prepared, parentSessionID+"\n"+content)
+	return d.admitErr
 }
 
 func (d *recordingDeliverer) delivered() []string {

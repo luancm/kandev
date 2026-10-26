@@ -283,12 +283,6 @@ func (s *Service) applyLaunchFailure(e *models.Errand, launchErr error) {
 	e.SettledAt = &now
 }
 
-func (s *Service) deliverPending(ctx context.Context, parentSessionID string) {
-	if s.deliverer != nil {
-		s.deliverer.DeliverPending(ctx, parentSessionID)
-	}
-}
-
 func (s *Service) errandFields(errand *models.Errand, extra ...string) []zap.Field {
 	fields := []zap.Field{
 		zap.String("task_id", errand.TaskID), zap.String("session_id", errand.ID),

@@ -21,8 +21,9 @@ const (
 // dev mode. Labels come from closed sets; task, session, errand, and profile
 // identifiers are never label values.
 var (
-	startedTotal = expvar.NewMap("errands_started_total")
-	settledTotal = expvar.NewMap("errands_settled_total")
+	startedTotal  = expvar.NewMap("errands_started_total")
+	settledTotal  = expvar.NewMap("errands_settled_total")
+	deliveryTotal = expvar.NewMap("errands_result_delivery_total")
 )
 
 func countStarted(outcome StartOutcome) {
@@ -35,5 +36,14 @@ func countSettled(status models.ErrandStatus) {
 	switch status {
 	case models.ErrandStatusDone, models.ErrandStatusFailed, models.ErrandStatusCancelled:
 		settledTotal.Add("status="+string(status), 1)
+	}
+}
+
+// countDelivery records one result handed to the parent. The route set is
+// closed; task, session, and errand identifiers are never labels.
+func countDelivery(route models.ErrandDeliveryRoute) {
+	switch route {
+	case models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext, models.ErrandDeliveryNotification:
+		deliveryTotal.Add("route="+string(route), 1)
 	}
 }

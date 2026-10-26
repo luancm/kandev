@@ -90,8 +90,15 @@ func (r *Repository) ListErrandsByParent(ctx context.Context, parentSessionID st
 	return r.listErrands(ctx, `parent_session_id = ? ORDER BY created_at, id`, parentSessionID)
 }
 
+// ListErrands returns every errand row. Reconciliation and the delivery
+// sweep use it; callers that need one parent or task use the filtered lists.
+func (r *Repository) ListErrands(ctx context.Context) ([]*models.Errand, error) {
+	return r.listErrands(ctx, "1 = 1")
+}
+
 // ListQueuedErrands returns every queued errand grouped by task and in
 // creation order within a task.
+
 func (r *Repository) ListQueuedErrands(ctx context.Context) ([]*models.Errand, error) {
 	return r.listErrands(ctx, `lifecycle = 'queued' ORDER BY task_id, created_at, id`)
 }

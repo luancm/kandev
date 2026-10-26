@@ -204,7 +204,7 @@ func (s *Service) applyCancel(e *models.Errand, source models.ErrandCancelSource
 	case source == models.ErrandCancelSourceUser && outstanding:
 		e.ResultKind = models.ErrandResultCancelled
 		e.ResultState = models.ErrandResultPending
-		e.ResultText = ""
+		e.ResultText = cancellationNotice
 		e.ResultTruncated = false
 		e.ResultTurnID = ""
 		e.DeliveredRoute, e.DeliveryToken, e.DeliveredAt = "", "", nil

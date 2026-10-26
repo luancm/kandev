@@ -53,7 +53,15 @@ func (s *Service) update(
 // character boundary.
 func oneLine(text string, limit int) string {
 	text = strings.Join(strings.Fields(text), " ")
-	if len(text) <= limit {
+	return cutBytes(text, limit)
+}
+
+// cutBytes cuts text to at most limit bytes without splitting a rune.
+func cutBytes(text string, limit int) string {
+	if len(text) <= limit || limit < 0 {
+		if limit < 0 {
+			return ""
+		}
 		return text
 	}
 	cut := limit

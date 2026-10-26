@@ -19,6 +19,7 @@ type Store interface {
 	ListErrandsByTask(ctx context.Context, taskID string) ([]*models.Errand, error)
 	ListErrandsByParent(ctx context.Context, parentSessionID string) ([]*models.Errand, error)
 	ListQueuedErrands(ctx context.Context) ([]*models.Errand, error)
+	ListErrands(ctx context.Context) ([]*models.Errand, error)
 	CountLiveErrandsByTask(ctx context.Context, taskID string) (int, error)
 	DeleteErrand(ctx context.Context, id string) error
 	UpdateErrand(ctx context.Context, errand *models.Errand) error
@@ -55,10 +56,19 @@ type SessionStopper interface {
 	StopErrandSession(ctx context.Context, sessionID, reason string) error
 }
 
-// ParentDeliverer delivers pending errand results to a parent session. It is
-// optional: a Service without one leaves results pending.
+// ParentDeliverer admits errand notifications onto a parent's queue. It is
+// optional: a Service without one leaves results pending. DeliverPending and
+// AdmitPrepared must not call back into the service.
 type ParentDeliverer interface {
+	// NotificationBlocked reports that a parent turn is running or any queue
+	// entry, a notification included, is already waiting.
+	NotificationBlocked(ctx context.Context, parentSessionID string) bool
+	// DeliverPending admits one empty server notification. A refusal, including
+	// a full queue, leaves results pending.
 	DeliverPending(ctx context.Context, parentSessionID string)
+	// AdmitPrepared admits one notification whose content is already the
+	// status block, used when the errand row will not survive until dispatch.
+	AdmitPrepared(ctx context.Context, parentSessionID, content string, metadata map[string]interface{}) error
 }
 
 // MCPSelections reads the session-level MCP selections of a parent session.
@@ -82,6 +92,27 @@ type ProfileResolver interface {
 // EventPublisher publishes one errand.updated event for a durable change.
 type EventPublisher interface {
 	PublishErrandUpdated(ctx context.Context, errand *models.Errand, status models.ErrandStatus)
+}
+
+// TurnView is the transcript evidence of one errand turn.
+type TurnView struct {
+	LastAgentText      string
+	EarliestUserSender string
+	Completed          bool
+}
+
+// TurnReader reads errand transcript evidence. The orchestrator satisfies it
+// from task messages. A nil reader treats only the reserved first turn as
+// parent-initiated and captures no assistant text.
+type TurnReader interface {
+	ReadTurn(ctx context.Context, sessionID, turnID string) (TurnView, error)
+	LatestTurn(ctx context.Context, sessionID string) (turnID string, view TurnView, err error)
+}
+
+// DeliveryLog reports whether a parent message contains a delivery token.
+// Reconciliation uses it to return claims whose token never landed.
+type DeliveryLog interface {
+	HasDeliveryToken(ctx context.Context, parentSessionID, token string) (bool, error)
 }
 
 // Clock supplies the current time.

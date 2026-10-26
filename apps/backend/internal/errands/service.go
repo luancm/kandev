@@ -39,9 +39,15 @@ type Service struct {
 	clock     Clock
 	logger    *logger.Logger
 
-	taskLocks taskLockSet
-	launching launchGuard
-	cascades  cascadeWorker
+	taskLocks   taskLockSet
+	parentLocks taskLockSet
+	launching   launchGuard
+	cascades    cascadeWorker
+	awaits      awaitRegistry
+
+	turns    TurnReader
+	receipts DeliveryLog
+	enabled  func() bool
 }
 
 // Snapshot is an errand row with its projected status.
@@ -83,6 +89,30 @@ func New(deps Dependencies) (*Service, error) {
 // SetDeliverer wires the parent delivery seam after construction.
 func (s *Service) SetDeliverer(deliverer ParentDeliverer) {
 	s.deliverer = deliverer
+}
+
+// SetEnabled reports whether features.errands is on. A nil gate leaves the
+// service enabled, which unit tests rely on; production sets the flag.
+func (s *Service) SetEnabled(enabled func() bool) {
+	s.enabled = enabled
+}
+
+// SetTurnReader wires transcript reads for result capture and reconciliation.
+func (s *Service) SetTurnReader(reader TurnReader) {
+	s.turns = reader
+}
+
+// SetDeliveryLog wires the read that proves a delivery token reached a parent
+// message. Without it, reconciliation leaves delivered rows in place.
+func (s *Service) SetDeliveryLog(log DeliveryLog) {
+	s.receipts = log
+}
+
+func (s *Service) featureEnabled() bool {
+	if s == nil || s.enabled == nil {
+		return true
+	}
+	return s.enabled()
 }
 
 // StartWorkers launches the worker that stops runtimes for cascades triggered
