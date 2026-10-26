@@ -1,0 +1,178 @@
+---
+id: "04-errand-launch-and-admission"
+title: "Launch, admit, track, and cancel errands"
+status: pending
+wave: 3
+depends_on:
+  - "01-flag-and-persistence"
+  - "02-workflow-isolation"
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-ERRANDS-001
+  - REQ-TASKS-ERRANDS-002
+  - REQ-TASKS-ERRANDS-007
+  - REQ-TASKS-ERRANDS-008
+  - REQ-TASKS-ERRANDS-013
+acceptance_criteria:
+  - AC-TASKS-ERRANDS-001.1
+  - AC-TASKS-ERRANDS-001.2
+  - AC-TASKS-ERRANDS-001.3
+  - AC-TASKS-ERRANDS-001.5
+  - AC-TASKS-ERRANDS-001.6
+  - AC-TASKS-ERRANDS-002.1
+  - AC-TASKS-ERRANDS-002.2
+  - AC-TASKS-ERRANDS-007.1
+  - AC-TASKS-ERRANDS-007.2
+  - AC-TASKS-ERRANDS-007.4
+  - AC-TASKS-ERRANDS-007.5
+  - AC-TASKS-ERRANDS-007.6
+  - AC-TASKS-ERRANDS-008.1
+  - AC-TASKS-ERRANDS-008.2
+  - AC-TASKS-ERRANDS-008.3
+  - AC-TASKS-ERRANDS-013.1
+  - AC-TASKS-ERRANDS-013.2
+system_design:
+  - ../../specs/tasks/system-design/errands.md
+---
+
+# Task 04: Launch, admit, track, and cancel errands
+
+## Summary
+
+Create the `internal/errands` service and its orchestrator adapters so the
+backend can start an errand session with an explicit profile, a reserved
+identity, and a snapshot of its parent's session-level MCP servers, queue it
+when the session ceiling refuses, project its status, publish
+`errand.updated`, and cancel it singly, all at once, or by cascade. Agents
+cannot reach this yet; tests drive the service and the `errand.list`,
+`errand.cancel`, and `errand.cancel_all` WebSocket actions.
+
+## In scope
+
+- `internal/errands`: `Service` with `Start`, `DrainQueued`, `Cancel`,
+  `CancelForParent`, `ProjectStatus`, `List`, and the narrow interfaces from
+  the [design](../../specs/tasks/system-design/errands.md#components-and-responsibilities).
+  `goleak.VerifyTestMain` in the package.
+- Start flow steps 2 to 7 of the [design start section](../../specs/tasks/system-design/errands.md#start):
+  per-task mutex and cap of 5, profile resolution by ID or exact name with
+  passthrough and executor compatibility checks, reserved identity through
+  `models.WithReservedLaunchIdentity`, row insert, and deletion on a
+  synchronous workspace or profile failure.
+- MCP inheritance: at start, read the parent's `task_session` MCP selections
+  into the row's `mcp_server_ids`; at launch, pass the still-enabled
+  definitions as `LaunchSessionRequest.MCPServerIDs` (nil when none), which
+  `apps/backend/internal/orchestrator/session_mcp.go` stores as the errand's
+  session scope after admission. Later parent changes never propagate.
+- `orchestrator.LaunchErrandSession`, the internal `Errand` launch field,
+  a new `ErrSessionCeilingRefused` sentinel (beside `ErrCeilingLaunchDeferred`
+  in `ceiling_seams.go`) returned by `admitOrDeferSeam1` for errand launches,
+  `prepareSessionAttempt` role, parent, and `IsPrimary=false`, and
+  `applyErrandOriginContext` with a placeholder errand context until task 06
+  supplies `errand.md`.
+- `ceilingSweepTick` (`ceiling_sweep.go`) calls `DrainQueued` after
+  `drainDeferredCeilingLaunches` (`ceiling_replay.go`); creation order per
+  task, reusing the stored MCP snapshot; a non-ceiling launch failure fails
+  the errand.
+- Status projection table, including `needs_attention` from the pending
+  permission signal.
+- Cancellation entry points in the [design cancellation table](../../specs/tasks/system-design/errands.md#cancellation):
+  `StopSession` with reason `errand_cancelled`, session-stop and delete
+  hooks, `CancelAll` for **Stop all errands** under the per-task mutex,
+  parent stop, failure, and delete cascade, task archive and delete, and the
+  `CancelAgent` and `CancelTurn` hook that calls `EndParentAwaits` on the
+  waiter registry interface (the registry arrives in task 05) and cancels no
+  errand.
+- `errand.list`, `errand.cancel`, and `errand.cancel_all` WebSocket actions in
+  `internal/task/handlers`, `errand.updated` publication with
+  `Hub.BroadcastToWorkspace`, and the error codes in the
+  [design table](../../specs/tasks/system-design/errands.md#error-codes),
+  including `feature_disabled` while the flag is off.
+- `errands_started_total` and `errands_settled_total` with closed labels, and
+  the structured logs for start, admission, settlement, and cancellation.
+- Extract the typed workspace conflict mapping from `handleSpawnSession` into
+  a shared helper with unchanged spawn output.
+
+## Out of scope
+
+- Result capture, await, the status block, delivery routes, parent workflow
+  deferral, and reconciliation (task 05).
+- MCP tools, errand mode, guards, and prompts (task 06).
+
+## Acceptance
+
+1. A started errand creates exactly one errand-role, non-primary session on
+   the task's existing environment with the explicit profile, the reserved
+   session ID, and the parent's session MCP selections as of the start; a
+   later parent change does not reach it; cap, profile, and workspace
+   failures create nothing.
+2. At the session ceiling, errands queue, start in creation order with their
+   stored snapshot when the sweep finds capacity, and never write the task's
+   `deferred_launch` record.
+3. Single, Stop-all, and cascade cancellation produce the projected statuses,
+   keep transcripts, and are idempotent; cancelling a parent turn cancels no
+   errand; counters use only the closed label sets.
+
+## Verification
+
+Run from the repository root.
+
+```bash
+(cd apps/backend && go test -race -trimpath ./internal/errands/... -count=1)
+(cd apps/backend && go test -trimpath ./internal/orchestrator -run 'Errand|Ceiling|SpawnOrigin|MCPServerSelection|CancelTurn' -count=1)
+(cd apps/backend && go test -trimpath ./internal/orchestrator/executor -run 'Errand|PrepareSession|ReservedLaunch' -count=1)
+(cd apps/backend && go test -trimpath ./internal/task/handlers -run 'Errand' -count=1)
+(cd apps/backend && go test -trimpath ./internal/mcp/handlers -run 'SpawnSession|WorkspaceConflict' -count=1)
+(cd apps/backend && go test -trimpath ./internal/gateway/websocket -run 'DispatchScope|Errand' -count=1)
+bash scripts/lint-go-changed $(git ls-files --modified --others --exclude-standard -- 'apps/backend/*.go')
+git diff --check
+```
+
+## Files likely touched
+
+- New `apps/backend/internal/errands/` (service, status, start, cancel,
+  metrics, interfaces, tests).
+- `apps/backend/internal/orchestrator/session_launch.go`, `session_mcp.go`
+  (read side for the parent's selections), `ceiling_seams.go`,
+  `ceiling_sweep.go`, `task_operations.go`, `cancel_turn.go`, and new errand
+  adapter and test files.
+- `apps/backend/internal/orchestrator/executor/executor_execute.go`.
+- New `apps/backend/internal/task/handlers/errand_ws_handlers.go`;
+  `apps/backend/pkg/websocket/actions.go`.
+- `apps/backend/internal/mcp/handlers/spawn_session.go` and a new shared
+  workspace conflict helper.
+- `apps/backend/internal/backendapp/` service wiring.
+
+## Dependencies
+
+Tasks 01 and 02.
+
+## Risks
+
+- Only automation retry uses `ReservedLaunchIdentity` today; prove the
+  `IntentStart` path honors the reserved session, turn, and submission IDs.
+- The ceiling seam is shared by every start; the errand-only refusal must
+  not change other launches.
+- PR [#4652](https://github.com/kdlbs/kandev/pull/4652) changes stop of
+  replaced runtimes; rebase the errand cancel path if it lands first.
+- PR [#4764](https://github.com/kdlbs/kandev/pull/4764) keeps the exact
+  assigned profile through launch on the `ProfileExplicit` path; PR
+  [#4765](https://github.com/kdlbs/kandev/pull/4765) guards helper-session
+  deletion and archives helper history, which may change the errand-row
+  deletion rule; PR [#4721](https://github.com/kdlbs/kandev/pull/4721) adds a
+  shared turn allowance refusal on the errand prompt path. Re-check each.
+- `MCPSelectionWriter.Replace` refuses disabled definitions, so the launcher
+  must drop definitions disabled after the parent selected them.
+
+## Parallelism
+
+`sequential`
+
+## Inputs
+
+- [System design](../../specs/tasks/system-design/errands.md) start, queued
+  admission, status projection, and cancellation sections.
+- `automation_retry_launch.go`, `spawn_session.go`, and the ceiling tests.
+
+## Results
+
+Pending.
