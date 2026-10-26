@@ -1,7 +1,7 @@
 ---
 id: "08-errand-ui"
 title: "Build the errand UI for desktop and phone"
-status: in_progress
+status: done
 wave: 6
 depends_on:
   - "03-frontend-data-layer"
@@ -142,7 +142,7 @@ Run from the repository root. In a fresh worktree, first run
 `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/chat/messages/kandev/errand-renderers.test.tsx components/task/chat/messages/kandev/registry.test.ts components/task/chat/errands components/task/chat/chat-status-bar.test.tsx components/task/session-tab-menu.test.tsx components/task/mobile/mobile-sessions-section.test.tsx)
+(cd apps/web && pnpm exec vitest run components/task/chat/messages/kandev/errand-renderers.test.tsx components/task/chat/messages/kandev/registry.test.ts components/task/chat/errands components/task/chat/chat-status-bar.test.tsx components/task/session-tab-menu.test.tsx components/task/mobile/mobile-sessions-section.test.tsx components/task/mobile/mobile-sessions-section.errands.test.tsx components/task/mobile/mobile-session-picker-row.test.tsx components/task/mobile/mobile-session-nesting.test.ts)
 (cd apps/web && pnpm exec eslint --max-warnings 0 components/task/chat/errands components/task/chat/messages/kandev/errand-renderers.tsx components/task/chat/messages/kandev/registry.ts components/task/chat/message-renderer.tsx components/task/chat/chat-status-bar.tsx components/task/session-tab-menu.tsx components/task/mobile/mobile-sessions-section.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
@@ -193,4 +193,84 @@ Tasks 03 and 06.
 
 ## Results
 
-Pending.
+Completed on 2026-10-26 on branch `feat/errands-web`, in five commits, built
+against the documented contract and fixtures before work order 06 landed; no
+live backend was available, so every surface was exercised through the store,
+mocked hooks, and jsdom tests only.
+
+Surfaces built (all gated by `useFeature("errands")`):
+
+- Transcript: `errand-renderers.tsx` renders `start_errand` as a row card
+  (title, profile, live status, objective disclosure, **Open**; on phones the
+  whole card is the open target), `await_errands` as a live list card, and
+  `cancel_errand` as a compact row. Pending, errored, and abandoned calls fall
+  back to a plain Kandev row, tool names match `mcp__kandev__`, `kandev/`,
+  `kandev: `, and bare forms, and start and await calls stay out of collapsed
+  turn groups. `message-renderer.tsx` renders one **Errand finished** card per
+  `errand_delivery` item from the message metadata snapshot, below any visible
+  user text, with no empty bubble for a notification turn.
+- Errand view: `errand-header.tsx` (desktop and phone forms) with back to
+  parent, title, profile, status, elapsed time, workspace path and branch, the
+  objective disclosure, and **Stop** while live or **Send result to parent**
+  when `can_send_result` is true, never both. One polite `role="status"`
+  region per view announces status changes. The composer and MCP explorer are
+  untouched, and a parent with `waiting_on_errands` stays directly promptable.
+- Chip and panel: `errands-chip.tsx` and `errands-panel.tsx` in
+  `chat-status-bar.tsx`, shown only when the task has errands. Label is
+  "Errands: N running" (primary tone), amber with a shield when an errand needs
+  attention, and "N errands" when none is live. Popover with a fine pointer, a
+  bottom drawer otherwise, grouped by parent session, **Open** per row, and
+  **Stop all errands** pinned below the list while any errand is live (44px on
+  drawers, `errand.cancel_all`).
+- Open and menus: opening an errand adds or focuses its `session:<id>` panel on
+  the desktop workbench and calls `setActiveSession` on phone and tablet,
+  without `session.set_primary` and without moving another panel's composer
+  target. `session-tab-menu.tsx` and the phone `SessionActionsMenu` omit
+  **Set as Primary** and **Handoff** for errand sessions (by role, flag
+  independent). With the flag on, an errand tab titles itself "Errand: title"
+  unless the user renamed it, and an errand session is never auto-adopted.
+- Phone: `SessionActionsMenu` moved to `session-actions-menu.tsx`;
+  `mobile-sessions-section.tsx` nests errands under their parent as 44px rows
+  with status and a chevron (orphans stay top level, errands do not count in
+  session numbering), and the sessions-pill row is hidden while an errand is
+  active so the errand header replaces it.
+- Store: removing a session also removes its errand row.
+- Copy: 44 `task.json` and 14 `chat.json` keys in en, pseudo, pt-pt, zh-cn,
+  zh-hk, zh-tw, ja, and ko. `errandWorkspaceWithBranch` is declared in the
+  shared `_verbatim.json`.
+
+Verification (from `apps/web` unless noted):
+
+| Command | Result |
+| --- | --- |
+| The vitest command above, including the three added mobile test files | Passed, 12 files, 153 tests |
+| `pnpm exec eslint --max-warnings 0` on every changed file | Passed |
+| `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck` | Passed |
+| `pnpm run i18n:check` | Passed |
+| `pnpm run i18n:ratchet` | Passed |
+| `git diff --check` | Passed |
+| `vitest run components/task hooks lib/ws lib/state lib/types components/threads components/kanban` | 14,092 passed, 7 failed in five files that also fail on the base commit (comment storage tests and message favorites) |
+
+Deviations:
+
+- The phone errand tests live in `mobile-sessions-section.errands.test.tsx`
+  because the existing test file would exceed the 600 line limit; the
+  Verification command lists it.
+- `pnpm run i18n:zh-hant` was run, but it also rewrote unrelated hand-tuned
+  zh-tw and zh-hk entries, so only the generated values for the new keys were
+  kept. The zh-hk and zh-tw catalogs otherwise match their previous content.
+- The chip's panel has no separate error state: the list load is silent by
+  design in the data layer, and **Stop all errands** failures use a toast. The
+  loading line shows only while live updates arrived before `errand.list`.
+- Phone errand rows in the sessions drawer have no per-row menu, so an errand
+  session cannot be deleted from there. Stop and Send result remain in the
+  errand view's actions menu.
+- The errand term is translated as incumbência (pt-pt), 委托 (zh), 依頼 (ja),
+  and 심부름 (ko); the English term has no direct equivalent.
+
+Backend fields and events the UI depends on: `errand.updated`,
+`errand.list`, `errand.cancel`, `errand.cancel_all` (`cancelled` count),
+`errand.send_result`; `Errand.can_send_result` (server-computed eligibility);
+`TaskSession.role`, `parent_session_id`, and `waiting_on_errands`; message
+metadata `errand_delivery`; and the `start_errand`, `await_errands`, and `cancel_errand` Kandev tool-call
+shapes (name prefixes tolerated).
