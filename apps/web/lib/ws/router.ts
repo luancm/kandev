@@ -32,6 +32,7 @@ import { registerTaskPlanCommentsHandlers } from "@/lib/ws/handlers/task-plan-co
 import { registerPreviewFeedbackHandlers } from "@/lib/ws/handlers/preview-feedback";
 import { registerWalkthroughsHandlers } from "@/lib/ws/handlers/walkthroughs";
 import { registerReviewHandlers } from "@/lib/ws/handlers/review";
+import { registerErrandsHandlers } from "@/lib/ws/handlers/errands";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerTurnChangesHandlers } from "@/lib/ws/handlers/turn-changes";
@@ -58,6 +59,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerPreviewFeedbackHandlers(store),
     ...registerWalkthroughsHandlers(store),
     ...registerReviewHandlers(store),
+    ...registerErrandsHandlers(store),
     ...registerWorkflowsHandlers(store),
 
     ...registerWorkspacesHandlers(store),

@@ -35,6 +35,7 @@ import {
   createFailedInboxSlice,
   createPreviewFeedbackSlice,
   createInboxHistorySlice,
+  createErrandsSlice,
 } from "./slices";
 
 // Re-export all types from slices for backwards compatibility.
@@ -78,6 +79,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createFailedInboxSlice(set, get),
         ...createPreviewFeedbackSlice(set),
         ...createInboxHistorySlice(set),
+        ...createErrandsSlice(set),
         // Re-assert merged initial state so caller-supplied values win over slice defaults.
         ...buildStateOverrides(merged),
         hydrate: (state, options) => set((draft) => hydrateState(draft, state, options)),

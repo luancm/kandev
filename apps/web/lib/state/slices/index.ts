@@ -33,6 +33,7 @@ export {
   createInboxHistorySlice,
   defaultInboxHistoryState,
 } from "./inbox-history/inbox-history-slice";
+export { createErrandsSlice, defaultErrandsState } from "./errands/errands-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -138,6 +139,7 @@ export type {
   InboxHistoryWorkspaceState,
   InboxHistoryReadStatus,
 } from "./inbox-history/types";
+export type { ErrandsSlice, ErrandsSliceActions, ErrandsSliceState } from "./errands/types";
 
 // Re-export commonly used types from each domain
 export type {

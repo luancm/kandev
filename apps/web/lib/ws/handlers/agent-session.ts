@@ -242,12 +242,16 @@ export function isStaleSessionStateEvent(
 // foreground_activity/active_subagent_count carry the ADR-0049 activity
 // substate; supports_steering carries the live steer-eligibility flip so the
 // composer can switch affordance without a refetch; cancellation_* carry the
-// backend-owned cancellation projection.
+// backend-owned cancellation projection. role and parent_session_id are
+// omitted for ordinary sessions, so absence must never clear a known errand.
 const CARRIED_WHEN_DEFINED = [
   "session_recovery_blocks",
   "review_status",
   "error_message",
   "is_passthrough",
+  "role",
+  "parent_session_id",
+  "waiting_on_errands",
   "name",
   "foreground_activity",
   "active_subagent_count",
