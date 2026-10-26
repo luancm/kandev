@@ -234,3 +234,31 @@ func TestRefusedCancellationNoticeFailsTheDeleteInsteadOfLosingIt(t *testing.T) 
 		t.Fatal("PreserveCancellationNotice succeeded although the notice was refused")
 	}
 }
+
+// @covers AC-TASKS-ERRANDS-003.3
+func TestSendResultCapturesAUserTurnOnlyWhenTheRuleAllows(t *testing.T) {
+	h, id := settleFirstTurn(t, "captured")
+	ctx := context.Background()
+	if _, err := h.service.SendResult(ctx, id); err == nil {
+		t.Fatal("SendResult accepted a turn whose result is already pending or delivered")
+	}
+	h.store.setSessionState(id, models.TaskSessionStateWaitingForInput)
+	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
+		"user-turn": {LastAgentText: "sent by the user", EarliestUserSender: "user"},
+	}})
+	if err := h.service.OnErrandTurnSettled(ctx, TurnSettlement{
+		SessionID: id, TurnID: "user-turn", Outcome: models.ErrandOutcomeDone,
+	}); err != nil {
+		t.Fatalf("OnErrandTurnSettled: %v", err)
+	}
+	if _, err := h.service.ComposeParentTurn(ctx, testParent, models.ErrandDeliveryTurnContext); err != nil {
+		t.Fatalf("ComposeParentTurn: %v", err)
+	}
+	snapshot, err := h.service.SendResult(ctx, id)
+	if err != nil {
+		t.Fatalf("SendResult after a user turn: %v", err)
+	}
+	if snapshot.Errand.ResultText != "sent by the user" || snapshot.Errand.ResultState != models.ErrandResultPending {
+		t.Fatalf("result = %q/%s, want the user turn pending", snapshot.Errand.ResultText, snapshot.Errand.ResultState)
+	}
+}

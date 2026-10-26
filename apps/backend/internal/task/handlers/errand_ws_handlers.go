@@ -20,6 +20,7 @@ type ErrandService interface {
 	Lookup(ctx context.Context, errandID string) (*models.Errand, error)
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	CancelAll(ctx context.Context, taskID string) (int, error)
+	SendResult(ctx context.Context, errandID string) (*errands.Snapshot, error)
 }
 
 // SetErrands wires the errands service and its release toggle. While the
@@ -33,6 +34,7 @@ func (h *TaskHandlers) registerErrandWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionErrandList, h.wsListErrands)
 	dispatcher.RegisterFunc(ws.ActionErrandCancel, h.wsCancelErrand)
 	dispatcher.RegisterFunc(ws.ActionErrandCancelAll, h.wsCancelAllErrands)
+	dispatcher.RegisterFunc(ws.ActionErrandSendResult, h.wsSendErrandResult)
 }
 
 type errandListResponse struct {
@@ -132,6 +134,38 @@ func (h *TaskHandlers) wsCancelErrand(ctx context.Context, msg *ws.Message) (*ws
 	snapshot, err := h.errands.Cancel(ctx, errands.CancelRequest{
 		ErrandID: errand.ID, TaskID: errand.TaskID, Source: models.ErrandCancelSourceUser,
 	})
+	if err != nil {
+		return h.errandFailure(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, errandCancelResponse{
+		Errand: dto.FromErrand(snapshot.Errand, snapshot.Status),
+	})
+}
+
+// wsSendErrandResult records the latest settled turn of an errand as its
+// result, when the send-result rule allows it.
+func (h *TaskHandlers) wsSendErrandResult(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.errandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	errandID := strings.TrimSpace(req.SessionID)
+	if errandID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	errand, err := h.errands.Lookup(ctx, errandID)
+	if err != nil {
+		return h.errandFailure(msg, err)
+	}
+	if err := h.authorizeErrandTask(ctx, errand.TaskID, authz.ScopeSessionControl); err != nil {
+		return errandError(msg, errands.ReasonNotFound, "errand not found"), nil
+	}
+	snapshot, err := h.errands.SendResult(ctx, errand.ID)
 	if err != nil {
 		return h.errandFailure(msg, err)
 	}

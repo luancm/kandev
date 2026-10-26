@@ -24,6 +24,8 @@ type fakeErrandService struct {
 	cancelErr  error
 	cancelAllN int
 	cancelAllE error
+	sent       []string
+	sendErr    error
 }
 
 func (f *fakeErrandService) List(_ context.Context, taskID string) ([]errands.Snapshot, error) {
@@ -44,6 +46,14 @@ func (f *fakeErrandService) Cancel(_ context.Context, req errands.CancelRequest)
 		return nil, f.cancelErr
 	}
 	return &errands.Snapshot{Errand: f.errand, Status: models.ErrandStatusCancelled}, nil
+}
+
+func (f *fakeErrandService) SendResult(_ context.Context, errandID string) (*errands.Snapshot, error) {
+	f.sent = append(f.sent, errandID)
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
+	return &errands.Snapshot{Errand: f.errand, Status: models.ErrandStatusDone}, nil
 }
 
 func (f *fakeErrandService) CancelAll(_ context.Context, taskID string) (int, error) {
@@ -99,6 +109,7 @@ func TestErrandRequestsFailWithFeatureDisabledWhileTheFlagIsOff(t *testing.T) {
 		{ws.ActionErrandList, map[string]string{"task_id": "task-b"}, h.wsListErrands},
 		{ws.ActionErrandCancel, map[string]string{"session_id": "errand-1"}, h.wsCancelErrand},
 		{ws.ActionErrandCancelAll, map[string]string{"task_id": "task-b"}, h.wsCancelAllErrands},
+		{ws.ActionErrandSendResult, map[string]string{"session_id": "errand-1"}, h.wsSendErrandResult},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			response, err := tc.handler(context.Background(), errandMessage(t, tc.action, tc.payload))
@@ -249,8 +260,24 @@ func TestErrandActionsAreRegisteredOnTheDispatcher(t *testing.T) {
 	h := errandHandlers(t, &fakeErrandService{}, true)
 	dispatcher := ws.NewDispatcher()
 	h.registerWS(dispatcher)
-	for _, action := range []string{ws.ActionErrandList, ws.ActionErrandCancel, ws.ActionErrandCancelAll} {
+	for _, action := range []string{ws.ActionErrandList, ws.ActionErrandCancel, ws.ActionErrandCancelAll, ws.ActionErrandSendResult} {
 		require.True(t, dispatcher.HasHandler(action), action)
 	}
-	require.False(t, dispatcher.HasHandler(ws.ActionErrandSendResult), "send_result belongs to result delivery")
+}
+
+// @covers AC-TASKS-ERRANDS-003.3
+func TestSendErrandResultRecordsTheResultAndReportsIneligibility(t *testing.T) {
+	svc := &fakeErrandService{errand: sampleErrand()}
+	h := errandHandlers(t, svc, true)
+	response, err := h.wsSendErrandResult(errandCallerAs("user-b"),
+		errandMessage(t, ws.ActionErrandSendResult, map[string]string{"session_id": "errand-1"}))
+	require.NoError(t, err)
+	require.NotEqual(t, ws.MessageTypeError, response.Type)
+	require.Equal(t, []string{"errand-1"}, svc.sent)
+
+	svc.sendErr = &errands.Error{Reason: errands.ReasonResultNotEligible, Message: "not eligible"}
+	response, err = h.wsSendErrandResult(errandCallerAs("user-b"),
+		errandMessage(t, ws.ActionErrandSendResult, map[string]string{"session_id": "errand-1"}))
+	require.NoError(t, err)
+	require.Equal(t, "errand_result_not_eligible", decodeError(t, response).Details["reason"])
 }
