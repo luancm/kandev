@@ -160,3 +160,14 @@ func TestErrorCodesFollowTheDesignTable(t *testing.T) {
 		}
 	}
 }
+
+func TestLookupReturnsTheRowOrANotFoundReason(t *testing.T) {
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	row, err := h.service.Lookup(context.Background(), errand.ID)
+	if err != nil || row.TaskID != testTask {
+		t.Fatalf("Lookup = %+v, %v", row, err)
+	}
+	_, err = h.service.Lookup(context.Background(), "ghost")
+	assertReason(t, err, ReasonNotFound)
+}

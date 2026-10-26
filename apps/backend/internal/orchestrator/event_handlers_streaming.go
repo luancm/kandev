@@ -2054,6 +2054,7 @@ func (s *Service) publishTaskSessionStateChanged(
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
 	}
+	models.AddSessionRoleFields(eventData, session)
 	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
 		projection := dto.TaskSessionDTO{}
 		if err := dto.EnrichSessionRecoveryBlocks(ctx, &projection, session, reader); err == nil {

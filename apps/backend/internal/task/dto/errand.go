@@ -68,3 +68,7 @@ type ErrandUpdatedEvent struct {
 	ErrandDTO
 	WorkspaceID string `json:"workspace_id"`
 }
+
+// GetWorkspaceID lets the WebSocket gateway route an in-process payload, which
+// is a struct rather than the decoded map a remote bus delivers.
+func (e ErrandUpdatedEvent) GetWorkspaceID() string { return e.WorkspaceID }

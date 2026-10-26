@@ -139,8 +139,10 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 	b.subscribeWithResolver(eventBus, subject, func(*bus.Event) string { return action })
 }
 
-// subscribeLifecycleStateEvents uses one NATS subscription so task and session
-// state notifications remain ordered for clients when the event bus is remote.
+// subscribeLifecycleStateEvents uses one NATS subscription so task, session,
+// and errand state notifications remain ordered for clients when the event bus
+// is remote. An errand's queued row therefore reaches a client before the
+// errand session's first state event.
 func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventBus) {
 	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
 		switch event.EffectiveSubject() {
@@ -148,6 +150,8 @@ func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventB
 			return ws.ActionTaskStateChanged
 		case events.TaskSessionStateChanged:
 			return ws.ActionSessionStateChanged
+		case events.ErrandUpdated:
+			return ws.ActionErrandUpdated
 		default:
 			return ""
 		}
@@ -370,6 +374,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
+	case ws.ActionErrandUpdated:
+		// Errand rows carry task content; an unattributed event must never
+		// fall back to a global broadcast when authentication is enforced.
+		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
+		return nil
 	case ws.ActionSessionPendingActionChanged:
 		// Pending action is a compact workspace projection. It must reach
 		// inactive session selectors, but an unattributed event must never
