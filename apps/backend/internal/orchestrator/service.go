@@ -941,6 +941,12 @@ type Service struct {
 	// boundary. It is optional so focused orchestrator tests and older callers
 	// retain the legacy runtime path.
 	mcpSelectionWriter MCPSelectionWriter
+	// mcpSelectionReader reads a parent session's MCP selections and filters
+	// definitions to those still enabled, for errand starts.
+	mcpSelectionReader MCPSelectionReader
+	// errands receives session lifecycle notifications and queue drain ticks.
+	// Nil leaves errand cleanup and queued admission off.
+	errands ErrandController
 
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have

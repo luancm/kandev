@@ -3050,6 +3050,9 @@ func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, se
 	if e.onTaskRuntimeStateReconcile != nil {
 		return e.onTaskRuntimeStateReconcile(ctx, taskID, sessionID, v1.TaskStateInProgress)
 	}
+	if e.sessionIsErrand(ctx, sessionID) {
+		return nil
+	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -3092,7 +3095,7 @@ func (e *Executor) writeTaskFailedForRuntime(ctx context.Context, taskID, sessio
 	if err != nil {
 		return err
 	}
-	if session == nil || session.State != models.TaskSessionStateFailed {
+	if session == nil || session.State != models.TaskSessionStateFailed || models.IsErrandSession(session) {
 		return nil
 	}
 	return e.updateTaskState(ctx, taskID, v1.TaskStateFailed)

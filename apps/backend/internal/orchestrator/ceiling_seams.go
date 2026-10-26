@@ -27,6 +27,16 @@ import (
 // success.
 var ErrCeilingLaunchDeferred = errors.New("orchestrator: launch deferred by session ceiling")
 
+// ceilingSeamStartTask names startTask's admission seam in ceiling decisions.
+const ceilingSeamStartTask = "startTask"
+
+// ErrSessionCeilingRefused is returned by startTask when the session ceiling
+// refuses an errand launch. Unlike ErrCeilingLaunchDeferred it writes no
+// deferred_launch record: the errand row itself is the queue entry, and the
+// errands service replays it when capacity frees. The refused launch created
+// no session and took no reservation.
+var ErrSessionCeilingRefused = errors.New("orchestrator: session ceiling refused an errand launch")
+
 // originFromAutoStart derives the launch origin from the existing autoStart
 // signal, the widening AC-13a describes for a seam that has no dedicated origin
 // parameter of its own. It is not trusted at the two call sites AC-13d names,
@@ -191,17 +201,9 @@ func seam1StartPayload(
 func (s *Service) admitOrDeferSeam1(
 	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
 ) (reservation *seam1Reservation, deferred bool, err error) {
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID,
-		origin: origin,
-		seam:   "startTask",
-	})
+	decision := s.admitSeam1Decision(ctx, taskID, origin)
 	if decision.admitted {
-		return &seam1Reservation{
-			controller: s.sessionCeiling, key: decision.reservationKey,
-			manualOverride: decision.manualOverride, population: decision.population,
-			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
-		}, false, nil
+		return s.seam1ReservationFor(decision), false, nil
 	}
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, "", startPayload)
 
@@ -212,4 +214,43 @@ func (s *Service) admitOrDeferSeam1(
 		return nil, false, err
 	}
 	return nil, true, nil
+}
+
+func (s *Service) admitSeam1Decision(ctx context.Context, taskID string, origin launchOrigin) admissionDecision {
+	return s.sessionCeiling.admit(ctx, admissionRequest{
+		taskID: taskID,
+		origin: origin,
+		seam:   ceilingSeamStartTask,
+	})
+}
+
+func (s *Service) seam1ReservationFor(decision admissionDecision) *seam1Reservation {
+	return &seam1Reservation{
+		controller: s.sessionCeiling, key: decision.reservationKey,
+		manualOverride: decision.manualOverride, population: decision.population,
+		populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+	}
+}
+
+// admitErrandSeam1 is the errand variant of admitOrDeferSeam1. A refusal
+// returns ErrSessionCeilingRefused and records nothing on the task.
+func (s *Service) admitErrandSeam1(ctx context.Context, taskID string, origin launchOrigin) (*seam1Reservation, error) {
+	decision := s.admitSeam1Decision(ctx, taskID, origin)
+	if !decision.admitted {
+		return nil, ErrSessionCeilingRefused
+	}
+	return s.seam1ReservationFor(decision), nil
+}
+
+// admitStartSeam1 admits a startTask launch. Only errand launches are refused
+// instead of deferred; every other start keeps admitOrDeferSeam1 unchanged.
+func (s *Service) admitStartSeam1(
+	ctx context.Context, taskID string, origin launchOrigin, opts startTaskOptions,
+	startPayload func() map[string]interface{},
+) (reservation *seam1Reservation, deferred bool, err error) {
+	if opts.Errand != nil {
+		reservation, err = s.admitErrandSeam1(ctx, taskID, origin)
+		return reservation, false, err
+	}
+	return s.admitOrDeferSeam1(ctx, taskID, origin, startPayload())
 }

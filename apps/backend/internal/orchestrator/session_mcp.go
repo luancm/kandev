@@ -19,6 +19,20 @@ func (s *Service) SetMCPSelectionWriter(writer MCPSelectionWriter) {
 	s.mcpSelectionWriter = writer
 }
 
+// MCPSelectionReader reads stored MCP selections and filters definition IDs to
+// those still enabled. The settings service performs workspace and owner
+// validation, as it does for writes.
+type MCPSelectionReader interface {
+	List(ctx context.Context, scope mcpconfig.SelectionScope, workspaceID, ownerID string) ([]string, error)
+	EnabledDefinitionIDs(ctx context.Context, workspaceID string, ids []string) ([]string, error)
+}
+
+// SetMCPSelectionReader wires the optional task-session selection reader that
+// errand starts use to inherit their parent's servers.
+func (s *Service) SetMCPSelectionReader(reader MCPSelectionReader) {
+	s.mcpSelectionReader = reader
+}
+
 func (s *Service) applyMCPServerSelections(ctx context.Context, taskID, sessionID string, ids []string) error {
 	if ids == nil {
 		return nil

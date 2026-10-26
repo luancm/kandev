@@ -241,6 +241,10 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// Errand marks an IntentStart launch as an errand session. Like SpawnOrigin
+	// it is server-side provenance (`json:"-"`): a WS client must not be able to
+	// request errand isolation or forge the errand's trusted first-turn block.
+	Errand *ErrandLaunch `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -914,6 +918,8 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 			SpawnOrigin:          req.SpawnOrigin,
 			MCPServerIDs:         req.MCPServerIDs,
 			reusePreparedPrimary: req.reusePreparedPrimary,
+			Errand:               req.Errand,
+			Origin:               errandStartOrigin(req.Errand),
 		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {

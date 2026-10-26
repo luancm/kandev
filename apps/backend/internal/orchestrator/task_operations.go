@@ -1493,6 +1493,10 @@ type startTaskOptions struct {
 	// MCPServerIDs replaces the selections for the task session. Nil means the
 	// caller did not request a session-scoped change.
 	MCPServerIDs []string
+	// Errand marks the launch as an errand session. Such a start never reads or
+	// writes task-owned launch state: no deferred-launch claim or record, no
+	// task scheduling state, no workflow step binding, and no launch-error card.
+	Errand *ErrandLaunch
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1629,6 +1633,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
+	ctx = withErrandSessionContext(ctx, opts.Errand)
 	if opts.ceilingEntryBinding != nil {
 		ctx = withCeilingEntryBinding(ctx, opts.ceilingEntryBinding)
 	}
@@ -1699,8 +1704,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
-	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin,
-		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
+	seam1Res, deferred, err := s.admitStartSeam1(ctx, taskID, origin, opts, func() map[string]interface{} {
+		return seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1715,7 +1721,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// this start has already created a session is a window that ends in two.
 	// The deferred release covers every failure path, including the early
 	// returns just below.
-	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	launchClaim := s.deferredLaunchClaimForStart(ctx, taskID, opts)
 	defer launchClaim.releaseIfHeld(ctx)
 
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
@@ -1745,7 +1751,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// bound to its current step. Resolve that canonical step before profile
 	// selection and launch-layer session configuration so a start-step rule is
 	// applied before the first prompt as well.
-	if workflowSessionConfigStepID == "" {
+	if workflowSessionConfigStepID == "" && opts.Errand == nil {
 		if dbTask, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
 			s.logger.Warn("failed to fetch task for workflow step fallback",
 				zap.String("task_id", taskID), zap.Error(taskErr))
@@ -1768,7 +1774,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
-	} else {
+	} else if opts.Errand == nil {
 		schedulingClaim = s.beginTaskScheduling(ctx, taskID)
 		if schedulingClaim != nil {
 			defer func() {
@@ -2056,6 +2062,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
+			errand:                    opts.Errand,
 		})
 	}
 
@@ -2114,6 +2121,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.configureRetryInitialLaunch(ctx, sessionID, initialTurnID, &launchOptions); err != nil {
 		return nil, failPreparedLaunch(err)
 	}
+	s.configureErrandInitialLaunch(ctx, opts.Errand, launchSession, &launchOptions)
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
 		if initialTurnCreated {
@@ -2128,7 +2136,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	s.markWorkspaceGroupMaterialized(ctx, taskID)
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 	execution.TurnID = initialTurnID
-	s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
+	if opts.Errand == nil {
+		s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
+	}
 
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
@@ -2182,6 +2192,7 @@ type launchPromptContext struct {
 	includeParentQuestionTool bool
 	referenceContext          string
 	spawnOrigin               *SpawnOrigin
+	errand                    *ErrandLaunch
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -2207,6 +2218,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// not recognize, so the block has to be generated from the same server state
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
+	prompt, spawnContext = applyErrandOriginContext(prompt, spawnContext, p.errand)
 	if p.isOfficeTask {
 		return sysprompt.InjectOfficeContextWithOptions(
 			p.taskID, p.sessionID, prompt,
@@ -2215,7 +2227,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		)
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
-		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
+		RequiresCompletionSignal:       p.errand == nil && s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
@@ -5712,8 +5724,8 @@ func (s *Service) CancelTaskExecutionSynchronously(ctx context.Context, taskID, 
 }
 
 // StopSession stops agent execution for a specific session
-func (s *Service) StopSession(ctx context.Context, sessionID string, reason string, force bool) error {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+func (s *Service) StopSession(ctx context.Context, sessionID string, reason string, force bool) (err error) {
+	if err = s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
 

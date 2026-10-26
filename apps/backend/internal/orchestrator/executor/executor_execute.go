@@ -1651,6 +1651,9 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID
 	}
+	if applyErrandSessionIdentity(ctx, session) {
+		isPrimarySession = false
+	}
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session
@@ -2542,7 +2545,7 @@ func (e *Executor) handleLaunchFailure(
 	safeErr, changed := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr,
 	)
-	if changed {
+	if changed && !e.sessionIsErrand(failCtx, sessionID) {
 		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),

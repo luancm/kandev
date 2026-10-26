@@ -3690,7 +3690,7 @@ func (s *Service) handleLaunchFailed(
 	if !found || lastError.IsDismissed() {
 		return
 	}
-	if !launchFailureIsTaskOwned(lastError, launchErr) {
+	if models.IsErrandSession(session) || !launchFailureIsTaskOwned(lastError, launchErr) {
 		if err := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, session.AgentExecutionID, lastError); err != nil {
 			s.logger.Warn("failed to persist session-owned launch failure history",
 				zap.String("task_id", taskID),
