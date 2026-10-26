@@ -120,8 +120,9 @@ scenario and explicit-tag upgrade fixture.
 project as `dto.ErrandDTO`: `errand_id`, `task_id`, `parent_session_id`,
 `title`, `objective`, `agent_profile_id`, `status`, `result_state`,
 `result_preview` (first 280 characters), `result_truncated`, `created_at`,
-`updated_at`, and `settled_at`. Full result text is returned only to the
-parent through MCP.
+`updated_at`, `settled_at`, and `can_send_result`, the
+[send-result rule](#errand-turn-settlement-and-results). Full result text is
+returned only to the parent through MCP.
 
 `statussummary.TaskStatusSummary` gains `Errands *ErrandsSummary`
 (`live`, `waiting`), omitted when both are zero so rows without errands stay
@@ -190,7 +191,7 @@ pending.
 | `errand.cancel` | request | `session_id` |
 | `errand.cancel_all` | request | `task_id`; returns `cancelled`, the count |
 | `errand.send_result` | request | `session_id` |
-| `errand.updated` | event | one `ErrandDTO`, routed with `Hub.BroadcastToWorkspace` |
+| `errand.updated` | event | one `ErrandDTO` plus `workspace_id`, routed with `Hub.BroadcastToWorkspaceOrDrop` |
 
 The gateway backstop scopes all four requests through `task_id` and
 `session_id`. Existing session events now carry `role`, `parent_session_id`,
@@ -216,8 +217,8 @@ and `waiting_on_errands`. A parent user message that delivers results carries
    first-turn profile list applies the same filter.
 4. The service mints `errand_id`, `first_turn_id`, and `submission_id`,
    snapshots the parent's `task_session` MCP selections into
-   `mcp_server_ids`, inserts the row as `queued`, and calls
-   `Launcher.LaunchErrand` with `models.WithReservedLaunchIdentity`, as in
+   `mcp_server_ids`, inserts the row as `queued`, publishes `errand.updated`, and
+   calls `Launcher.LaunchErrand` with `models.WithReservedLaunchIdentity`, as in
    `automation_retry_launch.go`.
 5. `orchestrator.LaunchErrandSession` calls `LaunchSession` with
    `Intent: IntentStart`, `ProfileExplicit: true`, the objective as the prompt,
@@ -267,9 +268,9 @@ Capture is idempotent on `result_turn_id`. Every settled turn updates
 waiters and runs the parent delivery check.
 
 `errand.send_result` is allowed when the projected status is `done` or
-`failed` and `latest_settled_turn_id` differs from `result_turn_id` or the
-current result is not pending or delivered. It captures that turn the same
-way.
+`failed`, a settled turn exists, and `latest_settled_turn_id` differs from
+`result_turn_id` or the current result is not pending or delivered
+(`Errand.CanSendResult`). It captures that turn the same way.
 
 ### Await
 
@@ -438,8 +439,8 @@ Backend guards check the verified sender's role in `handleCreateTask`,
 `errand_not_permitted`; `handleStartErrand` refuses one with
 `errand_not_supported`. `handleMessageTask` refuses a non-parent agent sender
 targeting an errand with `errand_sender_not_parent`; user messages use the
-session prompt path. Errand actions authorize through the task, like other
-session-keyed entry points. The residual REST risk is in the ADR.
+session prompt path. Errand actions authorize by task. The residual
+REST risk is in the ADR.
 
 ## Failure and recovery
 
@@ -452,12 +453,12 @@ session-keyed entry points. The residual REST risk is in the ADR.
   `pending`. Pending results of terminal parents become `discarded`; then
   `deliverPending` runs for every idle parent.
 - **Ordering.** Durable state is written before any local waiter wakes or any
-  event publishes, as the backend event-bus rule requires.
+  event publishes.
 - **Races.** Capture and delivery are version-guarded. The per-parent mutex
   orders await claims, turn composition, and notification admission; the
   per-task mutex orders cap checks and **Stop all errands**.
-- **Process loss during await.** Awaits end with the MCP connection, and
-  release returns their claims for the next parent turn.
+- **Process loss.** Awaits end with the MCP connection; release
+  returns their claims.
 - **Replay.** The block is part of the admitted prompt, so a replayed
   submission carries the same results under the same token.
 

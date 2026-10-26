@@ -333,7 +333,7 @@ Progress:
 - [x] [Task 01: Add the errands flag, session role, and errand persistence](task-01-flag-and-persistence.md)
 - [x] [Task 02: Detach errand sessions from workflow, primary, and routing](task-02-workflow-isolation.md)
 - [ ] [Task 03: Add the errands frontend data layer and tab filter](task-03-frontend-data-layer.md)
-- [ ] [Task 04: Launch, admit, track, and cancel errands](task-04-errand-launch-and-admission.md)
+- [x] [Task 04: Launch, admit, track, and cancel errands](task-04-errand-launch-and-admission.md)
 - [ ] [Task 05: Capture errand results and deliver them to a conversational parent](task-05-errand-results-and-delivery.md)
 - [ ] [Task 06: Expose errands to agents through MCP and prompts](task-06-errand-mcp-surface.md)
 - [ ] [Task 07: Show errand counts and waiting status on task rows](task-07-task-summary-indicators.md)

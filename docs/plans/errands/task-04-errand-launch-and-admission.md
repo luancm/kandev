@@ -1,7 +1,7 @@
 ---
 id: "04-errand-launch-and-admission"
 title: "Launch, admit, track, and cancel errands"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "01-flag-and-persistence"
@@ -175,4 +175,122 @@ Tasks 01 and 02.
 
 ## Results
 
-Pending.
+Completed on 2026-10-26 in the primary session, test-first, in four code commits
+(`7f3b7557d1`, `4b1f5bc3ca`, `8da167f445`, `680600ba1f`) and one documentation commit. No delegation.
+
+- Service: `internal/errands` (`Service`, `Store`, `Launcher`, `SessionStopper`,
+  `ProfileResolver`, `MCPSelections`, `ParentDeliverer`, `EventPublisher`,
+  `Clock`; `goleak.VerifyTestMain`). `Start` mints the reserved identity,
+  enforces the 5-live cap under a per-task mutex, inserts the queued row with
+  `awaiting_result=true`, publishes `errand.updated`, then launches. Success,
+  ceiling refusal (stays `queued`), and failure are each recorded with
+  version-guarded writes; a launch that created no session deletes the row and
+  returns the launcher's own error. `DrainQueued` walks queued rows by task and
+  creation order with their stored identity and MCP snapshot, stops a task's
+  walk at its first refusal, and fails a row on any other launch error with a
+  `failure` result. `Cancel`, `CancelAll`, `CancelForParent`, `CancelForTask`,
+  `CancelOnSessionStop`, `List`, `Lookup`, and `ProjectStatus` implement the
+  cancellation table and the status projection (`needs_attention` from the
+  pending permission signal). Cascades from session transitions and task
+  archive run on a worker owned by the service (`StartWorkers`/`StopWorkers`).
+  Counters `errands_started_total` and `errands_settled_total` use closed
+  labels; the structured logs are `errand.started`, `errand.admitted`,
+  `errand.settled`, and `errand.cancelled`.
+- Orchestrator: `Service.LaunchErrandSession`, the `ErrandLaunch` field on
+  `LaunchSessionRequest` and `startTaskOptions`, `ErrSessionCeilingRefused`,
+  `ErrandAdapter` (launcher, stopper, MCP reader), `ErrandController` and
+  `ParentAwaitEnder` seams, `SetMCPSelectionReader`, and
+  `SelectionService.EnabledDefinitionIDs`. An errand start skips the deferred
+  launch claim, task SCHEDULING, workflow step binding, and the launch-error
+  card, honors the reserved session, turn, and submission IDs (proved through
+  `startTask`), and gets a placeholder errand context block that
+  `applyErrandOriginContext` whitelists; the completion-signal instruction is
+  off. The executor stamps `Role`, `ParentSessionID`, and `IsPrimary=false`
+  from `executor.WithErrandSession`, and an errand launch failure never writes
+  task state.
+- Hooks: `StopSession` (user stop before, parent cascade after), `DeleteSession`,
+  terminal session transitions (both chokepoints), `CancelAgent`/`CancelTurn`
+  (`EndParentAwaits` only), the ceiling sweep tick (`DrainQueued`), and task
+  archive (`TaskErrandCanceller`).
+- Transport: `errand.list`, `errand.cancel`, `errand.cancel_all`, and
+  `errand.updated` (flat `ErrandDTO` plus `workspace_id`, routed with
+  `BroadcastToWorkspaceOrDrop` and ordered with session state events). Every
+  session created, waiting, state, cancelled, and recovered event builder adds
+  `role` and `parent_session_id` for errand sessions through
+  `models.AddSessionRoleFields`. `ErrandDTO.can_send_result` comes from
+  `models.Errand.CanSendResult`. `workspaceConflictError` is shared by
+  `handleSpawnSession` with unchanged output.
+
+Verification passed (Go 1.26.3):
+
+- `go test -race ./internal/errands/...`, the orchestrator `Errand|Ceiling|SpawnOrigin|MCPServerSelection|CancelTurn`
+  run, the executor, `task/handlers`, `mcp/handlers`, and `gateway/websocket`
+  runs from the list above.
+- Mutation checks: removing the errand guards on task scheduling, launch-error
+  clearing, and workflow step binding each failed the launch test.
+- `bash scripts/lint-go-changed` over every Go file of the four commits (0
+  issues), `gofmt -l`, `git diff --check`, `list-docs.py validate`, and
+  `lint-spec-files.py --all`. No SQL changed, so `sqlguard` did not run.
+- Wider runs of `./internal/orchestrator/...`, `./internal/task/...`,
+  `./internal/mcp/...`, `./internal/gateway/...`, `./internal/agent/mcpconfig/...`,
+  and `./internal/backendapp/...` show 109 failures. 108 fail identically at
+  `b6263ea4c3` (workspace relocation, archive, checkout, Git, and terminal
+  tests) and
+  `TestExecutorHostGHBridgeNoninteractiveExecution` failed only under suite
+  load and passed on every isolated run. PostgreSQL variants skip without
+  `KANDEV_TEST_POSTGRES_DSN`; this work order adds no dialect-specific SQL.
+
+Deviations and limits:
+
+- `admitOrDeferSeam1` keeps its signature. `startTask` calls `admitStartSeam1`,
+  which returns `ErrSessionCeilingRefused` for errand launches and delegates
+  to the unchanged `admitOrDeferSeam1` otherwise, so the 6 existing callers
+  and every other start are untouched.
+- Task archive reaches errands through a task-level `TaskErrandCanceller`
+  (queued errands have no session for `ClearParkedProjectionOnSessionTerminated`
+  to see); task delete relies on the foreign-key cascade.
+- A synchronous launch failure that created no session publishes a final
+  `errand.updated` with status `failed` for the removed row, so clients drop
+  the queued placeholder. If the failed launch left a session row, the errand
+  stays as a `failed` errand and `Start` returns it.
+- `errand.cancel` takes the errand ID in `session_id`. A queued errand has no
+  session row, so with enforced auth the gateway backstop refuses it; **Stop
+  all errands** (`task_id`) covers queued errands in that case.
+- `CanSendResult` also requires a settled turn to exist, which the design
+  rule implied.
+- `DeleteSession` records a user cancellation (and a `cancelled` result when
+  outstanding) before the row and its errand row are deleted together, so
+  task 05 must deliver that notice before the delete commits or accept that
+  the notice is lost with the row.
+- The errand first-turn block is a placeholder string in
+  `errand_launch.go`; task 06 replaces it with `errand.md`.
+- Design edits: `can_send_result`, the `workspace_id` on `errand.updated`, the
+  publish-before-launch ordering, and the settled-turn precondition are in the
+  system design, tightened elsewhere to stay under the size limit.
+
+For task 05:
+
+- `ParentDeliverer.DeliverPending(ctx, parentSessionID)` is called after a
+  user cancel, `Stop all errands`, and a failed launch, and is nil-safe.
+  Implement it and `Service.SetDeliverer`.
+- `ParentAwaitEnder.EndParentAwaits(parentSessionID)` is called by `CancelAgent`
+  and `CancelTurn`; wire it with `Service.SetParentAwaitEnder`.
+- Add `OnErrandTurnSettled`, `OnParentTurnSettled`, capture, and
+  `OnParentPromptAdmitted` on `errands.Service`, using
+  `Service.update` (compare-and-set), `IsOutstanding`, and
+  `countSettled(done|failed)`; hook them at `settleDetachedAgentReadyTurn`, the
+  errand branch of `finishAgentCompletedTurn`, and
+  `handleRecoverableFailureLockedState`.
+- `errand.send_result` is unregistered; reuse `Errand.CanSendResult` and the
+  `errand.cancel` handler shape, with `errand_result_not_eligible`.
+
+For task 06:
+
+- `errands.Service.Start(ctx, StartRequest{TaskID, ParentSessionID, Title,
+  Objective, Profile})` returns `StartResult{Snapshot, ProfileName}`; map
+  errors with `errands.WSError` (typed reasons, `limit` and `live` details,
+  profile `available` names) and `workspaceConflictError` for launcher errors.
+- `Service.Cancel(CancelRequest{ErrandID, TaskID, ParentSessionID, Source:
+  parent})` scopes by the verified caller session and task.
+- Replace `errandOriginContent` with `errand.md`, return `McpModeErrand` from
+  `resolveTaskSessionMCPMode`, and check the flag before calling the service.
