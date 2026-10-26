@@ -3,12 +3,15 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
+import { createErrandsSlice } from "../errands/errands-slice";
+import { makeErrand } from "../errands/errands.test-helpers";
 import type { SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
+import type { ErrandsSlice } from "../errands/types";
 
-type CombinedSlice = SessionSlice & SessionRuntimeSlice;
+type CombinedSlice = SessionSlice & SessionRuntimeSlice & ErrandsSlice;
 
-/** Creates a zustand store combining the session and session-runtime slices. */
+/** Creates a zustand store combining the session, session-runtime, and errands slices. */
 function makeStore() {
   return create<CombinedSlice>()(
     immer((set) => ({
@@ -16,6 +19,8 @@ function makeStore() {
       ...(createSessionSlice as any)(set),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(createSessionRuntimeSlice as any)(set),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(createErrandsSlice as any)(set),
     })),
   );
 }
@@ -82,6 +87,27 @@ describe("removeTaskSession cleanup cascade", () => {
     expect(after.contextWindow.bySessionId[SESSION_ID]).toBeUndefined();
     expect(after.shell.outputs["env-1"]).toBeUndefined();
     expect(after.environmentIdBySessionId[SESSION_ID]).toBeUndefined();
+  });
+
+  it("removes the errand row whose ID is the removed session", () => {
+    store.getState().upsertErrand(makeErrand({ errand_id: SESSION_ID, task_id: TASK_ID }));
+    store.getState().upsertErrand(makeErrand({ errand_id: "errand-sibling", task_id: TASK_ID }));
+
+    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
+
+    const errands = store.getState().errands.byTaskId[TASK_ID];
+    expect(errands?.[SESSION_ID]).toBeUndefined();
+    expect(errands?.["errand-sibling"]).toBeDefined();
+  });
+
+  it("removes an ordinary session without touching the task's errands", () => {
+    store.getState().upsertErrand(makeErrand({ errand_id: "errand-sibling", task_id: TASK_ID }));
+
+    store.getState().removeTaskSession(TASK_ID, "session-without-errand");
+
+    expect(Object.keys(store.getState().errands.byTaskId[TASK_ID] ?? {})).toEqual([
+      "errand-sibling",
+    ]);
   });
 
   it("clears queue metadata and protects a replacement operation token", () => {

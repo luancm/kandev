@@ -420,6 +420,16 @@ function handleTaskUpsert(
   logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
 
+/** Drops the deleted task's per-session client state and its errands. */
+function evictDeletedTaskSessions(state: AppState, taskId: string, sessionIds: string[]): void {
+  for (const sid of sessionIds) {
+    useContextFilesStore.getState().clearSession(sid);
+    state.clearQueueStatus?.(sid);
+    state.removeTaskSession?.(taskId, sid);
+  }
+  state.removeTaskErrands?.(taskId);
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -462,11 +472,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       cleanupTaskStorage(deletedId, sessionIds, envIds);
       // Remove the deleted task before the next sidebar preference PATCH.
       currentState.removeTaskFromSidebarPrefs(deletedId);
-      for (const sid of sessionIds) {
-        useContextFilesStore.getState().clearSession(sid);
-        currentState.clearQueueStatus?.(sid);
-        currentState.removeTaskSession?.(deletedId, sid);
-      }
+      evictDeletedTaskSessions(currentState, deletedId, sessionIds);
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 

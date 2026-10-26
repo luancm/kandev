@@ -94,3 +94,14 @@ describe("resolvesSteeringAffordance", () => {
     expect(resolvesSteeringAffordance(false, 1)).toBe(false);
   });
 });
+
+// @covers AC-TASKS-ERRANDS-010.9, AC-TASKS-ERRANDS-011.5
+describe("deriveSessionInputMode with outstanding errands", () => {
+  it("keeps a parent waiting on errands directly promptable", () => {
+    const parent = {
+      state: "WAITING_FOR_INPUT",
+      waiting_on_errands: true,
+    } as Pick<TaskSession, "state" | "foreground_activity" | "supports_steering">;
+    expect(deriveSessionInputMode(parent)).toBe("direct");
+  });
+});

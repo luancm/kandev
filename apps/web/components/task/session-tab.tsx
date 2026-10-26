@@ -22,12 +22,14 @@ import { shareableSessionStateClient } from "@/components/task/share/share-butto
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
 import type { TaskSessionState } from "@/lib/types/http";
+import { sessionId as toSessionId } from "@/lib/types/ids";
 import {
   markSessionTabUserActivationIntent,
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
 import { selectSessionTabTitle } from "./session-tab-title";
+import { isErrandSession } from "@/lib/state/slices/errands/selectors";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
@@ -88,8 +90,17 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!activeTaskId) return 0;
     return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
   });
+  const isErrand = useAppStore((state) => {
+    if (!sessionId) return false;
+    const session = state.taskSessions.items[sessionId];
+    const ownerTaskId = session?.task_id ?? state.tasks.activeTaskId;
+    return ownerTaskId
+      ? isErrandSession(state, ownerTaskId, { id: toSessionId(sessionId), role: session?.role })
+      : false;
+  });
   return {
     isPrimary,
+    isErrand,
     sessionState,
     taskId,
     tabTitle,
@@ -418,16 +429,9 @@ function SessionTabDialogHost({
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
-  const {
-    isPrimary,
-    sessionState,
-    taskId,
-    tabTitle,
-    sessionName,
-    agentName,
-    sessionNumber,
-    sessionCount,
-  } = useSessionTabState(sessionId);
+  const tabState = useSessionTabState(sessionId);
+  const { isPrimary, isErrand, sessionState, taskId, tabTitle, sessionName } = tabState;
+  const { agentName, sessionNumber, sessionCount } = tabState;
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
   const dialogs = useSessionTabDialogState(sessionId);
@@ -492,6 +496,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         <SessionContextMenuItems
           sessionState={sessionState}
           isPrimary={isPrimary}
+          isErrand={isErrand}
           canShare={canShare}
           taskId={taskId}
           sessionId={sessionId}

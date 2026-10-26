@@ -17,6 +17,7 @@ import type {
   FailedInboxSliceActions,
   PreviewFeedbackSliceActions,
   InboxHistorySliceActions,
+  ErrandsSliceActions,
 } from "./slices";
 
 // Split out of app-state-types.ts to stay under the file line limit. These
@@ -39,4 +40,5 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   NeedsYouInboxSliceActions &
   FailedInboxSliceActions &
   InboxHistorySliceActions &
-  PreviewFeedbackSliceActions;
+  PreviewFeedbackSliceActions &
+  ErrandsSliceActions;

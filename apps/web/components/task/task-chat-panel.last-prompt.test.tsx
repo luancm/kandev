@@ -47,6 +47,7 @@ const panelState = {
   pendingClarificationGroup: null,
 };
 const state = {
+  features: { errands: false },
   connection: { status: "disconnected" },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },

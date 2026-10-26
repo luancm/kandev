@@ -9,6 +9,8 @@ import {
   RIGHT_TOP_GROUP,
 } from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { isErrandSession } from "@/lib/state/slices/errands/selectors";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { TaskSession } from "@/lib/types/http";
@@ -379,10 +381,27 @@ function ensureSiblingPanels(
   return created;
 }
 
+/**
+ * Sessions that may gain a tab or selection automatically. While the errands
+ * flag is on, an errand opens only on request; existing errand tabs are kept.
+ */
+function resolveAutoTabSessionIds(
+  state: AppState,
+  taskId: string | null,
+  sessions: TaskSession[],
+): string[] {
+  const eligible =
+    taskId && state.features?.errands
+      ? sessions.filter((session) => !isErrandSession(state, taskId, session))
+      : sessions;
+  return eligible.map((session) => session.id);
+}
+
 /** Resolve the current session ID list from the store for the active task. */
 function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): {
   tid: string | null;
   currentSessionIds: string[];
+  autoTabSessionIds: string[];
   sessionListLoaded: boolean;
 } {
   const state = appStore.getState();
@@ -391,6 +410,7 @@ function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): 
   return {
     tid: tid ?? null,
     currentSessionIds: currentSessions.map((session) => session.id),
+    autoTabSessionIds: resolveAutoTabSessionIds(state, tid ?? null, currentSessions),
     sessionListLoaded: tid ? (state.taskSessionsByTask.loadedByTaskId[tid] ?? false) : false,
   };
 }
@@ -542,7 +562,8 @@ export function runAutoSessionTabEffect(
   const api = useDockviewStore.getState().api;
   if (!api) return;
 
-  const { tid, currentSessionIds, sessionListLoaded } = resolveCurrentSessionIds(appStore);
+  const { tid, currentSessionIds, autoTabSessionIds, sessionListLoaded } =
+    resolveCurrentSessionIds(appStore);
 
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
@@ -565,7 +586,7 @@ export function runAutoSessionTabEffect(
   if (hiddenSessionIdsFor(api).has(effectiveSessionId)) {
     const visibleSessionId = resolveVisibleSessionId(
       effectiveSessionId,
-      currentSessionIds,
+      autoTabSessionIds,
       hiddenSessionIdsFor(api),
     );
     if (tid && visibleSessionId) appStore.getState().setActiveSessionAuto(tid, visibleSessionId);
@@ -642,7 +663,7 @@ export function runAutoSessionTabEffect(
 
   const siblingsCreated = ensureSiblingPanels(
     api,
-    currentSessionIds,
+    autoTabSessionIds,
     effectiveSessionId,
     siblingAnchor,
     refs.sessionTabCreatedRef.current,
@@ -692,6 +713,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       ? request.requestId
       : null;
   });
+  const errandsEnabled = useFeature("errands");
 
   useEffect(() => {
     runAutoSessionTabEffect(effectiveSessionId, appStore, {
@@ -703,6 +725,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     appStore,
     dockviewApi,
     effectiveSessionId,
+    errandsEnabled,
     sessionIdsKey,
     sessionListLoaded,
     workflowFocusRequestId,

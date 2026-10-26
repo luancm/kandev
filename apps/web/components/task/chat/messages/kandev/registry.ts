@@ -36,6 +36,11 @@ import {
   ProposeResumeRenderer,
   ProposeTaskRenderer,
 } from "./propose-task-renderer";
+import {
+  AwaitErrandsRenderer,
+  CancelErrandRenderer,
+  StartErrandRenderer,
+} from "./errand-renderers";
 import type { KandevRenderer } from "./types";
 
 export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
@@ -68,6 +73,10 @@ export const KANDEV_RENDERERS: Record<string, KandevRenderer> = {
   propose_resume: ProposeResumeRenderer,
   propose_message: ProposeMessageRenderer,
   propose_move: ProposeMoveRenderer,
+
+  start_errand: StartErrandRenderer,
+  await_errands: AwaitErrandsRenderer,
+  cancel_errand: CancelErrandRenderer,
 };
 
 export function getKandevRenderer(stem: string | null): KandevRenderer | null {

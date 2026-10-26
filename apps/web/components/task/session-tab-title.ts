@@ -5,6 +5,7 @@ import {
   type DynamicConfigOption,
   type ModelSelectorOption,
 } from "@/components/model-config-selector";
+import { t } from "@/lib/i18n";
 import type { AppState } from "@/lib/state/store";
 
 type ResolveSessionTabTitleArgs = {
@@ -64,10 +65,20 @@ function profileSnapshotModel(session: AppState["taskSessions"]["items"][string]
     : null;
 }
 
+function errandTabTitle(state: AppState, taskId: string, sessionId: string): string | null {
+  if (!state.features?.errands) return null;
+  const title = state.errands?.byTaskId?.[taskId]?.[sessionId]?.title;
+  return title ? t("task:errandTabTitle", { title }) : null;
+}
+
 /** Selects the same live label used by task session tabs for one loaded session. */
 export function selectSessionTabTitle(state: AppState, sessionId: string): string | null {
   const session = state.taskSessions.items[sessionId];
   if (!session) return null;
+  if (!session.name) {
+    const errandTitle = errandTabTitle(state, session.task_id, sessionId);
+    if (errandTitle) return errandTitle;
+  }
 
   const sessionModels = state.sessionModels.bySessionId[sessionId];
 

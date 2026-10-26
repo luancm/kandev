@@ -32,6 +32,7 @@ import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
 import { AgentGoalChip } from "./agent-goal-chip";
 import { BackgroundWorkChip } from "./background-work/background-work-chip";
+import { ErrandsChip } from "./errands/errands-chip";
 import { shouldShowProceed } from "./types";
 import { getAgentGoal } from "@/lib/agent-goal";
 import { useComposerDisclosureContext } from "./composer-disclosure";
@@ -166,6 +167,24 @@ export function ComposerCIStatus({
       <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
     </div>
+  );
+}
+
+/** Chips for work running beside the conversation: background jobs and errands. */
+function WorkChips({
+  taskId,
+  sessionId,
+  detailActive,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  detailActive: boolean;
+}) {
+  return (
+    <>
+      <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
+      <ErrandsChip taskId={taskId} />
+    </>
   );
 }
 
@@ -402,7 +421,7 @@ export function ChatStatusBar({
         <TaskDependencyChip taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-        <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
+        <WorkChips taskId={taskId} sessionId={sessionId} detailActive={detailActive} />
         {queueChip}
       </ChatStatusBarActions>
     </div>

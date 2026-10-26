@@ -816,6 +816,75 @@ describe("session.state_changed name propagation", () => {
   });
 });
 
+describe("session.state_changed errand fields", () => {
+  it("carries the errand role, parent, and waiting flag onto the session row", () => {
+    const store = makeStore();
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-errand",
+        new_state: "RUNNING",
+        role: "errand",
+        parent_session_id: "s-parent",
+      }),
+    );
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-parent",
+        new_state: "WAITING_FOR_INPUT",
+        waiting_on_errands: false,
+      }),
+    );
+
+    const calls = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls;
+    expect(calls[0][1]).toEqual(
+      expect.objectContaining({ role: "errand", parent_session_id: "s-parent" }),
+    );
+    expect(calls[1][1]).toEqual(expect.objectContaining({ waiting_on_errands: false }));
+  });
+
+  it("omits the fields for an ordinary session so they never clobber the row", () => {
+    const store = makeStore();
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
+
+    const session = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls[0][1];
+    expect(session).not.toHaveProperty("role");
+    expect(session).not.toHaveProperty("parent_session_id");
+    expect(session).not.toHaveProperty("waiting_on_errands");
+  });
+
+  it("keeps a known errand role through a later event that omits it", () => {
+    const store = createAppStore();
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-errand",
+        new_state: "RUNNING",
+        role: "errand",
+        parent_session_id: "s-parent",
+      }),
+    );
+    handler(
+      makeMessage({ task_id: "t-1", session_id: "s-errand", new_state: "WAITING_FOR_INPUT" }),
+    );
+
+    expect(store.getState().taskSessions.items["s-errand"]).toEqual(
+      expect.objectContaining({
+        state: "WAITING_FOR_INPUT",
+        role: "errand",
+        parent_session_id: "s-parent",
+      }),
+    );
+  });
+});
+
 describe("session.state_changed context window provenance", () => {
   it("retains the backend context-window source", () => {
     const setContextWindow = vi.fn();

@@ -14,7 +14,7 @@ import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
-import { MobileSessionsPicker } from "./mobile-sessions-section";
+import { MobileSessionPickerRow } from "./mobile-session-picker-row";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
@@ -153,9 +153,7 @@ function MobileChatPanelContent({
     <div className="flex-1 min-h-0 flex flex-col">
       <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
       <WipQueueStatus taskId={activeTaskId} />
-      <div className="flex items-center px-1 py-2">
-        <MobileSessionsPicker taskId={activeTaskId} sessionId={effectiveSessionId} fullWidth />
-      </div>
+      <MobileSessionPickerRow taskId={activeTaskId} sessionId={effectiveSessionId} />
       {isPassthroughMode ? (
         <div className="flex-1 min-h-0">
           <PassthroughToolbar
