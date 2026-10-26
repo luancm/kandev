@@ -359,6 +359,11 @@ const (
 	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
 )
 
+// Event types for errands
+const (
+	ErrandUpdated = "errand.updated" // Errand row or projected status changed
+)
+
 // Event types for session todos (ACP plan entries)
 const (
 	SessionTodosUpdated = "session_todos.updated" // Agent plan/todo entries updated

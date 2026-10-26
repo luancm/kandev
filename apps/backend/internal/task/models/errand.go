@@ -157,11 +157,37 @@ func (e *Errand) Validate() error {
 	return nil
 }
 
-func (s *TaskSession) addRoleAPI(result map[string]interface{}) {
-	if s.Role != "" {
-		result["role"] = string(s.Role)
+// CanSendResult reports whether the user may record the latest settled turn
+// as the errand's result: the projected status is done or failed, a settled
+// turn exists, and that turn is not already the pending or delivered result.
+func (e *Errand) CanSendResult(status ErrandStatus) bool {
+	if status != ErrandStatusDone && status != ErrandStatusFailed {
+		return false
 	}
-	if s.ParentSessionID != "" {
-		result["parent_session_id"] = s.ParentSessionID
+	if e.LatestSettledTurnID == "" {
+		return false
+	}
+	if e.LatestSettledTurnID != e.ResultTurnID {
+		return true
+	}
+	return e.ResultState != ErrandResultPending && e.ResultState != ErrandResultDelivered
+}
+
+func (s *TaskSession) addRoleAPI(result map[string]interface{}) {
+	AddSessionRoleFields(result, s)
+}
+
+// AddSessionRoleFields adds the role and parent session identity of an errand
+// session to a session event or API payload. Ordinary sessions and nil add
+// nothing, so their payloads stay unchanged.
+func AddSessionRoleFields(payload map[string]interface{}, session *TaskSession) {
+	if session == nil {
+		return
+	}
+	if session.Role != "" {
+		payload["role"] = string(session.Role)
+	}
+	if session.ParentSessionID != "" {
+		payload["parent_session_id"] = session.ParentSessionID
 	}
 }

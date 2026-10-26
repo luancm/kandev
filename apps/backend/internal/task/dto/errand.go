@@ -26,6 +26,9 @@ type ErrandDTO struct {
 	CreatedAt       time.Time                `json:"created_at"`
 	UpdatedAt       time.Time                `json:"updated_at"`
 	SettledAt       *time.Time               `json:"settled_at"`
+	// CanSendResult is computed by the server so every client applies the
+	// same eligibility rule for Send result to parent.
+	CanSendResult bool `json:"can_send_result"`
 }
 
 // FromErrand projects an errand row with its already projected status.
@@ -44,6 +47,7 @@ func FromErrand(errand *models.Errand, status models.ErrandStatus) ErrandDTO {
 		CreatedAt:       errand.CreatedAt,
 		UpdatedAt:       errand.UpdatedAt,
 		SettledAt:       errand.SettledAt,
+		CanSendResult:   errand.CanSendResult(status),
 	}
 }
 
@@ -56,4 +60,11 @@ func errandResultPreview(text string) string {
 		characters++
 	}
 	return text
+}
+
+// ErrandUpdatedEvent is the errand.updated payload: the errand DTO plus the
+// workspace that routes it to the right clients.
+type ErrandUpdatedEvent struct {
+	ErrandDTO
+	WorkspaceID string `json:"workspace_id"`
 }

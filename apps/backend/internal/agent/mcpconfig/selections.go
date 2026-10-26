@@ -236,6 +236,36 @@ func (s *SelectionService) Replace(ctx context.Context, scope SelectionScope, wo
 	return nil
 }
 
+// EnabledDefinitionIDs returns the subset of ids that still resolve to an
+// enabled definition of workspaceID, in the caller's order without duplicates.
+// Missing, foreign, and disabled definitions are dropped rather than refused,
+// so a stored snapshot can be replayed after the catalog changed.
+func (s *SelectionService) EnabledDefinitionIDs(ctx context.Context, workspaceID string, ids []string) ([]string, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, ErrMCPInvalidSelection
+	}
+	if err := s.authorize(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	if s.catalog == nil {
+		return nil, errors.New("MCP catalog is unavailable")
+	}
+	enabled := make([]string, 0, len(ids))
+	for _, definitionID := range uniqueSelectionIDs(ids) {
+		definition, err := s.catalog.GetMCPServerDefinition(ctx, workspaceID, definitionID)
+		if errors.Is(err, ErrMCPServerDefinitionNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if definition != nil && definition.WorkspaceID == workspaceID && definition.Enabled {
+			enabled = append(enabled, definitionID)
+		}
+	}
+	return enabled, nil
+}
+
 func (s *SelectionService) replaceSessionSelections(
 	ctx context.Context,
 	workspaceID, sessionID string,

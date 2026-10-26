@@ -85,7 +85,7 @@ func TestErrandDTOProjectsPublicFieldsAndBoundedPreview(t *testing.T) {
 	}
 	sort.Strings(keys)
 	want := []string{
-		"agent_profile_id", "created_at", "errand_id", "objective", "parent_session_id", "result_preview",
+		"agent_profile_id", "can_send_result", "created_at", "errand_id", "objective", "parent_session_id", "result_preview",
 		"result_state", "result_truncated", "settled_at", "status", "task_id", "title", "updated_at",
 	}
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
@@ -97,5 +97,29 @@ func TestErrandDTOProjectsPublicFieldsAndBoundedPreview(t *testing.T) {
 	if payload := encodeToMap(t, FromErrand(errand, models.ErrandStatusRunning)); payload["settled_at"] != nil ||
 		payload["result_preview"] != "short" {
 		t.Fatalf("unsettled DTO = %v, want explicit null settled_at and the whole short preview", payload)
+	}
+}
+
+func TestErrandDTOCanSendResultFollowsTheSharedPredicate(t *testing.T) {
+	errand := &models.Errand{
+		ID: "errand-1", TaskID: "task-1", ParentSessionID: "parent-1",
+		Lifecycle: models.ErrandLifecycleLaunched, LastOutcome: models.ErrandOutcomeDone,
+		ResultTurnID: "turn-1", ResultState: models.ErrandResultDelivered, LatestSettledTurnID: "turn-2",
+	}
+	if payload := encodeToMap(t, FromErrand(errand, models.ErrandStatusDone)); payload["can_send_result"] != true {
+		t.Fatalf("can_send_result = %v for an unreported later turn, want true", payload["can_send_result"])
+	}
+	if payload := encodeToMap(t, FromErrand(errand, models.ErrandStatusRunning)); payload["can_send_result"] != false {
+		t.Fatalf("can_send_result = %v while running, want an explicit false", payload["can_send_result"])
+	}
+}
+
+func TestErrandUpdatedEventFlattensTheDTOAndAddsTheWorkspace(t *testing.T) {
+	errand := &models.Errand{ID: "errand-1", TaskID: "task-1", ParentSessionID: "parent-1"}
+	payload := encodeToMap(t, ErrandUpdatedEvent{
+		ErrandDTO: FromErrand(errand, models.ErrandStatusQueued), WorkspaceID: "workspace-1",
+	})
+	if payload["errand_id"] != "errand-1" || payload["status"] != "queued" || payload["workspace_id"] != "workspace-1" {
+		t.Fatalf("event payload = %v, want the flat DTO plus workspace_id", payload)
 	}
 }

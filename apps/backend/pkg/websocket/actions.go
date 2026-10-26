@@ -403,6 +403,12 @@ const (
 	ActionSessionBackgroundWorkUsage   = "session.background_work.usage"
 	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
 	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
+	// Errand actions
+	ActionErrandList       = "errand.list"
+	ActionErrandCancel     = "errand.cancel"
+	ActionErrandCancelAll  = "errand.cancel_all"
+	ActionErrandSendResult = "errand.send_result"
+	ActionErrandUpdated    = "errand.updated"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote
