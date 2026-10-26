@@ -2509,6 +2509,12 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	finalizeCtx, cancelFinalize := archivecascade.ContinuationContextUntil(ctx, archiveDeadline)
 	defer cancelFinalize()
 
+	// 3a. Errands are cancelled with the archived task: their rows, queued ones
+	// included, never outlive it as live work.
+	if s.taskErrandCanceller != nil {
+		s.taskErrandCanceller.CancelErrandsForTask(finalizeCtx, id)
+	}
+
 	// 3b. Finalize active sessions in the DB and publish their cancellation
 	// events. See finalizeCancelledSessions for the detailed rationale.
 	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions, archiveDeadline, models.SessionArchiveCancelReason)

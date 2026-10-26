@@ -5728,6 +5728,12 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	if err = s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	s.cancelErrandOnUserStop(ctx, sessionID)
+	defer func() {
+		if err == nil {
+			s.cascadeErrandsOfParent(sessionID)
+		}
+	}()
 
 	// A direct session stop is a true retry-ending transition. Retire the
 	// in-memory loop and its durable notice before stopping the execution.
@@ -5828,6 +5834,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 	taskID := session.TaskID
 	wasPrimary := session.IsPrimary
+	// The errand row is removed with its session, so record the user's
+	// deletion first. A deleted parent cancels its errands once it is gone.
+	s.cancelErrandOnUserStop(ctx, sessionID)
 
 	// A settled DB state can still own a workspace execution or detached
 	// background work. Quiesce that runtime boundary before removing the row.
@@ -5890,6 +5899,7 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if wasPrimary {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
 	}
+	s.cascadeErrandsOfParent(sessionID)
 
 	return nil
 }
@@ -11236,6 +11246,9 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error)
 	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
 		return err
 	}
+	// Cancelling a turn ends the parent's awaits and nothing else: its errands
+	// keep running.
+	s.endParentAwaits(sessionID)
 	if s.repo == nil {
 		return errors.New("cancel agent: repository is not configured")
 	}

@@ -947,6 +947,8 @@ type Service struct {
 	// errands receives session lifecycle notifications and queue drain ticks.
 	// Nil leaves errand cleanup and queued admission off.
 	errands ErrandController
+	// parentAwaits ends the in-flight awaits of a parent whose turn was cancelled.
+	parentAwaits ParentAwaitEnder
 
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have

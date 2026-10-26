@@ -41,6 +41,7 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, expectedTurnID stri
 	if active != expectedTurnID {
 		return ErrTurnNotActive
 	}
+	s.endParentAwaits(sessionID)
 	operation, owner, _, accepted := s.claimCancellationWithActionExclusive(sessionID, cancellationKindInternal, nil)
 	if !accepted || !owner {
 		return ErrCancelInFlight

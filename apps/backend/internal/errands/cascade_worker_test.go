@@ -68,25 +68,45 @@ func TestCascadeParentDeduplicatesWaitingParents(t *testing.T) {
 	var worker cascadeWorker
 	release := make(chan struct{})
 	ran := make(chan string, 8)
-	worker.start(context.Background(), func(_ context.Context, parentSessionID string) {
-		ran <- parentSessionID
+	worker.start(context.Background(), func(_ context.Context, job cascadeJob) {
+		ran <- job.id
 		<-release
 	})
 	t.Cleanup(worker.stop)
 
-	worker.enqueue("parent-a")
+	worker.enqueue(cascadeJob{id: "parent-a"})
 	if got := <-ran; got != "parent-a" {
 		t.Fatalf("first run = %s", got)
 	}
-	worker.enqueue("parent-b")
-	worker.enqueue("parent-b")
+	worker.enqueue(cascadeJob{id: "parent-b"})
+	worker.enqueue(cascadeJob{id: "parent-b"})
+	worker.enqueue(cascadeJob{taskWide: true, id: "parent-b"})
 	close(release)
 	if got := <-ran; got != "parent-b" {
 		t.Fatalf("second run = %s", got)
 	}
+	if got := <-ran; got != "parent-b" {
+		t.Fatalf("task-wide job with the same ID must be its own job, got %s", got)
+	}
 	select {
 	case extra := <-ran:
-		t.Fatalf("parent ran twice: %s", extra)
+		t.Fatalf("job ran twice: %s", extra)
 	case <-time.After(50 * time.Millisecond):
 	}
+}
+
+func TestCascadeTaskCancelsQueuedErrandsOffTheCaller(t *testing.T) {
+	h := newHarness(t)
+	h.launcher.behave = func(int, LaunchRequest) error { return ErrCeilingRefused }
+	queued := h.mustStart("queued").Errand
+	h.service.StartWorkers(context.Background())
+	t.Cleanup(h.service.StopWorkers)
+
+	if !h.service.CascadeTask(testTask) {
+		t.Fatal("CascadeTask refused work while the worker runs")
+	}
+	eventually(t, "the task cascade to cancel the queued errand", func() bool {
+		row, _ := h.store.GetErrand(context.Background(), queued.ID)
+		return row.Lifecycle == models.ErrandLifecycleCancelled
+	})
 }

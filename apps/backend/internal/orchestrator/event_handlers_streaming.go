@@ -1374,6 +1374,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	s.onSessionTerminalForErrands(sessionID, nextState)
 	return session, true
 }
 
@@ -1802,6 +1803,7 @@ func (s *Service) publishAcceptedTaskSessionState(
 	)
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	s.onSessionTerminalForErrands(sessionID, nextState)
 }
 
 // persistStrictTaskSessionState is transitionTaskSessionState's persistence

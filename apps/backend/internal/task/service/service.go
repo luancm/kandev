@@ -540,6 +540,7 @@ type Service struct {
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
+	taskErrandCanceller             TaskErrandCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
@@ -966,6 +967,17 @@ func (s *Service) SetStallDetectionThreshold(threshold time.Duration) {
 // transitions owned by the task service.
 func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCanceller) {
 	s.clarificationCanceller = canceller
+}
+
+// TaskErrandCanceller cancels every errand of a task, queued ones included, when
+// the task is archived. Errand runtimes are stopped asynchronously.
+type TaskErrandCanceller interface {
+	CancelErrandsForTask(ctx context.Context, taskID string)
+}
+
+// SetTaskErrandCanceller wires errand cancellation for task archive.
+func (s *Service) SetTaskErrandCanceller(canceller TaskErrandCanceller) {
+	s.taskErrandCanceller = canceller
 }
 
 // SetParkedProjectionCanceller wires parked-projection cleanup (orchestrator)
