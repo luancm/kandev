@@ -112,6 +112,10 @@ vi.mock("./task-autopilot-chat-chip", () => ({
   AutopilotChatChip: () => null,
   useTaskAutopilot: () => false,
 }));
+vi.mock("./errands/errands-chip", () => ({
+  ErrandsChip: ({ taskId }: { taskId: string | null }) =>
+    taskId ? <span data-testid="errands-chip" data-task-id={taskId} /> : null,
+}));
 vi.mock("./agent-goal-chip", () => ({
   AgentGoalChip: ({ goal }: { goal: { objective: string } | null }) =>
     goal ? <span data-testid="agent-goal-chip">{goal.objective}</span> : null,
@@ -171,6 +175,24 @@ describe("chat status bar goal visibility", () => {
         hasGoal: true,
       }),
     ).toBe(true);
+  });
+});
+
+describe("errands chip placement", () => {
+  it("mounts the errands chip for the task after the review status and goal", () => {
+    renderStatus({ taskId: "task-1", queueChip: <span data-testid="queue-chip" /> });
+
+    const chip = screen.getByTestId("errands-chip");
+    expect(chip.getAttribute("data-task-id")).toBe("task-1");
+    const goal = screen.getByTestId("agent-goal-chip");
+    const queue = screen.getByTestId("queue-chip");
+    expect(goal.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chip.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("passes no task to the chip before the session has one", () => {
+    renderStatus({ taskId: null });
+    expect(screen.queryByTestId("errands-chip")).toBeNull();
   });
 });
 

@@ -16,6 +16,7 @@ export function ErrandOpenButton({
   errandId,
   title,
   queued = false,
+  onOpened,
   className,
   testId,
 }: {
@@ -23,6 +24,8 @@ export function ErrandOpenButton({
   errandId: string;
   title: string;
   queued?: boolean;
+  /** Called after the session was opened, e.g. to close the surface that listed it. */
+  onOpened?: () => void;
   className?: string;
   testId?: string;
 }) {
@@ -37,7 +40,9 @@ export function ErrandOpenButton({
       aria-label={t("chat:errandOpenAria", { title })}
       data-testid={testId ?? `errand-open-${errandId}`}
       onClick={() => {
-        if (taskId) openSession({ taskId, sessionId: errandId, title });
+        if (!taskId) return;
+        openSession({ taskId, sessionId: errandId, title });
+        onOpened?.();
       }}
       className={cn(
         "h-6 shrink-0 cursor-pointer gap-1 px-2 text-[11px]",
