@@ -176,4 +176,74 @@ Task 04.
 
 ## Results
 
-Pending.
+Partially complete. Status remains `pending` because the orchestrator wiring
+below is not done. Commits on `feat/errands`: `8495fcea4f` (capture, supersede,
+bound, await, status block, claims, `deliverPending`), `861ffc2ca1` (delivery
+sweep, cancellation notice, acceptance tests), `dfa2a14df5` (`errand.send_result`).
+
+Complete and tested (`internal/errands`, race-clean):
+
+- `results.go`: parent-initiated capture (`first_turn_id` or verified sender),
+  16 KiB rune-safe bound, idempotent on `result_turn_id`, supersede on a new
+  parent prompt, `SendResult` gated by `Errand.CanSendResult`.
+- `await.go`, `await_registry.go`: `all`/`any` waits, `max_wait_seconds` 0
+  evaluates once, claim under the parent mutex, `ReleaseAwait`, `EndParentAwaits`.
+- `compose.go`: status block (10 lines, 4 KiB, `StripTags`), claim with a
+  token, `ReleaseTurnClaim`.
+- `delivery.go`: `deliverPending` checks the flag and pending results, honours
+  `NotificationBlocked`, and drops the parent lock before calling the
+  deliverer; `OnParentTurnSettled(ctx, parent, SettleCause)` returns whether the
+  parent is outstanding; `ParentOutstanding`; `SweepDelivery`;
+  `PreserveCancellationNotice` admits the notice before the row is deleted.
+- Wiring types: `TurnReader`, `DeliveryLog`, `ParentDeliverer` (now
+  `NotificationBlocked`, `DeliverPending`, `AdmitPrepared`); `Store.ListErrands`.
+- `errand.send_result` WebSocket action with `errand_result_not_eligible`.
+- Metric `errands_result_delivery_total{route}` with closed labels.
+- Acceptance tests for AC-003.1 to 003.5, 004.9, 004.11 (blocked), 006.1
+  (outstanding), and the send-result rule.
+
+Remaining (not started; nothing below is wired in production):
+
+- `internal/orchestrator`: implement `ParentDeliverer` over `messagequeue`
+  (`QueuedByServer`, `errand_notification`, `DeleteByIDForSession` withdrawal).
+- `event_handlers_agent.go`, `event_handlers_streaming.go`, `cancel_turn.go`:
+  call `OnErrandTurnSettled` on settlement and failure; call
+  `OnParentTurnSettled` before `drainQueuedBeforeWorkflowTransition`, with the
+  `errands_outstanding` no-op branch.
+- `task_operations.go` `promptTask`: `ComposeParentTurn` before delivery
+  admission, `errand_delivery` metadata, `ReleaseTurnClaim` on refusal; empty
+  notification consumption.
+- `internal/mcp/handlers` `handleMessageTask`: `OnParentPromptAdmitted`.
+- `CancelAgent` and `CancelTurn`: `EndParentAwaits`.
+- Session delete hook: call `PreserveCancellationNotice` before the row delete.
+- `backendapp/errands_wiring.go`: `SetDeliverer`, `SetTurnReader`,
+  `SetDeliveryLog`, `SetEnabled`; ceiling sweep calls `SweepDelivery`.
+- `reconcile.go` `Service.Reconcile` and its startup wiring (the interrupted
+  notice constant was removed while unused; add it with Reconcile).
+- `waiting_on_errands` (`*bool`, `omitempty`) on the session DTO and session events.
+- Orchestrator-level tests for AC-004.8, 004.10, 004.11, 006.1 to 006.6, 007.5.
+
+Deviations:
+
+- `OnParentTurnSettled` takes a `SettleCause` (`turn_done` or `user_cancel`)
+  instead of a free-form cause string.
+- `PreserveCancellationNotice` admits the notice directly because the row is
+  deleted afterward; it returns an error on refusal so the caller can keep the row.
+- The `ErrandService` interface in `internal/task/handlers` gained `SendResult`,
+  and its test fake was updated.
+- An existing test that asserted `errand.send_result` is unregistered was
+  flipped to assert it is registered.
+
+Verification:
+
+- `go test -race -trimpath ./internal/errands/... -count=1`: pass.
+- `go test ./internal/orchestrator -run 'Errand|CompletionFollowUp|Clarification|DrainQueued|PromptTask|CancelledTurn'`: pass.
+- `go test ./internal/orchestrator/messagequeue -run 'Errand|Admission|DeleteByID'`: pass.
+- `go test ./internal/task/repository/sqlite -run Errand`: pass.
+- `go test ./internal/task/handlers -run Errand`: pass.
+- `go test ./internal/mcp/handlers -run 'MessageTask|Errand'`: pass.
+- `go test ./internal/task/dto -run 'Errand|WaitingOnErrands'`: pass (no WaitingOnErrands tests yet).
+- `go build ./...`: pass.
+- `bash scripts/lint-go-changed <changed files>`: 0 issues.
+- `gofmt -l` on changed files: clean.
+- Plan checkboxes for Task 03, 05, and 08 were not changed: Task 05 is not complete.
