@@ -335,7 +335,7 @@ Progress:
 - [ ] [Task 03: Add the errands frontend data layer and tab filter](task-03-frontend-data-layer.md)
 - [x] [Task 04: Launch, admit, track, and cancel errands](task-04-errand-launch-and-admission.md)
 - [x] [Task 05: Capture errand results and deliver them to a conversational parent](task-05-errand-results-and-delivery.md)
-- [ ] [Task 06: Expose errands to agents through MCP and prompts](task-06-errand-mcp-surface.md)
+- [x] [Task 06: Expose errands to agents through MCP and prompts](task-06-errand-mcp-surface.md)
 - [ ] [Task 07: Show errand counts and waiting status on task rows](task-07-task-summary-indicators.md)
 - [ ] [Task 08: Build the errand UI for desktop and phone](task-08-errand-ui.md)
 - [ ] [Task 09: Add errand E2E scenarios, public docs, and harness notes](task-09-e2e-and-docs.md)

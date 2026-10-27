@@ -1,7 +1,7 @@
 ---
 id: "06-errand-mcp-surface"
 title: "Expose errands to agents through MCP and prompts"
-status: pending
+status: done
 wave: 5
 depends_on:
   - "05-errand-results-and-delivery"
@@ -148,4 +148,54 @@ Task 05.
 
 ## Results
 
-Pending.
+Complete. Status is `done`.
+
+Commits on `feat/errands` for this work order:
+
+- Mode, surface, capability, and the fixed errand catalog: `fdff1703b7`,
+  `142fcc3b96`.
+- Errand prompt and flag-gated parent guidance: `d7018e1d69`.
+- Errand MCP actions, parent guards, and the `errands_outstanding` refusal:
+  `7af9bb6b59`.
+- Errand first-turn replay carries the `errand.md` block, rebuilt from the
+  durable errand row through a narrow lookup seam that fails closed:
+  `994c61d3d5`.
+- Errand sessions see only the read-only errand catalog in their Kandev
+  context, from the new `errand-kandev-context.md` template: `527ed934dd`.
+- Follow-up and workflow prompts pass the errand role, so the ask-question tool
+  is never offered to an errand: `4938eb4f84`, with a follow-up test in
+  `2925535f21`.
+
+Ordinary task-mode context is unchanged. The flag-off golden and the
+`errand-session.golden` file pin the two renders.
+
+Verification (Go 1.26.3):
+
+- `go test ./internal/common/mcpmode ./internal/mcp/profile -count=1`: pass.
+- `go test ./internal/mcp/server -run 'Errand|SurfaceAutomation|SurfaceCoordinator|KeepAlive'`: pass.
+- `go test ./internal/mcp/handlers -run 'Errand|SpawnSession|StepComplete|MessageTask|ListTaskSessions|CreateTask|MoveTask'`: pass.
+- `go test ./internal/sysprompt ./config/prompts`: pass. `config/prompts` has no
+  test files.
+- `go test ./internal/orchestrator/executor -run 'MCPMode|MCPProfile|Errand'`: pass.
+- `go build ./...` in `apps/backend`: pass.
+- `scripts/lint-go-changed` over the 14 backend Go files changed since
+  `b6217de61f`: 0 issues.
+- `git diff --check`: clean.
+- Full `go test ./internal/orchestrator -count=1`: 8 failures, all in the
+  session-open and completed-relocation tests (`TestCompletedRelocation*`,
+  `TestSessionOpenResumeWaitsForWorkspaceInspection`,
+  `TestSessionOpenResumeHonorsEarlierCallerDeadline`,
+  `TestSessionOpenLaunchFailureExemptsOnlyVerifiedInspectionDeferral`). They
+  fail with `worktree directory is corrupted ... not a directory` under the
+  macOS `/var` temp path. The same 8 tests fail identically on base
+  `b6263ea4c3`, checked in a temporary detached worktree that was then removed.
+  No other orchestrator test fails.
+
+Remaining:
+
+- The `ClaimTaskTitleSession` call on errand launch is a no-op. The SQL query
+  excludes errand sessions (`titleClaimSessionNotErrand`), so errands never
+  claim the generated title.
+- The REST residual risk for `sender_session_id` stays as recorded in the ADR.
+- The backendapp WorkspaceSource materializer failures were not rerun in this
+  pass. They are pre-existing on macOS.
