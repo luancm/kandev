@@ -38,11 +38,12 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 			},
 		)
 
-		got := svc.wrapCreatedSessionPrompt(
+		got, err := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
 			false, false, false, false, nil, "",
 		)
 
+		require.NoError(t, err)
 		assert.Equal(t, "coord-1", gotCoordinatorID)
 		assert.Equal(t, "Acme Workspace", gotWorkspaceName)
 		assert.Equal(t, "ws-1", gotWorkspaceID)
@@ -56,10 +57,11 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 			Metadata: map[string]interface{}{models.MetaKeyCoordinatorID: "coord-1"},
 		}
 		svc := &Service{}
-		got := svc.wrapCreatedSessionPrompt(
+		got, err := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
 			false, false, false, false, nil, "",
 		)
+		require.NoError(t, err)
 		assert.Equal(t, "hello coordinator", got)
 	})
 
@@ -74,10 +76,11 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 				return "", errors.New("boom")
 			},
 		)
-		got := svc.wrapCreatedSessionPrompt(
+		got, err := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
 			false, false, false, false, nil, "",
 		)
+		require.NoError(t, err)
 		assert.Equal(t, "hello coordinator", got)
 	})
 
@@ -90,10 +93,11 @@ func TestWrapCreatedSessionPrompt_CoordinatorStandingInstructions(t *testing.T) 
 				return "", nil
 			},
 		)
-		got := svc.wrapCreatedSessionPrompt(
+		got, err := svc.wrapCreatedSessionPrompt(
 			ctx, "hello coordinator", "task", "session", session, dbTask,
 			false, false, false, false, nil, "",
 		)
+		require.NoError(t, err)
 		assert.Equal(t, "hello coordinator", got)
 	})
 }

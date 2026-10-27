@@ -1033,10 +1033,13 @@ func (s *Service) startCreatedSession(
 		}
 	}
 	if effectivePrompt != "" || len(attachments) > 0 {
-		effectivePrompt = s.wrapCreatedSessionPrompt(
+		effectivePrompt, err = s.wrapCreatedSessionPrompt(
 			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
 			isOfficeTask, configMode, titleOwner, includeCanvasGuidance, references, promptReferenceContext,
 		)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
 		return nil, err
@@ -1174,6 +1177,8 @@ func (s *Service) configureInitialPromptDispatch(
 // wrapCreatedSessionPrompt adds the first-turn context for a prepared session.
 // Passthrough sessions intentionally receive only the short pending-title
 // instruction; structured sessions receive the normal task or Office block.
+// An errand session also receives its trusted errand block, rebuilt from the
+// durable errand row, so a replayed first submission matches first delivery.
 func (s *Service) wrapCreatedSessionPrompt(
 	ctx context.Context,
 	prompt, taskID, sessionID string,
@@ -1182,7 +1187,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 	isOfficeTask, configMode, titleOwner, includeCanvasGuidance bool,
 	references []v1.EntityReference,
 	promptReferenceContext string,
-) string {
+) (string, error) {
 	prompt, pullRequestTargetContext := s.addTaskPullRequestTargetContext(
 		ctx, taskID, prompt, session.IsPassthrough,
 	)
@@ -1190,31 +1195,24 @@ func (s *Service) wrapCreatedSessionPrompt(
 	switch {
 	case session.IsPassthrough:
 		if !configMode && titleOwner {
-			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt, nil
 		}
-		return prompt
+		return prompt, nil
 	case isOfficeTask:
 		return sysprompt.InjectOfficeContextWithOptions(
 			taskID, sessionID, prompt,
 			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
-		)
+		), nil
 	case dbTask.Origin == models.TaskOriginCoordinator:
-		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
+		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask), nil
 	default:
-		includeErrands, errandProfiles := s.parentErrandPromptOptions(ctx, taskID, session)
-		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-			IncludeCoordinatorTaskControls: !configMode,
-			IncludeTaskTitleTool:           !configMode && titleOwner,
-			IncludeCanvasGuidance:          includeCanvasGuidance,
-			Autopilot:                      dbTask.Autopilot,
-			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
-			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
-			ErrandSession:                  models.IsErrandSession(session),
-			IncludeErrandTools:             includeErrands,
-			ErrandProfiles:                 errandProfiles,
-		}, referenceContext, promptReferenceContext, pullRequestTargetContext)
+		return s.wrapTaskSessionPrompt(ctx, taskPromptInputs{
+			prompt: prompt, taskID: taskID, sessionID: sessionID, session: session, dbTask: dbTask,
+			configMode: configMode, titleOwner: titleOwner, includeCanvasGuidance: includeCanvasGuidance,
+			referenceContext: referenceContext, promptReferenceContext: promptReferenceContext,
+			pullRequestTargetContext: pullRequestTargetContext,
+		})
 	}
 }
 

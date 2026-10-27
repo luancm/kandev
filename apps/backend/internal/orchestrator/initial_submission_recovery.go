@@ -497,7 +497,7 @@ func (s *Service) wrapInitialSubmissionReplayPrompt(
 	return s.wrapCreatedSessionPrompt(
 		ctx, prompt, taskID, sessionID, session, dbTask,
 		isOfficeTask, configMode, titleOwner, includeCanvasGuidance, nil, "",
-	), nil
+	)
 }
 
 func (s *Service) compareAndSetInitialSubmission(
