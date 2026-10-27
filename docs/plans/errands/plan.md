@@ -332,13 +332,81 @@ Progress:
 
 - [x] [Task 01: Add the errands flag, session role, and errand persistence](task-01-flag-and-persistence.md)
 - [x] [Task 02: Detach errand sessions from workflow, primary, and routing](task-02-workflow-isolation.md)
-- [ ] [Task 03: Add the errands frontend data layer and tab filter](task-03-frontend-data-layer.md)
+- [x] [Task 03: Add the errands frontend data layer and tab filter](task-03-frontend-data-layer.md)
 - [x] [Task 04: Launch, admit, track, and cancel errands](task-04-errand-launch-and-admission.md)
 - [x] [Task 05: Capture errand results and deliver them to a conversational parent](task-05-errand-results-and-delivery.md)
 - [x] [Task 06: Expose errands to agents through MCP and prompts](task-06-errand-mcp-surface.md)
 - [ ] [Task 07: Show errand counts and waiting status on task rows](task-07-task-summary-indicators.md)
-- [ ] [Task 08: Build the errand UI for desktop and phone](task-08-errand-ui.md)
+- [x] [Task 08: Build the errand UI for desktop and phone](task-08-errand-ui.md)
 - [ ] [Task 09: Add errand E2E scenarios, public docs, and harness notes](task-09-e2e-and-docs.md)
+
+## Implementation state
+
+This section records where the implementation stands on the
+`feat/errands` branch. It is a snapshot. Each work order's own Results section
+has the detailed verification. The branch is local and not pushed.
+
+Branch `feat/errands` holds 50 commits above the upstream base `b6263ea4c3`.
+Commit history was rewritten once to remove an agent co-author trailer; the
+file contents were verified identical before and after.
+
+### Status by work order
+
+| Work order | Status | Notes |
+| --- | --- | --- |
+| 01 Flag, session role, persistence | Done | Flag `features.errands`, off in every profile |
+| 02 Workflow isolation | Done | Errand sessions stay out of workflow, primary and default routing |
+| 03 Frontend data layer | Done | Types, store slice, live updates, automatic tab filter |
+| 04 Launch and admission | Done | Start, queue at the 5-live limit, cancel, cascades |
+| 05 Results and delivery | Done, with known gaps | Capture, await, status block, delivery, restart reconcile |
+| 06 Agent MCP surface | Done | `start_errand_kandev`, `await_errands_kandev`, `cancel_errand_kandev`, errand prompt, errand MCP mode |
+| 07 Task-row indicators | Partly done | Backend status-summary counts committed (`95031bfc6a`); board, sidebar and Threads indicators not started |
+| 08 Errand UI | Done | Transcript cards, header, chip and panel, phone layout, copy in seven locales |
+| 09 E2E, public docs, harness notes | Not started | |
+
+### How to try the branch
+
+Enable the feature with **Settings > System > Feature Toggles**, or set
+`KANDEV_FEATURES_ERRANDS=true` before starting Kandev. The flag requires a
+restart. It stays off in every shipped profile, so nothing changes for users
+who do not enable it.
+
+### Known gaps
+
+These are recorded in the work order Results sections and are not fixed:
+
+1. A crash right after a direct prompt's turn can lose that result, because the
+   turn's delivery token is recorded after the user message is written (task 05).
+2. The send-now path with a queued notification entry is not handled (task 05).
+3. After a 529 retry, the status block can be dropped on the fresh-launch
+   fallback. A fix needs a fallback acceptance marker first, or results would be
+   delivered twice (task 05).
+4. Task-service session events for cancel and recovery do not yet carry
+   `waiting_on_errands` (task 05).
+5. Errand deletion is not broadcast to other open browsers. They keep the row
+   until the next load (task 08).
+6. Phone sessions drawer has no per-row delete for errands (task 08).
+7. The UI has not been checked in a live browser. Only component tests and the
+   documented contract back it so far.
+
+### Remaining work
+
+- Task 07: frontend indicators on the board, sidebar and Threads, then tests and
+  i18n in seven locales.
+- Task 09: desktop and phone end-to-end scenarios, public docs, harness notes.
+- Full verification, promote the requirements and system design from draft to
+  active, mark this plan implemented, security review of the branch, push
+  `feat/errands` to the fork.
+
+### Pre-existing test failures
+
+On this macOS machine, the following fail identically on the untouched base
+`b6263ea4c3`, so they are not caused by this branch: about 108 non-errand Go
+tests (workspace relocation, archive, checkout, Git, terminal), six
+`WorkspaceSource` materializer tests in `backendapp`, eight orchestrator
+session-open and relocation tests, and two web tests
+(`lib/state/slices/comments/persistence.test.ts` and
+`message-favorites/favorites-store.test.ts`).
 
 ## Decisions to review
 
