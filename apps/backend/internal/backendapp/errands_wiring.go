@@ -103,6 +103,7 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
 	// features.errands is restart-required, so the boot value is the live value.
 	service.SetEnabled(func() bool { return p.features.Errands })
 	p.orchestratorSvc.SetErrandController(service)
+	p.orchestratorSvc.SetErrandsEnabled(func() bool { return p.features.Errands })
 	p.orchestratorSvc.SetParentAwaitEnder(service)
 	p.taskSvc.SetTaskErrandCanceller(p.orchestratorSvc)
 	service.StartWorkers(p.ctx)

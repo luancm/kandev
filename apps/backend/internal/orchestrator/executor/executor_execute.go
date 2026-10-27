@@ -110,6 +110,11 @@ func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (l
 // task is loaded first so a read error fails every session, config-mode
 // included; a coordinator-origin task then wins regardless of config_mode.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
+	if models.IsErrandSession(session) {
+		// An errand always gets the fixed errand catalog, whatever its task
+		// carries. Errand sessions never reach the task-state checks below.
+		return McpModeErrand, nil
+	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
 	if err != nil && !notFound {
@@ -166,6 +171,9 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
+	if models.IsErrandSession(session) {
+		return mcpprofile.New(mcpprofile.SurfaceErrand, nil, nil), nil
+	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
 	if err != nil && !notFound {
@@ -227,7 +235,16 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if task.IsFromOffice {
 		surface = mcpprofile.SurfaceOfficeTask
 	}
-	capabilities := make([]mcpprofile.Capability, 0, 2)
+	capabilities := e.kanbanSessionCapabilities(task, session, surface, allowTitleTool)
+	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+}
+
+// kanbanSessionCapabilities lists the task-local capabilities of an ordinary
+// (non-coordinator, non-automation, non-configuration) task session.
+// CapabilityErrands is granted only to an ordinary kanban session while the
+// errands gate is on; passthrough and ephemeral sessions cannot delegate.
+func (e *Executor) kanbanSessionCapabilities(task *models.Task, session *models.TaskSession, surface mcpprofile.Surface, allowTitleTool bool) []mcpprofile.Capability {
+	capabilities := make([]mcpprofile.Capability, 0, 3)
 	if task.Autopilot {
 		if task.ParentID != "" && !session.IsPassthrough {
 			capabilities = append(capabilities, mcpprofile.CapabilityParentQuestion)
@@ -238,7 +255,15 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
-	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+	if e.errandsGranted(task, session, surface) {
+		capabilities = append(capabilities, mcpprofile.CapabilityErrands)
+	}
+	return capabilities
+}
+
+func (e *Executor) errandsGranted(task *models.Task, session *models.TaskSession, surface mcpprofile.Surface) bool {
+	return e.errandsEnabled != nil && e.errandsEnabled() &&
+		surface == mcpprofile.SurfaceKanbanTask && !task.IsEphemeral && !session.IsPassthrough
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will

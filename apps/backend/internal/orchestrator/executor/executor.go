@@ -760,6 +760,10 @@ const McpModeAutomation = mcpmode.Automation
 // (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
 const McpModeCoordinator = mcpmode.Coordinator
 
+// McpModeErrand selects the fixed read-only errand MCP catalog for an errand
+// session. Parent errand tools never appear in this mode.
+const McpModeErrand = mcpmode.Errand
+
 // McpModeManagedConversation selects the isolated managed-conversation MCP surface.
 const McpModeManagedConversation = "managed-conversation"
 
@@ -1139,6 +1143,9 @@ type Executor struct {
 	gitlabCredentials         GitLabCredentialResolver
 	logger                    *logger.Logger
 	canvasesEnabled           bool
+	// errandsEnabled reports the runtime errands gate. It is read on every
+	// profile resolution, so a runtime override applies to new sessions.
+	errandsEnabled func() bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
@@ -1522,6 +1529,12 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+// SetErrandsEnabled supplies the errands gate that decides whether kanban
+// sessions receive the parent errand tools.
+func (e *Executor) SetErrandsEnabled(enabled func() bool) {
+	e.errandsEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

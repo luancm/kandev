@@ -2110,6 +2110,14 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// SetErrandsEnabled hands the executor the errands gate that controls the
+// parent errand tools in task MCP profiles.
+func (s *Service) SetErrandsEnabled(enabled func() bool) {
+	if s.executor != nil {
+		s.executor.SetErrandsEnabled(enabled)
+	}
+}
+
 // SetCoordinatorLookup forwards the coordinator lookup to the executor's
 // fail-closed coordinator-session-start check. Guarded by the caller on the
 // coordinator feature flag (docs/specs/coordinator/system-design/copilot.md#fail-closed).
