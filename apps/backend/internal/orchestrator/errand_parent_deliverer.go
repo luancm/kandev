@@ -66,13 +66,9 @@ func (d *ErrandParentDeliverer) admit(
 	if s.messageQueue == nil {
 		return errors.New("message queue is not configured")
 	}
-	session, err := s.repo.GetTaskSession(ctx, parentSessionID)
+	identity, err := s.parentQueueIdentity(ctx, parentSessionID)
 	if err != nil {
-		return fmt.Errorf("load parent session for errand delivery: %w", err)
-	}
-	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, session.TaskID, parentSessionID)
-	if err != nil {
-		return fmt.Errorf("resolve parent queue identity: %w", err)
+		return fmt.Errorf("resolve parent for errand delivery: %w", err)
 	}
 	_, err = s.messageQueue.QueueMessageWithMetadataForSession(
 		ctx, identity, content, "", messagequeue.QueuedByServer, false, nil, metadata,

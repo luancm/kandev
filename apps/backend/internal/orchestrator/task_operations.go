@@ -6760,6 +6760,11 @@ func (s *Service) promptTaskWithPromptContext(
 
 type promptTaskOptions struct {
 	internalContinuation bool
+	// errandNotification marks a queued notification entry dispatched for
+	// errand results. queuedMessage lets composition record how a turn delivered
+	// them on the queued user message.
+	errandNotification bool
+	queuedMessage      *messagequeue.QueuedMessage
 	// recoveryAction is populated only by the explicit context-continuation
 	// path. It allows the already-authorized prompt to cross the recovery block
 	// without reopening the ordinary launch gate.
@@ -7072,6 +7077,18 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			return nil, err
 		}
 	}
+	// Composition precedes the fallback snapshots so a relaunch carries the same
+	// status block and claim token as the first attempt.
+	composedPrompt, errandToken, composeErr := s.composeErrandTurn(resumePromptCtx, sessionID, effectivePrompt, &options)
+	if composeErr != nil {
+		s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
+		return nil, composeErr
+	}
+	effectivePrompt = composedPrompt
+	defer func() {
+		accepted := options.promptAccepted != nil && options.promptAccepted.Load()
+		s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(resumePromptCtx), errandToken, accepted)
+	}()
 	if options.fallbackUsesEffectivePrompt {
 		options.fallbackLaunchPrompt = effectivePrompt
 		options.fallbackRetryPrompt = effectivePrompt

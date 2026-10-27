@@ -96,6 +96,7 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
 		p.log.Error("errands service unavailable", zap.Error(err))
 		return
 	}
+	service.SetDeliverer(orchestrator.NewErrandParentDeliverer(p.orchestratorSvc))
 	p.orchestratorSvc.SetErrandController(service)
 	p.orchestratorSvc.SetParentAwaitEnder(service)
 	p.taskSvc.SetTaskErrandCanceller(p.orchestratorSvc)

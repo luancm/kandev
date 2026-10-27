@@ -1948,6 +1948,8 @@ func (s *Service) executeQueuedMessageWithReservation(
 		claimEntryID:         claimEntryID,
 		lifecyclePrompt:      lifecyclePrompt,
 		afterClaim:           afterClaim,
+		errandNotification:   isErrandNotificationEntry(queuedMsg),
+		queuedMessage:        queuedMsg,
 		afterDispatch:        afterDispatch,
 		beforeDispatch:       beforeDispatch,
 		disableDispatchRetry: queuedMsg.IsDurablePlanComment() || managedInput,
@@ -1991,6 +1993,10 @@ func (s *Service) executeQueuedMessageWithReservation(
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		launchOriginAutomatic,
 		options)
+	if errors.Is(err, errErrandNotificationEmpty) {
+		// Another turn took the results; the entry has nothing left to announce.
+		err = nil
+	}
 	if err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
 		if initialCreatePromptPassthroughQueued(queuedMsg.Metadata) {
@@ -2060,7 +2066,9 @@ func (s *Service) queuedMessageAfterClaim(
 		if queuedMsg.IsDurablePlanComment() {
 			return nil
 		}
-		if !alreadyRecorded {
+		// A notification has no user text of its own; its status block is not
+		// a transcript message.
+		if !alreadyRecorded && !isErrandNotificationEntry(queuedMsg) {
 			if err := s.recordQueuedUserMessageWithPromptContent(
 				ctx, queuedMsg, attachments, preparedPromptContent,
 			); err != nil {
