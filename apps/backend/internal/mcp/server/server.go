@@ -68,6 +68,9 @@ const (
 	// ModeCoordinator registers the fixed six-tool catalog for a workspace
 	// coordinator's conversation session.
 	ModeCoordinator = mcpmode.Coordinator
+	// ModeErrand registers the fixed eight-tool read-only catalog for an
+	// errand session. Parent-only errand tools never appear in this mode.
+	ModeErrand = mcpmode.Errand
 	// ModeManagedConversation exposes only the selected plugin agent tools.
 	ModeManagedConversation = "managed-conversation"
 )
@@ -107,7 +110,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator, ModeErrand:
 		return mode
 	default:
 		return ModeTask
@@ -378,6 +381,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeAutomation
 	case mcpprofile.SurfaceCoordinator:
 		return ModeCoordinator
+	case mcpprofile.SurfaceErrand:
+		return ModeErrand
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -828,7 +833,7 @@ func (s *Server) SetMode(mode string) {
 // copilot.md#attended-only), mirroring mcpprofile.Legacy's own exclusion of
 // SurfaceAutomation and SurfaceCoordinator from CapabilityUserQuestion.
 func isFixedCatalogMode(mode string) bool {
-	return mode == ModeAutomation || mode == ModeCoordinator
+	return mode == ModeAutomation || mode == ModeCoordinator || mode == ModeErrand
 }
 
 func surfaceForMode(mode string) mcpprofile.Surface {
@@ -843,6 +848,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceAutomation
 	case ModeCoordinator:
 		return mcpprofile.SurfaceCoordinator
+	case ModeErrand:
+		return mcpprofile.SurfaceErrand
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -1186,13 +1193,22 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
+	errandSurface := surfaceEnabled(mcpprofile.SurfaceErrand)
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return nil
+	}
+	if errandSurface(s.profile) {
+		// The errand catalog is fixed: inherited providers and capabilities
+		// never add groups to it.
+		return []profileToolGroup{
+			{name: "errand", enabled: errandSurface, register: func(s *Server) { s.registerErrandCatalogTools() }},
+		}
 	}
 	return []profileToolGroup{
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
+		{name: "errand-parent-tools", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityErrands)), register: func(s *Server) { s.registerErrandParentTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -1287,7 +1303,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
+	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator && s.profile.Surface != mcpprofile.SurfaceErrand {
 		s.registerPluginTools()
 	}
 	s.logger.Info("registered MCP tools",

@@ -588,6 +588,10 @@ const (
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
+	ActionMCPStartErrand                 = "mcp.start_errand"
+	ActionMCPAwaitErrands                = "mcp.await_errands"
+	ActionMCPAwaitErrandsRelease         = "mcp.await_errands_release"
+	ActionMCPCancelErrand                = "mcp.cancel_errand"
 )
 
 const (
