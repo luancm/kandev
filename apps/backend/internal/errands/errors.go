@@ -21,6 +21,7 @@ const (
 	ReasonNotFound            Reason = "errand_not_found"
 	ReasonLimitReached        Reason = "errand_limit_reached"
 	ReasonResultNotEligible   Reason = "errand_result_not_eligible"
+	ReasonErrandsOutstanding  Reason = "errands_outstanding"
 )
 
 // MaxLiveErrands is the number of live errands one task may hold.
@@ -71,7 +72,7 @@ func ErrorCode(reason Reason) string {
 		return ws.ErrorCodeForbidden
 	case ReasonProfileNotFound, ReasonProfileAmbiguous, ReasonProfileIncompatible:
 		return ws.ErrorCodeValidation
-	case ReasonLimitReached, ReasonResultNotEligible:
+	case ReasonLimitReached, ReasonResultNotEligible, ReasonErrandsOutstanding:
 		return ws.ErrorCodeConflict
 	default:
 		return ws.ErrorCodeInternalError

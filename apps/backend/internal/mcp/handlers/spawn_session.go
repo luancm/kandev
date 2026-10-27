@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -40,6 +41,9 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 	}
 
 	spawner := h.resolveSpawnerSession(ctx, &req)
+	if models.IsErrandSession(spawner) {
+		return errandRefusal(msg, errands.ReasonNotPermitted, "errand sessions cannot spawn sessions"), nil
+	}
 	profileID := h.resolveSpawnAgentProfile(ctx, &req, spawner)
 
 	resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{

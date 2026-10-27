@@ -307,6 +307,8 @@ type Handlers struct {
 	inputPauser            ClarificationInputPauser
 	sessionCeilingReleaser SessionCeilingReleaser
 	errandPrompts          ErrandParentPromptRecorder
+	errands                ErrandMCPService
+	errandsEnabled         bool
 	messageCreator         MessageCreator
 	sessionRepo            SessionRepository
 	taskRepo               TaskRepository
@@ -559,6 +561,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskQuestionHandlers(d)
 	h.registerReviewHandlers(d)
 	h.registerCanvasHandlers(d)
+	h.registerErrandHandlers(d)
 }
 
 func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
@@ -910,6 +913,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		message := mcpCreateTaskAdmissionErrorMessage(err)
 		h.logMCPCreateAdmissionRejection(ctx, code, message)
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
+	}
+	if refusal := h.errandCallerRefusal(ctx, msg, req.SourceSessionID, "errand sessions cannot create tasks"); refusal != nil {
+		return refusal, nil
 	}
 
 	// Resolve repositories and default workspace/workflow from parent if needed.
@@ -2596,6 +2602,12 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if errMsg != nil {
 		return errMsg, err
 	}
+	if refusal := h.errandCallerRefusal(ctx, msg, req.SessionID, "errand sessions cannot complete workflow steps"); refusal != nil {
+		return refusal, nil
+	}
+	if refusal := h.errandOutstandingRefusal(ctx, msg, req.SessionID); refusal != nil {
+		return refusal, nil
+	}
 
 	launchStepID, launchEntryID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
 	if err != nil {
@@ -2857,6 +2869,13 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			fmt.Sprintf("delivery_mode must be %q or %q", deliveryModeQueued, deliveryModeInterrupt), nil)
 	}
 
+	if refusal := h.errandCallerRefusal(ctx, msg, req.SenderSessionID, "errand sessions cannot message other sessions"); refusal != nil {
+		return refusal, nil
+	}
+	if refusal := h.errandMessageRefusal(ctx, msg, req.SenderSessionID, req.SessionID); refusal != nil {
+		return refusal, nil
+	}
+
 	// Sender lookup is global, not workspace-scoped: cross-workspace agent
 	// messaging is intentionally allowed (badge URL handles cross-workspace
 	// nav). Task IDs are UUIDs, so this is not exploitable in practice — and
@@ -2907,7 +2926,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
-	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
+	wrappedPrompt, senderMeta := wrapMessageForTarget(prompt, senderTask, session, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
 	if req.ReplyToQuestionID != "" {
 		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
 		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
