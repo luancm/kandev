@@ -24,6 +24,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
 		CompletionGate:      cloneCompletionGate(state.completionGate),
+		Errands:             cloneErrands(state.errands),
 	}
 }
 

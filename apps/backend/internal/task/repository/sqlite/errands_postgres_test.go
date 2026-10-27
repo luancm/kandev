@@ -42,6 +42,10 @@ func TestPostgresErrandConcurrentUpdateHasOneWinner(t *testing.T) {
 	exerciseErrandConcurrentUpdate(t, newPostgresErrandRepo(t))
 }
 
+func TestPostgresErrandsSummaryByTask(t *testing.T) {
+	exerciseErrandsSummary(t, newPostgresErrandRepo(t))
+}
+
 func TestPostgresErrandListingAndLiveCount(t *testing.T) {
 	exerciseErrandListingAndLiveCount(t, newPostgresErrandRepo(t))
 }

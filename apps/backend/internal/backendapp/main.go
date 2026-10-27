@@ -1184,6 +1184,7 @@ func startGatewayAndServe(
 		cfg.ResolvedHomeDir(),
 		func(fn func() error) { addCleanup(fn) },
 		cfg.Features.LSPBrowserContinuity,
+		cfg.Features.Errands,
 		orchestratorSvc.AcquireSessionLifecycleFence,
 		cfg.Limits.LSPMaxConnections,
 	)

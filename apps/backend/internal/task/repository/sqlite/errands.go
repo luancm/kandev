@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 const errandColumns = `id, task_id, parent_session_id, title, objective, agent_profile_id, mcp_server_ids,
@@ -114,6 +115,29 @@ func (r *Repository) CountLiveErrandsByTask(ctx context.Context, taskID string) 
 		return 0, fmt.Errorf("count live errands for task %s: %w", taskID, err)
 	}
 	return count, nil
+}
+
+// outstandingErrandPredicate mirrors errands.IsOutstanding: a queued errand,
+// one awaiting a parent-initiated turn, or one holding a pending result.
+const outstandingErrandPredicate = `(e.lifecycle = 'queued' OR e.awaiting_result OR e.result_state = 'pending')`
+
+// ErrandsSummaryByTask returns the bounded errand projection for one task. It
+// is a single aggregate over the task's errand rows, joined by primary key to
+// each errand's session and parent, so its size does not depend on how many
+// errands the task has. Waiting is true when an idle parent owes an outcome.
+func (r *Repository) ErrandsSummaryByTask(ctx context.Context, taskID string) (statussummary.ErrandsSummary, error) {
+	var live, waiting int64
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT
+		COALESCE(SUM(CASE WHEN `+liveErrandPredicate+` THEN 1 ELSE 0 END), 0),
+		COALESCE(MAX(CASE WHEN ps.state = ? AND `+outstandingErrandPredicate+` THEN 1 ELSE 0 END), 0)
+		FROM task_session_errands e
+		LEFT JOIN task_sessions s ON s.id = e.id
+		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id
+		WHERE e.task_id = ?`), string(models.TaskSessionStateWaitingForInput), taskID).Scan(&live, &waiting)
+	if err != nil {
+		return statussummary.ErrandsSummary{}, fmt.Errorf("summarize errands for task %s: %w", taskID, err)
+	}
+	return statussummary.ErrandsSummary{Live: int(live), Waiting: waiting > 0}, nil
 }
 
 // UpdateErrand writes the mutable errand fields only while the stored version

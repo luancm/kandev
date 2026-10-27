@@ -325,6 +325,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreErrands(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -334,6 +337,7 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.errands = cloneErrands(summary.Errands)
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -430,6 +434,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		return err
 	}
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreErrands(ctx, taskID, state); err != nil {
 		return err
 	}
 	return nil

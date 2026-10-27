@@ -123,6 +123,7 @@ func provideGateway(
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
+	errandsEnabled bool,
 	acquireSessionFence func(string) func(),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
@@ -364,6 +365,7 @@ func provideGateway(
 					Known:      observationErr == nil && observation.Known,
 				}), nil
 			},
+			LoadErrands: taskErrandsSummaryLoader(taskRepo, errandsEnabled),
 			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {
 				gate, err := taskRepo.GetTaskCompletionGate(ctx, taskID)
 				if err != nil {

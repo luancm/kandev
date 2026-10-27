@@ -106,6 +106,7 @@ type ProjectorConfig struct {
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
 	LoadCompletionGate      CompletionGateLoader
+	LoadErrands             ErrandsLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -139,6 +140,7 @@ type Projector struct {
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
 	loadCompletionGate      CompletionGateLoader
+	loadErrands             ErrandsLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
@@ -187,6 +189,7 @@ type projectionState struct {
 	launchQueueObserved    bool
 	completionGate         *CompletionGateSummary
 	completionGateObserved bool
+	errands                *ErrandsSummary
 }
 
 type sessionObservation struct {
@@ -251,6 +254,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
 		loadCompletionGate:      cfg.LoadCompletionGate,
+		loadErrands:             cfg.LoadErrands,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
@@ -343,6 +347,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.GitHubTaskPRDeleted,
 		events.GitHubTaskCIOptionsUpdated,
 		events.MessageQueueStatusChanged,
+		events.ErrandUpdated,
 	}
 	for _, pattern := range patterns {
 		sub, err := p.eventBus.Subscribe(pattern, p.HandleEvent)
@@ -489,6 +494,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		state.completionGateObserved = true
 	}
 
+	errandsChanged, err := p.refreshErrandsLocked(ctx, taskID, state, event.Type)
+	if err != nil {
+		return err
+	}
+
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
 		pendingChanged := false
@@ -509,11 +519,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged
 	if !changed {
 		return nil
 	}

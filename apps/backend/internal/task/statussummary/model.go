@@ -71,6 +71,18 @@ type TaskStatusSummary struct {
 	// CompletionGate is a bounded task-owned progress projection. Detailed
 	// criterion descriptions and evidence remain available from the task API.
 	CompletionGate *CompletionGateSummary `json:"completion_gate,omitempty"`
+	// Errands is the bounded errand projection. It is omitted when no errand
+	// is live and no parent is waiting on one, so task rows without errands
+	// stay byte-identical.
+	Errands *ErrandsSummary `json:"errands,omitempty"`
+}
+
+// ErrandsSummary counts the task's live errands and reports whether an idle
+// parent session is waiting on an errand outcome. Both values are derived from
+// the errand rows, never from the errand transcripts.
+type ErrandsSummary struct {
+	Live    int  `json:"live"`
+	Waiting bool `json:"waiting"`
 }
 
 // CompletionGateSummary keeps task-list transport bounded while exposing the
@@ -196,6 +208,9 @@ func (s TaskStatusSummary) Validate() error {
 	}
 	if err := validateLaunchQueue(s.LaunchQueue); err != nil {
 		return err
+	}
+	if s.Errands != nil && s.Errands.Live < 0 {
+		return fmt.Errorf("errands live count cannot be negative")
 	}
 	return validateCompletionGate(s.CompletionGate)
 }
@@ -387,6 +402,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		QueuedPromptCount:   s.QueuedPromptCount,
 		LaunchQueue:         s.LaunchQueue,
 		CompletionGate:      s.CompletionGate,
+		Errands:             s.Errands,
 	})
 }
 
@@ -404,4 +420,5 @@ type semanticPayload struct {
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
 	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
 	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
+	Errands             *ErrandsSummary        `json:"errands,omitempty"`
 }

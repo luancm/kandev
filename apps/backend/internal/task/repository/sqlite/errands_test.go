@@ -23,6 +23,10 @@ func TestErrandConcurrentUpdateHasOneWinnerSQLite(t *testing.T) {
 	exerciseErrandConcurrentUpdate(t, newRepoForSessionTests(t))
 }
 
+func TestErrandsSummaryByTaskSQLite(t *testing.T) {
+	exerciseErrandsSummary(t, newRepoForSessionTests(t))
+}
+
 func TestErrandListingAndLiveCountSQLite(t *testing.T) {
 	exerciseErrandListingAndLiveCount(t, newRepoForSessionTests(t))
 }
