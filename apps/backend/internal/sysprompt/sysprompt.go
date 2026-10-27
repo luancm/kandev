@@ -315,6 +315,9 @@ type KandevContextOptions struct {
 	// IncludeErrandTools adds the errand delegation policy and the three
 	// errand tools. Only an eligible parent session sets it.
 	IncludeErrandTools bool
+	// ErrandSession marks an errand. It cannot ask the user or a parent, and it
+	// has no coordinator task controls, so those sections are omitted.
+	ErrandSession bool
 	// ErrandProfiles lists the agent profiles an errand can run with. Only
 	// read when IncludeErrandTools is set; it is capped at MaxErrandProfiles.
 	ErrandProfiles []ErrandProfile
@@ -403,7 +406,7 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		section = stepCompleteSection
 	}
 	coordinatorControls := ""
-	if options.IncludeCoordinatorTaskControls {
+	if options.IncludeCoordinatorTaskControls && !options.ErrandSession {
 		coordinatorControls = coordinatorTaskControlSection
 	}
 	taskTitle := ""
@@ -418,6 +421,7 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	}
 	questionTool := ""
 	switch {
+	case options.ErrandSession:
 	case options.IncludeParentQuestionTool:
 		questionTool = parentQuestionSection
 	case options.IncludeUserQuestionTool || !options.Autopilot:

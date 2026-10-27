@@ -1202,6 +1202,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 	case dbTask.Origin == models.TaskOriginCoordinator:
 		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
 	default:
+		includeErrands, errandProfiles := s.parentErrandPromptOptions(ctx, taskID, session)
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
@@ -1210,6 +1211,9 @@ func (s *Service) wrapCreatedSessionPrompt(
 			Autopilot:                      dbTask.Autopilot,
 			IncludeUserQuestionTool:        !dbTask.Autopilot && !session.IsPassthrough,
 			IncludeParentQuestionTool:      dbTask.Autopilot && dbTask.ParentID != "",
+			ErrandSession:                  models.IsErrandSession(session),
+			IncludeErrandTools:             includeErrands,
+			ErrandProfiles:                 errandProfiles,
 		}, referenceContext, promptReferenceContext, pullRequestTargetContext)
 	}
 }
@@ -2049,6 +2053,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 				return nil, failPreparedLaunch(fmt.Errorf("failed to resolve canvas prompt capability: %w", err))
 			}
 		}
+		includeErrands, errandProfiles := false, []sysprompt.ErrandProfile(nil)
+		if !isOfficeTask && !skipKandevMCPWrap && !configMode {
+			includeErrands, errandProfiles = s.parentErrandPromptOptions(ctx, task.ID, launchSession)
+		}
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
 			prompt:                    effectivePrompt,
 			taskID:                    task.ID,
@@ -2063,6 +2071,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
 			errand:                    opts.Errand,
+			includeErrands:            includeErrands,
+			errandProfiles:            errandProfiles,
 		})
 	}
 
@@ -2193,6 +2203,8 @@ type launchPromptContext struct {
 	referenceContext          string
 	spawnOrigin               *SpawnOrigin
 	errand                    *ErrandLaunch
+	includeErrands            bool
+	errandProfiles            []sysprompt.ErrandProfile
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -2234,6 +2246,9 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		Autopilot:                      p.autopilot,
 		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
 		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
+		ErrandSession:                  p.errand != nil,
+		IncludeErrandTools:             p.includeErrands && p.errand == nil,
+		ErrandProfiles:                 p.errandProfiles,
 	}, p.referenceContext, spawnContext, pullRequestTargetContext)
 }
 

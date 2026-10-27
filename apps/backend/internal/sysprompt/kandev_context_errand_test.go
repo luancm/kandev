@@ -80,3 +80,15 @@ func TestFormatErrandContextFillsIdentityAndStripsTags(t *testing.T) {
 	assert.Contains(t, got, "no reset, checkout")
 	require.False(t, strings.Contains(got, "\u2014"), "errand prompt must not use an em dash")
 }
+
+func TestKandevContextErrandSessionOmitsTaskOnlyQuestionAndControls(t *testing.T) {
+	got := FormatKandevContextWithOptions("task-1", "session-1", KandevContextOptions{
+		IncludeCoordinatorTaskControls: true,
+		IncludeUserQuestionTool:        true,
+		ErrandSession:                  true,
+	})
+
+	assert.NotContains(t, got, "ask_user_question_kandev")
+	assert.NotContains(t, got, "Optional: session_id, delivery_mode")
+	assert.NotContains(t, got, "start_errand_kandev")
+}

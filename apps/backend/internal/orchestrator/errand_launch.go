@@ -112,20 +112,13 @@ func (s *Service) configureErrandInitialLaunch(
 	s.configureInitialDeliveryAdmission(session, startCreatedSessionOptions{deliverySubmissionID: errand.SubmissionID}, launchOptions)
 }
 
-// errandOriginContent renders the trusted first-turn block of an errand. It is
-// a placeholder that states identity and the result contract until the errand
-// prompt template replaces it.
+// errandOriginContent renders the trusted first-turn block of an errand from
+// config/prompts/errand.md: identity, objective, and the result contract.
 func errandOriginContent(errand *ErrandLaunch) string {
-	if errand == nil {
+	if errand == nil || sysprompt.StripTags(errand.ParentSessionID) == "" {
 		return ""
 	}
-	parent := sysprompt.StripTags(errand.ParentSessionID)
-	if parent == "" {
-		return ""
-	}
-	return fmt.Sprintf("You are an errand of session %s, started to do one piece of delegated work (%q). "+
-		"You share the task's workspace with your parent. Your final message in each turn the parent starts "+
-		"is your result, so end it with what you did and found.", parent, sysprompt.StripTags(errand.Title))
+	return sysprompt.FormatErrandContext(errand.ParentSessionID, errand.Title)
 }
 
 // applyErrandOriginContext prepends the errand block to the first turn and
