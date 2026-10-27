@@ -3529,6 +3529,10 @@ func (s *Service) subscribeStartupEvents() {
 }
 
 func (s *Service) startBackgroundRecovery(ctx context.Context) {
+	// Errand reconciliation reads session states that startup has already
+	// normalized, so it runs before any parent turn can start from delivery.
+	s.reconcileErrandsOnStartup(ctx)
+
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
