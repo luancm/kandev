@@ -306,6 +306,7 @@ type Handlers struct {
 	sessionCanceller       SessionCanceller
 	inputPauser            ClarificationInputPauser
 	sessionCeilingReleaser SessionCeilingReleaser
+	errandPrompts          ErrandParentPromptRecorder
 	messageCreator         MessageCreator
 	sessionRepo            SessionRepository
 	taskRepo               TaskRepository
@@ -2972,6 +2973,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
+	h.recordErrandParentPrompt(ctx, req.SenderTaskID, req.SenderSessionID, result.sessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,

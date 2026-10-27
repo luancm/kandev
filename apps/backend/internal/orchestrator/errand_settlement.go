@@ -117,3 +117,23 @@ func (s *Service) recordErrandsOutstandingNoOp(ctx context.Context, taskID, sess
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}
 }
+
+// errandParentAdmitter is the parent-prompt part of the errands service.
+// Type-asserted from ErrandController.
+type errandParentAdmitter interface {
+	OnParentPromptAdmitted(ctx context.Context, errandSessionID, senderSessionID string) error
+}
+
+// OnErrandParentPromptAdmitted records that a session admitted a prompt into an
+// errand. Callers pass the sender session they verified; the errands service
+// acts only when that session is the errand's parent.
+func (s *Service) OnErrandParentPromptAdmitted(ctx context.Context, errandSessionID, senderSessionID string) error {
+	if s.errands == nil {
+		return nil
+	}
+	admitter, ok := s.errands.(errandParentAdmitter)
+	if !ok {
+		return nil
+	}
+	return admitter.OnParentPromptAdmitted(ctx, errandSessionID, senderSessionID)
+}
