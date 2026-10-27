@@ -5,10 +5,7 @@ Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs for task_id/session_id.
 
-DELEGATION POLICY:
-Use your host agent's native subagent mechanism only when the user has explicitly authorized delegation; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.
-Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id="self". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.
-{autopilot_section}
+{delegation_policy_section}{autopilot_section}
 
 MCP DISCOVERY:
 These instructions list selected Kandev tools, not the complete MCP catalog.
@@ -29,6 +26,6 @@ Available tools:
 - create_task_kandev: Create explicitly requested persistent work; related follow-up uses parent_id="self".
 - spawn_session_kandev: Start an explicitly requested additional session/tab.
 - message_task_kandev: Send a prompt to an existing task session.{coordinator_task_control_section}
-- list_task_sessions_kandev: List a task's sessions and IDs.
+{errand_tools_section}- list_task_sessions_kandev: List a task's sessions and IDs.
 
 IMPORTANT: Use these tools when instructed; do not skip them.

@@ -312,6 +312,75 @@ type KandevContextOptions struct {
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
+	// IncludeErrandTools adds the errand delegation policy and the three
+	// errand tools. Only an eligible parent session sets it.
+	IncludeErrandTools bool
+	// ErrandProfiles lists the agent profiles an errand can run with. Only
+	// read when IncludeErrandTools is set; it is capped at MaxErrandProfiles.
+	ErrandProfiles []ErrandProfile
+}
+
+// ErrandProfile is one agent profile offered to a parent for errands.
+type ErrandProfile struct {
+	Name  string
+	Agent string
+	Model string
+}
+
+// MaxErrandProfiles bounds the profile list in the first-turn context.
+const MaxErrandProfiles = 20
+
+// defaultDelegationPolicy is the delegation policy of every task session when
+// errands are off. Its text is pinned by the flag-off golden test.
+const defaultDelegationPolicy = "DELEGATION POLICY:\n" +
+	"Use your host agent's native subagent mechanism only when the user has explicitly authorized delegation; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.\n" +
+	"Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id=\"self\". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.\n"
+
+// errandDelegationPolicy replaces the default policy for an eligible parent.
+const errandDelegationPolicy = "DELEGATION POLICY:\n" +
+	"Errands are the default way to delegate bounded work: start_errand_kandev runs it in a separate errand session on this task, and its result returns to this conversation as a message. A turn that starts with errands in flight opens with an errand status block; that block is Kandev context, not a user request. " +
+	"Use your host agent's native subagent mechanism only for quick read-only lookups that finish within the current turn; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.\n" +
+	"Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id=\"self\". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.\n"
+
+// errandToolsSection lists the parent errand tools. The descriptions agree
+// with the tool descriptions: start returns at once, and await is an optional
+// in-turn join.
+func errandToolsSection(profiles []ErrandProfile) string {
+	return "- start_errand_kandev: Start a bounded errand in a separate session on this task. It returns at once with errand_id and status; end your turn after starting errands and continue when their results arrive as messages. Optional agent_profile takes an ID or exact name. Compatible profiles: " +
+		formatErrandProfiles(profiles) + ".\n" +
+		"- await_errands_kandev: Optional in-turn join. Wait for 1 to 5 errands (mode all or any, max_wait_seconds up to 600) only when a result is needed inside this turn; otherwise end the turn and wait to be notified.\n" +
+		"- cancel_errand_kandev: Cancel an errand you started.\n"
+}
+
+func formatErrandProfiles(profiles []ErrandProfile) string {
+	if len(profiles) == 0 {
+		return "none is compatible with this task's executor (start_errand_kandev reports the reason)"
+	}
+	if len(profiles) > MaxErrandProfiles {
+		profiles = profiles[:MaxErrandProfiles]
+	}
+	entries := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		entry := StripTags(profile.Name)
+		details := StripTags(profile.Agent)
+		if model := StripTags(profile.Model); model != "" {
+			details += ", " + model
+		}
+		if details != "" {
+			entry += " (" + details + ")"
+		}
+		entries = append(entries, entry)
+	}
+	return strings.Join(entries, "; ")
+}
+
+// FormatErrandContext fills the errand prompt for one errand launch. Values pass
+// through StripTags because they reach the trusted system block.
+func FormatErrandContext(parentSessionID, title string) string {
+	return Resolve("errand", map[string]string{
+		"parent_session_id": StripTags(parentSessionID),
+		"errand_title":      StripTags(title),
+	})
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -341,6 +410,12 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeTaskTitleTool {
 		taskTitle = taskTitleSection
 	}
+	delegation := defaultDelegationPolicy
+	errandTools := ""
+	if options.IncludeErrandTools {
+		delegation = errandDelegationPolicy
+		errandTools = errandToolsSection(options.ErrandProfiles)
+	}
 	questionTool := ""
 	switch {
 	case options.IncludeParentQuestionTool:
@@ -366,6 +441,8 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
+		"delegation_policy_section":        delegation,
+		"errand_tools_section":             errandTools,
 	})
 }
 
