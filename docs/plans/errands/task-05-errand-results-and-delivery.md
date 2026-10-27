@@ -1,7 +1,7 @@
 ---
 id: "05-errand-results-and-delivery"
 title: "Capture errand results and deliver them to a conversational parent"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "04-errand-launch-and-admission"
@@ -176,12 +176,23 @@ Task 04.
 
 ## Results
 
-Partially complete. Status remains `pending` because the orchestrator wiring
-below is not done. Commits on `feat/errands`: `8495fcea4f` (capture, supersede,
-bound, await, status block, claims, `deliverPending`), `861ffc2ca1` (delivery
-sweep, cancellation notice, acceptance tests), `dfa2a14df5` (`errand.send_result`).
+Complete. Status is `done`.
 
-Complete and tested (`internal/errands`, race-clean):
+Commits on `feat/errands` for this work order:
+
+- Capture, await, status block, claims, delivery, and `errand.send_result`:
+  `8495fcea4f`, `861ffc2ca1`, `dfa2a14df5`.
+- Settlement hooks, delete preservation, sweep, and prompt admission:
+  `17cff71e64`, `3ee8a08c78`, `f36da82d7a`.
+- Message-queue deliverer, `promptTask` composition, startup reconcile, and the
+  parent delivery token: `9b69517f0f`, `9f73dc65b4`, `ff2f018ce3`, `2fe6f52917`,
+  `7bf2214b96`.
+- Final pass: `a56d89a5fd` (`waiting_on_errands` on session DTOs and events),
+  `0c618ba3d5` (status block limits, startup reconcile, waiting events),
+  `4a04ea529e` (idle parent prompts, workflow after settlement),
+  `b3c4abd99b` (result delivery after a restart).
+
+Delivered and tested (`internal/errands`, race-clean; orchestrator and DTO tests):
 
 - `results.go`: parent-initiated capture (`first_turn_id` or verified sender),
   16 KiB rune-safe bound, idempotent on `result_turn_id`, supersede on a new
@@ -191,55 +202,49 @@ Complete and tested (`internal/errands`, race-clean):
 - `compose.go`: status block (10 lines, 4 KiB, `StripTags`), claim with a
   token, `ReleaseTurnClaim`.
 - `delivery.go`: `deliverPending` checks the flag and pending results, honours
-  `NotificationBlocked`, and drops the parent lock before calling the
-  deliverer; `OnParentTurnSettled(ctx, parent, SettleCause)` returns whether the
-  parent is outstanding; `ParentOutstanding`; `SweepDelivery`;
-  `PreserveCancellationNotice` admits the notice before the row is deleted.
-- Wiring types: `TurnReader`, `DeliveryLog`, `ParentDeliverer` (now
-  `NotificationBlocked`, `DeliverPending`, `AdmitPrepared`); `Store.ListErrands`.
-- `errand.send_result` WebSocket action with `errand_result_not_eligible`.
+  `NotificationBlocked`, and drops the parent lock before calling the deliverer;
+  `OnParentTurnSettled`, `ParentOutstanding`, `ParentErrandState`, `SweepDelivery`,
+  and `PreserveCancellationNotice`.
+- Orchestrator wiring: settlement hooks on the completed, ready, failure, and
+  cancelled paths; `ComposeParentTurn` in `promptTask`; `Service.Reconcile` at
+  startup; `SetDeliverer`, `SetTurnReader`, `SetDeliveryLog`, and `SetEnabled`.
+- `waiting_on_errands` (`*bool`, `omitempty`): projected on the full and summary
+  session DTOs and on the `session.state_changed`, waiting, and created events.
+  It is nil when the parent has no errand row. It is `true` when the parent is
+  `WAITING_FOR_INPUT` with an outstanding errand.
 - Metric `errands_result_delivery_total{route}` with closed labels.
-- Acceptance tests for AC-003.1 to 003.5, 004.9, 004.11 (blocked), 006.1
-  (outstanding), and the send-result rule.
 
-Wired in this work order (orchestrator commits on `feat/errands`):
+Acceptance coverage added in this work order:
 
-- `17cff71e64` settlement hooks: `OnErrandTurnSettled` on the detached
-  completion, ready, and failure paths; `OnParentTurnSettled(turn_done)` before
-  the drain on the completed and ready paths; the `errands_outstanding` no-op
-  settles to `WAITING_FOR_INPUT` without `writeTaskReviewState`;
-  `OnParentTurnSettled(user_cancel)` on the cancelled-turn path;
-  `SetParentAwaitEnder` wired so `CancelTurn` ends awaits.
-- `3ee8a08c78` session delete calls `PreserveCancellationNotice` before the
-  row delete and returns (keeping the row) on refusal; the ceiling sweep calls
-  `SweepDelivery`.
-- `f36da82d7a` `handleMessageTask` records `OnParentPromptAdmitted` after a
-  successful dispatch, trusting the sender session only when it belongs to the
-  sender task.
+- AC-006.2, 006.3, 006.5 (orchestrator tests), and 006.6 (status block limits).
+- AC-004.8 (startup reconcile wiring and restart delivery of a pending result).
+- AC-004.10 and AC-004.11 annotated on existing orchestrator tests.
+- AC-006.1 and AC-007.5 annotated on existing tests.
 
-Still open (not started; nothing below delivers results in production yet):
+Known gaps (recorded, not fixed):
 
-- `ParentDeliverer` over `messagequeue` (item 1): `NotificationBlocked`,
-  `DeliverPending` (`QueuedByServer`, empty content, metadata
-  `errand_notification`, an async drain after the admission), and `AdmitPrepared`
-  (prepared block, `errand_delivery` metadata). Without it `PreserveCancellationNotice`
-  is a silent no-op and pending results wait for a later turn. Do not wire
-  `DeliverPending` before composition exists: the dispatch would send an empty prompt.
-- `promptTask` composition (item 3): `ComposeParentTurn` before the foreground
-  dispatch for parent sessions, `errand_delivery` metadata on the user message,
-  `ReleaseTurnClaim` when the prompt is not accepted (the `promptAccepted` defer
-  is the natural place), consumption of an `errand_notification` entry that finds
-  nothing pending, and `DeleteByIDForSession` withdrawal when another turn takes
-  the results. This needs the drain's consume/ack semantics and a table test pinning
-  every prompt caller.
-- `Service.Reconcile` and its startup wiring, with the interrupted-notice constant.
-- `SetDeliverer`, `SetTurnReader`, `SetDeliveryLog` in `errands_wiring.go`
-  (`SetEnabled` is not yet wired either).
-- `waiting_on_errands` (`*bool`, `omitempty`) on the session DTO and session events.
+1. A direct-prompt turn-context claim is not re-delivered after a restart when
+   the server crashes right after the turn.
+2. The send-now path with a notification entry is not handled.
+3. The 529 retry path keeps the status block: a transient 529 replays the raw
+   cached prompt through `promptTask`, which recomposes the block. The block is
+   dropped only on the `ErrExecutionNotFound` fresh-launch fallback in
+   `handlePromptDispatchFailure`, which relaunches with the raw prompt. A fix
+   that adds the block there would need a fallback acceptance marker first:
+   `promptAccepted` is not set on that path, so the claim would be released
+   after its block was delivered and results would arrive twice. Not small and
+   safe, so not changed.
+
+Not built (outside this work order, or not implemented):
+
+- AC-006.4, the `errands_outstanding` refusal in step completion. It is not in
+  the WO-05 frontmatter.
+- Task service session publishers (`publishSessionsCancelled`,
+  `publishSessionRecovered` in `internal/task/service/service_events.go`) do not
+  project `waiting_on_errands`.
 - Errand-session `CancelTurn` does not settle the errand turn (no outcome is
-  defined for a user-cancelled errand turn); the errand's `awaiting_result` stays
-  set until its next settled turn.
-- Orchestrator-level tests for AC-004.8, 004.10, 004.11, 006.1 to 006.6, 007.5.
+  defined for a user-cancelled errand turn); `awaiting_result` stays set until
+  its next settled turn.
 
 Deviations:
 
@@ -264,4 +269,9 @@ Verification:
 - `go build ./...`: pass.
 - `bash scripts/lint-go-changed <changed files>`: 0 issues.
 - `gofmt -l` on changed files: clean.
-- Plan checkboxes for Task 03, 05, and 08 were not changed: Task 05 is not complete.
+- Final pass on HEAD `b3c4abd99b`, all passing: `go test -race -trimpath ./internal/errands/... -count=1`; `go test -trimpath ./internal/orchestrator -run 'Errand|CompletionFollowUp|Clarification|DrainQueued|PromptTask|CancelledTurn'`; `go test -trimpath ./internal/orchestrator/messagequeue -run 'Errand|Admission|DeleteByID'`; `go test -trimpath ./internal/task/repository/sqlite -run Errand`; `go test -trimpath ./internal/task/handlers -run Errand`; `go test -trimpath ./internal/mcp/handlers -run 'MessageTask|Errand'`; `go test -trimpath ./internal/task/dto -run 'Errand|WaitingOnErrands'`; `go build ./...`; `git diff --check` on `apps/backend`.
+- Pre-existing failures on base `b6263ea4c3` (not caused by this work order, confirmed in a temporary worktree):
+  `internal/task/handlers` `TestCursorMCPAuthenticateAfterCompletedTerminalReconnectStartsFreshLogin`, and 53 test names across `internal/orchestrator`, `internal/orchestrator/executor`, and `internal/task/service`. The failing-name list is identical between HEAD and base.
+- `bash scripts/lint-go-changed <changed files>`: 0 issues on each commit's files.
+- `gofmt -l` on changed files: clean.
+- Task 05 is ticked in `docs/plans/errands/plan.md`.
