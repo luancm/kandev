@@ -202,25 +202,43 @@ Complete and tested (`internal/errands`, race-clean):
 - Acceptance tests for AC-003.1 to 003.5, 004.9, 004.11 (blocked), 006.1
   (outstanding), and the send-result rule.
 
-Remaining (not started; nothing below is wired in production):
+Wired in this work order (orchestrator commits on `feat/errands`):
 
-- `internal/orchestrator`: implement `ParentDeliverer` over `messagequeue`
-  (`QueuedByServer`, `errand_notification`, `DeleteByIDForSession` withdrawal).
-- `event_handlers_agent.go`, `event_handlers_streaming.go`, `cancel_turn.go`:
-  call `OnErrandTurnSettled` on settlement and failure; call
-  `OnParentTurnSettled` before `drainQueuedBeforeWorkflowTransition`, with the
-  `errands_outstanding` no-op branch.
-- `task_operations.go` `promptTask`: `ComposeParentTurn` before delivery
-  admission, `errand_delivery` metadata, `ReleaseTurnClaim` on refusal; empty
-  notification consumption.
-- `internal/mcp/handlers` `handleMessageTask`: `OnParentPromptAdmitted`.
-- `CancelAgent` and `CancelTurn`: `EndParentAwaits`.
-- Session delete hook: call `PreserveCancellationNotice` before the row delete.
-- `backendapp/errands_wiring.go`: `SetDeliverer`, `SetTurnReader`,
-  `SetDeliveryLog`, `SetEnabled`; ceiling sweep calls `SweepDelivery`.
-- `reconcile.go` `Service.Reconcile` and its startup wiring (the interrupted
-  notice constant was removed while unused; add it with Reconcile).
+- `17cff71e64` settlement hooks: `OnErrandTurnSettled` on the detached
+  completion, ready, and failure paths; `OnParentTurnSettled(turn_done)` before
+  the drain on the completed and ready paths; the `errands_outstanding` no-op
+  settles to `WAITING_FOR_INPUT` without `writeTaskReviewState`;
+  `OnParentTurnSettled(user_cancel)` on the cancelled-turn path;
+  `SetParentAwaitEnder` wired so `CancelTurn` ends awaits.
+- `3ee8a08c78` session delete calls `PreserveCancellationNotice` before the
+  row delete and returns (keeping the row) on refusal; the ceiling sweep calls
+  `SweepDelivery`.
+- `f36da82d7a` `handleMessageTask` records `OnParentPromptAdmitted` after a
+  successful dispatch, trusting the sender session only when it belongs to the
+  sender task.
+
+Still open (not started; nothing below delivers results in production yet):
+
+- `ParentDeliverer` over `messagequeue` (item 1): `NotificationBlocked`,
+  `DeliverPending` (`QueuedByServer`, empty content, metadata
+  `errand_notification`, an async drain after the admission), and `AdmitPrepared`
+  (prepared block, `errand_delivery` metadata). Without it `PreserveCancellationNotice`
+  is a silent no-op and pending results wait for a later turn. Do not wire
+  `DeliverPending` before composition exists: the dispatch would send an empty prompt.
+- `promptTask` composition (item 3): `ComposeParentTurn` before the foreground
+  dispatch for parent sessions, `errand_delivery` metadata on the user message,
+  `ReleaseTurnClaim` when the prompt is not accepted (the `promptAccepted` defer
+  is the natural place), consumption of an `errand_notification` entry that finds
+  nothing pending, and `DeleteByIDForSession` withdrawal when another turn takes
+  the results. This needs the drain's consume/ack semantics and a table test pinning
+  every prompt caller.
+- `Service.Reconcile` and its startup wiring, with the interrupted-notice constant.
+- `SetDeliverer`, `SetTurnReader`, `SetDeliveryLog` in `errands_wiring.go`
+  (`SetEnabled` is not yet wired either).
 - `waiting_on_errands` (`*bool`, `omitempty`) on the session DTO and session events.
+- Errand-session `CancelTurn` does not settle the errand turn (no outcome is
+  defined for a user-cancelled errand turn); the errand's `awaiting_result` stays
+  set until its next settled turn.
 - Orchestrator-level tests for AC-004.8, 004.10, 004.11, 006.1 to 006.6, 007.5.
 
 Deviations:
