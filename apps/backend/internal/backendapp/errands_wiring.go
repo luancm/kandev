@@ -68,12 +68,13 @@ func (c errandProfileCatalog) ValidateForTaskExecutor(ctx context.Context, taskI
 }
 
 // wireErrands builds the errands service on the orchestrator, registers its
-// lifecycle hooks, and exposes it to the task WebSocket handlers. Queued
+// lifecycle hooks, and exposes it to the task WebSocket handlers. It returns
+// the service for the MCP handlers, or nil when errands are not wired. Queued
 // errands and cancellation cascades run regardless of the release toggle, so
 // existing errands stay governed when it is off.
-func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
+func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) *errands.Service {
 	if p.orchestratorSvc == nil || p.taskRepo == nil {
-		return
+		return nil
 	}
 	adapter := orchestrator.NewErrandAdapter(p.orchestratorSvc)
 	service, err := errands.New(errands.Dependencies{
@@ -95,7 +96,7 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
 	})
 	if err != nil {
 		p.log.Error("errands service unavailable", zap.Error(err))
-		return
+		return nil
 	}
 	service.SetDeliverer(orchestrator.NewErrandParentDeliverer(p.orchestratorSvc))
 	transcript := errandTranscript{repo: p.taskRepo}
@@ -113,4 +114,5 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
 		return nil
 	})
 	taskHandlers.SetErrands(service, p.features.Errands)
+	return service
 }
