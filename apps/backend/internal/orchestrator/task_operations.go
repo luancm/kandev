@@ -5834,9 +5834,12 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 	taskID := session.TaskID
 	wasPrimary := session.IsPrimary
-	// The errand row is removed with its session, so record the user's
-	// deletion first. A deleted parent cancels its errands once it is gone.
-	s.cancelErrandOnUserStop(ctx, sessionID)
+	// The errand row is removed with its session, so its cancellation notice is
+	// admitted first and a refusal keeps the row. A deleted parent cancels its
+	// errands once it is gone.
+	if err := s.preserveErrandNoticeOnDelete(ctx, sessionID); err != nil {
+		return fmt.Errorf("record errand deletion: %w", err)
+	}
 
 	// A settled DB state can still own a workspace execution or detached
 	// background work. Quiesce that runtime boundary before removing the row.

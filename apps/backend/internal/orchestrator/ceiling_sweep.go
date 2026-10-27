@@ -157,4 +157,5 @@ func (s *Service) ceilingSweepTick(ctx context.Context) {
 	}
 	s.drainDeferredCeilingLaunches(ctx)
 	s.drainQueuedErrands(ctx)
+	s.sweepErrandDelivery(ctx)
 }
