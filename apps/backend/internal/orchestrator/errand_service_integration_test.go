@@ -14,6 +14,10 @@ import (
 
 type errandProfileStub struct{}
 
+func (errandProfileStub) CompatibleProfiles(context.Context, string) ([]errands.ProfileInfo, error) {
+	return nil, nil
+}
+
 func (errandProfileStub) ResolveProfile(_ context.Context, _, selector, defaultProfileID string) (errands.ResolvedProfile, error) {
 	id := selector
 	if id == "" {

@@ -87,6 +87,8 @@ type ResolvedProfile struct {
 // *Error values with a profile reason.
 type ProfileResolver interface {
 	ResolveProfile(ctx context.Context, taskID, selector, defaultProfileID string) (ResolvedProfile, error)
+	// CompatibleProfiles lists the profiles a parent may offer for errands.
+	CompatibleProfiles(ctx context.Context, taskID string) ([]ProfileInfo, error)
 }
 
 // EventPublisher publishes one errand.updated event for a durable change.

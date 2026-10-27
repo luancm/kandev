@@ -246,6 +246,10 @@ type fakeProfiles struct {
 	defaultP string
 }
 
+func (p *fakeProfiles) CompatibleProfiles(context.Context, string) ([]ProfileInfo, error) {
+	return nil, nil
+}
+
 func (p *fakeProfiles) ResolveProfile(_ context.Context, _ string, selector, defaultProfileID string) (ResolvedProfile, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

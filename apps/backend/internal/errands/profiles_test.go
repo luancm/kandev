@@ -109,3 +109,41 @@ func TestProfileResolverSurfacesCatalogFailures(t *testing.T) {
 		t.Fatal("a catalog failure was reported as a typed profile refusal")
 	}
 }
+
+// @covers AC-TASKS-ERRANDS-009.5
+func TestCompatibleProfilesListsRunnableProfilesSortedAndCapped(t *testing.T) {
+	var profiles []ProfileInfo
+	for i := 0; i < 25; i++ {
+		profiles = append(profiles, ProfileInfo{
+			ID: fmt.Sprintf("p-%02d", i), Name: fmt.Sprintf("Agent %02d", i), Agent: "claude", Model: "sonnet",
+		})
+	}
+	profiles = append(profiles,
+		ProfileInfo{ID: "pty", Name: "Terminal", Passthrough: true},
+		ProfileInfo{ID: "bad", Name: "Broken"},
+	)
+	catalog := &fakeCatalog{profiles: profiles, incompatible: map[string]bool{"bad": true}}
+
+	got, err := NewProfileResolver(catalog).CompatibleProfiles(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("CompatibleProfiles: %v", err)
+	}
+	if len(got) != MaxAvailableProfiles {
+		t.Fatalf("got %d profiles, want %d", len(got), MaxAvailableProfiles)
+	}
+	if got[0].Name != "Agent 00" || got[0].Agent != "claude" || got[0].Model != "sonnet" {
+		t.Fatalf("first profile = %+v, want Agent 00 with agent and model", got[0])
+	}
+	for _, profile := range got {
+		if profile.Passthrough || profile.ID == "bad" || profile.ID == "pty" {
+			t.Fatalf("incompatible profile %+v leaked into the list", profile)
+		}
+	}
+}
+
+func TestCompatibleProfilesReportsCatalogFailure(t *testing.T) {
+	catalog := &fakeCatalog{listErr: errors.New("catalog down")}
+	if _, err := NewProfileResolver(catalog).CompatibleProfiles(context.Background(), "task-1"); err == nil {
+		t.Fatal("expected the catalog failure to surface")
+	}
+}

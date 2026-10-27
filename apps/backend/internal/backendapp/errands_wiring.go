@@ -55,7 +55,8 @@ func (c errandProfileCatalog) ListTaskProfiles(ctx context.Context, taskID strin
 				continue
 			}
 			infos = append(infos, errands.ProfileInfo{
-				ID: profile.ID, Name: profile.Name, Passthrough: profile.CLIPassthrough,
+				ID: profile.ID, Name: profile.Name, Agent: profile.AgentDisplayName, Model: profile.Model,
+				Passthrough: profile.CLIPassthrough,
 			})
 		}
 	}

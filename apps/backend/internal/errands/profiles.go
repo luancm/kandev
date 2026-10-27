@@ -11,6 +11,9 @@ import (
 type ProfileInfo struct {
 	ID   string
 	Name string
+	// Agent and Model describe the profile in the parent's first-turn context.
+	Agent string
+	Model string
 	// Passthrough marks a CLI passthrough profile. It produces no structured
 	// assistant messages to capture, so errands refuse it.
 	Passthrough bool
@@ -87,6 +90,27 @@ func matchProfiles(profiles []ProfileInfo, selector string) []ProfileInfo {
 	return named
 }
 
+// CompatibleProfiles lists the profiles a parent can offer for errands: not
+// passthrough, runnable on the task's executor, sorted by name, and capped at
+// MaxAvailableProfiles.
+func (r *catalogResolver) CompatibleProfiles(ctx context.Context, taskID string) ([]ProfileInfo, error) {
+	profiles, err := r.catalog.ListTaskProfiles(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list errand profiles: %w", err)
+	}
+	compatible := make([]ProfileInfo, 0, len(profiles))
+	for _, profile := range profiles {
+		if r.eligible(ctx, taskID, profile) {
+			compatible = append(compatible, profile)
+		}
+	}
+	sort.SliceStable(compatible, func(i, j int) bool { return compatible[i].Name < compatible[j].Name })
+	if len(compatible) > MaxAvailableProfiles {
+		compatible = compatible[:MaxAvailableProfiles]
+	}
+	return compatible, nil
+}
+
 func (r *catalogResolver) eligible(ctx context.Context, taskID string, profile ProfileInfo) bool {
 	if profile.Passthrough {
 		return false
@@ -108,4 +132,10 @@ func (r *catalogResolver) profileError(
 		names = names[:MaxAvailableProfiles]
 	}
 	return newError(reason, message, map[string]interface{}{"available": names})
+}
+
+// CompatibleProfiles lists the agent profiles a parent on the task can offer
+// for errands. It is read-only and never launches anything.
+func (s *Service) CompatibleProfiles(ctx context.Context, taskID string) ([]ProfileInfo, error) {
+	return s.profiles.CompatibleProfiles(ctx, taskID)
 }
