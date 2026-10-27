@@ -20,7 +20,13 @@ var errErrandNotificationEmpty = errors.New("errand notification has no pending 
 
 // errandDeliveryKey names the user message metadata that records how a parent
 // turn delivered its errand results.
-const errandDeliveryKey = "errand_delivery"
+const (
+	errandDeliveryKey = "errand_delivery"
+	// ErrandDeliveryTokenMetadataKey is the user message metadata key that
+	// records the claim token of the errand results a turn delivered.
+	// Reconciliation reads it through the delivery log.
+	ErrandDeliveryTokenMetadataKey = "errand_delivery_token"
+)
 
 // errandTurnComposer is the composition part of the errands service. It is
 // type-asserted from ErrandController so the controller's method set stays fixed.
@@ -68,13 +74,25 @@ func (s *Service) composeErrandTurn(
 	if route != models.ErrandDeliveryNotification {
 		s.withdrawErrandNotification(ctx, sessionID)
 	}
-	if options.queuedMessage != nil {
-		if options.queuedMessage.Metadata == nil {
-			options.queuedMessage.Metadata = map[string]interface{}{}
-		}
-		options.queuedMessage.Metadata[errandDeliveryKey] = string(route)
-	}
+	recordErrandDelivery(options.queuedMessage, route, composition)
 	return joinErrandBlock(composition.Block, prompt), composition.Token, nil
+}
+
+// recordErrandDelivery stamps a queued entry's user message with the route and
+// claim token that delivered its results. A notification has no text of its
+// own, so its status block becomes the entry's content and transcript text.
+func recordErrandDelivery(entry *messagequeue.QueuedMessage, route models.ErrandDeliveryRoute, composition errands.Composition) {
+	if entry == nil {
+		return
+	}
+	if entry.Metadata == nil {
+		entry.Metadata = map[string]interface{}{}
+	}
+	entry.Metadata[errandDeliveryKey] = string(route)
+	entry.Metadata[ErrandDeliveryTokenMetadataKey] = composition.Token
+	if route == models.ErrandDeliveryNotification {
+		entry.Content = composition.Block
+	}
 }
 
 func joinErrandBlock(block, prompt string) string {

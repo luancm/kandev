@@ -56,6 +56,7 @@ func TestComposeErrandTurnPrependsBlockForDirectPrompt(t *testing.T) {
 	require.Equal(t, "tok", token)
 	require.Equal(t, []models.ErrandDeliveryRoute{models.ErrandDeliveryTurnContext}, composer.routes)
 	require.Equal(t, string(models.ErrandDeliveryTurnContext), options.queuedMessage.Metadata[errandDeliveryKey])
+	require.Equal(t, "tok", options.queuedMessage.Metadata[ErrandDeliveryTokenMetadataKey])
 }
 
 func TestComposeErrandTurnNotificationWithoutResultsConsumesEntry(t *testing.T) {
@@ -74,12 +75,15 @@ func TestComposeErrandTurnNotificationCarriesBlockAsPrompt(t *testing.T) {
 	composer := &fakeErrandComposer{composition: errands.Composition{Token: "tok", Block: "BLOCK"}}
 	svc := withErrandComposer(t, composer)
 
+	entry := &messagequeue.QueuedMessage{Metadata: map[string]interface{}{errandNotificationKey: true}}
 	prompt, token, err := svc.composeErrandTurn(context.Background(), "s1", "",
-		&promptTaskOptions{errandNotification: true})
+		&promptTaskOptions{errandNotification: true, queuedMessage: entry})
 
 	require.NoError(t, err)
 	require.Equal(t, "BLOCK", prompt)
 	require.Equal(t, "tok", token)
+	require.Equal(t, "BLOCK", entry.Content, "the notification's transcript text is its status block")
+	require.Equal(t, "tok", entry.Metadata[ErrandDeliveryTokenMetadataKey])
 	require.Equal(t, []models.ErrandDeliveryRoute{models.ErrandDeliveryNotification}, composer.routes)
 }
 

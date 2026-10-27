@@ -2066,9 +2066,7 @@ func (s *Service) queuedMessageAfterClaim(
 		if queuedMsg.IsDurablePlanComment() {
 			return nil
 		}
-		// A notification has no user text of its own; its status block is not
-		// a transcript message.
-		if !alreadyRecorded && !isErrandNotificationEntry(queuedMsg) {
+		if !alreadyRecorded {
 			if err := s.recordQueuedUserMessageWithPromptContent(
 				ctx, queuedMsg, attachments, preparedPromptContent,
 			); err != nil {
