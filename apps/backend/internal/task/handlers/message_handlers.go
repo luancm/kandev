@@ -276,6 +276,7 @@ func (h *MessageHandlers) injectMessageContext(
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
+		ErrandSession:                  sessionResp.Session.Role == models.SessionRoleErrand,
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
 }
 

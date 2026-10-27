@@ -6400,6 +6400,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
+		ErrandSession:                  models.IsErrandSession(state.session),
 	}
 	return sysprompt.InjectKandevContextWithOptions(
 			state.taskID, state.sessionID, recordedPrompt, options,
