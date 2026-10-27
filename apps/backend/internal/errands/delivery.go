@@ -38,19 +38,27 @@ func (s *Service) OnParentTurnSettled(ctx context.Context, parentSessionID strin
 // errands is queued, awaiting a parent-initiated turn, or holds a pending
 // result. A parent without errands is never outstanding.
 func (s *Service) ParentOutstanding(ctx context.Context, parentSessionID string) (bool, error) {
+	_, outstanding, err := s.ParentErrandState(ctx, parentSessionID)
+	return outstanding, err
+}
+
+// ParentErrandState reports whether a parent owns any errand row and whether
+// one of those rows still owes an outcome. hasErrands is false for a parent
+// without rows, which is how projections omit waiting_on_errands entirely.
+func (s *Service) ParentErrandState(ctx context.Context, parentSessionID string) (hasErrands, outstanding bool, err error) {
 	if !s.featureEnabled() || parentSessionID == "" {
-		return false, nil
+		return false, false, nil
 	}
 	rows, err := s.store.ListErrandsByParent(ctx, parentSessionID)
 	if err != nil {
-		return false, fmt.Errorf("list errands of parent: %w", err)
+		return false, false, fmt.Errorf("list errands of parent: %w", err)
 	}
 	for _, row := range rows {
 		if IsOutstanding(row) {
-			return true, nil
+			return true, true, nil
 		}
 	}
-	return false, nil
+	return len(rows) > 0, false, nil
 }
 
 // deliverPending asks the deliverer for one notification when the parent has a

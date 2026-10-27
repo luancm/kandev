@@ -7620,6 +7620,7 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 			eventData["session_metadata"] = session.Metadata
 		}
 		models.AddSessionRoleFields(eventData, session)
+		s.addWaitingOnErrandsField(eventData, session)
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
@@ -7664,6 +7665,7 @@ func (s *Service) publishSessionCreatedEvent(ctx context.Context, taskID, sessio
 			eventData["session_metadata"] = session.Metadata
 		}
 		models.AddSessionRoleFields(eventData, session)
+		s.addWaitingOnErrandsField(eventData, session)
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
