@@ -72,6 +72,7 @@ func TestReconcileCapturesCompletedUncapturedParentTurn(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-ERRANDS-004.8
 func TestReconcileInterruptsAbandonedParentTurn(t *testing.T) {
 	h := newHarness(t)
 	errand := h.mustStart("audit").Errand

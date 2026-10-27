@@ -44,6 +44,7 @@ func withErrandComposer(t *testing.T, composer *fakeErrandComposer) *Service {
 	return svc
 }
 
+// @covers AC-TASKS-ERRANDS-004.10
 func TestComposeErrandTurnPrependsBlockForDirectPrompt(t *testing.T) {
 	composer := &fakeErrandComposer{composition: errands.Composition{Token: "tok", Block: "BLOCK"}}
 	svc := withErrandComposer(t, composer)
