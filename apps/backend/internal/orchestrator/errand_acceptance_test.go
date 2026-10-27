@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -70,6 +72,38 @@ func TestParentSessionEventReportsWaitingOnErrandsOnlyWhileIdleAndOutstanding(t 
 	ordinary := publish(t, models.TaskSessionStateWaitingForInput,
 		&fakeErrandStateController{hasErrands: false})
 	require.NotContains(t, ordinary, "waiting_on_errands", "a parent without errand rows keeps its payload unchanged")
+}
+
+// @covers AC-TASKS-ERRANDS-006.2
+func TestParentTurnCompletingWithNothingOutstandingRunsItsWorkflow(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	controller := &settlingErrandController{outstanding: false}
+	svc.SetErrandController(controller)
+
+	require.False(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone),
+		"a turn that completes with nothing outstanding must not skip workflow completion")
+	require.Equal(t, []errands.SettleCause{errands.SettleCauseTurnDone}, controller.causes)
+}
+
+// @covers AC-TASKS-ERRANDS-006.5
+func TestParentWithOutstandingErrandsAcceptsAPromptAsAnIdleSession(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.SetErrandController(&fakeErrandStateController{hasErrands: true, outstanding: true})
+
+	seedTaskAndSession(t, repo, "task1", "parent1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "parent1")
+	require.NoError(t, err)
+	session.AgentExecutionID = "exec-parent-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-parent-1")
+	require.NoError(t, repo.UpdateTaskSession(context.Background(), session))
+
+	_, err = svc.PromptTask(context.Background(), "task1", "parent1", "follow-up", "", false, nil, false)
+	require.NoError(t, err, "an idle parent with outstanding errands must accept a prompt")
+	require.Len(t, agentMgr.capturedPrompts, 1)
 }
 
 // @covers AC-TASKS-ERRANDS-004.8

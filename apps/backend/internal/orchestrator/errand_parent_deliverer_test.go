@@ -17,6 +17,7 @@ func newErrandDelivererFixture(t *testing.T) (*Service, *ErrandParentDeliverer) 
 	return svc, NewErrandParentDeliverer(svc)
 }
 
+// @covers AC-TASKS-ERRANDS-004.11
 func TestErrandParentDelivererBlocksWhileQueueHoldsEntry(t *testing.T) {
 	ctx := context.Background()
 	svc, deliverer := newErrandDelivererFixture(t)
