@@ -97,6 +97,11 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
 		return
 	}
 	service.SetDeliverer(orchestrator.NewErrandParentDeliverer(p.orchestratorSvc))
+	transcript := errandTranscript{repo: p.taskRepo}
+	service.SetTurnReader(transcript)
+	service.SetDeliveryLog(transcript)
+	// features.errands is restart-required, so the boot value is the live value.
+	service.SetEnabled(func() bool { return p.features.Errands })
 	p.orchestratorSvc.SetErrandController(service)
 	p.orchestratorSvc.SetParentAwaitEnder(service)
 	p.taskSvc.SetTaskErrandCanceller(p.orchestratorSvc)
