@@ -116,9 +116,11 @@ func (s *Service) writeReconciled(ctx context.Context, row *models.Errand, chang
 	return nil
 }
 
-// releaseUndeliveredClaims returns turn and notification claims whose token is
-// in no parent message to pending. Await claims never write a parent message,
-// so they are left to their own release.
+// releaseUndeliveredClaims returns notification claims whose token is in no
+// parent message to pending. A notification entry is queued by the server and
+// its user message carries the token, so a missing token proves it never
+// dispatched. A turn-context claim is not checked: a direct prompt's message is
+// written before its block is composed, so its absence proves nothing.
 func (s *Service) releaseUndeliveredClaims(ctx context.Context) error {
 	if s.receipts == nil {
 		return nil
@@ -130,7 +132,7 @@ func (s *Service) releaseUndeliveredClaims(ctx context.Context) error {
 	orphaned := map[string]struct{}{}
 	for _, row := range rows {
 		if row.ResultState != models.ErrandResultDelivered || row.DeliveryToken == "" ||
-			row.DeliveredRoute == models.ErrandDeliveryAwait {
+			row.DeliveredRoute != models.ErrandDeliveryNotification {
 			continue
 		}
 		found, err := s.receipts.HasDeliveryToken(ctx, row.ParentSessionID, row.DeliveryToken)

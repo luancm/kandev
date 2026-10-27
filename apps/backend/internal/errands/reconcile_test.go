@@ -95,7 +95,7 @@ func TestReconcileInterruptsAbandonedParentTurn(t *testing.T) {
 
 func TestReconcileReturnsClaimWithoutParentMessageToPending(t *testing.T) {
 	h, id := settleFirstTurn(t, "the answer")
-	composition, err := h.service.ComposeParentTurn(context.Background(), testParent, models.ErrandDeliveryTurnContext)
+	composition, err := h.service.ComposeParentTurn(context.Background(), testParent, models.ErrandDeliveryNotification)
 	if err != nil || composition.Token == "" {
 		t.Fatalf("ComposeParentTurn token %q err %v, want a claim", composition.Token, err)
 	}
@@ -110,9 +110,26 @@ func TestReconcileReturnsClaimWithoutParentMessageToPending(t *testing.T) {
 	}
 }
 
-func TestReconcileKeepsClaimWhoseTokenReachedParent(t *testing.T) {
+func TestReconcileLeavesTurnContextClaimDelivered(t *testing.T) {
 	h, id := settleFirstTurn(t, "the answer")
 	composition, err := h.service.ComposeParentTurn(context.Background(), testParent, models.ErrandDeliveryTurnContext)
+	if err != nil || composition.Token == "" {
+		t.Fatalf("ComposeParentTurn token %q err %v, want a claim", composition.Token, err)
+	}
+	h.service.SetDeliveryLog(&fakeReceipts{tokens: map[string]bool{}})
+
+	if err := h.service.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if row := reconcileRow(t, h, id); row.ResultState != models.ErrandResultDelivered {
+		t.Fatalf("state %q, want a turn-context claim left delivered: its message may predate composition", row.ResultState)
+	}
+}
+
+func TestReconcileKeepsClaimWhoseTokenReachedParent(t *testing.T) {
+	h, id := settleFirstTurn(t, "the answer")
+	composition, err := h.service.ComposeParentTurn(context.Background(), testParent, models.ErrandDeliveryNotification)
 	if err != nil || composition.Token == "" {
 		t.Fatalf("ComposeParentTurn token %q err %v, want a claim", composition.Token, err)
 	}
