@@ -287,6 +287,18 @@ func (s *Service) recordNotRequiredDeliveryWorkflowOutcome(
 	taskID string,
 	effect *models.AgentDeliveryEffect,
 ) error {
+	return s.recordDeliveryWorkflowOutcomeWithReason(ctx, taskID, effect, "not_required")
+}
+
+// recordDeliveryWorkflowOutcomeWithReason records a workflow no-op for a
+// completed delivery that did not advance the workflow, with reason as the
+// recorded cause.
+func (s *Service) recordDeliveryWorkflowOutcomeWithReason(
+	ctx context.Context,
+	taskID string,
+	effect *models.AgentDeliveryEffect,
+	reason string,
+) error {
 	if effect == nil || !agentDeliveryEffectCarriesDeliveryIdentity(effect) {
 		return nil
 	}
@@ -294,7 +306,7 @@ func (s *Service) recordNotRequiredDeliveryWorkflowOutcome(
 	if err != nil {
 		return fmt.Errorf("load task for non-workflow delivery outcome: %w", err)
 	}
-	if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, "not_required") {
+	if !s.recordDeliveryWorkflowNoOp(ctx, task, effect, reason) {
 		return errors.New("guarded non-workflow delivery outcome was not committed")
 	}
 	return nil

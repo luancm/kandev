@@ -97,6 +97,7 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) {
 		return
 	}
 	p.orchestratorSvc.SetErrandController(service)
+	p.orchestratorSvc.SetParentAwaitEnder(service)
 	p.taskSvc.SetTaskErrandCanceller(p.orchestratorSvc)
 	service.StartWorkers(p.ctx)
 	p.addCleanup(func() error {
