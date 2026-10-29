@@ -87,7 +87,7 @@ repository:
 | `parent_session_id` | Parent session. |
 | `title`, `objective` | Start arguments. The objective is the first prompt. |
 | `agent_profile_id` | Resolved effective profile. |
-| `mcp_server_ids` | JSON list: the parent's `task_session` MCP selections at start. |
+| `mcp_server_ids` | JSON additions/exclusions snapshot; legacy arrays remain readable. |
 | `first_turn_id`, `submission_id` | Reserved launch identity. |
 | `lifecycle` | `queued`, `launched`, or `cancelled`. |
 | `cancel_source` | `''`, `parent`, `user`, or `cascade`. |

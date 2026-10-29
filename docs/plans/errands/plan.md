@@ -32,7 +32,7 @@ Outstanding work was preserved before merging: `3cd5cb2e25` (plans/specs),
 `a1071b3a91` (reliability), and `6793dc3361` (board/sidebar). All 99 original
 changed paths survive; only five were reformatted by the normal hooks.
 
-The last merged upstream boundary is `dc2d77359f`. Three frontend conflicts
+The first refreshed upstream boundary was `dc2d77359f`. Three frontend conflicts
 were resolved by combining Errands state/header behavior with upstream read
 retirement and queue layout in merge commit `7032b395ce`. Normal hooks passed
 after the cold lint cache was populated; the extended lint reported zero
@@ -64,9 +64,15 @@ The receipt/retention fix passes SQLite and PostgreSQL; notification checks
 now use nonmutating turn reads; session persistence wakes parent awaiters
 without changing status projection. Full Errands race checks and mock MCP
 checks pass. The corrections are committed in `33206ec0ca` and deterministic
-browser fixtures in `6b5d983acc`. Browser reproof remains required. A second
-upstream refresh to `da9ff6332863` is pending; the earlier
-`dc2d77359f` boundary is no longer the latest upstream head.
+browser fixtures in `6b5d983acc`. Browser reproof remains required. Merge
+`36f63e09bf` integrates upstream `da9ff6332863` and its new session MCP
+exclusions: admission snapshots preserve additions and exclusions, queued
+launches retain that snapshot, and exclusions take precedence over additions.
+SQLite/PostgreSQL persistence, queued launch, resolver and focused race checks
+passed on that merged tree. Legacy array snapshots remain readable; earlier
+array-only builds cannot decode new rows that contain exclusions. The supported
+pilot rollback disables the flag and restarts the current binary. Upstream has
+since advanced to `b767ca83fd37`; that merge and refreshed checks are pending.
 
 ## Overview
 

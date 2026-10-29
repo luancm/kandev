@@ -227,9 +227,10 @@ mock-agent tests passed. Desktop, phone and opt-in real-provider specs exist;
 discovery finds eight desktop and four phone cases including changed-files
 scroll regressions. The fresh managed backend/helpers and production web
 build passed. The initial browser attempt could not launch the missing
-Playwright revision; Chromium 1228 is now installed and the unchanged build
-is being exercised with the managed runner. Browser and provider acceptance
-remain pending. Public coordination/tool guidance and scoped ownership/metrics
+Playwright revision; Chromium 1228 is now installed. The next desktop run
+passed changed-files scrolling and cap/cancellation but exposed delivery and
+await defects, now fixed with focused regressions. Browser reproof on current
+upstream and provider acceptance remain pending. Public coordination/tool guidance and scoped ownership/metrics
 notes are authored; harness, specification, catalog and public-doc source
 validators pass. The separate Landing publication build is unavailable in
 this checkout and is not claimed.

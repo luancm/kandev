@@ -46,7 +46,7 @@ The summary groups all errands of the task by parent. Its **Stop all errands** a
 
 Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
 
-All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands inherit the parent's selected MCP servers at start; later parent selection changes do not rewrite that snapshot.
+All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands snapshot the parent's session MCP additions and exclusions at start; later parent selection changes do not rewrite that snapshot. Removed or disabled servers are omitted at launch.
 
 Errands remain disabled in every shipped profile. To roll back an opt-in installation, disable the override (or set the explicit environment value to `false`) and restart. Retained child sessions stay inspectable and detached from workflow ownership. Provider/executor certification is specific to the tested installation; enabling the flag does not establish universal provider support.
 
