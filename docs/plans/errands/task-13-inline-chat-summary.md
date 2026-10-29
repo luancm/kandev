@@ -1,7 +1,7 @@
 ---
 id: "13-inline-chat-summary"
 title: "Reuse interactive chat cards for current errands"
-status: in_progress
+status: completed
 wave: 13
 depends_on:
   - "07-task-summary-indicators"
@@ -166,3 +166,10 @@ makes its regression fail. Host coverage extends the existing chat-panel
 harness instead of duplicating it in a new test file. Shared loading and
 historical card tests pass. Final lint, typecheck and localization checks
 passed. Desktop/phone scroll proof remains pending; this is not final acceptance.
+
+Acceptance checkpoint, 2026-10-29: on merged upstream `b767ca83fd37`, the
+focused backend and frontend checks, typecheck, changed-file lint, i18n and
+managed desktop/phone browser journeys passed. The selected `gpt-6-luna`
+Codex ACP pilot passed in a disposable SQLite worktree instance, including
+flag-off restart. See the current delivery checkpoint in `plan.md` for exact
+scope, merge, evidence and remaining broader-support limitations.

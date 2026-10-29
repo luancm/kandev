@@ -1,7 +1,7 @@
 ---
 id: "09-e2e-and-docs"
 title: "Add errand E2E scenarios, public docs, and harness notes"
-status: in_progress
+status: completed
 wave: 14
 depends_on:
   - "13-inline-chat-summary"
@@ -252,3 +252,10 @@ pending with the exact missing prerequisite. Do not ask for credentials during
 planning or modify the live installation to manufacture evidence. No upstream
 PR or release work is included; a later contribution needs refreshed
 `upstream/main` integration and its own explicit publication request.
+
+Acceptance checkpoint, 2026-10-29: on merged upstream `b767ca83fd37`, the
+focused backend and frontend checks, typecheck, changed-file lint, i18n and
+managed desktop/phone browser journeys passed. The selected `gpt-6-luna`
+Codex ACP pilot passed in a disposable SQLite worktree instance, including
+flag-off restart. See the current delivery checkpoint in `plan.md` for exact
+scope, merge, evidence and remaining broader-support limitations.

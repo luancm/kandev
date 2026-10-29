@@ -1,7 +1,7 @@
 ---
 id: "07-task-summary-indicators"
 title: "Show errand counts and waiting status on task rows"
-status: in_progress
+status: completed
 wave: 12
 depends_on:
   - "03-frontend-data-layer"
@@ -175,3 +175,10 @@ remain outstanding, and task 07 stays `in_progress`. Task 09 still owns
 rendered desktop/phone proof; task 13 remains excluded from this packet.
 PostgreSQL skips remain an explicit readiness gate, and no broader support or
 provider-pilot claim is made.
+
+Acceptance checkpoint, 2026-10-29: on merged upstream `b767ca83fd37`, the
+focused backend and frontend checks, typecheck, changed-file lint, i18n and
+managed desktop/phone browser journeys passed. The selected `gpt-6-luna`
+Codex ACP pilot passed in a disposable SQLite worktree instance, including
+flag-off restart. See the current delivery checkpoint in `plan.md` for exact
+scope, merge, evidence and remaining broader-support limitations.

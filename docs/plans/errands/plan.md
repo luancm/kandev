@@ -25,6 +25,25 @@ legacy_specs: []
 
 ## Current delivery checkpoint (2026-10-29)
 
+Final acceptance checkpoint: merge `28e3cd57b8` includes upstream
+`b767ca83fd3792f2e0fbc66909dce32af3cf2dff`. The product fix and browser
+fixture corrections are committed in `666d79d31f`. Merged-tree Go checks
+passed, including Errands and queue race suites, SQLite and real PostgreSQL
+repository coverage, PostgreSQL store conformance under race, orchestration,
+recovery, configuration, history retention and SQL guard. The earlier broad
+PostgreSQL run timed out and is not a pass. Frontend acceptance passed 24
+suites and 271 tests, typecheck, localization and changed-file lint. Managed
+production browser runs passed eight desktop and four phone cases, including
+changed-files scrolling. A disposable SQLite Codex ACP pilot using
+`gpt-6-luna` with max reasoning and the worktree executor passed actual
+start, delivery, follow-up, independent cancellation and flag-off restart;
+it does not certify other providers, executors or a PostgreSQL pilot. Shipped
+profiles remain off. Older array-only binaries cannot read snapshots containing
+MCP exclusions; the tested rollback disables the flag and restarts the current
+binary. The separate Landing publication build was unavailable and is not
+claimed. Raw checks and the original snapshot remain in
+`/tmp/errands-delivery-20261029`.
+
 The owner authorized sequential completion, logical commits, a fresh upstream
 merge, and push to `origin` (`luancm/kandev`) only. No pull request, upstream
 push, live-instance mutation, or shipped-default promotion is authorized.
@@ -345,10 +364,10 @@ Progress:
 - [x] Task 00: integrated canonical upstream baseline f150e6a.
 - [x] Task 10: durable delivery envelope and recovery, implementation accepted.
 - [x] Task 11: notification wake, Send now, retry acceptance, implementation accepted.
-- [x] Task 12: cancellation, kill switch, authorization and state convergence, SQLite implementation checks accepted; PostgreSQL readiness unproved.
-- [ ] Task 07: backend portion exists; frontend remains in progress.
-- [ ] Task 13: inline current-Errands summary using native chat card patterns.
-- [ ] Task 09: deterministic browser journeys, docs and personal pilot.
+- [x] Task 12: cancellation, kill switch, authorization and state convergence; focused SQLite and PostgreSQL checks passed.
+- [x] Task 07: backend and frontend summaries and Threads navigation accepted.
+- [x] Task 13: inline current-Errands summary and desktop/phone scroll checks accepted.
+- [x] Task 09: deterministic browser journeys, docs and selected SQLite personal pilot accepted; broader support remains conditional.
 
 ## Continuation checkpoint (2026-10-27)
 
