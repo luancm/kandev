@@ -61,6 +61,8 @@ session-open resume path; remove the variable before the recovery attempt.
 
 ## Emitter helpers worth knowing
 
+`/e2e:errands` and `/e2e:errands-await` accept JSON `{profile,prompts}` and call the real Errands MCP tools. Await uses IDs returned by start; child prompts use causal turn gates. `/e2e:errands-status` reports injected status-block count.
+
 `emitter.go` wraps the ACP `sessionUpdater` with helpers that shield scenarios from SDK plumbing:
 
 - `e.text(s)` / `e.thought(s)` — plain agent message vs reasoning channel.

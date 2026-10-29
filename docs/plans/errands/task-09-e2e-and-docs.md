@@ -1,7 +1,7 @@
 ---
 id: "09-e2e-and-docs"
 title: "Add errand E2E scenarios, public docs, and harness notes"
-status: pending
+status: in_progress
 wave: 14
 depends_on:
   - "13-inline-chat-summary"
@@ -221,9 +221,18 @@ its owning work order; do not bypass its unit/contract evidence inside E2E.
 
 ## Results
 
-Pending. No scenarios, browser specs or public Errands docs exist at the
-planning snapshot. This continuation packet adds acceptance/readiness gates;
-it does not claim those gates were executed.
+Implementation checkpoint, 2026-10-29: deterministic mock scenarios call
+real MCP start/await tools with returned IDs and causal child gates. Focused
+mock-agent tests passed. Desktop, phone and opt-in real-provider specs exist;
+discovery finds eight desktop and four phone cases including changed-files
+scroll regressions. The fresh managed backend/helpers and production web
+build passed. The initial browser attempt could not launch the missing
+Playwright revision; Chromium 1228 is now installed and the unchanged build
+is being exercised with the managed runner. Browser and provider acceptance
+remain pending. Public coordination/tool guidance and scoped ownership/metrics
+notes are authored; harness, specification, catalog and public-doc source
+validators pass. The separate Landing publication build is unavailable in
+this checkout and is not claimed.
 
 ## Pilot and conditional store evidence
 

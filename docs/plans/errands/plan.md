@@ -1,6 +1,6 @@
 ---
 created: 2026-10-23
-updated: 2026-10-27
+updated: 2026-10-29
 status: draft
 requirements:
   - REQ-TASKS-ERRANDS-001
@@ -22,6 +22,51 @@ legacy_specs: []
 ---
 
 # Implementation Plan: Errands
+
+## Current delivery checkpoint (2026-10-29)
+
+The owner authorized sequential completion, logical commits, a fresh upstream
+merge, and push to `origin` (`luancm/kandev`) only. No pull request, upstream
+push, live-instance mutation, or shipped-default promotion is authorized.
+Outstanding work was preserved before merging: `3cd5cb2e25` (plans/specs),
+`a1071b3a91` (reliability), and `6793dc3361` (board/sidebar). All 99 original
+changed paths survive; only five were reformatted by the normal hooks.
+
+The last merged upstream boundary is `dc2d77359f`. Three frontend conflicts
+were resolved by combining Errands state/header behavior with upstream read
+retirement and queue layout in merge commit `7032b395ce`. Normal hooks passed
+after the cold lint cache was populated; the extended lint reported zero
+issues. PostgreSQL 16 now runs only in a
+disposable user-owned `/tmp` directory. Real PostgreSQL checks exposed and
+fixed connection-string quoting, optional queue cleanup transaction aborts,
+and UTC timestamp interpretation. Focused Errands persistence/deletion and
+non-UTC recovery regressions pass; the broad PostgreSQL run exceeded its
+package timeout and is not recorded as passing.
+
+07B (`3541b0aaf0`) and 13 (`0c5e2abc4e`) are committed. The combined focused
+frontend acceptance run passed 24 suites and 266 tests; typecheck, exact-file
+lint, translation validation and ratchets passed. Browser and selected-provider
+checks remain in progress.
+Threads Open/Back now has a column-owned navigation regression. Browser
+fixtures capture actual start-returned IDs and use causal file gates. Desktop
+and phone discovery finds eight and four tests respectively, including the
+existing changed-files scroll regressions. No browser or real-provider pass
+is claimed yet. Primary is the sole writer; persistent child reservations
+remain inactive. Logs and the original snapshot are under
+`/tmp/errands-delivery-20261029`.
+
+The first actual desktop run passed the changed-files scroll regression and
+cap/cancellation flow, then exposed delivery blockers: the merged upstream
+workflow-outcome allowlists rejected `errands_outstanding`; notification
+readiness lazily created a parent turn; and optional-await could miss the
+child's later authoritative idle-state change. Each has a red regression.
+The receipt/retention fix passes SQLite and PostgreSQL; notification checks
+now use nonmutating turn reads; session persistence wakes parent awaiters
+without changing status projection. Full Errands race checks and mock MCP
+checks pass. The corrections are committed in `33206ec0ca` and deterministic
+browser fixtures in `6b5d983acc`. Browser reproof remains required. A second
+upstream refresh to `da9ff6332863` is pending; the earlier
+`dc2d77359f` boundary is no longer the latest upstream head.
 
 ## Overview
 

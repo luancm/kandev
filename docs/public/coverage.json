@@ -266,6 +266,33 @@
       ]
     },
     {
+      "id": "errands",
+      "audiences": [
+        "user",
+        "operator"
+      ],
+      "stability": "experimental",
+      "docs": [
+        "coordination",
+        "agent-communication"
+      ],
+      "sources": [
+        "apps/backend/internal/errands/service.go",
+        "apps/backend/internal/mcp/server/errand_tools.go",
+        "apps/web/components/task/chat/errands/errands-inline-summary.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/mcp/handlers/errands_test.go",
+        "apps/web/e2e/tests/session/errands.spec.ts",
+        "apps/web/e2e/tests/session/mobile-errands.spec.ts"
+      ],
+      "mcpTools": [
+        "start_errand_kandev",
+        "await_errands_kandev",
+        "cancel_errand_kandev"
+      ]
+    },
+    {
       "id": "plans-walkthroughs-and-review",
       "audiences": [
         "user"

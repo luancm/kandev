@@ -1,7 +1,7 @@
 ---
 id: "13-inline-chat-summary"
 title: "Reuse interactive chat cards for current errands"
-status: pending
+status: in_progress
 wave: 13
 depends_on:
   - "07-task-summary-indicators"
@@ -108,7 +108,7 @@ native-list and chat-panel Errands suites are planned files, created with
 TDD. Existing exemplar suites guard unrelated diff/todo behavior.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/task/chat/errands/errands-inline-summary.test.tsx components/task/chat/errands/errands-chip.test.tsx components/task/chat/errands/errand-delivery-message.test.tsx components/task/chat/message-list-native.errands.test.tsx components/task/task-chat-panel.errands.test.tsx components/task/chat/turn-changed-files-card.test.tsx components/task/chat/messages/todo-message.test.tsx hooks/domains/session/use-task-errands.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/chat/errands/errands-inline-summary.test.tsx components/task/chat/errands/errands-chip.test.tsx components/task/chat/errands/errand-delivery-message.test.tsx components/task/chat/message-list-native.errands.test.tsx components/task/task-chat-panel.last-prompt.test.tsx components/task/chat/turn-changed-files-card.test.tsx components/task/chat/messages/todo-message.test.tsx hooks/domains/session/use-task-errands.test.ts)
 (cd apps/web && pnpm exec eslint --max-warnings 0 components/task/chat/errands/errands-inline-summary.tsx components/task/chat/errands/errands-panel.tsx components/task/chat/errands/errands-panel-row.tsx components/task/chat/message-list-native.tsx components/task/chat/message-list-shared.tsx components/task/task-chat-panel.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:zh-hant)
@@ -127,7 +127,7 @@ Task 09 adds managed desktop/phone interaction, scroll and reload proof.
 - `apps/web/components/task/chat/{message-list-shared.tsx,message-list-native.tsx}`
   and new `message-list-native.errands.test.tsx`.
 - `apps/web/components/task/task-chat-panel.tsx` and new
-  `task-chat-panel.errands.test.tsx`.
+  `task-chat-panel.last-prompt.test.tsx`.
 - `apps/web/src/locales/*/task.json`; shared selectors/hooks only if a
   focused regression proves existing projections insufficient.
 
@@ -159,5 +159,10 @@ transitively by 10-12. Task 09 proves this additional UI outcome in browsers.
 
 ## Results
 
-Pending. This work order records the user's planning revision. No application
-or permanent test changes have been made.
+Implementation checkpoint, 2026-10-29: the default-collapsed task-wide card,
+shared grouped rows/actions, profile labels, and native transcript tail are
+implemented. Component and host tests pass; removing either host connection
+makes its regression fail. Host coverage extends the existing chat-panel
+harness instead of duplicating it in a new test file. Shared loading and
+historical card tests pass. Final lint, typecheck and localization checks
+passed. Desktop/phone scroll proof remains pending; this is not final acceptance.

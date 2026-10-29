@@ -257,8 +257,9 @@ text message, cuts it to 16 KiB at a rune boundary, and writes
 `last_outcome`, the result fields, and `result_state=pending` in one
 version-guarded update. A still pending earlier result becomes `superseded`.
 Capture is idempotent on `result_turn_id`. Every settled turn updates
-`latest_settled_turn_id`. After the write commits, the service wakes local
-waiters and runs the parent delivery check.
+`latest_settled_turn_id`. Committed result and session-state writes wake parent
+waiters, covering capture-before-idle ordering without changing projection or
+claims. Result writes also run the parent delivery check.
 
 `errand.send_result` is allowed when the projected status is `done` or
 `failed`, a settled turn exists, and `latest_settled_turn_id` differs from

@@ -59,9 +59,9 @@ apps/backend/
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
 │   ├── runs/             # Generic run queue: models, repository, service, scheduler
-│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, configsync,
-│   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
-│   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
+│   ├── errands/          # Task-owned child admission, settlement, results and delivery
+│   ├── office/           # Autonomous agent management; scoped AGENTS.md owns package details
+│   │                     # Agents, approvals, channels, routines, routing and workspaces
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway, including task-owned LSP lease lifecycle
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)

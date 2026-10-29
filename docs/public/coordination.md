@@ -9,7 +9,7 @@ Kandev can coordinate several agents without turning every unit of work into a s
 
 ## Quick path
 
-1. Use another session for parallel work in the same task environment.
+1. With Errands enabled, ask the agent for an errand when bounded work should report back within the task. Use another named session for a peer conversation in the same task environment.
 2. Use a subtask when work needs its own workflow state.
 3. Choose an isolated workspace for concurrent writers or a different repository.
 4. Send bounded messages and keep the human review gate explicit.
@@ -32,6 +32,25 @@ Start with the smallest boundary that preserves shared context. Increase the bou
 | One deliverable spanning repositories                                | Multi-repository task                     | Separate worktree per attachment           | No; one task workflow      |
 
 Shared files make handoff cheap but allow concurrent edits to collide. Separate environments isolate file state, but only the executor determines whether host processes and credentials are also isolated.
+
+## Use agent-created errands (experimental)
+
+Errands are opt-in child conversations within one task. Ask the task's agent to start an errand for a bounded objective, then keep talking to the parent while the child works. Each child has its own transcript and uses the task's existing workspace; it has no separate board card or workflow step.
+
+1. Enable **Errands** in **Settings > System > Feature Toggles**, then restart Kandev. Alternatively, set `KANDEV_FEATURES_ERRANDS=true` in the environment used by your launcher and restart it. An explicit environment value takes precedence over the settings override.
+2. Open a task with a compatible structured agent profile and an existing task workspace. Ask the agent, for example: "Start an errand to review the error handling in this task's changed files. Report its findings, and keep this parent conversation available."
+3. Watch the collapsed **Errands** summary in the parent chat or open the Errands chip. Expand it and choose **Open** to inspect a child's full conversation. On phones, Open shows the child full screen; the Back control returns to its parent.
+4. The delivered result appears as an **Errand finished** card in the parent transcript. The parent receives it through an optional await, its next turn, or a notification turn. With queue Auto-run off, the notification waits for manual Send now or the next parent turn.
+
+The summary groups all errands of the task by parent. Its **Stop all errands** action has task-wide scope and remains separate from expanding the list. An opened child offers **Stop** while live, a follow-up composer, and **Send result to parent** when a user-initiated result is eligible. Cancelling the parent's current turn leaves its errands running; stopping or deleting the parent/task cascades to its errands.
+
+Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
+
+All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands inherit the parent's selected MCP servers at start; later parent selection changes do not rewrite that snapshot.
+
+Errands remain disabled in every shipped profile. To roll back an opt-in installation, disable the override (or set the explicit environment value to `false`) and restart. Retained child sessions stay inspectable and detached from workflow ownership. Provider/executor certification is specific to the tested installation; enabling the flag does not establish universal provider support.
+
+See [Errand tools](agent-communication.md#errand-tools) for the agent contract.
 
 ## Run parallel sessions in one task
 
