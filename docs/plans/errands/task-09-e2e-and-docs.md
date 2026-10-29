@@ -2,9 +2,9 @@
 id: "09-e2e-and-docs"
 title: "Add errand E2E scenarios, public docs, and harness notes"
 status: pending
-wave: 7
+wave: 14
 depends_on:
-  - "07-task-summary-indicators"
+  - "13-inline-chat-summary"
   - "08-errand-ui"
 plan: "plan.md"
 requirements:
@@ -13,8 +13,11 @@ requirements:
   - REQ-TASKS-ERRANDS-005
   - REQ-TASKS-ERRANDS-006
   - REQ-TASKS-ERRANDS-007
+  - REQ-TASKS-ERRANDS-008
+  - REQ-TASKS-ERRANDS-009
   - REQ-TASKS-ERRANDS-010
   - REQ-TASKS-ERRANDS-011
+  - REQ-TASKS-ERRANDS-012
 acceptance_criteria:
   - AC-TASKS-ERRANDS-003.1
   - AC-TASKS-ERRANDS-003.5
@@ -29,6 +32,11 @@ acceptance_criteria:
   - AC-TASKS-ERRANDS-007.1
   - AC-TASKS-ERRANDS-007.5
   - AC-TASKS-ERRANDS-007.6
+  - AC-TASKS-ERRANDS-008.1
+  - AC-TASKS-ERRANDS-008.2
+  - AC-TASKS-ERRANDS-008.3
+  - AC-TASKS-ERRANDS-009.1
+  - AC-TASKS-ERRANDS-009.2
   - AC-TASKS-ERRANDS-010.2
   - AC-TASKS-ERRANDS-010.3
   - AC-TASKS-ERRANDS-010.4
@@ -37,11 +45,16 @@ acceptance_criteria:
   - AC-TASKS-ERRANDS-010.7
   - AC-TASKS-ERRANDS-010.8
   - AC-TASKS-ERRANDS-010.9
+  - AC-TASKS-ERRANDS-010.10
   - AC-TASKS-ERRANDS-011.1
   - AC-TASKS-ERRANDS-011.2
   - AC-TASKS-ERRANDS-011.3
   - AC-TASKS-ERRANDS-011.4
   - AC-TASKS-ERRANDS-011.5
+  - AC-TASKS-ERRANDS-011.6
+  - AC-TASKS-ERRANDS-012.1
+  - AC-TASKS-ERRANDS-012.2
+  - AC-TASKS-ERRANDS-012.3
 system_design:
   - ../../specs/tasks/system-design/errands.md
 ---
@@ -52,21 +65,40 @@ system_design:
 
 Prove the user-visible behavior end to end on desktop and phone with
 deterministic mock-agent scenarios, document errands for users, and record
-the new package, slice, flag, and metrics in the agent guidance files.
+the package, slice, flag, and metrics in agent guidance. Record a real-provider
+pilot before describing this first delivery as ready for daily use.
 
 ## In scope
 
-- Mock agent predefined scenarios in `apps/backend/cmd/mock-agent/scenarios.go`:
-  `/e2e:errands` emits text, starts three errands whose objectives are inline
-  `e2e:` scripts, and ends its turn; `/e2e:errands-await` starts two errands
-  and awaits them by the returned IDs. A reply to a user prompt that carries
-  an errand status block states how many errands the block listed. Document
-  both in `cmd/mock-agent/AGENTS.md`.
+- Deterministic mock-agent scenarios `/e2e:errands` and
+  `/e2e:errands-await`, with a small `errands_scenarios.go` helper. Capture
+  the real IDs returned by start calls and use them for await/follow-up.
+  Current `script.go` remembers only plan versions, not arbitrary tool
+  results; adding registry strings alone cannot implement these journeys.
+  Echo the received status-block count and use causal file/event gates for
+  long-running, permission, settlement and cancellation states. Do not add a
+  general-purpose result-binding framework or fixed sleeps.
 - `apps/web/e2e/tests/session/errands.spec.ts` (`chromium`) and
-  `apps/web/e2e/tests/session/mobile-errands.spec.ts` (`mobile-chrome`), each
-  enabling the flag with `backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" })`
-  and using causal waits from `e2e/helpers/causal-waits.ts`. Scenarios are
-  listed in the [plan E2E section](plan.md#e2e-tests).
+  `mobile-errands.spec.ts` (`mobile-chrome`). Reuse `backend.useEnv` and its
+  existing restoration to enable the flag only for these tests. Share
+  errands helpers/page-object methods between specs; keep fixtures disposable.
+- Separate focused scenarios for conversational parent/open/follow-up/send
+  result; real finished-card metadata live and after reload; Auto-run on/off
+  and manual Send now; individual/bulk/queued cancellation; cap/admission;
+  workflow hold then final advancement; two-client deletion; and retained
+  sessions after disable/restart. Assert the actual wire-backed UI rather
+  than injecting the desired message metadata into a store.
+- Phone checks through the existing Sessions/Threads picker and errand view:
+  visible back/actions, full-screen transcript, temporary bottom drawer,
+  fixed Stop-all footer and one scrolling list. Assert real 44px targets,
+  viewport containment, safe-area clearance, dismissal/focus and no page
+  horizontal overflow; include a narrow fine-pointer check at the phone
+  breakpoint where shared controls branch.
+- Inline current-summary cases from task 13: default collapse, live header
+  updates, grouped expansion, independent Open/Stop-all actions, shared
+  chip/list state, reading-position and bottom-follow behavior. Keep historical
+  start/result cards and neighboring diff/todo widgets; test reload and mobile
+  hit geometry. Existing changed-files scroll suites guard the shared host.
 - Public docs through `/docs-maintainer`: an Errands section in
   `docs/public/coordination.md` and the tool contract in
   `docs/public/agent-communication.md`, including the flag, limits, the
@@ -79,8 +111,17 @@ the new package, slice, flag, and metrics in the agent guidance files.
 - Guidance: root `AGENTS.md` Observability bullet for `errands_*` counters;
   `apps/backend/AGENTS.md` package structure entry for `internal/errands`;
   `apps/web/AGENTS.md` store slice entry for `errands`.
-- After all checks pass, update this plan's verification results and the
-  work-order statuses as the spec workflow prescribes.
+- An opt-in pilot on one installed structured profile and an existing
+  attach-capable executor: start two disjoint errands, end the parent turn,
+  send a parent prompt while they run, open/steer a child, receive results,
+  exercise turn cancel versus Stop, then disable/restart and inspect retained
+  sessions. Record provider/model/executor, exact revision, observed results,
+  failures and rollback. Use disposable isolated data; do not alter the
+  developer's main instance or publish user task contents.
+- After every continuation work order and its checks pass, record results
+  and promote draft requirements to `active`, draft design to `current`,
+  and plan to `implemented` only if the final behavior matches. If pilot
+  execution is unavailable, record it as pending and keep readiness open.
 
 ## Out of scope
 
@@ -93,12 +134,18 @@ the new package, slice, flag, and metrics in the agent guidance files.
    composer whose prompt receives the status block, open, follow-up,
    **Errand finished** cards from a notification turn, a parent turn cancel
    that leaves errands running, **Stop all errands**, the board indicator,
-   and the task staying in progress until the final parent turn.
+   and the task staying in progress until the final parent turn. It also
+   proves real snapshot persistence, Auto-run/manual dispatch, queued/cap
+   handling, two-client deletion, flag-off retained-session behavior, and
+   UI-11 inline-summary interaction alongside existing diff/todo cards.
 2. The phone spec proves nesting, the full screen errand view, the actions
    menu, the chip drawer with **Stop all errands**, full-width finished
    cards, 44px targets, internal scrolling, and no horizontal overflow.
-3. Public docs and agent guidance describe the shipped behavior, and the
-   documentation and specification validators pass.
+   UI-11 expands inline under the same chat scroller and preserves Open/back.
+3. Public docs and guidance describe the proven behavior, documentation
+   validators pass, and the selected provider/executor pilot records its
+   outcome and disable/restart rollback. Unexecuted certification remains
+   explicit; no claim of universal provider support is made.
 
 ## ASCII UI preview
 
@@ -115,13 +162,16 @@ Phone:   Sessions drawer -> errand (full screen) -> [.] Stop -> back
 ## Verification
 
 Run from the repository root. In a fresh worktree, first run
-`(cd apps && pnpm install --frozen-lockfile)`. Run the two E2E commands
-sequentially.
+`(cd apps && pnpm install --frozen-lockfile)` (task 00 normally did this).
+Confirm discovery, then run the two managed E2E commands sequentially. They
+build the production web/backend assets; do not use stale `--no-build` output.
 
 ```bash
 (cd apps/backend && go test -trimpath ./cmd/mock-agent -run 'Errand|Scenario' -count=1)
-(cd apps/web && pnpm e2e:run --project chromium tests/session/errands.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-errands.spec.ts)
+(cd apps/web && pnpm e2e:raw --project chromium e2e/tests/session/errands.spec.ts --list)
+(cd apps/web && pnpm e2e:raw --project mobile-chrome e2e/tests/session/mobile-errands.spec.ts --list)
+(cd apps/web && pnpm e2e:run --project chromium tests/session/errands.spec.ts tests/git/turn-changed-files-scroll.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-errands.spec.ts tests/git/mobile-turn-changed-files-scroll.spec.ts)
 (cd apps/web && pnpm run e2e:sleep-ratchet)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
@@ -133,7 +183,8 @@ git diff --check
 
 ## Files likely touched
 
-- `apps/backend/cmd/mock-agent/scenarios.go`, a scenario test, and
+- `apps/backend/cmd/mock-agent/scenarios.go`, new `errands_scenarios.go`
+  and `errands_scenarios_test.go`, and
   `apps/backend/cmd/mock-agent/AGENTS.md`.
 - New `apps/web/e2e/tests/session/errands.spec.ts` and
   `mobile-errands.spec.ts`, plus any page-object helpers under `apps/web/e2e/`.
@@ -143,7 +194,8 @@ git diff --check
 
 ## Dependencies
 
-Tasks 07 and 08.
+Tasks 13 and 08, transitively 00, 10, 11, 12 and 07. A product failure returns to
+its owning work order; do not bypass its unit/contract evidence inside E2E.
 
 ## Risks
 
@@ -169,4 +221,24 @@ Tasks 07 and 08.
 
 ## Results
 
-Pending.
+Pending. No scenarios, browser specs or public Errands docs exist at the
+planning snapshot. This continuation packet adds acceptance/readiness gates;
+it does not claim those gates were executed.
+
+## Pilot and conditional store evidence
+
+Use the user's selected installed profile and executor in a disposable
+instance. Record whether the store is SQLite or PostgreSQL. The first personal
+pilot does not certify every provider, remote executor, or SQL backend.
+Before a PostgreSQL pilot or broader support claim, run the existing env-gated
+repository tests with a disposable database; a skip is not a pass:
+
+```bash
+(cd apps/backend && test -n "${KANDEV_TEST_POSTGRES_DSN:-}" && go test -trimpath ./internal/task/repository/sqlite -run 'Errand' -count=1)
+```
+
+If the pilot cannot be run with available credentials/runtime, leave its result
+pending with the exact missing prerequisite. Do not ask for credentials during
+planning or modify the live installation to manufacture evidence. No upstream
+PR or release work is included; a later contribution needs refreshed
+`upstream/main` integration and its own explicit publication request.

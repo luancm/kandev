@@ -294,3 +294,9 @@ For task 06:
   parent})` scopes by the verified caller session and task.
 - Replace `errandOriginContent` with `errand.md`, return `McpModeErrand` from
   `resolveTaskSessionMCPMode`, and check the flag before calling the service.
+
+## Continuation follow-up (2026-10-27)
+
+The original implementation/results above are historical. Task 12 now owns
+the enforced-auth queued-ID cancellation gap; task 00 rechecks launch
+contracts after upstream integration. No foundation rewrite is planned.

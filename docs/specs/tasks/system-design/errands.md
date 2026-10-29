@@ -24,17 +24,14 @@ owners:
 
 ## Purpose and boundaries
 
-The task system owns task sessions, their workspace binding, primary
-selection, and workflow turn hooks, so it owns errands. This design uses
-without owning: the agent runtime, the message queue
-(`internal/orchestrator/messagequeue`), the session ceiling, MCP tool
-profiles
+The task system owns errand identity, workspace binding, primary selection,
+and workflow isolation. It consumes the agent runtime, message queue
+(`internal/orchestrator/messagequeue`), session ceiling, MCP tool profiles
 ([ADR-2026-08-08-mcp-tool-profiles](../../../decisions/2026-08-08-mcp-tool-profiles.md)),
 the [bounded task summary](../../platform/requirements/bounded-task-status-delivery.md),
 and [attach-only workspace reuse](additional-session-workspace-reuse.md).
-Native subagent observation stays with
-[subagent observability](../../ui/requirements/subagent-observability.md),
-unchanged.
+Native subagent observation remains
+[UI-owned](../../ui/requirements/subagent-observability.md).
 
 ## Requirement mapping
 
@@ -58,16 +55,16 @@ unchanged.
 
 | Component | Responsibility |
 | --- | --- |
-| `internal/errands` (new) | `Service`: start, cap, profiles, status, results, status block, delivery, await, cancellation, queued admission, reconciliation, metrics. Depends only on narrow interfaces: `Store`, `Launcher`, `ParentDeliverer`, `SessionStopper`, `ProfileResolver`, `EventPublisher`, `Clock`. |
-| `internal/task/repository/sqlite` | Columns on `task_sessions`, the `task_session_errands` table, and the `errands.Store` implementation, on SQLite and PostgreSQL. |
+| `internal/errands` (new) | `Service` owns errand lifecycle/delivery through narrow `Store`, `Launcher`, `ParentDeliverer`, `SessionStopper`, `ProfileResolver`, `EventPublisher`, and `Clock` interfaces. |
+| `internal/task/repository/sqlite` | `task_sessions` columns, errand rows and `Store` on SQLite/PostgreSQL. |
 | `internal/task/models` | `TaskSession.Role`, `TaskSession.ParentSessionID`, `SessionRoleErrand`, `Errand`, and `IsWorkflowDetachedSession`. |
-| `internal/orchestrator` | `LaunchErrandSession`, errand-aware session preparation, parent turn composition in `promptTask`, turn-settle, cancel, and stop hooks, ceiling-sweep hook, workflow-detached call sites. |
-| `internal/orchestrator/executor` | Errand role and parent on the prepared session, `IsPrimary=false`, `McpModeErrand` from `resolveTaskSessionMCPMode`. |
-| `internal/mcp/server` | `errands` tool group for the parent, fixed `errand` catalog, keepalive for await, await release on abandonment. |
+| `internal/orchestrator` | `LaunchErrandSession`, `promptTask` composition, settlement/cancellation, ceiling drain, and detached-session guards. |
+| `internal/orchestrator/executor` | Detached preparation and errand MCP mode resolution. |
+| `internal/mcp/server` | Parent tools, fixed child catalog, await keepalive/release. |
 | `internal/mcp/handlers` | `mcp.start_errand`, `mcp.await_errands`, `mcp.cancel_errand`, `mcp.await_errands_release`; errand guards in existing mutation handlers; shared workspace-conflict mapping. |
 | `internal/sysprompt`, `config/prompts` | `errand.md`; flag-gated delegation and errand tool sections in `kandev-context.md`. |
 | `internal/task/statussummary` | `ErrandsSummary` on `TaskStatusSummary`. |
-| `apps/web` | Types, `errands` store slice, WebSocket handlers, hooks, transcript cards, errand header, chip and panel, tab filter, phone nesting, board and Threads indicators. |
+| `apps/web` | Shared errand state, transcript/inline surfaces, navigation and row metadata. |
 
 ## Data and contracts
 
@@ -193,48 +190,44 @@ pending.
 | `errand.send_result` | request | `session_id` |
 | `errand.updated` | event | one `ErrandDTO` plus `workspace_id`, routed with `Hub.BroadcastToWorkspaceOrDrop` |
 
-The gateway backstop scopes all four requests through `task_id` and
-`session_id`. Existing session events now carry `role`, `parent_session_id`,
-and `waiting_on_errands`. A parent user message that delivers results carries
-`errand_delivery` metadata: `token`, `route`, and `items` (`errand_id`,
-`title`, `status`, and a preview of at most 280 characters).
+The gateway scopes requests through `task_id` and `session_id`. A queued
+errand has no session row: cancel authorization resolves its task from the
+errand record and applies the same workspace membership check. Session
+events, including cancel and recovery, carry `role`, `parent_session_id`,
+and `waiting_on_errands`. Existing `session.removed` events reach authorized
+workspace viewers and remove errands from each client's store; session-only
+synthetic payloads resolve their task from local state.
+
+Each result-bearing parent user message persists an `errand_delivery`
+object: `token`, `route`, and `items` (`errand_id`, `title`, `status`,
+`preview`, at most 280 characters). Direct prompts, queued prompts,
+notifications, and preserved deletion notices use the same snapshot in
+storage and live events. Keep `errand_delivery_token` for recovery readback.
+Cards use this immutable snapshot after reload or errand deletion.
 
 ## Control flow
 
 ### Start
 
-1. `handleStartErrand` checks the flag, then resolves the verified caller
-   session as `resolveSpawnerSession` does. It refuses a missing, errand, or
-   passthrough (`IsPassthrough`) caller and Office, ephemeral,
-   configuration, coordinator-origin, and automation-origin tasks with
-   `errand_not_supported`.
-2. `errands.Service.Start` takes a per-task mutex, counts live errands
-   (`lifecycle != cancelled` and status live), and refuses beyond 5.
-3. `ProfileResolver` matches an ID, then an exact name, refuses passthrough
-   profiles (no structured assistant messages to capture), and checks
-   executor compatibility with `ValidateAgentProfileForExecutor`, as task
-   creation does. The default is the caller's `AgentProfileID`. The
-   first-turn profile list applies the same filter.
-4. The service mints `errand_id`, `first_turn_id`, and `submission_id`,
-   snapshots the parent's `task_session` MCP selections into
-   `mcp_server_ids`, inserts the row as `queued`, publishes `errand.updated`, and
-   calls `Launcher.LaunchErrand` with `models.WithReservedLaunchIdentity`, as in
-   `automation_retry_launch.go`.
-5. `orchestrator.LaunchErrandSession` calls `LaunchSession` with
-   `Intent: IntentStart`, `ProfileExplicit: true`, the objective as the prompt,
-   `MCPServerIDs` set to the snapshot's enabled definitions (nil when
-   none), and an internal `Errand` field (`json:"-"`) with the errand ID,
-   parent session, and title. `session_mcp.go` stores the IDs as the errand's
-   session scope after admission. The field also makes `admitOrDeferSeam1`
-   return a new `ErrSessionCeilingRefused` sentinel instead of writing the
-   task's `deferred_launch` record and returning `ErrCeilingLaunchDeferred`.
-6. `prepareSessionAttempt` sets `Role`, `ParentSessionID`, and
-   `IsPrimary=false` on the new row. `promoteSessionIfTaskHasNoPrimary`
-   ignores detached sessions. The first turn uses `applyErrandOriginContext`,
-   the counterpart of `applySpawnOriginContext`.
-7. Success moves the row to `launched`; a ceiling refusal leaves it `queued`;
-   a synchronous workspace or profile failure deletes it and returns the
-   typed error. `errand.updated` follows each durable change.
+1. `handleStartErrand` checks the flag and verified caller, rejecting missing,
+   errand, or passthrough callers and Office, ephemeral, configuration,
+   coordinator, and automation tasks with `errand_not_supported`.
+2. `Service.Start` serializes per task and enforces five live errands.
+3. `ProfileResolver` matches ID, then exact name, defaulting to the caller's
+   profile. Passthrough profiles are excluded; executor compatibility uses
+   `ValidateAgentProfileForExecutor`. Profile guidance uses the same filter.
+4. Reserve errand/session, turn, and submission IDs, snapshot the parent's
+   session MCP selections, persist `queued`, publish, and call the launcher
+   with `models.WithReservedLaunchIdentity`.
+5. `LaunchErrandSession` uses `IntentStart`, `ProfileExplicit`, the objective,
+   enabled snapshot definitions, and an internal `Errand` identity. Admission
+   stores selections through `session_mcp.go`. `admitOrDeferSeam1` returns
+   `ErrSessionCeilingRefused` without using the task's `deferred_launch` slot.
+6. Preparation writes role/parent and `IsPrimary=false`; detached sessions
+   cannot be promoted. `applyErrandOriginContext` frames the first prompt.
+7. Success persists `launched`; ceiling refusal retains `queued`; synchronous
+   workspace/profile failure deletes the reservation and returns its typed
+   error. Events follow durable writes.
 
 ### Queued admission
 
@@ -274,18 +267,14 @@ waiters and runs the parent delivery check.
 
 ### Await
 
-The MCP server handler sends `mcp.await_errands` with a random await token and
-runs `emitKeepAlivePings` with `askQuestionKeepAliveInterval`, as
-`askUserQuestionHandler` does. The backend checks that every ID is an errand
-of the caller, registers a parent waiter, and loops: read rows, evaluate the
-mode, or wait for a local notification or the deadline.
-On return it marks each claimed `pending` result `delivered` with route
-`await` and the token in one transaction, then responds. If the MCP request
-context ends first, the server sends `mcp.await_errands_release` with the
-token, returning rows still delivered under it to `pending`. Ceiling-queued
-and `needs_attention` errands do not end an `all` wait. `EndParentAwaits`
-ends every in-flight await of a parent: each returns statuses without result
-text and claims nothing.
+The MCP handler sends `mcp.await_errands` with a random token and runs
+`emitKeepAlivePings` at `askQuestionKeepAliveInterval`. The backend verifies
+parent ownership, registers a waiter, and evaluates rows until the mode or
+deadline is satisfied. Returned pending results are claimed transactionally
+with route `await`. Request abandonment sends `mcp.await_errands_release`,
+returning claims under that token to pending. Queued and `needs_attention`
+errands do not end `all`. `EndParentAwaits` ends the parent's waits with
+statuses only, without claiming results.
 
 ### Errand status block
 
@@ -310,12 +299,15 @@ the token and route `notification` or `turn_context`.
 
 ### Parent turns and delivery
 
-Every parent turn reaches `promptTask`: direct, queued, peer, workflow, CI,
-and recovery prompts. For a parent session it calls `ComposeParentTurn` after
-workflow and plan-mode composition and before delivery admission, prepends
-the block, and records `errand_delivery` on the user message. A rejected
-admission calls `ReleaseTurnClaim(token)`, returning rows still delivered
-under that token to `pending`. No errand state gates a parent prompt.
+`promptTask` composes direct, queued, peer, workflow, CI, and recovery
+prompts after workflow/plan composition and before provider admission.
+Persist the delivery snapshot with the user message before admission;
+a later best-effort token write is insufficient for restart readback.
+Release claims on definite refusal. Fresh-launch retries retain the block
+and report accepted, refused, or uncertain admission through the existing
+`startCreatedSessionOptions` callbacks, as Send now does. Launch return
+success alone is not acceptance; uncertainty must not cause duplicate replay.
+Errand state never gates a parent prompt.
 
 A result that becomes pending during a parent turn stays pending; only an
 await in that turn can claim it. `deliverPending(parent)` runs when a result
@@ -323,14 +315,15 @@ becomes pending, from `OnParentTurnSettled`, and from the ceiling sweep:
 
 1. It does nothing while another parent turn runs or any queue entry, a
    notification included, waits; the next turn takes the results.
-2. Otherwise `ParentDeliverer` admits one notification entry
-   (`QueuedByServer`, empty content, metadata `errand_notification`). A
-   refusal, `queue_full` included, leaves the results pending for the sweep.
-3. With Auto-run on, the existing drain starts it at once; with Auto-run
-   off, it waits. At dispatch, `ComposeParentTurn` carries every result then
-   pending; an entry that finds none is consumed without a turn.
-4. When another turn attaches results, the orchestrator deletes the waiting
-   notification with `DeleteByIDForSession`.
+2. `ParentDeliverer` queues one empty `QueuedByServer` entry with
+   `errand_notification` metadata. Refusal leaves results pending.
+3. Successful admission invokes existing queue readiness/drain logic:
+   Auto-run on wakes an idle parent; off leaves the entry queued. Normal
+   dispatch and Send now both retain notification identity, compose all
+   pending results at dispatch, and consume an empty notification without
+   a provider turn. A newer ordinary prompt keeps its visible text.
+4. A competing parent turn withdraws the waiting notification through the
+   session-scoped queue API after claiming its results.
 
 Before `drainQueuedBeforeWorkflowTransition` in the agent-completed and
 cancelled-turn completion paths, the orchestrator calls
@@ -372,11 +365,12 @@ outstanding errands with `errands_outstanding` before recording any signal.
 | **Stop all errands** | `errand.cancel_all` to `Service.CancelAll`, source `user` | Each live errand as for **Stop**, under the per-task mutex, then one `deliverPending` per parent |
 | Errand session deleted | Session delete hook | Errand row deleted; a `cancelled` result first when outstanding |
 | Parent stopped, failed, or deleted | `StopSession`, terminal transitions, delete | All live errands of the parent cancelled with source `cascade`; pending results `discarded` |
-| A parent turn is cancelled, including during an await | `CancelAgent` and `CancelTurn` call `EndParentAwaits` | Only the turn ends: no errand is cancelled and the await claims nothing |
+| A parent turn is cancelled, including during an await | `CancelAgent` and `CancelTurn` call `EndParentAwaits` and the outstanding settlement guard | Only the turn ends; errands keep running, awaits claim nothing, workflow stays deferred |
+| An errand turn is cancelled | Turn-bound settlement hook | Parent-origin interruption produces a failed result and clears `awaiting_result`; a user-origin turn restores the prior outcome; stale callbacks cannot settle a successor |
 | Task archived or deleted | Archive batch cancellation and `ClearParkedProjectionOnSessionTerminated`; delete cascade | All errands cancelled or removed |
 
-Cancellation is a version-guarded update, so a repeat cancel succeeds without
-change.
+Cancellation is version-guarded and idempotent. Deletion with the flag off
+never queues a notice or result; retained sessions remain workflow-detached.
 
 ## Workflow-detached predicate
 
@@ -404,23 +398,18 @@ while an errand writes to the shared worktree.
 
 ## Prompts
 
-`config/prompts/errand.md` holds the errand context: objective framing, the
-result contract, shared-workspace caution (no reset, checkout, stash, rebase,
-or force operations), and the depth and question limits. It is inserted as a
-trusted `<kandev-system>` block. Parent follow-ups to an errand use an errand
-variant of `wrapAgentMessage` that restates the result contract instead of
-the sibling reply hint.
+`config/prompts/errand.md` supplies a trusted `<kandev-system>` block with
+objective, final-message result contract, no destructive Git operations
+(reset, checkout, stash, rebase, force), and depth/question limits. Parent
+follow-ups use an errand `wrapAgentMessage` variant instead of a sibling
+reply hint.
 
-`kandev-context.md` gains `{delegation_policy_section}` and
-`{errand_tools_section}`. `sysprompt.KandevContextOptions` gains
-`IncludeErrandTools` and `ErrandProfiles` (name, agent, model; at most 20).
-The errand tools section explains the status block and recommends starting
-errands, ending the turn, and continuing when their results arrive with a
-later turn; it reserves `await_errands_kandev` for results needed inside the
-current turn. The tool descriptions agree: `start_errand_kandev` returns at
-once, and `await_errands_kandev` is an optional in-turn join. Without the
-capability the placeholders resolve to the current policy text and to empty,
-so the rendered context stays byte-identical, which a golden test pins.
+`kandev-context.md` uses `{delegation_policy_section}` and
+`{errand_tools_section}`, populated through `KandevContextOptions` fields
+`IncludeErrandTools` and `ErrandProfiles` (at most 20 names/agents/models).
+Guidance and tool descriptions recommend start, end the turn, then continue
+with delivered results; await remains an optional in-turn join. Without the
+capability, golden tests require byte-identical legacy context.
 
 ## Security
 
@@ -449,8 +438,10 @@ REST risk is in the ADR.
   session is `WAITING_FOR_INPUT` with a completed, uncaptured result turn is
   captured. A row whose parent-initiated turn was abandoned by restart or
   stall recovery becomes `failed` with an `interrupted` result. A turn or
-  notification delivery whose token is in no parent message returns to
-  `pending`. Pending results of terminal parents become `discarded`; then
+  notification claim is reconciled against durable admission and message
+  evidence, including direct prompts. Definite non-admission releases the
+  claim; accepted or uncertain admission must not be blindly replayed.
+  Pending results of terminal parents become `discarded`; then
   `deliverPending` runs for every idle parent.
 - **Ordering.** Durable state is written before any local waiter wakes or any
   event publishes.
@@ -478,55 +469,65 @@ session, errand, and parent IDs as fields only.
 
 ## Frontend
 
-- **Types and state.** `TaskSession` (`lib/types/http.ts`) gains `role`,
-  `parent_session_id`, and `waiting_on_errands`; `lib/types/errands.ts`
-  defines `Errand`. A `lib/state/slices/errands` slice stores
-  `byTaskId[taskId][errandId]` with selectors for task errands, errands by
-  parent, live count, and errand by session.
-- **Transport.** `lib/ws/handlers/errands.ts` applies `errand.updated`;
-  `upsertTaskSessionFromEvent` keeps the new session fields.
-  `hooks/domains/session/use-task-errands.ts` loads `errand.list` once per
-  task while the flag is on; `use-errand-actions.ts` sends the other requests.
-- **Tabs.** `runAutoSessionTabEffect` and `useAutoSessionTab` skip sessions
-  with `role === "errand"` while the flag is on. Opening an errand adds or
-  focuses its `session:<id>` panel without calling `session.set_primary`.
-  `session-tab-menu.tsx` hides **Set as Primary** and **Handoff** for errands.
-- **Transcript.** `components/task/chat/messages/kandev/errand-renderers.tsx`
-  registers renderers for `start_errand_kandev` (one row card) and
-  `await_errands_kandev` (a list card with live statuses) in `registry.ts`.
-  `message-renderer.tsx` matches `errand_delivery` metadata and renders one
-  **Errand finished** card per item (title, status, preview, **Open**) below
-  any visible user text. The status block is stripped like any
-  `<kandev-system>` content.
-- **Errand view.** `components/task/chat/errands/errand-header.tsx` renders
-  above the chat for errand sessions with the back link, objective, profile,
-  status, workspace path and branch, and **Stop** while live or
-  **Send result to parent** when eligible, never both.
-- **Chip and panel.** `errands-chip.tsx` (labelled with the live count) and
-  `errands-panel.tsx` mount in `chat-status-bar.tsx` only when the task has
-  errands, following `background-work-chip.tsx`: popover on desktop. The
-  panel footer shows **Stop all errands** while any errand is live.
-- **Composer.** Errand state never disables the parent's composer. Errand
-  views keep the composer MCP explorer, so an idle errand takes added servers
-  like any session.
-- **Task rows.** Kanban card, sidebar row, and Threads row components read
-  `statusSummary.errands`. `thread-session-switcher.tsx` nests errands under
-  their parent.
-- **Copy.** Keys live in `task.json`, `chat.json`, `kanban.json`, and
-  `threads.json` in all seven shipped locales. One `role="status"` region per
-  view announces errand status changes.
+- **State/transport.** Session projections carry role, parent and waiting
+  fields. `lib/types/errands.ts`, the `errands` slice, `errand.updated` and
+  `use-task-errands.ts` own the shared list/live state and reconnect refresh;
+  `use-errand-actions.ts` owns mutations. Mounting multiple surfaces must
+  retain one shared list request. Historical result cards use message
+  snapshots, not today's rows.
+- **Tabs.** `runAutoSessionTabEffect`, `useAutoSessionTab`, and live session
+  adoption skip errands while enabled. Explicit Open focuses `session:<id>`
+  without changing primary ownership. Menus hide Primary/Handoff by role,
+  including while the feature is off.
+- **Transcript.** `messages/kandev/errand-renderers.tsx` registers separate
+  start rows and await lists. `message-renderer.tsx` renders one finished
+  card per `errand_delivery` item below visible user text. Strip system
+  framing; retain each historical message's identity and placement.
+- **Errand view.** `errand-header.tsx` shows parent/back, objective, profile,
+  status, workspace/branch, Stop while live or Send result when eligible.
+  The existing composer supports follow-up and MCP selection.
+- **Chip/panel.** `errands-chip.tsx` in `chat-status-bar.tsx` opens the
+  existing task-wide grouped popover/Drawer with Open and Stop-all actions.
+  `errands-panel.tsx` and `errands-panel-row.tsx` supply shared list content.
+  Errand state never disables the parent's composer.
+- **Task rows.** Board/sidebar/Threads consume `statusSummary.errands`;
+  `thread-session-switcher.tsx` nests sessions beneath parents.
+- **Copy/accessibility.** Use existing locale namespaces and seven shipped
+  locales, keyboard-operable actions and one polite status announcer per view.
+
+### Inline current-errands summary
+
+`errands/errands-inline-summary.tsx` uses `@kandev/ui/collapsible` and the
+bordered shell/count/action hierarchy of `TurnChangedFilesCard`. Todo
+messages use a separate `ExpandableRow`; its clickable `div` and hover-only
+chevron need semantic controls here. Use native React, not rich-output catalog
+interactions.
+
+`TaskChatPanel` supplies a new optional `transcriptTail` React-node prop via
+`MessageListProps` in `message-list-shared.tsx`. `NativeMessageListBody` mounts
+it between `TranscriptMessageItems` and `NativeMessageListFooter`, inside
+`data-chat-content` and its existing resize/scroll owner. Preserve upstream
+`detailActive` and reconciliation; no generic widget registry is needed.
+
+Mount once in eligible parent chats while enabled and task rows exist; hide
+in child chats and empty/off states. Default collapsed, with local expansion
+keyed to task/session. Shared live selectors drive total/live/attention and
+parent groups; Open and task-wide Stop all reuse existing handlers. Reuse
+list/action content, not the overlay wrapper. Keep all groups visible within
+that disclosure so bulk scope matches the chip. No new endpoint, polling or
+per-surface loader. Starts, awaits, results and exact historical diff anchors
+retain their existing renderers; never bind mutable state to an old turn.
 
 ### Phone composition
 
-`mobile-sessions-section.tsx` nests errands under their parent with status.
-Tapping one makes it the active session and renders `errand-header.tsx` in
-its phone form with **Back to parent** and a visible actions menu that holds
-**Stop** while live or **Send result to parent** when eligible. The chip
-opens the panel in a bottom `Drawer`, as `background-work-chip.tsx` does on
-phones, with the list as its only scroll owner and **Stop all errands** in a
-fixed footer.
-**Errand finished** cards use the shared renderer at full width. Touch
-targets are at least 44px through the existing coarse-pointer variants.
+Sessions nest children; Open navigates to full-screen errand chat with visible
+Back and actions. The chip retains its grouped bottom Drawer, one internal
+scroll owner and fixed Stop-all footer. The inline summary stays full-width
+inside the chat, stacks header/actions as needed, and uses the chat scroller
+rather than another overlay or nested scroller. Visible disclosure/Open/bulk
+controls have 44px phone/coarse-pointer targets; desktop stays compact.
+Preserve bottom-follow when enabled and reading position when scrolled up.
+Finished cards fit phone width and the parent composer remains enabled.
 
 ## Release toggle
 

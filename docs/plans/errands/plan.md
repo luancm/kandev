@@ -1,5 +1,6 @@
 ---
 created: 2026-10-23
+updated: 2026-10-27
 status: draft
 requirements:
   - REQ-TASKS-ERRANDS-001
@@ -33,10 +34,11 @@ enabled composer, every turn it starts with errands in flight carries a
 compact errand status block, and each result arrives once, through an
 optional await, attached to the parent's next turn, or in a notification
 turn. An errand starts with a snapshot of its parent's session-level MCP
-servers. Nine work orders deliver errands in seven working layers behind
-`features.errands`, which stays off in every shipped profile. Isolation lands
-before any errand can start, and agents see the tools only after the service
-underneath them is complete.
+servers. The original work orders established the foundation and session UI.
+The continuation below closes delivery and lifecycle gaps, finishes task-row
+indicators, and proves an opt-in daily-use delivery. `features.errands` stays
+off in every shipped profile; no upstream proposal or publication is part of
+this planning turn.
 
 Behavior is defined by the
 [requirements](../../specs/tasks/requirements/errands.md), the
@@ -60,49 +62,13 @@ The ways an agent can split work today, from the ADR's concept table:
 Each diagram summarizes the linked requirements and system design, which
 remain authoritative.
 
-### 1. Work-order dependencies by wave
+### 1. Continuation dependencies
 
-Read left to right: each box is a wave, and an arrow points from a work order
-to one that depends on it. Waves 2 and 5 hold parallel-safe pairs.
-
-```mermaid
-flowchart LR
-    subgraph wave1 [Wave 1]
-        t01["01 Flag and persistence"]
-    end
-    subgraph wave2 [Wave 2]
-        t02["02 Workflow isolation"]
-        t03["03 Frontend data layer"]
-    end
-    subgraph wave3 [Wave 3]
-        t04["04 Launch and admission"]
-    end
-    subgraph wave4 [Wave 4]
-        t05["05 Results and delivery"]
-    end
-    subgraph wave5 [Wave 5]
-        t06["06 MCP surface"]
-        t07["07 Task summary indicators"]
-    end
-    subgraph wave6 [Wave 6]
-        t08["08 Errand UI"]
-    end
-    subgraph wave7 [Wave 7]
-        t09["09 E2E and docs"]
-    end
-    t01 --> t02
-    t01 --> t03
-    t01 --> t04
-    t02 --> t04
-    t04 --> t05
-    t05 --> t06
-    t05 --> t07
-    t03 --> t07
-    t03 --> t08
-    t06 --> t08
-    t07 --> t09
-    t08 --> t09
-```
+Historical foundations 01-06 and 08 are recorded done. Execute the remaining
+work sequentially: **00 upstream baseline -> 10 delivery snapshots -> 11
+notification dispatch -> 12 lifecycle convergence -> 07 task indicators ->
+13 inline chat summary -> 09 browser proof and operating guide**. The work-order table below is the
+current dependency manifest; historical wave numbers do not authorize workers.
 
 ### 2. Errand status lifecycle
 
@@ -301,114 +267,237 @@ flowchart LR
 
 ## Work orders
 
-Area: **Backend** is Go only, **Frontend** is web only, **Both** touches
-each. Requirement numbers abbreviate `REQ-TASKS-ERRANDS-<NNN>`.
+Area: Backend is Go, Frontend is web, Both spans the contract. Requirement
+numbers abbreviate `REQ-TASKS-ERRANDS-<NNN>`. A completed historical work order
+is not acceptance of a newly found gap; the continuation owns those deltas.
 
-| Wave | ID | Title | Depends on | Area | Requirements |
+| Wave | ID | Outcome | Depends on | Area | Requirements |
 | --- | --- | --- | --- | --- | --- |
-| 1 | [`01-flag-and-persistence`](task-01-flag-and-persistence.md) | Add the errands flag, session role, and errand persistence | None | Both | 001, 012 |
-| 2 | [`02-workflow-isolation`](task-02-workflow-isolation.md) | Detach errand sessions from workflow, primary, and routing | 01 | Backend | 005, 012 |
-| 2 | [`03-frontend-data-layer`](task-03-frontend-data-layer.md) | Add the errands frontend data layer and tab filter | 01 | Frontend | 010, 012 |
-| 3 | [`04-errand-launch-and-admission`](task-04-errand-launch-and-admission.md) | Launch, admit, track, and cancel errands | 01, 02 | Backend | 001, 002, 007, 008, 013 |
-| 4 | [`05-errand-results-and-delivery`](task-05-errand-results-and-delivery.md) | Capture errand results and deliver them to a conversational parent | 04 | Backend | 003, 004, 006, 007, 013 |
-| 5 | [`06-errand-mcp-surface`](task-06-errand-mcp-surface.md) | Expose errands to agents through MCP and prompts | 05 | Backend | 001, 002, 004, 006, 009, 012 |
-| 5 | [`07-task-summary-indicators`](task-07-task-summary-indicators.md) | Show errand counts and waiting status on task rows | 03, 05 | Both | 006, 010 |
-| 6 | [`08-errand-ui`](task-08-errand-ui.md) | Build the errand UI for desktop and phone | 03, 06 | Frontend | 003, 005, 007, 010, 011 |
-| 7 | [`09-e2e-and-docs`](task-09-e2e-and-docs.md) | Add errand E2E scenarios, public docs, and harness notes | 07, 08 | Both | 003, 004, 005, 006, 007, 010, 011 |
-
-Dependency order and parallel-safe candidates:
-
-| Wave | Layer | Work orders | Why this order |
-| --- | --- | --- | --- |
-| 1 | Flag, session role, and errand persistence | 01 | Schema, DTO, and flag contract |
-| 2 | Workflow and ownership isolation for errand-role sessions, in parallel with the frontend data layer | 02, 03 | Backend isolation and frontend data layer touch disjoint files |
-| 3 | Errand launch with the parent's MCP snapshot, admission, status, and cancellation | 04 | Needs isolation before any errand session exists |
-| 4 | Results, status block, delivery routes, parent workflow deferral, and restart reconciliation | 05 | Shares the service and orchestrator hooks with 04 |
-| 5 | The agent-facing MCP surface and prompts, in parallel with the task summary indicators | 06, 07 | MCP and prompts versus status summary and row indicators; disjoint files and locale namespaces |
-| 6 | Errand UI on desktop and phone | 08 | Needs the tool names from 06 and the slice from 03 |
-| 7 | End-to-end scenarios, public documentation, and harness notes | 09 | Needs the complete feature |
+| 1 | [01](task-01-flag-and-persistence.md) | Flag, immutable role and persistence (done) | None | Both | 001, 012 |
+| 2 | [02](task-02-workflow-isolation.md) | Workflow/primary/routing isolation (done) | 01 | Backend | 005, 012 |
+| 2 | [03](task-03-frontend-data-layer.md) | Store, transport and tab filtering (done) | 01 | Frontend | 010, 012 |
+| 3 | [04](task-04-errand-launch-and-admission.md) | Launch, queue, MCP snapshot and cascades (done) | 01, 02 | Backend | 001, 002, 007, 008, 013 |
+| 4 | [05](task-05-errand-results-and-delivery.md) | Initial results/delivery (historically done) | 04 | Backend | 003, 004, 006, 007, 013 |
+| 5 | [06](task-06-errand-mcp-surface.md) | Parent tools, child catalog and prompts (done) | 05 | Backend | 001, 002, 004, 006, 009, 012 |
+| 6 | [08](task-08-errand-ui.md) | Desktop/phone session UI (component-tested) | 03, 06 | Frontend | 003, 005, 007, 010, 011 |
+| 8 | [00](task-00-upstream-baseline.md) | Integrate current canonical upstream (done) | None | Both | 005, 009, 012 |
+| 9 | [10](task-10-delivery-snapshots.md) | Persist result-card snapshots and recover claims | 00, 05 | Both | 003, 004, 010 |
+| 10 | [11](task-11-notification-dispatch.md) | Wake parent, Send now and safe fallback acceptance | 10 | Backend | 004, 006, 007 |
+| 11 | [12](task-12-lifecycle-convergence.md) | Cancellation, disabled paths and live convergence | 11 | Both | 002, 003, 005, 006, 007, 008, 012, 013 |
+| 12 | [07](task-07-task-summary-indicators.md) | Finish board/sidebar/Threads indicators and nesting | 03, 05, 12 | Frontend | 006, 010 |
+| 13 | [13](task-13-inline-chat-summary.md) | Interactive current-Errands card inside chat | 07, 08 | Frontend | 010, 011 |
+| 14 | [09](task-09-e2e-and-docs.md) | Desktop/phone E2E, operating guide and pilot evidence | 13, 08 | Both | 003, 004, 005, 006, 007, 008, 009, 010, 011, 012 |
 
 Progress:
 
-- [x] [Task 01: Add the errands flag, session role, and errand persistence](task-01-flag-and-persistence.md)
-- [x] [Task 02: Detach errand sessions from workflow, primary, and routing](task-02-workflow-isolation.md)
-- [x] [Task 03: Add the errands frontend data layer and tab filter](task-03-frontend-data-layer.md)
-- [x] [Task 04: Launch, admit, track, and cancel errands](task-04-errand-launch-and-admission.md)
-- [x] [Task 05: Capture errand results and deliver them to a conversational parent](task-05-errand-results-and-delivery.md)
-- [x] [Task 06: Expose errands to agents through MCP and prompts](task-06-errand-mcp-surface.md)
-- [ ] [Task 07: Show errand counts and waiting status on task rows](task-07-task-summary-indicators.md)
-- [x] [Task 08: Build the errand UI for desktop and phone](task-08-errand-ui.md)
-- [ ] [Task 09: Add errand E2E scenarios, public docs, and harness notes](task-09-e2e-and-docs.md)
+- [x] Tasks 01-06 and 08: historical implementation/results retained.
+- [x] Task 00: integrated canonical upstream baseline f150e6a.
+- [x] Task 10: durable delivery envelope and recovery, implementation accepted.
+- [x] Task 11: notification wake, Send now, retry acceptance, implementation accepted.
+- [x] Task 12: cancellation, kill switch, authorization and state convergence, SQLite implementation checks accepted; PostgreSQL readiness unproved.
+- [ ] Task 07: backend portion exists; frontend remains in progress.
+- [ ] Task 13: inline current-Errands summary using native chat card patterns.
+- [ ] Task 09: deterministic browser journeys, docs and personal pilot.
 
-## Implementation state
+## Continuation checkpoint (2026-10-27)
 
-This section records where the implementation stands on the
-`feat/errands` branch. It is a snapshot. Each work order's own Results section
-has the detailed verification. The branch is local and not pushed.
+### Outcome and scope
 
-Branch `feat/errands` holds 50 commits above the upstream base `b6263ea4c3`.
-Commit history was rewritten once to remove an agent co-author trailer; the
-file contents were verified identical before and after.
+Deliver the accepted v1 for the user's daily work before considering an
+upstream contribution. An agent can start errands, end its turn, remain
+conversational, receive one useful result per delegated turn, and let the
+user inspect, steer or stop that work on desktop and phone. Keep the
+accepted depth-one/shared-workspace model and five-live cap. Do not add
+UI-created errands, isolated worktrees, nested delegation, new task filters,
+a phone per-row delete menu, or a new queue architecture.
 
-### Status by work order
+The task system remains the sole spec owner. Existing `REQ-TASKS-ERRANDS-001`
+through `013` and their AC IDs apply without renumbering. Requirements and
+system design remain draft until implementation and their work-order checks
+pass. Findings below identify missing implementation of the existing
+contract; they do not redefine accidental behavior as intended behavior.
 
-| Work order | Status | Notes |
+### Inline chat summary (UI-11)
+
+The user requested reuse of the interactive chat surfaces shown by changed
+files and agent todo lists. Add task 13 before browser signoff. This is a
+proposed additional current-state card, separate from the existing historical
+start/await/result cards; the exclusion on regrouping consecutive start calls
+and the absence of a Dockview Errands panel both remain.
+
+The screenshot is `TurnChangedFilesCard`
+(`apps/web/components/task/chat/turn-changed-files-card.tsx`), anchored after
+an exact assistant message. Todo uses `messages/todo-message.tsx` with a
+separate `ExpandableRow`. They do not share a generic widget framework.
+Reuse their bordered shell, count/action hierarchy and disclosure pattern;
+use `@kandev/ui/collapsible` for semantic controls rather than copying a
+clickable `div` or hover-only chevron. Lifecycle controls remain native React,
+not agent-authored rich-output catalog actions.
+
+New `errands/errands-inline-summary.tsx` renders once in each eligible normal
+parent chat, task-scoped like the existing chip. `TaskChatPanel` supplies a
+new optional `transcriptTail` through `MessageListProps` in
+`message-list-shared.tsx`; `NativeMessageListBody` places it between
+`TranscriptMessageItems` and `NativeMessageListFooter`, inside the observed
+chat content. Preserve upstream `detailActive`, exact diff anchors and
+scroll reconciliation. Do not attach changing task state to an old turn.
+
+- UI-11 desktop, collapsed: visible disclosure, total/live counts, attention,
+  and independent task-wide Stop all while any errand is live. Default
+  collapsed; expansion is local to the viewed task/session.
+- UI-11 desktop, expanded: parent headings and existing child
+  title/profile/status/Open rows. Reuse grouped list/action content from
+  `errands-panel.tsx`/`errands-panel-row.tsx`, not their overlay shell. Show
+  every affected parent group so task-wide Stop all has honest scope.
+- UI-11 phone: full-width card with stacked header/actions when needed;
+  visible 44px disclosure/Open/bulk targets. Expansion uses the existing
+  chat scroller with no nested scroller or extra overlay. Open navigates to
+  full-screen errand chat and existing Back returns to the parent.
+- All states: shared accepted list/live selectors and reconnect path, no
+  extra per-panel request or polling; empty/off/child views omit the card.
+  Counts update while collapsed. Preserve reader position when scrolled up,
+  existing bottom-follow when active, and the single status announcer.
+  Keep the chip/popover/Drawer available while reading elsewhere.
+
+`AC-TASKS-ERRANDS-010.10` and `AC-TASKS-ERRANDS-011.6` define this new outcome;
+existing IDs retain their meanings. Task 13 owns component/slot/i18n tests;
+09 adds real desktop/phone disclosure, Open/back, Stop-all, scroll, reload
+and sibling diff/todo coexistence proof. No application code is changed in
+this planning revision.
+
+### Canonical base and branch evidence
+
+The current task branch is `feature/plan-errands-first-d-424`, created from
+`feat/errands`; HEAD equals published `origin/feat/errands` at
+`19df9464a303462fab5c46b4fa80f1d0d1ca9333`. The fetched canonical base is
+`upstream/main` at `7f5e4d2115f0d16e55ba4fb1149da31019a6fab1`, with common
+ancestor `b6263ea4c3165c86ec60e29e798475ad552ad6ce`: 23 upstream-only commits
+and 51 feature-only commits. `origin` is the user's fork, `upstream` is
+`kdlbs/kandev`. Do not substitute the fork's `origin/main` for the base.
+
+Read-only merge analysis found eight conflicts, all `chat.json` catalogs:
+feature Errands keys and upstream Quick Chat creation keys must both survive.
+MCP and runtime paths merge textually but need semantic checks. Planning
+fetched refs and inspected a merge tree; it did not merge, rebase, rewrite
+history, or change product/test files. Task 00 owns integration and refreshed
+ancestry evidence; repeat it before any later contribution if upstream moves.
+This revision refreshed upstream by three commits, including interrupted
+terminal settlement recovery (`c84ac37e34`); 12 preserves that authenticated
+terminal evidence boundary during errand cancellation/restart reconciliation.
+
+### Implemented versus remaining
+
+| Area | What exists | Remaining completion |
 | --- | --- | --- |
-| 01 Flag, session role, persistence | Done | Flag `features.errands`, off in every profile |
-| 02 Workflow isolation | Done | Errand sessions stay out of workflow, primary and default routing |
-| 03 Frontend data layer | Done | Types, store slice, live updates, automatic tab filter |
-| 04 Launch and admission | Done | Start, queue at the 5-live limit, cancel, cascades |
-| 05 Results and delivery | Done, with known gaps | Capture, await, status block, delivery, restart reconcile |
-| 06 Agent MCP surface | Done | `start_errand_kandev`, `await_errands_kandev`, `cancel_errand_kandev`, errand prompt, errand MCP mode |
-| 07 Task-row indicators | Partly done | Backend status-summary counts committed (`95031bfc6a`); board, sidebar and Threads indicators not started |
-| 08 Errand UI | Done | Transcript cards, header, chip and panel, phone layout, copy in seven locales |
-| 09 E2E, public docs, harness notes | Not started | |
+| Identity, persistence, flag | Reserved child-session role/parent, durable rows, all-off restart-required flag | Preserve through upstream merge; PostgreSQL execution is unproved |
+| Launch and authority | Explicit profiles, MCP snapshots, cap, ceiling queue, fixed child catalog, mutation guards | Enforced-auth cancellation of a queued reserved ID (12) |
+| Results and parent | Capture, await, context composition, claims, outstanding workflow guard | Snapshot/readback (10), actual notification wake/Send now/fallback acceptance (11), cancellation guard (12) |
+| Session UI | Cards, open/back, header/composer, chip/popover/drawer, phone nesting, localized copy | Real result-card data (10); multi-client removal/waiting updates (12); inline current summary (13); browser proof (09) |
+| Task summaries | Backend `live`/`waiting` projection at `95031bfc6a` | Types, board/sidebar/desktop and phone Threads indicators/nesting (07) |
+| Delivery evidence | Historical unit/component results | No Errands E2E scenarios/specs, public guidance or real-provider pilot yet (09) |
 
-### How to try the branch
+### Confirmed gaps and ownership
 
-Enable the feature with **Settings > System > Feature Toggles**, or set
-`KANDEV_FEATURES_ERRANDS=true` before starting Kandev. The flag requires a
-restart. It stays off in every shipped profile, so nothing changes for users
-who do not enable it.
+| Evidence at the feature snapshot | Consequence | Owner |
+| --- | --- | --- |
+| `orchestrator/errand_turn_composition.go:84` writes a route string; frontend `errand-parse.ts:170` requires an object with `items`; direct nil-entry prompts are skipped | Real deliveries cannot render finished cards; fixture-only tests hide the mismatch | 10 |
+| `errands/reconcile.go:119` checks notification claims only; direct token persistence is late | Crash windows can lose direct-turn results; receipt/readback must distinguish accepted, refused and uncertain | 10 |
+| `orchestrator/errand_parent_deliverer.go:73` only enqueues/publishes | An idle parent's notification has no automatic dispatch request | 11 |
+| `orchestrator/queue_send_now.go:755` omits notification options | Send now loses notification semantics and empty-entry suppression | 11 |
+| Fresh fallback returns success without propagating `onInitialPromptAccepted` to the outer claim | Merely retaining the block risks duplicate delivery after claim release | 11 |
+| `CancelTurn`/`CancelAgent` do not settle the child result; generic parent cancel bypasses the outstanding guard | Child may remain outstanding indefinitely or parent workflow may complete early | 12 |
+| Disabled `PreserveCancellationNotice` admits a prepared prompt during deletion | Kill switch can still deliver result text | 12 |
+| Gateway authorization expects a session row for queued cancellation | Authorized users cannot stop one queued errand before launch | 12 |
+| Task-service cancel/recovery omits waiting state; remote deletion leaves the errand store row | Other clients can show stale state until reload | 12 |
+| `writeReconciled` has no required reconciliation log; delivery label set is untested | Operational evidence is incomplete | 12 |
+| Frontend summary type/surfaces lack errands; Threads switcher is flat | Required task-level visibility is absent | 07 |
+| No mock scenario binds returned errand IDs; no browser specs exist | End-to-end delivery, responsive layout and real provider behavior are unproved | 09 |
 
-### Known gaps
+Paths above are under `apps/backend/internal/` or `apps/web/` as applicable;
+line numbers are the analysis snapshot, not permanent anchors. Three native
+read-only investigators covered backend, frontend, and delivery readiness.
+All artifact ownership and integration decisions stay in this primary session.
+No implementation worker was launched or authorized by these work-order waves.
 
-These are recorded in the work order Results sections and are not fixed:
+### First-delivery acceptance
 
-1. A crash right after a direct prompt's turn can lose that result, because the
-   turn's delivery token is recorded after the user message is written (task 05).
-2. The send-now path with a queued notification entry is not handled (task 05).
-3. After a 529 retry, the status block can be dropped on the fresh-launch
-   fallback. A fix needs a fallback acceptance marker first, or results would be
-   delivered twice (task 05).
-4. Task-service session events for cancel and recovery do not yet carry
-   `waiting_on_errands` (task 05).
-5. Errand deletion is not broadcast to other open browsers. They keep the row
-   until the next load (task 08).
-6. Phone sessions drawer has no per-row delete for errands (task 08).
-7. The UI has not been checked in a live browser. Only component tests and the
-   documented contract back it so far.
+- All seven continuation work orders pass their own checks. Historical results
+  do not substitute for changed-path evidence after the upstream merge.
+- Real persisted delivery messages render finished cards live and after reload,
+  with no lost/duplicate text across direct, await, notification, retry,
+  refusal, restart, and user cancellation boundaries.
+- Parent remains promptable; only its first completion with no outstanding
+  work advances workflow. Cancel a turn, stop a child, and stop a parent keep
+  their distinct semantics. Queued cancellation is authorized correctly.
+- Task indicators and phone/desktop session navigation follow UI-01 through
+  UI-11; native subagent counts remain distinct. Disabled mode has no new
+  tools, prompts, delivery, waiting indicators, or mutation side effects, and
+  retained errand sessions stay viewable and detached.
+- Managed production-build E2E proves the desktop and phone journeys. A
+  selected installed structured profile/executor then completes the pilot
+  checklist in task 09; record the exact environment and evidence, without
+  claiming all providers or executors were certified.
+- Shipped defaults remain off. Opt-in enable/restart and disable/restart are
+  documented and tested. Any missing operator-run pilot evidence remains an
+  explicit release condition; it is not silently waived.
 
-### Remaining work
+### Ownership and handoff
 
-- Task 07: frontend indicators on the board, sidebar and Threads, then tests and
-  i18n in seven locales.
-- Task 09: desktop and phone end-to-end scenarios, public docs, harness notes.
-- Full verification, promote the requirements and system design from draft to
-  active, mark this plan implemented, security review of the branch, push
-  `feat/errands` to the fork.
+The user explicitly authorized implementation of the saved package on
+2026-10-27 and selected Simple Dev as the substitute for the unavailable
+Specialist workflow. Persistent children inherit the current task worktree
+and profiles. Execute sequentially with one active writer: baseline (00),
+delivery/lifecycle reliability (10, 11, 12), frontend visibility (07, 13),
+then browser proof, docs and pilot evidence (09). The primary session owns
+this manifest, the live task plan, dependency release and integration
+decisions; each child owns only its assigned work orders and source files.
+Reuse the completed foundations and retain all reviewed design changes.
 
-### Pre-existing test failures
+The user explicitly requested recreating the three not-started downstream subtasks under configured Lunaldinho profile `188db592-1c5e-45e4-bb53-d84e6997f191` (GPT 6 Luna, max reasoning). The replacement owners are reliability `cff83e74-8dd3-40b7-87a5-14898f49e9d7` (10 -> 11 -> 12), frontend `96bfe4e1-2d06-4acb-a95c-f03e75dce6d1` (07 -> 13), and browser/docs/pilot `962d46d3-c40a-4549-ac03-3519c4fc0b38` (09), with verified serial predecessor edges from baseline through these owners. Their complete briefs and live plans preserve scope, exact checks and shared-worktree ownership. All replacements are held in Todo with automatic starts disabled; the superseded tasks are archived. Baseline remains untouched as the sole writer. Use the live plan's current replacement registry for future releases; prior task/session model-override records are historical.
 
-On this macOS machine, the following fail identically on the untouched base
-`b6263ea4c3`, so they are not caused by this branch: about 108 non-errand Go
-tests (workspace relocation, archive, checkout, Git, terminal), six
-`WorkspaceSource` materializer tests in `backendapp`, eight orchestrator
-session-open and relocation tests, and two web tests
-(`lib/state/slices/comments/persistence.test.ts` and
-`message-favorites/favorites-store.test.ts`).
+The user explicitly authorized the local upstream merge and continuation. Task 00 is done at merge commit `69c190e0785bb21d0b750297125bcd9ef5ec07db`, with canonical upstream `f150e6accd66c9cecdadb56d481180ebc9f75c7f` verified as an ancestor. Normal hooks passed without bypass, all reviewed design documents remain outside that commit, and baseline source ownership is released. The primary may now release only the Lunaldinho reliability owner; frontend and browser/docs/pilot stay held for their serial predecessor handoffs. Pushes, PR publication, unrelated commits, shipped-default changes and live-instance mutation remain excluded. Children must not signal completion into Simple Dev's Delivery step or redelegate. Child IDs,
+launch receipts, exact branch/head and the next decision are recorded in the
+live task plan for task `29d30fd5-4243-4b3a-99b5-2a76931fa7ef`.
 
-## Decisions to review
+Integration checkpoint, 2026-10-27 16:27 UTC: return the parent to Coordinate. Baseline 00 remains the sole running writer; its final verification and stopped-writer handoff are pending. HEAD remains `19df9464a303462fab5c46b4fa80f1d0d1ca9333`; the prepared merge targets `f150e6accd66c9cecdadb56d481180ebc9f75c7f`, with eight locale conflicts still present at inspection. The 799 staged upstream paths belong to baseline integration; the eight unstaged and five untracked design documents are expected. No unowned source edits were identified. The ancestor check returns 1, so 00 cannot be marked done. No linked change request or matching branch PR exists on upstream or the fork. Downstream dependency edges are independently confirmed through the related-task API. Reliability has one CREATED session and browser/docs/pilot has two CREATED sessions despite the earlier zero-session record; none is RUNNING, and none has a writer grant. Coordinate must reconcile these inactive sessions before releasing existing children, keep successors held until the concrete baseline handoff and merge boundary are resolved, and retain all publication exclusions. No product, browser, provider or PostgreSQL completion is established by this inspection.
+
+### Execution sizing update (2026-10-27)
+
+The user requested smaller, faster subtasks after the reliability child ran for over an hour. Keep that active writer's current assignment intact and inspect its final stopped-writer handoff; at the observed checkpoint, its Results report 10 completed, 11 in_progress and 12 pending. Do not duplicate or take over its source work. After that handoff, reconcile actual remaining scope and assign one independently verifiable outcome with its focused checks per child, aiming for roughly 20-40 minutes of active work while allowing builds/tests to run to completion. Any remaining reliability orders must be separate packets rather than another 10-12 batch.
+
+The held frontend reservation must be rebriefed before launch: first shared summary plus board/sidebar indicators (07A), then a fresh desktop/phone Threads packet (07B), then the inline card and transcript integration (13). Keep shared projection as a dependency and preserve the reviewed desktop/phone UI outcomes; 07 is done only after both packets and its original remaining checks pass. The held browser/docs reservation must similarly be narrowed to mock scenarios first, followed by separate desktop E2E, phone E2E, docs/guidance and selected-provider pilot jobs. Keep the saved acceptance criteria and exact verification commands assigned across these packets; this changes execution granularity, not the product contract or signoff bar. Do not create speculative jobs or release more than one writer.
+
+Each future brief needs one outcome, owned files, exact relevant acceptance IDs/commands, concise predecessor evidence and a stop condition. At a completed boundary, update the child's live plan and return a compact handoff before adjacent work grows the context. Read only owning contract sections and scoped guidance, avoid repeating baseline installation/verification, retain raw logs in scratch files, and do not preload historical coordination. The compact parent live plan is current; [coordination history](coordination-history.md) preserves the prior full record and receipts for selective lookup. The two held reservation plans now prohibit executing their old bundled briefs without narrowing them first.
+
+### Evidence limits
+
+Reliability implementation accepted, 2026-10-28: primary inspected 10/11 Results and final 12A-E receipts/explicit stopped-process handoffs. All saved commands have passing outcomes for available SQLite/frontend execution, including the exact native-recovery selector across four packages and root whitespace check. Orders 10/11/12 are normalized to done for implementation; this releases packet 07A only. PostgreSQL native-terminal proof, restart binding, retention/notice and unpublished-turn tests were skipped without a DSN and remain an explicit readiness gate, never passes. This host has no Docker, Podman or PostgreSQL binaries. Provider/browser/pilot signoff and broader support claims remain unaccepted. Task09's pilot boundary must preserve the exact PostgreSQL skip inventory in `.kandev/diagnostics/errands-12e-session-93aa2d1e/`; no live instance or new database was touched.
+
+Packet 12D accepted, 2026-10-28: primary inspected `.kandev/diagnostics/errands-12d-session-f38e1a99/12d-receipts.txt` and the explicit stopped-writer handoff. Focused observability TDD, final errands race, changed-Go lint and focused whitespace checks passed. Structured start/admission/delivery/reconciliation logs follow durable success and all three metric label sets are bounded. Next packet 12E is source-read-only validation of the remaining saved native-recovery selector and order12 command-evidence reconciliation; failures return to primary rather than authorizing a recovery redesign. Full order12 acceptance and presentation/browser release remain pending. Fresh remote upstream/main is `8a9c891c25152fbee5c705429bc0da26e4989355`; the integrated/local comparison base remains f150e6a with no new merge.
+
+Packet 12C accepted, 2026-10-28: primary inspected receipts at `.kandev/diagnostics/errands-12c-session-8ef8a553/commands-and-exits.txt`, the removal-state implementation and explicit writer/process release. Saved backend and frontend checks pass (120 tests across six frontend files), reconnect coverage passes, changed Go/TypeScript lint passes and final typecheck passes with `NODE_OPTIONS=--max-old-space-size=8192`; earlier default/4 GiB typechecks exhausted memory. Removed-ID tombstones prevent late list/live resurrection and clear with task errand state; their count can grow with deletions while a long-lived task stays retained, a recorded operational limitation. Next packet 12D owns observability/logs/bounded labels only; the remaining saved native-recovery checks get a separate validation handoff. No presentation/browser release or full order12 acceptance yet.
+
+Packet 12B accepted, 2026-10-28: primary inspected `.kandev/diagnostics/errands-12b-session-1973b8a0/commands-and-exits.txt` and accepted the owner's explicit stopped-writer handoff. Final orchestrator, task/gateway, backendapp authorization and runtimeflag/status selectors, changed-Go lint and tracked/untracked whitespace checks passed; unchanged errands package race evidence carries forward from 12A. Next is a fresh 12C packet for waiting/removal client convergence only. Observability, native-recovery evidence and final order acceptance remain pending; frontend presentation and browser reservations stay held.
+
+Packet 12A accepted, 2026-10-28: primary verified the saved exact command/exit receipts for the orchestrator cancellation selector, errands race suite, changed-Go lint and tracked/untracked whitespace checks. The validation owner released all writes/processes and changed no source. Its logs/receipts remain under `.kandev/diagnostics/errands-12a-recovery-session-f3578a9e/`. Rebrief the existing reliability task into a fresh 12B session for Acceptance 2 only (disabled/enabled deletion notices and queued reserved-ID authorization). Keep order 12 in_progress and all frontend/browser successors held. Remote upstream/main advanced to `fb4c2bc3ef98da2fc303fe05cb144bcd6c167d58`; integrated/local comparison base is still `f150e6accd66c9cecdadb56d481180ebc9f75c7f`, with no additional merge authorized by this handoff.
+
+Post-restart checkpoint, 2026-10-28: all code edits survived, no test/lint process remains, and the three earlier reliability sessions are FAILED. Primary's packet 12A changes and pre-interruption orchestrator pass are recorded in task 12 Results; the interrupted race run is not a pass and shared-memory evidence was lost. Fresh configured Lunaldinho session `f3578a9e-b0ca-45c1-97c8-c695b3d6acfd` was dispatched on the existing reliability task for 12A validation only. Preserve all edits and retain new logs/exit receipts in ignored workspace diagnostics. Keep the rest of order 12 and all frontend/browser successors held until accepted evidence and stopped-writer handoff.
+
+Recovery dispatch, 2026-10-27 21:05 UTC: both earlier reliability sessions are FAILED and no child processes were observed. Backend diagnostics identify the fresh-start failure as a delivery journal open returning no space left on device; current host capacity is 26 GB free with ample inodes. Original-session resume also reports unknown restore failure. The primary rebriefed the existing reliability task to packet 12A, cancellation semantics only, and reassigned its sole writer lease to fresh Lunaldinho session `a40f4053-67ab-43f5-a0da-dca5fa2b1557` (returned STARTING). Its scope is order 12 Acceptance 1, the errands race and orchestrator cancellation selectors, and changed-file lint. Preserve all partial edits; disabled/queued authorization, client convergence and remaining verification stay in later packets. Dispatch does not accept orders 10/11/12 or release successors.
+
+Resumed coordination checkpoint, 2026-10-27 20:08 UTC: orders 10 and 11 report completed with focused passing checks; order 12 is in_progress with Pending Results and partial source edits. These remain owner claims awaiting acceptance. The reliability session was observed WAITING_FOR_INPUT; a queued checkpoint/handoff request failed because Kandev could not start the existing agent session. No new session or successor was launched. A one-shot process listing found no test/lint process, but no authoritative writer-release handoff exists. Keep successors held and preserve all edits until owner recovery or an explicit stopped-writer handoff resolves this gate. No primary product changes or tests ran during this inspection.
+
+Baseline handoff inspected, 2026-10-27 16:58 UTC: the owner has stopped all launched processes and released source writes. The prepared merge has zero conflicts and 807 staged integration paths matching the handoff inventory; none of the 13 reviewed design documents is staged. Focused MCP, launch/admission, recovery, configuration, 169 frontend tests, locale/i18n and whitespace checks pass with the environment adjustments recorded in task 00. Raw port-alias config failures reproduce on exact upstream; the successful merged rerun unsets only those inherited aliases. The initial interrupted compiler command passed on retry with GOGC=50, with its interruption cause left unestablished. Task 00 remains in_progress because HEAD is unchanged and upstream ancestry fails. The primary is presenting the now-concrete local merge-commit checkpoint required by the existing commit exclusion; all new Lunaldinho owners stay held until that decision and a final predecessor-state check.
+
+No backend, frontend or browser product tests ran during planning. Frontend
+`node_modules` is absent in this new worktree. Original macOS baseline
+failures and rewritten historical commit IDs remain in old work-order Results;
+they are historical records, not current Linux waivers. PostgreSQL tests have
+only recorded skips without `KANDEV_TEST_POSTGRES_DSN`; run them before a
+PostgreSQL pilot or broader support claim. Shared-worktree writes and
+profile-granted shell/REST authority remain the accepted v1 residual risks.
+
+## Recorded design boundaries
 
 | Topic | Decision |
 | --- | --- |
@@ -422,8 +511,8 @@ session-open and relocation tests, and two web tests
 | Await | Kept as an optional in-turn join; prompts recommend ending the turn and being notified. |
 | MCP servers | An errand inherits a snapshot of its parent's session-level MCP selections at start, on top of its own profile, task, and repository selections. Later parent changes do not propagate; the user can add servers from the errand's composer. Inherited servers never widen the Kandev tool surface. |
 | Transcript grouping | No grouped transcript block for consecutive start calls. Each start renders its own row card, and the await card lists the group. |
-| Desktop errand list | No dockview Errands panel. Desktop uses the chip popover. |
-| Work-order split | The draft plan proposed eight work orders in five waves. The service was split into launch (04) and delivery (05) so each work order stays verifiable in one pass, giving nine work orders in seven waves. |
+| Desktop errand list | No Dockview Errands panel. Retain the chip popover and add the current-state inline card through 13. |
+| Continuation split | Keep foundations; 00 integrates upstream, 10 fixes snapshots/readback, 11 dispatch/acceptance, 12 lifecycle convergence, 07 row metadata, 13 inline summary, then 09 signoff. |
 
 ## Risks
 
@@ -437,9 +526,11 @@ session-open and relocation tests, and two web tests
 | Inherited MCP snapshot | 04 | A definition disabled after the parent selected it would fail `Replace`; the launcher keeps only still-enabled definitions, and a queued errand reuses its stored snapshot. |
 | Shared worktree | 06 (prompt) | Parent and errands can write the same files. Prompt guidance and co-residency counters are the only mitigation in v1. |
 | Completion handler complexity | 02, 05 | The agent-completed and cancelled-turn completion paths already have many branches; tasks 02 and 05 must add the detached and outstanding branches without reordering clarification, pending-move, and drain behavior. |
-| Spec size | All | The requirement and system-design files are within about 150 bytes of their 20 KiB and 32 KiB limits. Further growth needs a split by contract boundary first. |
+| Spec size | All | Requirements remain near the 20 KiB limit. Design continuation details replace redundant prose; do not raise limits or add exceptions. Split by contract boundary if further growth is necessary. |
 
-Upstream pull requests to re-check:
+Upstream watchpoints, checked open and unmerged on 2026-10-27 with `gh`:
+these are not delivery prerequisites. Refresh their status before touching the
+listed contract and before a future upstream proposal.
 
 | Pull request | Topic | Why it matters |
 | --- | --- | --- |
@@ -461,7 +552,7 @@ Upstream pull requests to re-check:
 | Isolation | One workflow-detached predicate replacing every completion follow-up check in the orchestrator, plus errand exclusions from primary, title, routing, reuse, feeder, CI, and task-state paths | 02 |
 | Service | The `internal/errands` service: start, cap, profile resolution, reserved identity, MCP inheritance, ceiling-queued admission, status projection, results, status block, await, turn attachment and notifications, parent workflow deferral, cancellation including **Stop all errands**, reconciliation, and metrics | 04, 05 |
 | Agent surface | MCP tools `start_errand_kandev`, `await_errands_kandev`, `cancel_errand_kandev`, the `errand` MCP mode and catalog, backend guards, `list_task_sessions_kandev` fields, `errand.md`, and the flag-gated delegation policy and errand guidance in `kandev-context.md` | 06 |
-| UI, coverage, and docs | Desktop and phone UI, the task summary indicators, i18n in all seven shipped locales, mock-agent scenarios, Playwright coverage, public docs, and `AGENTS.md` updates | 03, 07, 08, 09 |
+| UI, coverage, and docs | Desktop/phone session and inline UI, task indicators, i18n, scenarios, Playwright, public docs and guidance | 03, 07, 08, 13, 09 |
 
 ### Out of scope
 
@@ -481,15 +572,15 @@ boundaries per layer:
 | --- | --- | --- |
 | Persistence | 01 | Idempotent `ADD COLUMN` migrations in `apps/backend/internal/task/repository/sqlite/base_migrations.go`, then the index; `initErrandsSchema` beside `base_schema.go`; `models.TaskSession.Role` and `ParentSessionID`; `dto.TaskSessionDTO`, `dto.TaskSessionSummaryDTO`, `TaskSession.ToAPI`; the `task` descriptor in `internal/persistence/requiredstores/catalog.go`; `storeconformance` |
 | Isolation | 02 | `models.IsWorkflowDetachedSession` and every call site in the design's predicate table, including `Repository.SetSessionPrimary` and a task-state-free waiting settle path |
-| Service | 04, 05 | New `apps/backend/internal/errands` package with narrow interfaces. Orchestrator adapters: `LaunchErrandSession` with `MCPServerIDs` (stored by `session_mcp.go`), the `Errand` internal launch field, a new `ErrSessionCeilingRefused` sentinel from `admitOrDeferSeam1`, the `ceilingSweepTick` hook, `ComposeParentTurn` in `promptTask`, turn-settle, stop, cancel, and delete hooks, and notification entries through `messagequeue` |
+| Service | 04, 05, 10, 11, 12 | Existing `apps/backend/internal/errands` package with narrow interfaces. Orchestrator adapters: `LaunchErrandSession` with `MCPServerIDs` (stored by `session_mcp.go`), the `Errand` internal launch field, a new `ErrSessionCeilingRefused` sentinel from `admitOrDeferSeam1`, the `ceilingSweepTick` hook, `ComposeParentTurn` in `promptTask`, turn-settle, stop, cancel, and delete hooks, and notification entries through `messagequeue` |
 | MCP and prompts | 06 | `internal/common/mcpmode`, `internal/mcp/profile`, `internal/mcp/server` (`errands` group, `registerErrandTools`, keepalive and release), `internal/mcp/handlers` (four actions, guards, shared workspace conflict helper), `internal/sysprompt`, and `config/prompts` |
-| Frontend | 03, 07, 08 | `lib/types`, a new `lib/state/slices/errands`, `lib/ws/handlers/errands.ts`, hooks, Kandev tool renderers, **Errand finished** cards, the errand header, chip and panel with **Stop all errands**, tab filtering, phone nesting, and summary indicators |
+| Frontend | 03, 07, 08, 10, 12, 13 | `lib/types`, a new `lib/state/slices/errands`, `lib/ws/handlers/errands.ts`, hooks, Kandev tool renderers, **Errand finished** cards, the errand header, chip and panel with **Stop all errands**, tab filtering, phone nesting, and summary indicators |
 
 ### Provider compatibility
 
 | Profile shape | Parent use | Errand use | Evidence | Fallback |
 | --- | --- | --- | --- | --- |
-| ACP agent with Kandev MCP (Claude, Codex, Cursor, OpenCode, Auggie, and others) | Tools registered; prompts recommend ending the turn; an optional await keeps the call alive with progress notifications | Supported; result is the turn's last agent text message | Mock-agent unit and E2E coverage; manual check per real provider during rollout | A client that aborts long calls gets `pending` or loses the call; results then arrive with the next parent turn |
+| ACP agent with Kandev MCP (Claude, Codex, Cursor, OpenCode, Auggie, and others) | Tools registered; prompts recommend ending the turn; an optional await keeps the call alive with progress notifications | Supported; result is the turn's last agent text message | Unit fixtures exist; task 09 adds E2E and a selected-profile pilot. Real provider certification remains conditional | A client that aborts long calls gets `pending` or loses the call; results then arrive with the next parent turn |
 | Passthrough terminal profile | Not eligible (`errand_not_supported`) | Refused (`errand_profile_incompatible`) | Handler unit tests | None; use a structured profile |
 | Remote executors (SSH, Docker, Kubernetes, Sprites) | Same as the ACP row | Same as the ACP row when attach-only reuse is supported | Existing reuse tests plus errand start tests for typed failures | Typed workspace errors; no errand created |
 
@@ -498,40 +589,60 @@ notifications on long MCP calls; that remains a rollout check.
 
 ## Tests
 
-Criteria abbreviate `AC-TASKS-ERRANDS-<NNN.N>`. Superseded criteria (004.1,
-004.6, 007.3, and 010.1) have no planned evidence.
+Criteria abbreviate `AC-TASKS-ERRANDS-<NNN.N>`. This is a source inventory and
+implementation test map, not a fresh passing test report. Superseded 004.1,
+004.6, 007.3 and 010.1 remain unassigned. New regression cases below belong
+to 10-13, while their existing suites provide the TDD fixtures.
 
-| Criteria | Planned evidence |
-| --- | --- |
-| 001.1 to 001.5 | `internal/errands/service_start_test.go`; `internal/mcp/handlers/errands_test.go` typed errors |
-| 001.6 | `internal/errands/service_start_test.go` snapshot; `internal/orchestrator/errand_launch_mcp_test.go` launch selections and no propagation |
-| 002.1, 002.2 | `internal/errands/status_test.go` projection table |
-| 002.3 | `internal/mcp/handlers/list_task_sessions_errand_test.go` |
-| 003.1 to 003.5 | `internal/errands/results_test.go`; `internal/orchestrator/errand_turn_settle_test.go` |
-| 004.2 to 004.5, 004.7, 004.9 to 004.12 | `internal/errands/delivery_test.go`, `await_test.go`, `notification_test.go`; `internal/orchestrator/errand_turn_compose_test.go`; `internal/mcp/server/errand_tools_test.go` keepalive and release |
-| 004.8 | `internal/errands/reconcile_test.go` |
-| 005.1 to 005.5 | `internal/task/models/workflow_detached_test.go`; `internal/orchestrator/errand_isolation_test.go`; `internal/task/service/errand_isolation_test.go`; `components/task/session-tab-menu.test.tsx` |
-| 006.1 to 006.5 | `internal/orchestrator/errand_parent_turn_test.go`; `internal/mcp/handlers/errands_test.go` step completion guard |
-| 006.6 | `internal/errands/status_block_test.go` bounds, order, and flag-off |
-| 007.1, 007.2, 007.4 to 007.6 | `internal/errands/cancel_test.go`; `internal/orchestrator/errand_cascade_test.go`, `errand_turn_cancel_test.go` |
-| 008.1 to 008.3 | `internal/errands/service_start_test.go`; `internal/orchestrator/errand_ceiling_test.go` |
-| 009.1 to 009.6 | `internal/mcp/server/server_errand_mode_test.go` catalogs; `internal/mcp/handlers/errand_guards_test.go`; `internal/sysprompt/errand_context_test.go` golden text |
-| 010.2 to 010.9 | Renderer, header, chip, panel, slice, and selector Vitest files named in tasks 03 and 08; desktop E2E |
-| 011.1 to 011.5 | `mobile-sessions-section.test.tsx`; phone E2E |
-| 012.1 to 012.3 | `internal/runtimeflags` and profile contract tests; `features-contract.test.ts`; flag-off handler and prompt tests |
-| 013.1, 013.2 | `internal/errands/metrics_test.go` label sets |
+| Criteria | Existing test home and representative case | Continuation |
+| --- | --- | --- |
+| 001.1-001.6, 008.1 | `internal/errands/start_test.go`: `TestStartLaunchesWithReservedIdentityAndTheParentMCPSnapshot`; `profiles_test.go`: `TestProfileResolverMatchesIDThenExactNameThenTheDefault` | 00 preserves integration |
+| 001.2, 001.6, 008.2-008.3 | `internal/orchestrator/errand_launch_test.go`: `TestLaunchErrandSessionCreatesOneNonPrimaryErrandSessionWithReservedIdentity`; `internal/errands/drain_test.go`: `TestDrainQueuedLaunchesInCreationOrderWithTheStoredIdentityAndSnapshot` | 12 adds enforced-auth queued cancellation |
+| 002.1-002.3 | `internal/errands/status_test.go`; `internal/mcp/handlers/errands_test.go` session listing | 12 adds cancelled child-turn outcomes |
+| 003.1-003.5 | `internal/errands/delivery_test.go`: `TestParentInitiatedTurnCapturesItsFinalMessageAsOneResult`, bound/user-turn/supersession/send-result cases | 10 snapshot and 12 cancellation regressions |
+| 004.2-004.5, 004.7-004.12 | `delivery_test.go`: `TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute`; `restart_delivery_test.go`: `TestRestartDeliversAResultThatWasStillPending`; `reconcile_test.go` | 10 real direct-message/crash/race tests; 11 dispatch/refusal/Send now/fallback acceptance |
+| 005.1-005.5 | `internal/orchestrator/errand_isolation_test.go`: `TestErrandAgentReadyRecordsNotRequiredWithoutWorkflowOrTaskState`; `errand_isolation_routing_test.go`; `internal/task/service/errand_isolation_test.go` | 00 baseline and 12 flag-off/cancel integration |
+| 006.1-006.3, 006.5-006.6 | `internal/orchestrator/errand_acceptance_test.go`: `TestParentSessionEventReportsWaitingOnErrandsOnlyWhileIdleAndOutstanding`; `internal/errands/status_block_test.go` | 11 actual automatic parent prompt; 12 cancel/recovery publishers; 07 rows |
+| 006.4 | `internal/mcp/handlers/errands_test.go` step-completion refusal | 00 preserves guard |
+| 007.1-007.2, 007.4-007.6 | `internal/errands/cancel_test.go`: `TestCancelAllCancelsLiveErrandsAndDeliversOncePerParent`; `internal/orchestrator/errand_service_integration_test.go` | 12 CancelTurn/CancelAgent, disabled deletion and queued-ID authorization |
+| 009.1-009.6 | `internal/mcp/server/server_errand_mode_test.go`: `TestErrandCatalog_IsExactlyTheEightReadOnlyTools`; `internal/sysprompt/kandev_context_errand_test.go` and context goldens; MCP handler guards | 00 rechecks catalogs after upstream changes |
+| 010.2-010.9 | Existing `components/task/chat/errands/*.test.*`, `errand-renderers.test.tsx`, session-tab tests | 10 wire-backed finished cards; 07 new summary indicators, mobile Threads tests and existing switcher suite |
+| 010.10, 011.6 | New `errands-inline-summary.test.tsx`, native-list/chat-panel slot suites; existing changed-files/todo exemplar tests | 13 one native current-state card, independent actions, shared-load and scroll ownership; 09 rendered proof |
+| 011.1-011.5 | `components/task/mobile/mobile-sessions-section.errands.test.tsx`, existing header/chip tests | 09 managed phone journey; component tests do not prove geometry |
+| 012.1-012.3 | Runtime registry/config/profile contracts, `features-contract.test.ts`, fixed catalog/context goldens and flag-independent isolation tests | 12 no disabled deletion delivery; 09 retained-session disable/restart |
+| 013.1-013.2 | `internal/errands/list_events_test.go`: `TestCountersUseOnlyClosedLabelSets` currently covers starts/settlements | 12 adds delivery labels and committed reconciliation/delivery logs |
+
+Backend paths in this table are relative to `apps/backend/`; frontend paths
+are relative to `apps/web/`. Exact command packets live in each work order.
+Task 00 establishes the integrated foundation baseline once; later work
+orders rerun their affected suites, not every historical command or a generic
+full-repository audit.
 
 ## E2E tests
 
-Both specs enable the flag with `backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" })`
-and drive errands with the new mock-agent `/e2e:errands` scenario (start three
-errands and end the turn) and `/e2e:errands-await` (start two and await).
-Criteria abbreviate `AC-TASKS-ERRANDS-<NNN.N>`.
+No Errands browser spec exists at the planning snapshot. Task 09 adds the
+following independently named scenarios in `tests/session/errands.spec.ts`
+(`chromium`) and `tests/session/mobile-errands.spec.ts` (`mobile-chrome`).
+Reuse real start-returned IDs and production-built assets. Do not inject a
+fictional metadata envelope to make finished-card assertions pass.
 
-| Spec | Project | Flow | Criteria |
+| Journey | Projects | Criteria | Required observation |
 | --- | --- | --- | --- |
-| `apps/web/e2e/tests/session/errands.spec.ts` | `chromium` | Parent starts three errands and ends its turn; cards update live; no errand tabs appear; the composer stays enabled and a user prompt gets a reply that reports its status block; **Open** shows the errand view with **Stop** only while live; a follow-up reaches the errand; finished errands arrive as **Errand finished** cards in a notification turn; cancelling a parent turn during an await leaves its errands running; **Stop all errands** in the popover cancels the rest; the board card shows the count and waiting status; the task stays in progress until the final parent turn | 003.1, 003.5, 004.10, 004.11, 005.4, 006.1 to 006.3, 006.5, 006.6, 007.1, 007.5, 007.6, 010.2 to 010.5, and 010.7 to 010.9 |
-| `apps/web/e2e/tests/session/mobile-errands.spec.ts` | `mobile-chrome` | Sessions drawer nesting; full screen errand view with back; actions menu with **Stop** while live; chip drawer with **Stop all errands**; **Errand finished** cards at full width with the composer enabled; 44px targets; internal scrolling; no horizontal overflow | 011.1 to 011.5 and 010.6 |
+| Start errands, end parent turn, prompt parent while work runs | Both | 001.1, 006.1-006.3, 006.5-006.6, 010.7, 010.9, 011.5 | Live cards, no automatic tabs, enabled composer, bounded status context, workflow held |
+| Open, back, follow up, explicit send result | Both | 003.3, 005.5, 010.2-010.4, 011.1, 011.3 | Full transcript and composer; parent ownership preserved; Stop/send mutually exclusive |
+| Automatic notification and explicit await | Both | 003.1, 004.2, 004.9-004.12, 006.2, 010.7 | Actual parent wake, one result text, finished card live and after reload, final workflow advancement |
+| Auto-run off and manual Send now | Chromium | 004.7, 004.9-004.11 | One queued notification, preserved ordinary text, no empty/repeated turn |
+| Turn cancel, single/bulk Stop, two-client deletion | Both | 003.5, 007.1-007.2, 007.5-007.6, 010.8 | Child work survives parent-turn cancel; Stop notices differ; parent-only second client and late list response converge |
+| Cap, ceiling queue and queued Stop | Chromium | 008.1-008.3 | Sixth live start refused, queued identity has no runtime, authorized single cancellation before launch |
+| Board, sidebar, Threads and nested session selection | Both | 006.3, 010.5-010.6, 011.1 | Bounded counts/waiting, distinct native-subagent metadata, unchanged selection semantics |
+| Disable/restart with retained errand sessions | Both | 005.1-005.5, 012.1-012.3 | No tools/new delivery/waiting UI; ordinary retained tabs remain detached and viewable |
+| Inline summary and sibling chat widgets | Both | 010.10, 011.6 | Collapsed live counts, grouped expansion, Open/back and task-wide Stop-all, preserved start/result/diff/todo cards, reading position and active bottom-follow |
+| Phone navigation, drawer and actions geometry | Mobile-chrome | 010.6, 011.1-011.5 | Full-screen chat, visible actions/back, 44px hit targets, one scroll owner, safe-area clearance, no horizontal overflow |
+
+Retry/uncertain-admission and crash windows are deterministic backend tests
+in 10/11; browser reload and the selected real-profile pilot supply the
+user-observable proof. Use the existing isolated fixtures, causal waits and
+scoped environment restoration. Never overlap the desktop/phone managed runs.
 
 ## ASCII UI preview
 
@@ -546,6 +657,7 @@ existing `@kandev/ui` primitives and tokens.
 | The parent composer stays enabled while errands run | UI-01, UI-10 |
 | The errand header; **Stop** and **Send result to parent** never appear together | UI-02, UI-07 |
 | A chip only when errands exist, showing the live count | UI-01, UI-10 |
+| An additive current-state inline card with semantic disclosure and independent actions | UI-11 |
 | Grouping by parent and **Stop all errands** | UI-03, UI-06, UI-08 |
 | Phone nesting, full screen errand view, visible actions menu, and bottom drawer | UI-06, UI-07, UI-08 |
 
@@ -561,6 +673,7 @@ existing `@kandev/ui` primitives and tokens.
 | UI-08 | Phone errands drawer from the chip | 011.2, 011.4 |
 | UI-09 | Desktop await card when the agent awaits inside its turn | 010.7, 004.2 |
 | UI-10 | Phone parent session while errands run | 011.5, 010.4 |
+| UI-11 | Inline current-Errands summary, desktop/phone collapsed and expanded | 010.10, 011.6 |
 
 UI-01: Desktop parent session after starting three errands and ending its turn (AC-TASKS-ERRANDS-010.2, 010.4, 010.7, 010.9).
 
@@ -723,9 +836,25 @@ UI-10: Phone parent session while errands run (AC-TASKS-ERRANDS-011.5, 010.4).
 +--------------------------------+
 ```
 
+### UI-05 phone and shared state
+
+Task 07 extends existing metadata rather than adding another surface. Desktop
+board/sidebar/Threads rows keep compact counts beside existing status and
+native-subagent metadata. Phone Threads uses its existing header and bottom
+picker; errand rows nest beneath their parent and open the full-screen chat.
+The shared `live`/`waiting` view model drives both. Keep 44px phone actions,
+one internal scrolling list and safe-area clearance; preserve desktop density.
+
+At zero/absent summary or flag off, omit Errands decoration. In waiting-only
+state show the waiting label without claiming live children. Long translated
+labels truncate without obscuring actions; load/error handling remains with
+the existing task request. Existing UI-01 through UI-10 drawings are retained
+as the reviewed structural reference. The session handoff uses Kandev's rich
+preview rather than a separate mock application.
+
 ## Verification results
 
-Design validation on 2026-10-26:
+Historical design validation on 2026-10-26 (not rerun product checks):
 
 | Check | Result |
 | --- | --- |
@@ -737,4 +866,46 @@ Design validation on 2026-10-26:
 | Acceptance criterion assignment | All 67 active criteria assigned; superseded 004.1, 004.6, 007.3, and 010.1 unassigned; 2 or 3 acceptance conditions per work order |
 | Whitespace, em dash, and non-ASCII checks | Passed |
 
-Implementation verification is pending.
+Continuation design validation on 2026-10-27:
+
+| Check | Result |
+| --- | --- |
+| `python3 scripts/list-docs.py validate` | Passed: 404 decisions and 1742 specifications |
+| `python3 scripts/lint-spec-files.py --all` | Passed: requirement 20,385/20,480 bytes; design 32,654/32,768 bytes; no size exception added |
+| `python3 scripts/lint-spec-files.test.py` | Passed: 36 tests |
+| `.github/scripts/pr-docs.cjs` `validateCoverage` | Passed (`covered`): 14 work orders, current on-disk documents, new untracked work orders and prospective source paths included |
+| Active acceptance assignment | All 69 active criteria assigned, including new 010.10 and 011.6; four superseded IDs excluded |
+| `git diff --check` and plan status inventory | Passed; five new work orders present, no staged files, only specs/plans changed |
+
+No product, browser or provider checks ran in this planning turn. Their
+commands and results belong to the work orders. Dependency installation is
+still pending in this fresh worktree. Internal docs updated; public docs
+remain implementation work in 09 because current changes specify intent.
+
+To reproduce documentation coverage from the repository root, include both
+committed feature changes and current/untracked planning files:
+
+```bash
+node <<'NODE'
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const { validateCoverage } = require('./.github/scripts/pr-docs.cjs');
+const git = args => execFileSync('git', args, { encoding: 'utf8' }).split('\0').filter(Boolean);
+const changedFiles = [...new Set([
+  ...git(['diff', '--name-only', '-z', 'upstream/main...HEAD']),
+  ...git(['diff', '--name-only', '-z', 'HEAD']),
+  ...git(['ls-files', '--others', '--exclude-standard', '-z', '--', 'docs/plans/errands', 'docs/specs/tasks']),
+])];
+const paths = fs.readdirSync('docs/plans/errands').filter(p => p.endsWith('.md'))
+  .map(p => `docs/plans/errands/${p}`);
+paths.push('docs/specs/tasks/requirements/errands.md', 'docs/specs/tasks/system-design/errands.md');
+const fileContents = new Map(paths.map(p => [p, fs.readFileSync(p, 'utf8')]));
+const result = validateCoverage({ changedFiles, fileContents });
+console.log(JSON.stringify({ ok: result.ok, status: result.status, errors: result.errors }));
+if (!result.ok) process.exitCode = 1;
+NODE
+```
+
+A later upstream proposal is a separate checkpoint after the personal pilot.
+Refresh canonical ancestry and watchpoints then; do not publish a PR or
+promote shipped defaults as a side effect of completing this planning turn.

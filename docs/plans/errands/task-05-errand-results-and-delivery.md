@@ -275,3 +275,11 @@ Verification:
 - `bash scripts/lint-go-changed <changed files>`: 0 issues on each commit's files.
 - `gofmt -l` on changed files: clean.
 - Task 05 is ticked in `docs/plans/errands/plan.md`.
+
+## Continuation follow-up (2026-10-27)
+
+The original completion/results above are historical. Tasks 10 and 11 own
+delivery snapshots, recovery, notification wake, Send now and fallback
+acceptance; task 12 owns cancellation, waiting events and disabled deletion.
+The step-completion guard originally listed as outside this work order landed
+in task 06. These findings are not fresh test results or accepted deviations.

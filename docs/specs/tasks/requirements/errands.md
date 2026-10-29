@@ -10,39 +10,32 @@ owners:
 
 ## Overview
 
-An errand is a visible, steerable child session that a task's agent starts to
-delegate work and whose result returns to that agent. It runs in the task's
-shared workspace with its own transcript, profile, and follow-up input. The
-parent session stays conversational while its errands run. The task system
-owns this contract because errands are task sessions: their identity,
-workspace binding, workflow isolation, and parent relationship live in the
-task session model. The rationale and concept boundaries are in
+An errand is a visible, steerable child session started by a task's agent.
+It uses the task's shared workspace, has its own transcript, profile, and
+follow-up input, and returns results to a conversational parent. The task
+system owns its identity, workspace binding, workflow isolation, and parent
+relationship. The rationale and boundaries are in
 [ADR-2026-10-23-errands-first-class-delegation](../../../decisions/2026-10-23-errands-first-class-delegation.md).
 
 ## Terminology
 
-- **Parent session:** The task session whose agent started the errand.
-- **Parent-initiated turn:** An errand turn started by the errand objective or
-  by a message from its parent session.
-- **Result:** The deliverable outcome of one settled parent-initiated turn, or
-  a cancellation notice.
-- **Live errand:** An errand whose status is `queued`, `running`, or
-  `needs_attention`.
-- **Outstanding:** A parent has outstanding errands while one of its errands
-  is queued, is working on a parent-initiated turn, or holds a result that has
-  not been delivered. A user-initiated errand turn does not make the parent
-  outstanding.
-- **Errand status block:** A compact, server-authored summary of the parent's
-  in-flight errands in a parent turn's context.
-- **Notification:** A server-queued message whose parent turn delivers the
-  results pending when that turn starts.
+- **Parent session:** The session whose agent started the errand.
+- **Parent-initiated turn:** An errand turn started by its objective or a
+  parent message.
+- **Result:** A parent-initiated turn's outcome or a cancellation notice.
+- **Live errand:** Status `queued`, `running`, or `needs_attention`.
+- **Outstanding:** A parent has a queued errand, an in-flight parent-initiated
+  errand turn, or an undelivered result. User-initiated turns do not count.
+- **Errand status block:** A server-authored summary of in-flight errands
+  in a parent turn's context.
+- **Notification:** A server-queued message delivering all results pending
+  when its parent turn starts.
 
 ## Requirements
 
 ### REQ-TASKS-ERRANDS-001: Errand start
 
-**Intent:** Let a task's agent delegate work to a separately visible session
-with a chosen profile, without blocking its own turn.
+**Intent:** Let an agent delegate to a chosen profile without blocking its turn.
 
 #### Acceptance criteria
 
@@ -75,8 +68,7 @@ with a chosen profile, without blocking its own turn.
 
 ### REQ-TASKS-ERRANDS-002: Errand status
 
-**Intent:** Give the parent agent and the user one consistent status for each
-errand.
+**Intent:** Expose one consistent errand status.
 
 #### Acceptance criteria
 
@@ -94,7 +86,7 @@ errand.
 
 ### REQ-TASKS-ERRANDS-003: Errand results
 
-**Intent:** Turn each piece of delegated work into one bounded result.
+**Intent:** Capture one bounded outcome per delegated turn.
 
 #### Acceptance criteria
 
@@ -118,8 +110,7 @@ errand.
 
 ### REQ-TASKS-ERRANDS-004: Result delivery
 
-**Intent:** Deliver each result to the parent exactly when it can use it, and
-never twice.
+**Intent:** Deliver each result once, when the parent can use it.
 
 #### Acceptance criteria
 
@@ -164,8 +155,7 @@ never twice.
 
 ### REQ-TASKS-ERRANDS-005: Workflow and ownership isolation
 
-**Intent:** Keep workflow ownership, task state, and routing with the parent
-and its peers.
+**Intent:** Keep workflow, task state, and routing with parents and peers.
 
 #### Acceptance criteria
 
@@ -184,8 +174,7 @@ and its peers.
 
 ### REQ-TASKS-ERRANDS-006: Parent session while errands run
 
-**Intent:** Keep the parent conversational while delegated work runs, and
-hold its workflow until every result is delivered.
+**Intent:** Keep parents conversational and defer workflow for outstanding errands.
 
 #### Acceptance criteria
 
@@ -216,8 +205,7 @@ hold its workflow until every result is delivered.
 
 ### REQ-TASKS-ERRANDS-007: Cancellation
 
-**Intent:** Stop delegated work predictably from the parent, the user, or a
-cascade.
+**Intent:** Cancel delegated work predictably.
 
 #### Acceptance criteria
 
@@ -243,7 +231,7 @@ cascade.
 
 ### REQ-TASKS-ERRANDS-008: Limits and admission
 
-**Intent:** Bound the work one task can fan out and respect install capacity.
+**Intent:** Bound fan-out and respect install capacity.
 
 #### Acceptance criteria
 
@@ -260,8 +248,7 @@ cascade.
 
 ### REQ-TASKS-ERRANDS-009: Agent tool surface and delegation policy
 
-**Intent:** Give the parent the tools and guidance to delegate, and give the
-errand only what its objective needs.
+**Intent:** Expose parent delegation tools and a restricted errand tool surface.
 
 #### Acceptance criteria
 
@@ -294,8 +281,7 @@ errand only what its objective needs.
 
 ### REQ-TASKS-ERRANDS-010: Desktop task surfaces
 
-**Intent:** Show errands where the user already works, without new chrome on
-tasks that have none.
+**Intent:** Show errands in existing task surfaces.
 
 #### Acceptance criteria
 
@@ -318,22 +304,27 @@ tasks that have none.
   shipped locale. Status changes shall be announced through one polite status
   region, and every errand control shall be keyboard operable with an
   accessible name.
-- **AC-TASKS-ERRANDS-010.7:** In the parent transcript, each errand start
-  shall render as an errand card with title, profile, live status, and
-  **Open**, and an await call as a card that lists its errands with live
-  statuses. Each result delivered with a parent turn shall render as an
-  **Errand finished** card with title, status, a result preview, and
-  **Open**. Neither result text nor the status block shall render as raw
-  system text.
+- **AC-TASKS-ERRANDS-010.7:** Parent transcripts shall render each start as a
+  separate card (title, profile, live status, **Open**), await as a live-status
+  list card, and each delivered result as an **Errand finished** card (title,
+  status, result preview, **Open**). Result text and status blocks shall not
+  render as raw system text.
 - **AC-TASKS-ERRANDS-010.8:** The errands panel shall offer
   **Stop all errands** while any errand of the task is live.
 - **AC-TASKS-ERRANDS-010.9:** The parent's composer shall stay enabled while
   its errands run, and the errands chip shall show the live errand count.
 
+- **AC-TASKS-ERRANDS-010.10:** With the flag on and task errands present,
+  each parent chat shall show one collapsed inline Errands summary using
+  the diff/todo card pattern. Its header shows total/live
+  counts and attention. Expansion groups rows by parent with title, profile,
+  status and **Open**; **Stop all errands** affects the task while any is live.
+  Actions shall not toggle disclosure; historical start/await/result cards
+  remain separate.
+
 ### REQ-TASKS-ERRANDS-011: Phone composition
 
-**Intent:** Deliver the same errand capabilities on a phone with a native
-composition.
+**Intent:** Provide phone-native access to the same errand capabilities.
 
 #### Acceptance criteria
 
@@ -353,6 +344,11 @@ composition.
   the screen width, and the parent's composer shall stay enabled while its
   errands run.
 
+- **AC-TASKS-ERRANDS-011.6:** The inline summary shall fit phone width,
+  expose 44px disclosure/actions, and expand within the chat scroller. Open
+  navigates to full-screen errand chat; the composer and reading position
+  remain usable.
+
 ### REQ-TASKS-ERRANDS-012: Release toggle
 
 **Intent:** Ship errands dark and keep a kill switch.
@@ -371,8 +367,7 @@ composition.
 
 ### REQ-TASKS-ERRANDS-013: Operational counters
 
-**Intent:** Let operators see errand volume and outcomes without exposing
-task data.
+**Intent:** Count volume and outcomes without exposing task data.
 
 #### Acceptance criteria
 
@@ -399,3 +394,7 @@ task data.
 ## System design
 
 - [Errands](../system-design/errands.md)
+
+## Implementation plans
+
+- [Errands delivery and continuation](../../../plans/errands/plan.md)

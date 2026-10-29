@@ -274,3 +274,15 @@ Backend fields and events the UI depends on: `errand.updated`,
 `TaskSession.role`, `parent_session_id`, and `waiting_on_errands`; message
 metadata `errand_delivery`; and the `start_errand`, `await_errands`, and `cancel_errand` Kandev tool-call
 shapes (name prefixes tolerated).
+
+## Continuation follow-up (2026-10-27)
+
+The original completion/results above are component-level evidence. Task 10
+connects real delivery metadata to these cards; task 12 owns cross-browser
+removal and late-list races; task 09 owns production desktop/phone proof.
+Phone per-row deletion remains outside the first completion scope; Open,
+follow-up, Send result and Stop remain required.
+
+Task 13 adds the newly requested current-state inline summary, reusing native
+chat card patterns. This historical work order does not claim that surface
+was already delivered. Existing start/await/result cards remain separate.
