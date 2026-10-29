@@ -201,10 +201,17 @@ func (s *Service) applyCancel(e *models.Errand, source models.ErrandCancelSource
 	e.AwaitingResult = false
 	e.SettledAt = &now
 	switch {
-	case source == models.ErrandCancelSourceUser && outstanding:
+	case source == models.ErrandCancelSourceUser && outstanding && s.featureEnabled():
 		e.ResultKind = models.ErrandResultCancelled
 		e.ResultState = models.ErrandResultPending
 		e.ResultText = cancellationNotice
+		e.ResultTruncated = false
+		e.ResultTurnID = ""
+		e.DeliveredRoute, e.DeliveryToken, e.DeliveredAt = "", "", nil
+	case source == models.ErrandCancelSourceUser && outstanding:
+		e.ResultKind = models.ErrandResultCancelled
+		e.ResultState = models.ErrandResultDiscarded
+		e.ResultText = ""
 		e.ResultTruncated = false
 		e.ResultTurnID = ""
 		e.DeliveredRoute, e.DeliveryToken, e.DeliveredAt = "", "", nil

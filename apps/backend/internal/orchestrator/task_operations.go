@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/editors/capabilities"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
@@ -753,12 +754,14 @@ type startCreatedSessionOptions struct {
 	includeCanvasGuidance  bool
 	// promptReferencesPrepared records that the caller accepted the exact
 	// server-owned expansion snapshot, including an empty snapshot.
-	promptReferencesPrepared bool
-	preserveDirectPrompt     bool
-	deliverySubmissionID     string
-	deliveryProtocol         string
-	deliveryPayloadHash      string
-	deliveryClaimUpdater     deliveryClaimUpdater
+	promptReferencesPrepared              bool
+	preserveDirectPrompt                  bool
+	deliverySubmissionID                  string
+	deliveryProtocol                      string
+	deliveryPayloadHash                   string
+	deliveryClaimUpdater                  deliveryClaimUpdater
+	prepareInitialPrompt                  func(context.Context, string) (string, bool, error)
+	cacheEffectivePromptForTransientRetry bool
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
@@ -1071,6 +1074,20 @@ func (s *Service) startCreatedSession(
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 		}
 		return nil, err
+	}
+	if options.prepareInitialPrompt != nil {
+		preparedPrompt, skipMessageRecordForPrompt, prepareErr := options.prepareInitialPrompt(ctx, effectivePrompt)
+		if prepareErr != nil {
+			if initialTurnCreated {
+				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+			}
+			return nil, prepareErr
+		}
+		effectivePrompt = preparedPrompt
+		skipMessageRecord = skipMessageRecord || skipMessageRecordForPrompt
+	}
+	if options.cacheEffectivePromptForTransientRetry {
+		s.rememberComposedTurnPrompt(sessionID, effectivePrompt, "", planMode, attachments, nil)
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		s.armInitialCreatePromptPassthroughForLaunch(ctx, session, initialTurnID)
@@ -6778,8 +6795,13 @@ type promptTaskOptions struct {
 	// errandNotification marks a queued notification entry dispatched for
 	// errand results. queuedMessage lets composition record how a turn delivered
 	// them on the queued user message.
-	errandNotification bool
-	queuedMessage      *messagequeue.QueuedMessage
+	errandNotification      bool
+	queuedMessage           *messagequeue.QueuedMessage
+	skipErrandComposition   bool
+	errandClaimToken        *string
+	deferErrandClaimRelease bool
+	// directMessageContent identifies the persisted user message for direct prompt callers without a submission ID.
+	directMessageContent string
 	// recoveryAction is populated only by the explicit context-continuation
 	// path. It allows the already-authorized prompt to cross the recovery block
 	// without reopening the ordinary launch gate.
@@ -6858,8 +6880,11 @@ type promptTaskOptions struct {
 	// fallbackLaunchPrompt is the fully composed prompt for fresh-launch
 	// recovery. The normal dispatch still receives the raw prompt so it can
 	// apply session transforms exactly once.
-	fallbackLaunchPrompt string
-	fallbackRetryPrompt  string
+	fallbackLaunchPrompt          string
+	fallbackRetryPrompt           string
+	fallbackPromptAlreadyComposed bool
+	fallbackStartOptions          *startCreatedSessionOptions
+	onFallbackStart               func()
 	// promptReferenceContext is the exact expansion returned while composing
 	// this workflow entry. Recovery uses it to preserve the trusted block.
 	promptReferenceContext        string
@@ -7092,15 +7117,31 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			return nil, err
 		}
 	}
+	if options.queuedMessage == nil {
+		if options.directMessageContent == "" {
+			options.directMessageContent = prompt
+		}
+	}
 	// Composition precedes the fallback snapshots so a relaunch carries the same
 	// status block and claim token as the first attempt.
-	composedPrompt, errandToken, composeErr := s.composeErrandTurn(resumePromptCtx, sessionID, effectivePrompt, &options)
+	composedPrompt := effectivePrompt
+	errandToken := ""
+	var composeErr error
+	if !options.skipErrandComposition {
+		composedPrompt, errandToken, composeErr = s.composeErrandTurn(resumePromptCtx, sessionID, effectivePrompt, &options)
+	}
 	if composeErr != nil {
 		s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
 		return nil, composeErr
 	}
+	if options.errandClaimToken != nil {
+		*options.errandClaimToken = errandToken
+	}
 	effectivePrompt = composedPrompt
 	defer func() {
+		if options.deferErrandClaimRelease {
+			return
+		}
 		accepted := options.promptAccepted != nil && options.promptAccepted.Load()
 		s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(resumePromptCtx), errandToken, accepted)
 	}()
@@ -7155,6 +7196,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 				modelSwitchGuard.release()
 			}
 		}()
+	}
+	if errandToken != "" || hasQueuedErrandDelivery(options.queuedMessage) {
+		s.rememberComposedTurnPrompt(sessionID, effectivePrompt, model, planMode, attachments, options.onAccepted)
 	}
 	modelSwitchAdmissionNeeded := modelSwitchRequired(session, model)
 	var modelSwitchQueuedReservation *queuedDispatchReservation
@@ -7941,12 +7985,25 @@ func (s *Service) finishPromptDispatchFailure(
 		// error may reconcile session state, but must not delete this turn.
 		rollback.reservedTurnAccepted = true
 	}
+	fallbackStartOptions := options.fallbackStartOptions
+	if fallbackStartOptions != nil && options.promptAccepted != nil {
+		copied := *fallbackStartOptions
+		accepted := copied.onInitialPromptAccepted
+		copied.onInitialPromptAccepted = func(executionID string) {
+			if accepted != nil {
+				accepted(executionID)
+			}
+			options.promptAccepted.Store(true)
+		}
+		fallbackStartOptions = &copied
+	}
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt && !options.disableDispatchRetry,
 		attachments, rollback, options.lifecyclePrompt || options.internalContinuation, dispatchAccepted, promptErr,
-		options.promptAlreadyComposed, options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
+		options.promptAlreadyComposed || options.fallbackPromptAlreadyComposed,
+		options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
 		options.promptReferenceContext, options.promptReferencesPrepared, options.entityReferences,
-		options.resumeAttempt != nil,
+		options.resumeAttempt != nil, fallbackStartOptions, options.onFallbackStart,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -9129,6 +9186,8 @@ func (s *Service) handlePromptDispatchFailure(
 	promptReferencesPrepared bool,
 	references []v1.EntityReference,
 	lifecycleLockHeld bool,
+	fallbackStartOptions *startCreatedSessionOptions,
+	onFallbackStart func(),
 ) (*PromptResult, error) {
 	if errors.Is(promptErr, errPromptAdmissionRejected) {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
@@ -9143,9 +9202,10 @@ func (s *Service) handlePromptDispatchFailure(
 		if fallbackLaunchPrompt != "" {
 			fallbackPrompt = fallbackLaunchPrompt
 		}
-		if freshErr := s.fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
+		if freshErr := s.fallbackFreshLaunchOnMissingExecutionWithStartOptions(
 			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode,
 			promptReferenceContext, false, nil, attachments, references, promptReferencesPrepared, lifecycleLockHeld,
+			fallbackStartOptions, onFallbackStart,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
@@ -11625,6 +11685,9 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 	continuation, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
 	requireWaiting := prepared.completionEligible || continuation != nil
 	session := prepared.session
+	if models.IsErrandSession(session) {
+		s.settleCancelledErrandTurn(ctx, sessionID, prepared.capturedTurnID, "")
+	}
 	if session != nil {
 		reconciled, err := s.reconcileCancelledTurnOwned(
 			ctx,
@@ -11668,6 +11731,10 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 
 	if expected, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry); expected == nil {
 		s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)
+	}
+	if session != nil && !models.IsErrandSession(session) &&
+		s.settleParentTurn(ctx, session.ID, errands.SettleCauseUserCancel) {
+		return nil
 	}
 	s.reconcileCancelledAgentWorkflow(ctx, session, prepared.completionEligible)
 	return nil

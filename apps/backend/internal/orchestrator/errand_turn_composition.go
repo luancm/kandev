@@ -2,12 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -25,7 +28,10 @@ const (
 	// ErrandDeliveryTokenMetadataKey is the user message metadata key that
 	// records the claim token of the errand results a turn delivered.
 	// Reconciliation reads it through the delivery log.
-	ErrandDeliveryTokenMetadataKey = "errand_delivery_token"
+	ErrandDeliveryTokenMetadataKey = errands.DeliveryTokenMetadataKey
+	// ErrandDeliverySubmissionMetadataKey links a delivery snapshot to the
+	// prompt submission whose durable outcome reconciliation reads back.
+	ErrandDeliverySubmissionMetadataKey = "errand_delivery_submission_id"
 )
 
 // errandTurnComposer is the composition part of the errands service. It is
@@ -66,33 +72,188 @@ func (s *Service) composeErrandTurn(
 		return prompt, "", nil
 	}
 	if composition.Block == "" {
-		if options.errandNotification && prompt == "" {
+		if options.errandNotification && !hasErrandNotificationPrompt(prompt, options) {
 			return "", "", errErrandNotificationEmpty
 		}
 		return prompt, "", nil
 	}
+	if options.queuedMessage == nil {
+		if options.deliverySubmissionID == "" {
+			options.deliverySubmissionID = "internal:" + uuid.NewString()
+		}
+		if err := s.recordDirectErrandDelivery(
+			ctx, sessionID, options.deliverySubmissionID, options.directMessageContent, route, composition,
+		); err != nil {
+			s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(ctx), composition.Token, false)
+			s.logger.Warn("errand delivery snapshot could not be persisted; prompt sent without it",
+				zap.String("session_id", sessionID), zap.Error(err))
+			return prompt, "", nil
+		}
+	} else {
+		recordErrandDelivery(options.queuedMessage, route, composition, options.deliverySubmissionID)
+	}
 	if route != models.ErrandDeliveryNotification {
 		s.withdrawErrandNotification(ctx, sessionID)
 	}
-	recordErrandDelivery(options.queuedMessage, route, composition)
 	return joinErrandBlock(composition.Block, prompt), composition.Token, nil
 }
 
-// recordErrandDelivery stamps a queued entry's user message with the route and
-// claim token that delivered its results. A notification has no text of its
-// own, so its status block becomes the entry's content and transcript text.
-func recordErrandDelivery(entry *messagequeue.QueuedMessage, route models.ErrandDeliveryRoute, composition errands.Composition) {
+func hasErrandNotificationPrompt(prompt string, options *promptTaskOptions) bool {
+	if options == nil || options.queuedMessage == nil {
+		if options != nil && strings.TrimSpace(options.directMessageContent) != "" {
+			return true
+		}
+		return strings.TrimSpace(prompt) != ""
+	}
+	entry := options.queuedMessage
+	return strings.TrimSpace(entry.Content) != "" || len(entry.Attachments) > 0 ||
+		len(entityrefs.NormalizePersisted(entry.Metadata[messagequeue.MetadataEntityReferences])) > 0 ||
+		stepHandoffFromQueuedMetadata(entry.Metadata) != ""
+}
+
+// recordErrandDelivery stamps a queued entry's user message with its immutable
+// result snapshot and the durable prompt submission identity. A notification
+// has no text of its own, so its status block becomes the entry content.
+func recordErrandDelivery(entry *messagequeue.QueuedMessage, route models.ErrandDeliveryRoute, composition errands.Composition, submissionID string) {
 	if entry == nil {
 		return
 	}
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]interface{}{}
 	}
-	entry.Metadata[errandDeliveryKey] = string(route)
+	items := appendErrandDeliveryItems(queuedErrandDeliveryItems(entry.Metadata), composition.Items)
+	entry.Metadata[errandDeliveryKey] = errands.DeliveryEnvelope{
+		Token: composition.Token, Route: route, Items: items,
+	}
 	entry.Metadata[ErrandDeliveryTokenMetadataKey] = composition.Token
-	if route == models.ErrandDeliveryNotification {
+	if submissionID != "" {
+		entry.Metadata[ErrandDeliverySubmissionMetadataKey] = normalizeDeliverySubmissionID(submissionID)
+	}
+	if route == models.ErrandDeliveryNotification && strings.TrimSpace(entry.Content) == "" {
 		entry.Content = composition.Block
 	}
+}
+
+func queuedErrandDelivery(entry *messagequeue.QueuedMessage) (errands.DeliveryEnvelope, bool) {
+	if entry == nil || entry.Metadata == nil {
+		return errands.DeliveryEnvelope{}, false
+	}
+	envelope, ok := decodeErrandDeliveryEnvelope(entry.Metadata[errandDeliveryKey])
+	return envelope, ok && envelope.Token != ""
+}
+
+func queuedErrandDeliveryItems(metadata map[string]interface{}) []errands.DeliveryItem {
+	envelope, ok := decodeErrandDeliveryEnvelope(metadata[errandDeliveryKey])
+	if !ok {
+		return nil
+	}
+	return envelope.Items
+}
+
+func decodeErrandDeliveryEnvelope(value interface{}) (errands.DeliveryEnvelope, bool) {
+	if envelope, ok := value.(errands.DeliveryEnvelope); ok {
+		return envelope, true
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return errands.DeliveryEnvelope{}, false
+	}
+	var envelope errands.DeliveryEnvelope
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		return errands.DeliveryEnvelope{}, false
+	}
+	return envelope, true
+}
+
+func appendErrandDeliveryItems(previous, next []errands.DeliveryItem) []errands.DeliveryItem {
+	items := make([]errands.DeliveryItem, 0, len(previous)+len(next))
+	seen := make(map[string]struct{}, len(previous)+len(next))
+	for _, item := range append(append([]errands.DeliveryItem(nil), previous...), next...) {
+		if item.ErrandID == "" {
+			continue
+		}
+		if _, exists := seen[item.ErrandID]; exists {
+			continue
+		}
+		seen[item.ErrandID] = struct{}{}
+		items = append(items, item)
+	}
+	return items
+}
+
+func hasQueuedErrandDelivery(entry *messagequeue.QueuedMessage) bool {
+	_, ok := queuedErrandDelivery(entry)
+	return ok
+}
+
+func (s *Service) recordDirectErrandDelivery(
+	ctx context.Context, sessionID, submissionID, messageContent string,
+	route models.ErrandDeliveryRoute, composition errands.Composition,
+) error {
+	if s.transientRetryMessages == nil {
+		return errors.New("direct parent message is unavailable")
+	}
+	messages, err := s.transientRetryMessages.ListMessages(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("list parent messages: %w", err)
+	}
+	activeTurnID, _ := s.peekActiveTurnID(ctx, sessionID)
+	var target *models.Message
+	for _, message := range messages {
+		if message == nil || message.AuthorType != models.MessageAuthorUser {
+			continue
+		}
+		if submissionID != "" && message.ID == submissionID {
+			target = message
+			break
+		}
+		if message.Content != messageContent || (activeTurnID != "" && message.TurnID != activeTurnID) {
+			continue
+		}
+		if target == nil || !message.CreatedAt.Before(target.CreatedAt) {
+			target = message
+		}
+	}
+	if target == nil {
+		return errors.New("direct parent user message was not found")
+	}
+	return s.updateErrandDeliveryMessage(ctx, sessionID, target.ID, submissionID, route, composition)
+}
+
+func (s *Service) updateErrandDeliveryMessage(
+	ctx context.Context, sessionID, messageID, submissionID string,
+	route models.ErrandDeliveryRoute, composition errands.Composition,
+) error {
+	if messageID == "" || s.transientRetryMessages == nil {
+		return errors.New("parent message service is unavailable")
+	}
+	messages, err := s.transientRetryMessages.ListMessages(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("list parent messages: %w", err)
+	}
+	for _, message := range messages {
+		if message == nil || message.ID != messageID || message.AuthorType != models.MessageAuthorUser {
+			continue
+		}
+		updated := *message
+		updated.Metadata = make(map[string]interface{}, len(message.Metadata)+3)
+		for key, value := range message.Metadata {
+			updated.Metadata[key] = value
+		}
+		items := appendErrandDeliveryItems(queuedErrandDeliveryItems(message.Metadata), composition.Items)
+		updated.Metadata[errandDeliveryKey] = errands.DeliveryEnvelope{
+			Token: composition.Token, Route: route, Items: items,
+		}
+		updated.Metadata[ErrandDeliveryTokenMetadataKey] = composition.Token
+		if submissionID != "" {
+			updated.Metadata[ErrandDeliverySubmissionMetadataKey] = normalizeDeliverySubmissionID(submissionID)
+		}
+		if err := s.transientRetryMessages.UpdateMessage(ctx, &updated); err != nil {
+			return fmt.Errorf("update parent message: %w", err)
+		}
+		return nil
+	}
+	return errors.New("direct parent user message was not found")
 }
 
 func joinErrandBlock(block, prompt string) string {

@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +10,19 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestDeliverySnapshotItemsUseSnakeCaseWireFields(t *testing.T) {
+	encoded, err := json.Marshal(DeliveryItem{
+		ErrandID: "errand-1", Title: "Review API", Status: models.ErrandStatusDone, Preview: "Reviewed the API.",
+	})
+	if err != nil {
+		t.Fatalf("marshal delivery item: %v", err)
+	}
+	const want = `{"errand_id":"errand-1","title":"Review API","status":"done","preview":"Reviewed the API."}`
+	if string(encoded) != want {
+		t.Fatalf("delivery item JSON = %s, want %s", encoded, want)
+	}
+}
 
 // fakeTurns serves transcript evidence keyed by turn ID.
 type fakeTurns struct {
@@ -21,6 +35,20 @@ func (f *fakeTurns) ReadTurn(_ context.Context, _, turnID string) (TurnView, err
 
 func (f *fakeTurns) LatestTurn(context.Context, string) (string, TurnView, error) {
 	return "", TurnView{}, nil
+}
+
+type cancellationTurns struct {
+	views    map[string]TurnView
+	latestID string
+	latest   TurnView
+}
+
+func (f *cancellationTurns) ReadTurn(_ context.Context, _, turnID string) (TurnView, error) {
+	return f.views[turnID], nil
+}
+
+func (f *cancellationTurns) LatestTurn(context.Context, string) (string, TurnView, error) {
+	return f.latestID, f.latest, nil
 }
 
 // settleFirstTurn starts an errand whose first turn is parent-initiated and
@@ -95,6 +123,102 @@ func TestUserTurnDoesNotProduceAResult(t *testing.T) {
 	}
 	if row.LatestSettledTurnID != "user-turn" {
 		t.Fatalf("latest settled turn = %q, want the user turn recorded", row.LatestSettledTurnID)
+	}
+}
+
+func TestCancelledParentTurnProducesInterruptedFailureAndClearsAwaiting(t *testing.T) {
+	h := newHarness(t)
+	err := h.mustStart("audit").Errand
+	h.service.SetTurnReader(&cancellationTurns{
+		views:    map[string]TurnView{err.FirstTurnID: {EarliestUserSender: testParent}},
+		latestID: err.FirstTurnID,
+		latest:   TurnView{EarliestUserSender: testParent},
+	})
+
+	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, err.FirstTurnID, err.SubmissionID); err != nil {
+		t.Fatalf("OnErrandTurnCancelled: %v", err)
+	}
+	row, getErr := h.store.GetErrand(context.Background(), err.ID)
+	if getErr != nil {
+		t.Fatalf("GetErrand: %v", getErr)
+	}
+	if row.LastOutcome != models.ErrandOutcomeFailed || row.ResultKind != models.ErrandResultInterrupted ||
+		row.ResultState != models.ErrandResultPending || row.ResultTurnID != err.FirstTurnID || row.AwaitingResult {
+		t.Fatalf("row = outcome %q kind %q state %q turn %q awaiting %v, want an interrupted pending failure with no outstanding bit",
+			row.LastOutcome, row.ResultKind, row.ResultState, row.ResultTurnID, row.AwaitingResult)
+	}
+}
+
+func TestCancelledUserTurnPreservesPriorOutcomeWithoutAResult(t *testing.T) {
+	h := newHarness(t)
+	err := h.mustStart("audit").Errand
+	_, _, updateErr := h.service.update(context.Background(), err.ID, func(row *models.Errand) bool {
+		row.LastOutcome = models.ErrandOutcomeDone
+		row.LatestSettledTurnID = "previous-turn"
+		return true
+	})
+	if updateErr != nil {
+		t.Fatalf("seed prior outcome: %v", updateErr)
+	}
+	h.service.SetTurnReader(&cancellationTurns{
+		views:    map[string]TurnView{"user-turn": {EarliestUserSender: "user-session"}},
+		latestID: "user-turn",
+		latest:   TurnView{EarliestUserSender: "user-session"},
+	})
+
+	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, "user-turn", "user-submission"); err != nil {
+		t.Fatalf("OnErrandTurnCancelled: %v", err)
+	}
+	row, getErr := h.store.GetErrand(context.Background(), err.ID)
+	if getErr != nil {
+		t.Fatalf("GetErrand: %v", getErr)
+	}
+	if row.LastOutcome != models.ErrandOutcomeDone || row.ResultState == models.ErrandResultPending || row.ResultText != "" ||
+		row.LatestSettledTurnID != "user-turn" {
+		t.Fatalf("row = outcome %q state %q text %q latest %q, want the previous outcome and no implicit result",
+			row.LastOutcome, row.ResultState, row.ResultText, row.LatestSettledTurnID)
+	}
+	if got := h.deliverer.delivered(); len(got) != 0 {
+		t.Fatalf("cancelled user turn triggered result delivery: %v", got)
+	}
+}
+
+func TestCancelledErrandTurnIgnoresSuccessorAndWrongInitialSubmission(t *testing.T) {
+	h := newHarness(t)
+	err := h.mustStart("audit").Errand
+	h.service.SetTurnReader(&cancellationTurns{
+		views:    map[string]TurnView{err.FirstTurnID: {EarliestUserSender: testParent}},
+		latestID: "successor-turn",
+		latest:   TurnView{EarliestUserSender: testParent},
+	})
+
+	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, err.FirstTurnID, err.SubmissionID); err != nil {
+		t.Fatalf("stale OnErrandTurnCancelled: %v", err)
+	}
+	row, getErr := h.store.GetErrand(context.Background(), err.ID)
+	if getErr != nil {
+		t.Fatalf("GetErrand: %v", getErr)
+	}
+	if row.AwaitingResult == false || row.ResultState == models.ErrandResultPending || row.LastOutcome != "" {
+		t.Fatalf("stale cancellation changed successor state: awaiting %v, result %q, outcome %q",
+			row.AwaitingResult, row.ResultState, row.LastOutcome)
+	}
+
+	h.service.SetTurnReader(&cancellationTurns{
+		views:    map[string]TurnView{err.FirstTurnID: {EarliestUserSender: testParent}},
+		latestID: err.FirstTurnID,
+		latest:   TurnView{EarliestUserSender: testParent},
+	})
+	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, err.FirstTurnID, "wrong-submission"); err != nil {
+		t.Fatalf("wrong-submission OnErrandTurnCancelled: %v", err)
+	}
+	row, getErr = h.store.GetErrand(context.Background(), err.ID)
+	if getErr != nil {
+		t.Fatalf("GetErrand after wrong submission: %v", getErr)
+	}
+	if !row.AwaitingResult || row.ResultState == models.ErrandResultPending || row.LastOutcome != "" {
+		t.Fatalf("wrong submission changed errand: awaiting %v, result %q, outcome %q",
+			row.AwaitingResult, row.ResultState, row.LastOutcome)
 	}
 }
 
@@ -222,6 +346,38 @@ func TestDeletedOutstandingErrandAdmitsItsCancellationNotice(t *testing.T) {
 	}
 	if len(h.deliverer.prepared) != 1 || !strings.Contains(h.deliverer.prepared[0], cancellationNotice) {
 		t.Fatalf("admitted = %v, want one cancellation notice", h.deliverer.prepared)
+	}
+	if err := h.store.DeleteErrand(context.Background(), errand.ID); err != nil {
+		t.Fatalf("DeleteErrand after notice admission: %v", err)
+	}
+	metadata := h.deliverer.preparedMetadata[0]
+	envelope, ok := metadata[DeliveryEnvelopeMetadataKey].(DeliveryEnvelope)
+	if !ok || envelope.Route != models.ErrandDeliveryNotification || len(envelope.Items) != 1 ||
+		envelope.Items[0].ErrandID != errand.ID || envelope.Items[0].Status != models.ErrandStatusCancelled {
+		t.Fatalf("cancellation notice snapshot = %#v, want the cancelled errand item", metadata[DeliveryEnvelopeMetadataKey])
+	}
+	if metadata[DeliveryTokenMetadataKey] != envelope.Token || envelope.Token == "" {
+		t.Fatalf("cancellation notice token = %#v envelope=%q, want a matching immutable token", metadata[DeliveryTokenMetadataKey], envelope.Token)
+	}
+}
+
+func TestDisabledErrandDeletionDoesNotQueueCancellationNotice(t *testing.T) {
+	h := newHarness(t)
+	err := h.mustStart("audit").Errand
+	h.service.SetEnabled(func() bool { return false })
+
+	if err := h.service.PreserveCancellationNotice(context.Background(), err.ID); err != nil {
+		t.Fatalf("PreserveCancellationNotice: %v", err)
+	}
+	if len(h.deliverer.prepared) != 0 || len(h.deliverer.delivered()) != 0 {
+		t.Fatalf("disabled deletion queued output: prepared=%v delivered=%v", h.deliverer.prepared, h.deliverer.delivered())
+	}
+	row, getErr := h.store.GetErrand(context.Background(), err.ID)
+	if getErr != nil {
+		t.Fatalf("GetErrand: %v", getErr)
+	}
+	if row.Lifecycle != models.ErrandLifecycleCancelled || row.ResultState != models.ErrandResultDiscarded || row.ResultText != "" {
+		t.Fatalf("disabled deletion left lifecycle=%q result=%q/%q, want cancelled with no queued result", row.Lifecycle, row.ResultState, row.ResultText)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 var (
@@ -96,13 +97,18 @@ func (s *Service) runTurnCancellationOwned(ctx context.Context, taskID, sessionI
 		return err
 	}
 	s.setCancellationCompletionEligible(sessionID, operation, completionEligible)
+	if models.IsErrandSession(session) {
+		s.settleCancelledErrandTurn(ctx, sessionID, identity.turnID, "")
+	}
 	prepared := cancelAgentPreparation{session: session, identity: identity, completionEligible: completionEligible}
 	if err := s.finishSilentCancelledAgentTurn(ctx, taskID, sessionID, prepared); err != nil {
 		return err
 	}
 	// A user cancel never starts a result notification; pending results wait
 	// for a later parent turn.
-	s.settleParentTurn(ctx, sessionID, errands.SettleCauseUserCancel)
+	if !models.IsErrandSession(session) {
+		s.settleParentTurn(ctx, sessionID, errands.SettleCauseUserCancel)
+	}
 	return nil
 }
 

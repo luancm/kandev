@@ -357,6 +357,7 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 				b.hub.BroadcastConversationMutation(data)
 			}
 			b.hub.BroadcastToSession(sessionID, msg)
+			b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:

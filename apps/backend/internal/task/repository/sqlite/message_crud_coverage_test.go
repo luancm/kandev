@@ -2,12 +2,50 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
+
+func TestErrandDeliveryMessageMetadataRoundTrips(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-errand-message", "session-errand-message", "turn-errand-message")
+	message := &models.Message{
+		ID: "message-errand-delivery", TaskID: "task-errand-message", TaskSessionID: "session-errand-message",
+		TurnID: "turn-errand-message", AuthorType: models.MessageAuthorUser, Content: "hello",
+		Metadata: map[string]any{
+			"errand_delivery": map[string]any{
+				"token": "delivery-token", "route": "turn_context",
+				"items": []any{map[string]any{
+					"errand_id": "errand-1", "title": "Review API", "status": "done", "preview": "Reviewed the API.",
+				}},
+			},
+			"errand_delivery_token":         "delivery-token",
+			"errand_delivery_submission_id": "prompt:message-errand-delivery",
+		},
+	}
+	if err := repo.CreateMessage(ctx, message); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	stored, err := repo.GetMessage(ctx, message.ID)
+	if err != nil {
+		t.Fatalf("GetMessage: %v", err)
+	}
+	if stored.Content != "hello" || stored.Metadata["errand_delivery_token"] != "delivery-token" {
+		t.Fatalf("stored message text/token = %q/%#v", stored.Content, stored.Metadata["errand_delivery_token"])
+	}
+	wire, err := json.Marshal(stored.Metadata["errand_delivery"])
+	if err != nil {
+		t.Fatalf("marshal stored delivery snapshot: %v", err)
+	}
+	const want = `{"token":"delivery-token","route":"turn_context","items":[{"errand_id":"errand-1","title":"Review API","status":"done","preview":"Reviewed the API."}]}`
+	require.JSONEq(t, want, string(wire))
+}
 
 func TestMessageCRUDPaginationSearchAndMetadataLookups(t *testing.T) {
 	repo := newRepoForSessionTests(t)

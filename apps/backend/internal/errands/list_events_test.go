@@ -97,17 +97,40 @@ func TestCountersUseOnlyClosedLabelSets(t *testing.T) {
 	_, _ = h.service.Cancel(context.Background(), CancelRequest{
 		ErrandID: h.launcher.calls()[0].ErrandID, TaskID: testTask, Source: models.ErrandCancelSourceUser,
 	})
-	countSettled(models.ErrandStatusRunning) // outside the closed set: ignored
+	for _, outcome := range []StartOutcome{
+		StartOutcomeStarted, StartOutcomeQueued, StartOutcomeLimitReached, StartOutcomeRejected, StartOutcomeFailed,
+	} {
+		countStarted(outcome)
+	}
+	for _, status := range []models.ErrandStatus{
+		models.ErrandStatusDone, models.ErrandStatusFailed, models.ErrandStatusCancelled,
+	} {
+		countSettled(status)
+	}
+	for _, route := range []models.ErrandDeliveryRoute{
+		models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext, models.ErrandDeliveryNotification,
+	} {
+		countDelivery(route)
+	}
+	countStarted(StartOutcome(testTask))
+	countSettled(models.ErrandStatus(testTask))
+	countDelivery(models.ErrandDeliveryRoute(testTask))
 
 	allowed := map[string]map[string]bool{
 		"errands_started_total": {"outcome=started": true, "outcome=queued": true, "outcome=limit_reached": true,
 			"outcome=rejected": true, "outcome=failed": true},
-		"errands_settled_total": {"status=done": true, "status=failed": true, "status=cancelled": true},
+		"errands_settled_total":         {"status=done": true, "status=failed": true, "status=cancelled": true},
+		"errands_result_delivery_total": {"route=await": true, "route=turn_context": true, "route=notification": true},
 	}
 	for name, labels := range allowed {
 		counter, ok := expvar.Get(name).(*expvar.Map)
 		if !ok {
 			t.Fatalf("expvar %s is not published", name)
+		}
+		for label := range labels {
+			if counter.Get(label) == nil {
+				t.Errorf("%s is missing closed label %q", name, label)
+			}
 		}
 		counter.Do(func(entry expvar.KeyValue) {
 			if !labels[entry.Key] {
@@ -115,8 +138,14 @@ func TestCountersUseOnlyClosedLabelSets(t *testing.T) {
 			}
 		})
 	}
-	if settled := expvar.Get("errands_settled_total").(*expvar.Map).Get("status=running"); settled != nil {
-		t.Fatal("an open-set status leaked into errands_settled_total")
+	for name, invalidLabel := range map[string]string{
+		"errands_started_total":         "outcome=" + testTask,
+		"errands_settled_total":         "status=" + testTask,
+		"errands_result_delivery_total": "route=" + testTask,
+	} {
+		if got := expvar.Get(name).(*expvar.Map).Get(invalidLabel); got != nil {
+			t.Errorf("an identifier leaked into %s as %q", name, invalidLabel)
+		}
 	}
 }
 

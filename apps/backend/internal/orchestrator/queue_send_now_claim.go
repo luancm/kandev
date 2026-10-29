@@ -135,9 +135,17 @@ func (s *Service) sendNowAfterClaim(
 			return errLifecyclePromptReservationSuperseded
 		}
 		if durablePlanComments {
+			if hasQueuedErrandDelivery(&claim.Dispatch) {
+				if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+					return fmt.Errorf("update Send Now errand delivery transcript: %w", err)
+				}
+			}
 			return nil
 		}
 		if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+			if hasQueuedErrandDelivery(&claim.Dispatch) {
+				return fmt.Errorf("record Send Now errand delivery transcript: %w", err)
+			}
 			s.logger.Warn("failed to record send-now user message after prompt claim",
 				zap.String("session_id", claim.Dispatch.SessionID), zap.Error(err))
 		} else if s.messageCreator != nil {

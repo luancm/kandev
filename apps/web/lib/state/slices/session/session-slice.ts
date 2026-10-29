@@ -934,7 +934,12 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
       // An errand's ID is its session ID.
       const errands = (draft as unknown as Partial<ErrandsSliceState>).errands;
-      delete errands?.byTaskId[taskId]?.[sessionId];
+      if (errands) {
+        delete errands.byTaskId[taskId]?.[sessionId];
+        const removedIds = (errands.removedSessionIdsByTaskId[taskId] ??= {});
+        removedIds[sessionId] = true;
+        errands.liveRevisionByTaskId[taskId] = (errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
+      }
     });
 }
 

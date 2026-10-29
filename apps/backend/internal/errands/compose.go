@@ -22,12 +22,26 @@ const (
 	statusOmittedLine = " errands omitted; use list_task_sessions_kandev."
 )
 
+const (
+	// DeliveryEnvelopeMetadataKey stores an immutable delivery snapshot on a chat message.
+	DeliveryEnvelopeMetadataKey = "errand_delivery"
+	// DeliveryTokenMetadataKey links a chat message to its result claim.
+	DeliveryTokenMetadataKey = "errand_delivery_token"
+)
+
 // DeliveryItem is one errand attached to a parent turn.
 type DeliveryItem struct {
-	ErrandID string
-	Title    string
-	Status   models.ErrandStatus
-	Preview  string
+	ErrandID string              `json:"errand_id"`
+	Title    string              `json:"title"`
+	Status   models.ErrandStatus `json:"status"`
+	Preview  string              `json:"preview"`
+}
+
+// DeliveryEnvelope is the immutable message snapshot rendered by the web UI.
+type DeliveryEnvelope struct {
+	Token string                     `json:"token"`
+	Route models.ErrandDeliveryRoute `json:"route"`
+	Items []DeliveryItem             `json:"items"`
 }
 
 // Composition is the status block for one parent turn and the claim that

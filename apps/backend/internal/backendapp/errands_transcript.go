@@ -2,10 +2,12 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // errandTranscriptRepo is the transcript read the errands service needs. The
@@ -14,6 +16,7 @@ type errandTranscriptRepo interface {
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	GetAgentDeliverySubmission(ctx context.Context, id string) (*models.AgentDeliverySubmission, error)
 }
 
 // errandTranscript serves errand turn evidence and delivery-token checks from
@@ -60,7 +63,22 @@ func (t errandTranscript) HasDeliveryToken(ctx context.Context, parentSessionID,
 		return false, err
 	}
 	for _, message := range messages {
-		if message.Metadata[orchestrator.ErrandDeliveryTokenMetadataKey] == token {
+		if message == nil || message.Metadata[orchestrator.ErrandDeliveryTokenMetadataKey] != token {
+			continue
+		}
+		submissionID, _ := message.Metadata[orchestrator.ErrandDeliverySubmissionMetadataKey].(string)
+		if submissionID == "" {
+			return true, nil
+		}
+		submission, err := t.repo.GetAgentDeliverySubmission(ctx, submissionID)
+		if errors.Is(err, repository.ErrAgentDeliverySubmissionNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if submission == nil || (submission.State != models.DeliverySubmissionFailed &&
+			submission.State != models.DeliverySubmissionCancelled) {
 			return true, nil
 		}
 	}

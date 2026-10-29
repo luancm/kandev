@@ -147,3 +147,24 @@ describe("removeTaskSession cleanup cascade", () => {
     expect(store.getState().queue.activeOperationBySessionId[SESSION_ID]).toEqual(replacement);
   });
 });
+
+describe("removed session errand fencing", () => {
+  it("does not let an in-flight errand.list response restore a removed session", () => {
+    const store = makeStore();
+    const requestRevision = store.getState().errands.liveRevisionByTaskId[TASK_ID] ?? 0;
+    const removedErrand = makeErrand({ errand_id: SESSION_ID, task_id: TASK_ID });
+
+    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
+    store.getState().setTaskErrands(TASK_ID, [removedErrand], requestRevision);
+
+    expect(store.getState().errands.byTaskId[TASK_ID]?.[SESSION_ID]).toBeUndefined();
+  });
+
+  it("ignores a delayed errand update after the session was removed", () => {
+    const store = makeStore();
+    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
+    store.getState().upsertErrand(makeErrand({ errand_id: SESSION_ID, task_id: TASK_ID }));
+
+    expect(store.getState().errands.byTaskId[TASK_ID]?.[SESSION_ID]).toBeUndefined();
+  });
+});

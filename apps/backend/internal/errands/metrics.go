@@ -27,7 +27,10 @@ var (
 )
 
 func countStarted(outcome StartOutcome) {
-	startedTotal.Add("outcome="+string(outcome), 1)
+	switch outcome {
+	case StartOutcomeStarted, StartOutcomeQueued, StartOutcomeLimitReached, StartOutcomeRejected, StartOutcomeFailed:
+		startedTotal.Add("outcome="+string(outcome), 1)
+	}
 }
 
 // countSettled records a settlement. Only the closed done, failed, and

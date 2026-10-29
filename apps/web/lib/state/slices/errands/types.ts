@@ -8,6 +8,8 @@ export type ErrandsSliceState = {
     loadedByTaskId: Record<string, boolean>;
     /** Advances on every live upsert, so a list response can tell it raced live events. */
     liveRevisionByTaskId: Record<string, number>;
+    /** Removed session IDs block late list and live errand events from restoring a row. */
+    removedSessionIdsByTaskId: Record<string, Record<string, true>>;
   };
 };
 

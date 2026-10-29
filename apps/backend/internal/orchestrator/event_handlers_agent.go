@@ -1417,6 +1417,9 @@ func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *
 	if queuedMsg == nil {
 		return false, nil
 	}
+	if isErrandNotificationEntry(queuedMsg) {
+		return true, nil
+	}
 	if present, ok := queuedMsg.Metadata[metaKeyWorkflowDispatchInputPresent].(bool); ok {
 		return present, nil
 	}
@@ -1532,15 +1535,44 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 ) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if alreadyRecorded {
+		if delivery, ok := queuedErrandDelivery(queuedMsg); ok {
+			messageID := ""
+			if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
+				messageID = transcriptID
+			} else {
+				if len(sourceIDs) == 0 {
+					sourceIDs = []string{queuedMsg.ID}
+				}
+				messageID = uuid.NewSHA1(
+					uuid.NameSpaceOID,
+					[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
+				).String()
+			}
+			_, submissionID, _ := queuedMsg.DeliverySubmission()
+			composition := errands.Composition{Token: delivery.Token, Items: delivery.Items}
+			return s.updateErrandDeliveryMessage(ctx, queuedMsg.SessionID, messageID, submissionID, delivery.Route, composition)
+		}
 		return nil
 	}
 	// Handler-originated comment sends commit the transcript and queue receipt
 	// in one transaction. The marker is only written by that boundary.
 	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
+		if delivery, ok := queuedErrandDelivery(queuedMsg); ok {
+			composition := errands.Composition{Token: delivery.Token, Items: delivery.Items}
+			_, submissionID, _ := queuedMsg.DeliverySubmission()
+			if err := s.updateErrandDeliveryMessage(
+				ctx, queuedMsg.SessionID, transcriptID, submissionID, delivery.Route, composition,
+			); err != nil {
+				return err
+			}
+		}
 		markQueuedUserMessageRecorded(queuedMsg)
 		return nil
 	}
 	if s.messageCreator == nil {
+		if hasQueuedErrandDelivery(queuedMsg) {
+			return errors.New("message creator is unavailable for errand delivery snapshot")
+		}
 		if queuedMsg.IsDurablePlanComment() {
 			return errors.New("message creator is unavailable for durable plan-comment delivery")
 		}
@@ -2063,14 +2095,14 @@ func (s *Service) queuedMessageAfterClaim(
 		if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(ctx, queuedMsg) {
 			return errLifecyclePromptReservationSuperseded
 		}
-		if queuedMsg.IsDurablePlanComment() {
+		if queuedMsg.IsDurablePlanComment() && !hasQueuedErrandDelivery(queuedMsg) {
 			return nil
 		}
-		if !alreadyRecorded {
+		if !alreadyRecorded || hasQueuedErrandDelivery(queuedMsg) {
 			if err := s.recordQueuedUserMessageWithPromptContent(
 				ctx, queuedMsg, attachments, preparedPromptContent,
 			); err != nil {
-				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() {
+				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() || hasQueuedErrandDelivery(queuedMsg) {
 					return err
 				}
 			} else if userMessageRecorded != nil && s.messageCreator != nil {
@@ -2760,7 +2792,7 @@ func (s *Service) settleDetachedAgentReadyTurn(
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
 	if models.IsErrandSession(session) {
-		s.settleErrandTurn(completionCtx, data.SessionID, turnID, models.ErrandOutcomeDone, "")
+		s.settleErrandTurn(completionCtx, data.SessionID, turnID, models.ErrandOutcomeDone, "", data.DeliverySubmissionID)
 	}
 	s.settleDetachedSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 }
@@ -3469,7 +3501,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// both turns would emit a spurious empty-turn notice.
 	failedTurnID := s.markTurnErrorTerminated(ctx, data.SessionID)
 	if errandSession {
-		s.settleErrandTurn(ctx, data.SessionID, failedTurnID, models.ErrandOutcomeFailed, data.ErrorMessage)
+		s.settleErrandTurn(ctx, data.SessionID, failedTurnID, models.ErrandOutcomeFailed, data.ErrorMessage, data.DeliverySubmissionID)
 	} else if !workflowDetached {
 		s.settleParentTurn(ctx, data.SessionID, errands.SettleCauseTurnDone)
 	}

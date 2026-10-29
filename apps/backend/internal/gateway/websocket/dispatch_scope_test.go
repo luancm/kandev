@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/require"
 )
 
 // Dispatched WS actions were previously left to authorize themselves at the
@@ -49,6 +50,16 @@ func newDispatchScopeFixture(t *testing.T, identity authn.Identity) *dispatchSco
 				return repoerrors.ErrTaskNotFound
 			},
 		},
+		ResolveErrandTask: func(_ context.Context, errandID string) (string, error) {
+			switch errandID {
+			case "sess-a", "queued-errand-a":
+				return "task-a", nil
+			case "sess-b", "queued-errand-b":
+				return "task-b", nil
+			default:
+				return "", repoerrors.ErrTaskNotFound
+			}
+		},
 		ActionEnvironment: func(_ context.Context, envID string) error {
 			if envID == "env-a" {
 				return nil
@@ -67,6 +78,24 @@ func newDispatchScopeFixture(t *testing.T, identity authn.Identity) *dispatchSco
 	c.hub = h
 	c.identity = identity
 	return &dispatchScopeFixture{client: c, handled: &handled, dispatcher: dispatcher}
+}
+
+func TestDispatchScopeAuthorizesQueuedErrandByOwningTask(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+	f.dispatchAs(t, ws.ActionErrandCancel, `{"session_id":"queued-errand-a"}`)
+	require.True(t, *f.handled, "the owning workspace member can cancel a queued errand without a session row")
+}
+
+func TestDispatchScopeDeniesQueuedErrandFromForeignTaskBeforeDispatch(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+	f.dispatchAs(t, ws.ActionErrandCancel, `{"session_id":"queued-errand-b"}`)
+	require.False(t, *f.handled, "a queued errand from another workspace must be denied before mutation")
+}
+
+func TestDispatchScopeDeniesErrandTaskMismatch(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+	f.dispatchAs(t, ws.ActionErrandCancel, `{"session_id":"queued-errand-a","task_id":"task-b"}`)
+	require.False(t, *f.handled, "a caller-supplied task must not override the reserved errand's owner")
 }
 
 // dispatchAs sends payload under a real action name, so tests can exercise the

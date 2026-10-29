@@ -41,8 +41,10 @@ func (s *Service) Start(ctx context.Context, req StartRequest) (*StartResult, er
 	req.Title = strings.TrimSpace(req.Title)
 	req.Objective = strings.TrimSpace(req.Objective)
 	if req.TaskID == "" || req.ParentSessionID == "" || req.Title == "" || req.Objective == "" {
+		startErr := fmt.Errorf("%w: task, parent session, title, and prompt are required", ErrInvalidRequest)
 		countStarted(StartOutcomeRejected)
-		return nil, fmt.Errorf("%w: task, parent session, title, and prompt are required", ErrInvalidRequest)
+		s.logStartRequest(req, StartOutcomeRejected, startErr)
+		return nil, startErr
 	}
 	prepared, err := s.prepareStart(ctx, req)
 	if err != nil {
@@ -73,17 +75,21 @@ func (s *Service) prepareStart(ctx context.Context, req StartRequest) (*prepared
 	parent, err := s.loadParent(ctx, req)
 	if err != nil {
 		countStarted(StartOutcomeRejected)
+		s.logStartRequest(req, StartOutcomeRejected, err)
 		return nil, err
 	}
 	profile, err := s.profiles.ResolveProfile(ctx, req.TaskID, req.Profile, parent.AgentProfileID)
 	if err != nil {
 		countStarted(StartOutcomeRejected)
+		s.logStartRequest(req, StartOutcomeRejected, err)
 		return nil, err
 	}
 	mcp, err := s.mcp.SessionServerIDs(ctx, req.TaskID, parent.ID)
 	if err != nil {
 		countStarted(StartOutcomeFailed)
-		return nil, fmt.Errorf("read parent MCP selections: %w", err)
+		startErr := fmt.Errorf("read parent MCP selections: %w", err)
+		s.logStartRequest(req, StartOutcomeFailed, startErr)
+		return nil, startErr
 	}
 	return &preparedStart{req: req, parent: parent, profile: profile, mcp: mcp}, nil
 }
@@ -111,7 +117,9 @@ func (s *Service) admit(ctx context.Context, prepared *preparedStart) (*models.E
 	live, err := s.store.CountLiveErrandsByTask(ctx, prepared.req.TaskID)
 	if err != nil {
 		countStarted(StartOutcomeFailed)
-		return nil, fmt.Errorf("count live errands: %w", err)
+		startErr := fmt.Errorf("count live errands: %w", err)
+		s.logStartRequest(prepared.req, StartOutcomeFailed, startErr)
+		return nil, startErr
 	}
 	if live >= MaxLiveErrands {
 		countStarted(StartOutcomeLimitReached)
@@ -126,6 +134,8 @@ func (s *Service) admit(ctx context.Context, prepared *preparedStart) (*models.E
 	if err := s.store.CreateErrand(ctx, errand); err != nil {
 		s.launching.release(errand.ID)
 		countStarted(StartOutcomeFailed)
+		s.logger.Warn("errand.started", s.errandFields(errand,
+			"outcome", string(StartOutcomeFailed), "error", oneLine(err.Error(), 300))...)
 		return nil, fmt.Errorf("create errand: %w", err)
 	}
 	return errand, nil
@@ -209,6 +219,7 @@ func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (la
 	if changed {
 		s.events.PublishErrandUpdated(ctx, row, status)
 		countStarted(StartOutcomeStarted)
+		s.logger.Info("errand.started", s.errandFields(row, "outcome", string(StartOutcomeStarted))...)
 		s.logger.Info("errand.admitted", s.errandFields(row)...)
 	}
 	return launchOutcome{snapshot: Snapshot{Errand: row, Status: status}}, nil
@@ -244,6 +255,8 @@ func (s *Service) recordLaunchFailure(
 		s.events.PublishErrandUpdated(ctx, row, status)
 		countSettled(status)
 		countStarted(StartOutcomeFailed)
+		s.logger.Warn("errand.started", s.errandFields(row,
+			"outcome", string(StartOutcomeFailed), "error", oneLine(launchErr.Error(), 300))...)
 		s.logger.Warn("errand.settled", s.errandFields(row, "status", string(status), "error", oneLine(launchErr.Error(), 300))...)
 		s.deliverPending(ctx, row.ParentSessionID)
 	}
@@ -292,6 +305,17 @@ func (s *Service) errandFields(errand *models.Errand, extra ...string) []zap.Fie
 		fields = append(fields, zap.String(extra[i], extra[i+1]))
 	}
 	return fields
+}
+
+func (s *Service) logStartRequest(req StartRequest, outcome StartOutcome, err error) {
+	fields := []zap.Field{
+		zap.String("task_id", req.TaskID), zap.String("parent_session_id", req.ParentSessionID),
+		zap.String("outcome", string(outcome)),
+	}
+	if err != nil {
+		fields = append(fields, zap.String("error", oneLine(err.Error(), 300)))
+	}
+	s.logger.Warn("errand.started", fields...)
 }
 
 func newErrandIdentity() (errandID, turnID, submissionID string) {

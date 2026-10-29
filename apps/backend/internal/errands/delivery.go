@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -122,11 +123,18 @@ func (s *Service) SweepDelivery(ctx context.Context) error {
 // and admits its cancellation notice to the parent before the row is removed.
 // A parent with no outstanding work gets nothing. A refused admission returns
 // an error so the caller keeps the row and the notice is not lost. It runs
-// whether or not the feature flag is on.
+// only while the feature is enabled; disabled retained sessions are cancelled
+// without preserving a result for a later turn.
 func (s *Service) PreserveCancellationNotice(ctx context.Context, errandID string) error {
 	row, _, err := s.cancelRow(ctx, errandID, models.ErrandCancelSourceUser)
 	if err != nil {
 		return err
+	}
+	if !s.featureEnabled() {
+		if row.ResultState == models.ErrandResultPending {
+			return s.discardPending(ctx, row.ID)
+		}
+		return nil
 	}
 	if row.ResultState != models.ErrandResultPending || s.deliverer == nil {
 		return nil
@@ -134,10 +142,21 @@ func (s *Service) PreserveCancellationNotice(ctx context.Context, errandID strin
 	now := s.clock.Now()
 	block := renderStatusBlock([]composedErrand{{errand: row, status: models.ErrandStatusCancelled}},
 		map[string]*models.Errand{row.ID: row}, now)
-	metadata := map[string]interface{}{"errand_delivery": string(models.ErrandDeliveryNotification)}
+	token := uuid.NewString()
+	metadata := map[string]interface{}{
+		DeliveryEnvelopeMetadataKey: DeliveryEnvelope{
+			Token: token, Route: models.ErrandDeliveryNotification,
+			Items: []DeliveryItem{{
+				ErrandID: row.ID, Title: row.Title, Status: models.ErrandStatusCancelled,
+				Preview: previewText(row.ResultText),
+			}},
+		},
+		DeliveryTokenMetadataKey: token,
+	}
 	if err := s.deliverer.AdmitPrepared(ctx, row.ParentSessionID, block, metadata); err != nil {
 		return fmt.Errorf("admit cancellation notice: %w", err)
 	}
 	countDelivery(models.ErrandDeliveryNotification)
+	s.logger.Info("errand.delivered", s.errandFields(row, "route", string(models.ErrandDeliveryNotification))...)
 	return nil
 }

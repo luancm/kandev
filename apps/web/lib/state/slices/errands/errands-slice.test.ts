@@ -16,6 +16,7 @@ describe("errands slice", () => {
       byTaskId: {},
       loadedByTaskId: {},
       liveRevisionByTaskId: {},
+      removedSessionIdsByTaskId: {},
     });
   });
 });
@@ -128,6 +129,7 @@ describe("removeTaskErrands", () => {
     expect(errands.byTaskId[ERRAND_TASK_ID]).toBeUndefined();
     expect(errands.loadedByTaskId[ERRAND_TASK_ID]).toBeUndefined();
     expect(errands.liveRevisionByTaskId[ERRAND_TASK_ID]).toBeUndefined();
+    expect(errands.removedSessionIdsByTaskId[ERRAND_TASK_ID]).toBeUndefined();
     expect(Object.keys(taskErrands(store, "task-b"))).toEqual(["errand-1"]);
   });
 });

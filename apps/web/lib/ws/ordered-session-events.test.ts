@@ -68,4 +68,15 @@ describe("ordered session event envelopes", () => {
       }),
     ).toBe("project");
   });
+
+  it("accepts a terminal removal event whose payload only has the session ID", () => {
+    expect(
+      orderedCoreDisposition({
+        ...validEvent,
+        event_type: "session.removed",
+        task_id: null,
+        payload: { type: "session.removed", session_id: "session-1" },
+      }),
+    ).toBe("terminal");
+  });
 });

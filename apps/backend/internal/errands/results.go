@@ -18,7 +18,8 @@ const (
 	// cancellationNotice is the result a user cancel or delete leaves behind.
 	cancellationNotice = "The errand was cancelled."
 	// failureNotice is the result when a failed turn has no summary of its own.
-	failureNotice = "The errand failed before it produced a result."
+	failureNotice         = "The errand failed before it produced a result."
+	interruptedTurnNotice = "The errand was interrupted before it finished."
 )
 
 // TurnSettlement is one settled errand turn. Outcome is done or failed.
@@ -26,14 +27,20 @@ const (
 type TurnSettlement struct {
 	SessionID      string
 	TurnID         string
+	SubmissionID   string
 	Outcome        models.ErrandOutcome
 	FailureSummary string
+	Interrupted    bool
 }
 
 // OnErrandTurnSettled records a settled errand turn. A session that is not an
 // errand is ignored. Capture of a parent-initiated turn is idempotent on the
 // result turn id.
 func (s *Service) OnErrandTurnSettled(ctx context.Context, settlement TurnSettlement) error {
+	return s.onErrandTurnSettled(ctx, settlement, "")
+}
+
+func (s *Service) onErrandTurnSettled(ctx context.Context, settlement TurnSettlement, reconciliationAction string) error {
 	if settlement.SessionID == "" || settlement.TurnID == "" {
 		return nil
 	}
@@ -51,9 +58,56 @@ func (s *Service) OnErrandTurnSettled(ctx context.Context, settlement TurnSettle
 		return settleErr
 	}
 	if changed {
+		if reconciliationAction != "" {
+			s.logReconciled(row, reconciliationAction)
+		}
 		s.afterResultWrite(ctx, row)
 	}
 	return nil
+}
+
+// OnErrandTurnCancelled settles the exact turn observed by cancellation. A
+// terminal turn that already won the race keeps its real outcome; otherwise a
+// parent-origin turn becomes an interrupted failure and a user-origin turn
+// keeps the errand's prior settled outcome.
+func (s *Service) OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error {
+	if sessionID == "" || turnID == "" {
+		return nil
+	}
+	errand, err := s.store.GetErrand(ctx, sessionID)
+	if errors.Is(err, models.ErrErrandNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load errand before cancellation settlement: %w", err)
+	}
+	if turnID == errand.FirstTurnID {
+		if submissionID == "" {
+			submissionID = errand.SubmissionID
+		}
+		if submissionID != errand.SubmissionID {
+			return nil
+		}
+	}
+	outcome := models.ErrandOutcomeFailed
+	interrupted := true
+	if s.turns != nil {
+		latestID, latest, err := s.turns.LatestTurn(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("read current errand turn before cancellation settlement: %w", err)
+		}
+		if latestID != "" && latestID != turnID {
+			return nil
+		}
+		if latest.Completed {
+			outcome = models.ErrandOutcomeDone
+			interrupted = false
+		}
+	}
+	return s.OnErrandTurnSettled(ctx, TurnSettlement{
+		SessionID: sessionID, TurnID: turnID, SubmissionID: submissionID,
+		Outcome: outcome, FailureSummary: interruptedTurnNotice, Interrupted: interrupted,
+	})
 }
 
 // OnParentPromptAdmitted marks that the errand's parent admitted a prompt.
@@ -137,6 +191,18 @@ func sentResult(row *models.Errand, turnID string) bool {
 func (s *Service) settleTurn(
 	ctx context.Context, errand *models.Errand, settlement TurnSettlement,
 ) (*models.Errand, bool, error) {
+	if s.turns != nil {
+		latestID, _, err := s.turns.LatestTurn(ctx, errand.ID)
+		if err != nil {
+			return nil, false, fmt.Errorf("verify current errand turn: %w", err)
+		}
+		if latestID != "" && latestID != settlement.TurnID {
+			return errand, false, nil
+		}
+	}
+	if settlement.TurnID == errand.FirstTurnID && settlement.SubmissionID != "" && settlement.SubmissionID != errand.SubmissionID {
+		return errand, false, nil
+	}
 	view, err := s.readTurn(ctx, errand.ID, settlement.TurnID)
 	if err != nil {
 		return nil, false, err
@@ -238,6 +304,14 @@ func writePendingResult(
 func resultOf(settlement TurnSettlement, view TurnView, parentInitiated bool) (string, bool, models.ErrandResultKind) {
 	if !parentInitiated {
 		return "", false, ""
+	}
+	if settlement.Interrupted {
+		summary := settlement.FailureSummary
+		if summary == "" {
+			summary = interruptedTurnNotice
+		}
+		text, truncated := boundResult(summary)
+		return text, truncated, models.ErrandResultInterrupted
 	}
 	if settlement.Outcome == models.ErrandOutcomeFailed {
 		summary := settlement.FailureSummary

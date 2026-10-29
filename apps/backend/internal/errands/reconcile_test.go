@@ -111,7 +111,7 @@ func TestReconcileReturnsClaimWithoutParentMessageToPending(t *testing.T) {
 	}
 }
 
-func TestReconcileLeavesTurnContextClaimDelivered(t *testing.T) {
+func TestReconcileReturnsTurnContextClaimWithoutPersistedMessage(t *testing.T) {
 	h, id := settleFirstTurn(t, "the answer")
 	composition, err := h.service.ComposeParentTurn(context.Background(), testParent, models.ErrandDeliveryTurnContext)
 	if err != nil || composition.Token == "" {
@@ -123,8 +123,8 @@ func TestReconcileLeavesTurnContextClaimDelivered(t *testing.T) {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
-	if row := reconcileRow(t, h, id); row.ResultState != models.ErrandResultDelivered {
-		t.Fatalf("state %q, want a turn-context claim left delivered: its message may predate composition", row.ResultState)
+	if row := reconcileRow(t, h, id); row.ResultState != models.ErrandResultPending || row.DeliveryToken != "" {
+		t.Fatalf("state %q token %q, want the orphaned turn-context claim returned to pending", row.ResultState, row.DeliveryToken)
 	}
 }
 

@@ -17,6 +17,10 @@ type errandTurnSettler interface {
 	OnParentTurnSettled(ctx context.Context, parentSessionID string, cause errands.SettleCause) (bool, error)
 }
 
+type errandTurnCanceller interface {
+	OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error
+}
+
 // errandOutstandingReason is the delivery workflow no-op reason recorded when
 // a parent turn ends while its errands still owe an outcome.
 const errandOutstandingReason = "errands_outstanding"
@@ -32,17 +36,38 @@ func (s *Service) errandSettler() (errandTurnSettler, bool) {
 // settleErrandTurn records a settled errand turn. Only the errand's own
 // settled turn is captured; a session that is not an errand is ignored.
 func (s *Service) settleErrandTurn(
-	ctx context.Context, sessionID, turnID string, outcome models.ErrandOutcome, failureSummary string,
+	ctx context.Context, sessionID, turnID string, outcome models.ErrandOutcome, failureSummary string, submissionIDs ...string,
 ) {
 	settler, ok := s.errandSettler()
 	if !ok || sessionID == "" || turnID == "" {
 		return
 	}
+	submissionID := ""
+	if len(submissionIDs) > 0 {
+		submissionID = submissionIDs[0]
+	}
 	err := settler.OnErrandTurnSettled(ctx, errands.TurnSettlement{
-		SessionID: sessionID, TurnID: turnID, Outcome: outcome, FailureSummary: failureSummary,
+		SessionID: sessionID, TurnID: turnID, SubmissionID: submissionID,
+		Outcome: outcome, FailureSummary: failureSummary,
 	})
 	if err != nil {
 		s.logger.Warn("failed to record errand turn settlement",
+			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+	}
+}
+
+func (s *Service) settleCancelledErrandTurn(ctx context.Context, sessionID, turnID, submissionID string) {
+	canceller, ok := s.errands.(errandTurnCanceller)
+	if !ok || sessionID == "" || turnID == "" {
+		return
+	}
+	if err := s.reconcileAgentDeliverySettlements(ctx, sessionID); err != nil {
+		s.logger.Warn("skipping interrupted errand settlement while durable terminal evidence is unresolved",
+			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+		return
+	}
+	if err := canceller.OnErrandTurnCancelled(ctx, sessionID, turnID, submissionID); err != nil {
+		s.logger.Warn("failed to settle cancelled errand turn",
 			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
 	}
 }
@@ -80,7 +105,7 @@ func (s *Service) evaluateCompletedAgentWorkflow(
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 		}
 		if models.IsErrandSession(session) {
-			s.settleErrandTurn(completionCtx, data.SessionID, data.TurnID, models.ErrandOutcomeDone, "")
+			s.settleErrandTurn(completionCtx, data.SessionID, data.TurnID, models.ErrandOutcomeDone, "", data.DeliverySubmissionID)
 		}
 		return false, false
 	}

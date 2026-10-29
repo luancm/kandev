@@ -232,6 +232,7 @@ func (s *Service) publishSessionsCancelled(
 		if len(sess.Metadata) > 0 {
 			data["session_metadata"] = sess.Metadata
 		}
+		s.addSessionWaitingOnErrandsEventField(data, sess)
 		if sess.TaskEnvironmentID != "" {
 			data["task_environment_id"] = sess.TaskEnvironmentID
 		}
@@ -279,6 +280,7 @@ func (s *Service) publishSessionRecovered(
 	if len(session.Metadata) > 0 {
 		data["session_metadata"] = session.Metadata
 	}
+	s.addSessionWaitingOnErrandsEventField(data, session)
 	if session.TaskEnvironmentID != "" {
 		data["task_environment_id"] = session.TaskEnvironmentID
 	}
@@ -292,6 +294,20 @@ func (s *Service) publishSessionRecovered(
 		return err
 	}
 	return nil
+}
+
+func (s *Service) addSessionWaitingOnErrandsEventField(data map[string]interface{}, session *models.TaskSession) {
+	if session == nil {
+		return
+	}
+	provider, ok := s.foregroundActivity.(interface {
+		ParentErrandState(sessionID string) (hasErrands, outstanding bool)
+	})
+	if !ok {
+		return
+	}
+	_, outstanding := provider.ParentErrandState(session.ID)
+	data["waiting_on_errands"] = outstanding && session.State == models.TaskSessionStateWaitingForInput
 }
 
 // publishTaskEvent publishes task events to the event bus

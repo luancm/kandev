@@ -77,5 +77,9 @@ func (d *ErrandParentDeliverer) admit(
 		return fmt.Errorf("queue errand notification: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, parentSessionID)
+	// Queue admission can race the parent's ready event. Recheck using the
+	// captured incarnation so an idle Auto-run parent starts promptly without
+	// dispatching into a replacement session.
+	s.CheckQueueAdmissionReadiness(ctx, identity)
 	return nil
 }

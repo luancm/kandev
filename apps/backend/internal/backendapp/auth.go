@@ -129,6 +129,16 @@ func gatewayAuthPolicy(
 		// The user-shell actions name a task environment and treat task_id as
 		// optional, so the dispatch backstop needs an environment-keyed check.
 		ActionEnvironment: taskSvc.AuthorizeEnvironmentAccess,
+		ResolveErrandTask: func(ctx context.Context, errandID string) (string, error) {
+			if taskRepo == nil {
+				return "", repoerrors.ErrTaskNotFound
+			}
+			errand, err := taskRepo.GetErrand(ctx, errandID)
+			if err != nil {
+				return "", err
+			}
+			return errand.TaskID, nil
+		},
 	}
 }
 

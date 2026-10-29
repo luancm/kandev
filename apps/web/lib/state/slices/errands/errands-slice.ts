@@ -9,6 +9,7 @@ export const defaultErrandsState: ErrandsSliceState = {
     byTaskId: {},
     loadedByTaskId: {},
     liveRevisionByTaskId: {},
+    removedSessionIdsByTaskId: {},
   },
 };
 
@@ -28,6 +29,7 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
   upsertErrand: (errand) =>
     set((draft) => {
       const taskId = errand.task_id;
+      if (draft.errands.removedSessionIdsByTaskId[taskId]?.[errand.errand_id]) return;
       const errands = (draft.errands.byTaskId[taskId] ??= {});
       if (isOlderErrand(errand, errands[errand.errand_id])) return;
       errands[errand.errand_id] = errand;
@@ -38,7 +40,10 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
   setTaskErrands: (taskId, errands, requestRevision) =>
     set((draft) => {
       const current = (draft.errands.byTaskId[taskId] ??= {});
-      const listed = errands.filter((errand) => errand.task_id === taskId);
+      const removedSessionIds = draft.errands.removedSessionIdsByTaskId[taskId] ?? {};
+      const listed = errands.filter(
+        (errand) => errand.task_id === taskId && !removedSessionIds[errand.errand_id],
+      );
       const racedLiveUpdates =
         (draft.errands.liveRevisionByTaskId[taskId] ?? 0) !== requestRevision;
       if (!racedLiveUpdates) {
@@ -58,5 +63,6 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
       delete draft.errands.byTaskId[taskId];
       delete draft.errands.loadedByTaskId[taskId];
       delete draft.errands.liveRevisionByTaskId[taskId];
+      delete draft.errands.removedSessionIdsByTaskId[taskId];
     }),
 });

@@ -297,11 +297,12 @@ func (p *recordingPublisher) statuses() []models.ErrandStatus {
 }
 
 type recordingDeliverer struct {
-	mu       sync.Mutex
-	parents  []string
-	prepared []string
-	blocked  bool
-	admitErr error
+	mu               sync.Mutex
+	parents          []string
+	prepared         []string
+	preparedMetadata []map[string]interface{}
+	blocked          bool
+	admitErr         error
 }
 
 func (d *recordingDeliverer) NotificationBlocked(context.Context, string) bool {
@@ -316,10 +317,11 @@ func (d *recordingDeliverer) DeliverPending(_ context.Context, parentSessionID s
 	d.parents = append(d.parents, parentSessionID)
 }
 
-func (d *recordingDeliverer) AdmitPrepared(_ context.Context, parentSessionID, content string, _ map[string]interface{}) error {
+func (d *recordingDeliverer) AdmitPrepared(_ context.Context, parentSessionID, content string, metadata map[string]interface{}) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.prepared = append(d.prepared, parentSessionID+"\n"+content)
+	d.preparedMetadata = append(d.preparedMetadata, metadata)
 	return d.admitErr
 }
 

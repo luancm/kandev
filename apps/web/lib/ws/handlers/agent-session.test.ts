@@ -7,6 +7,7 @@ import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
 import { getSessionRestartStore } from "@/lib/session/session-restart-state";
 import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
+import { makeErrand } from "@/lib/state/slices/errands/errands.test-helpers";
 import type {
   TaskSessionActivityChangedPayload,
   TaskSessionCancellationChangedPayload,
@@ -16,6 +17,82 @@ const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
 const AGENTCTL_READY_ACTION = "session.agentctl_ready";
 const CURRENT_INCARNATION = `incarnation-2`;
 const CURRENT_STATUS_EPOCH = `status-epoch-1`;
+
+describe("session.removed handler", () => {
+  it("removes the errand row for local and parent-only workspace clients", () => {
+    const sessionId = "errand-removed";
+    const stores = [createAppStore(), createAppStore()];
+    for (const store of stores) {
+      store.getState().upsertErrand(makeErrand({ errand_id: sessionId, task_id: "task-1" }));
+      registerTaskSessionHandlers(store)["session.removed"]?.({
+        id: "session-removed",
+        type: "notification",
+        action: "session.removed",
+        payload: { session_id: sessionId, task_id: "task-1" },
+      } as never);
+    }
+
+    for (const store of stores) {
+      expect(store.getState().errands.byTaskId["task-1"]?.[sessionId]).toBeUndefined();
+    }
+  });
+
+  it("resolves a session-only event from its task and selects the newest survivor", () => {
+    const store = createAppStore();
+    const removed = {
+      id: "session-removed",
+      task_id: "task-1",
+      state: "RUNNING",
+      started_at: "2026-10-28T10:00:00Z",
+    } as TaskSession;
+    const older = {
+      id: "session-older",
+      task_id: "task-1",
+      state: "RUNNING",
+      started_at: "2026-10-28T09:00:00Z",
+    } as TaskSession;
+    const newer = {
+      id: "session-newer",
+      task_id: "task-1",
+      state: "RUNNING",
+      started_at: "2026-10-28T09:30:00Z",
+    } as TaskSession;
+    store.setState((state) => ({
+      tasks: {
+        ...state.tasks,
+        activeTaskId: "task-1",
+        activeSessionId: removed.id,
+        pinnedSessionId: removed.id,
+      },
+      taskSessions: {
+        ...state.taskSessions,
+        items: { ...state.taskSessions.items, [removed.id]: removed },
+      },
+      taskSessionsByTask: {
+        ...state.taskSessionsByTask,
+        itemsByTaskId: {
+          ...state.taskSessionsByTask.itemsByTaskId,
+          "task-1": [older, newer, removed],
+        },
+      },
+    }));
+    store
+      .getState()
+      .upsertErrand(makeErrand({ task_id: "task-2", errand_id: "other-task-errand" }));
+
+    registerTaskSessionHandlers(store)["session.removed"]?.({
+      id: "session-removed",
+      type: "notification",
+      action: "session.removed",
+      payload: { session_id: removed.id },
+    } as never);
+
+    expect(store.getState().taskSessions.items[removed.id]).toBeUndefined();
+    expect(store.getState().tasks.activeSessionId).toBe(newer.id);
+    expect(store.getState().tasks.pinnedSessionId).toBeNull();
+    expect(store.getState().errands.byTaskId["task-2"]?.["other-task-errand"]).toBeDefined();
+  });
+});
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {

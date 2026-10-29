@@ -438,6 +438,45 @@ func TestTaskEventBroadcasterDoesNotResetConversationOnReceiptlessSessionRemoval
 	}
 }
 
+func TestSessionRemovedReachesWorkspaceViewersAndSessionSubscribers(t *testing.T) {
+	hub := newTestHub(t)
+	hub.mu.Lock()
+	hub.dispatchCtx = context.Background()
+	hub.mu.Unlock()
+	hub.setAuthPolicy(AuthPolicy{
+		Enforced: func() bool { return true },
+		Subscriptions: SubscriptionAccessPolicy{
+			Session: func(context.Context, string) error { return nil },
+		},
+		WorkspaceReaders: func(_ context.Context, workspaceID string) ([]string, error) {
+			require.Equal(t, "workspace-a", workspaceID)
+			return []string{"user-a", "user-b"}, nil
+		},
+	})
+	sessionClient := newTestClient("session-subscriber")
+	sessionClient.identity = authn.Identity{UserID: "user-a", Role: authn.RoleMember}
+	parentClient := newTestClient("parent-only-viewer")
+	parentClient.identity = authn.Identity{UserID: "user-b", Role: authn.RoleMember}
+	foreignClient := newTestClient("foreign-viewer")
+	foreignClient.identity = authn.Identity{UserID: "user-c", Role: authn.RoleMember}
+	registerTestClient(hub, sessionClient)
+	registerTestClient(hub, parentClient)
+	registerTestClient(hub, foreignClient)
+	hub.SubscribeToSession(sessionClient, "session-1")
+
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	msg, err := ws.NewNotification(ws.ActionSessionRemoved, map[string]any{
+		"session_id": "session-1", "task_id": "task-1", "workspace_id": "workspace-a",
+	})
+	require.NoError(t, err)
+	require.NoError(t, broadcaster.routeBroadcast(ws.ActionSessionRemoved, msg.Payload,
+		"session-1", "workspace-a", msg))
+
+	require.True(t, clientReceived(sessionClient), "transcript subscriber did not receive removal")
+	require.True(t, clientReceived(parentClient), "workspace viewer without a child session missed removal")
+	require.False(t, clientReceived(foreignClient), "removal crossed the workspace boundary")
+}
+
 func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	h := newTestHub(t)
 	first := newTestClient("first")

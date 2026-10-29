@@ -122,6 +122,13 @@ export function clearPinnedSessionIfOverridden(store: StoreApi<AppState>, sessio
   }));
 }
 
+function clearRemovedSessionPin(store: StoreApi<AppState>, removedSessionId: string): void {
+  if (store.getState().tasks.pinnedSessionId !== removedSessionId) return;
+  store.setState((state) => ({
+    tasks: { ...state.tasks, pinnedSessionId: null },
+  }));
+}
+
 /** Promote agentctl status to "ready" when the session enters a live state.
  *  Acts as a fallback for missed/late agentctl_ready WS events — the backend
  *  cannot reach RUNNING/WAITING_FOR_INPUT without a live agentctl. Never
@@ -235,6 +242,67 @@ export function pickPrimarySessionReplacement(
       .find((t) => t.id === taskId);
   const primary = task?.primarySessionId ?? null;
   return primary && primary !== retiredSessionId ? primary : null;
+}
+
+function findUniqueTaskMatch(taskIds: string[]): { found: boolean; taskId: string | null } {
+  const uniqueTaskIds = [...new Set(taskIds)];
+  return {
+    found: uniqueTaskIds.length > 0,
+    taskId: uniqueTaskIds.length === 1 ? (uniqueTaskIds[0] ?? null) : null,
+  };
+}
+
+function findTaskForRemovedSession(state: AppState, sessionId: string): string | null {
+  const sessionTaskId = state.taskSessions?.items?.[sessionId]?.task_id;
+  if (sessionTaskId) return sessionTaskId;
+
+  const sessionTaskMatch = findUniqueTaskMatch(
+    Object.entries(state.taskSessionsByTask?.itemsByTaskId ?? {}).flatMap(([taskId, sessions]) =>
+      sessions.some((session) => session.id === sessionId) ? [taskId] : [],
+    ),
+  );
+  if (sessionTaskMatch.found) return sessionTaskMatch.taskId;
+
+  return findUniqueTaskMatch(
+    Object.entries(state.errands?.byTaskId ?? {}).flatMap(([taskId, errands]) =>
+      errands[sessionId]?.task_id === taskId ? [taskId] : [],
+    ),
+  ).taskId;
+}
+
+function handleSessionRemoved(
+  store: StoreApi<AppState>,
+  payload: { session_id?: string; task_id?: string },
+): void {
+  const sessionId = payload.session_id;
+  if (!sessionId) return;
+
+  const before = store.getState();
+  const knownTaskId = findTaskForRemovedSession(before, sessionId);
+  if (payload.task_id && knownTaskId && payload.task_id !== knownTaskId) return;
+  const taskId = payload.task_id || knownTaskId;
+  if (!taskId) return;
+
+  const wasActive =
+    before.tasks.activeTaskId === taskId && before.tasks.activeSessionId === sessionId;
+  const wasPinned = before.tasks.pinnedSessionId === sessionId;
+  before.removeTaskSession(taskId, sessionId);
+
+  const after = store.getState();
+  if (wasActive) {
+    const replacement =
+      pickReplacementSessionId(after, taskId) ??
+      pickPrimarySessionReplacement(after, taskId, sessionId);
+    if (replacement && replacement !== sessionId) {
+      inheritAgentctlStatus(after, sessionId, replacement);
+      clearPinnedSessionIfOverridden(store, replacement);
+      after.setActiveSessionAuto(taskId, replacement);
+    } else {
+      after.clearActiveSession();
+    }
+  } else if (wasPinned) {
+    clearRemovedSessionPin(store, sessionId);
+  }
 }
 
 /** Ignore subscribe snapshots that were read before a newer state landed. */
@@ -912,6 +980,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
   return {
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
+    "session.removed": (message) => handleSessionRemoved(store, message.payload),
     // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together
     "session.state_changed": (message) => {
       const payload = message.payload;

@@ -67,6 +67,10 @@ type AuthPolicy struct {
 	// task_id as optional. Kept off SubscriptionAccessPolicy because there is
 	// no environment subscription topic; this is dispatch-only.
 	ActionEnvironment func(ctx context.Context, taskEnvironmentID string) error
+	// ResolveErrandTask resolves a reserved errand/session ID to its task before
+	// dispatch. Queued errands have no session row, so ordinary session access
+	// cannot authorize their cancellation.
+	ResolveErrandTask func(ctx context.Context, errandID string) (string, error)
 }
 
 // SetAuthPolicy installs the auth hooks. Call during startup wiring, before
