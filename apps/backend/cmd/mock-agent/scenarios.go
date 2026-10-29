@@ -22,6 +22,8 @@ const (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
+	"errands":                          scenarioErrands,
+	"errands-await":                    scenarioErrandsAwait,
 	"simple-message":                   scenarioSimpleMessage,
 	"read-and-edit":                    scenarioReadAndEdit,
 	"permission-flow":                  scenarioPermissionFlow,

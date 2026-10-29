@@ -9,6 +9,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -51,7 +52,8 @@ func getMCPClientForServersCtx(ctx context.Context, serverName string, sessionSe
 		return c, nil
 	}
 
-	c, err := mcpclient.NewSSEMCPClient(srv.URL)
+	// Await can hold a response for ten minutes; the ACP context still bounds cancellation.
+	c, err := mcpclient.NewSSEMCPClient(srv.URL, transport.WithResponseTimeout(11*time.Minute))
 	if err != nil {
 		return nil, fmt.Errorf("create SSE client for %s: %w", serverName, err)
 	}
