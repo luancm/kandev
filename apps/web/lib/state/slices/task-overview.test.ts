@@ -114,6 +114,7 @@ it("keeps a newer task-wide running event over a stale in-flight HTTP row", () =
       revision: 1,
       updated_at: "2026-09-29T12:00:00Z",
       has_running_session: false,
+      errands: { live: 3, waiting: true },
     },
   });
   store.getState().retainTaskOverviews(DISPLAY_OWNER, [initial]);
@@ -131,6 +132,7 @@ it("keeps a newer task-wide running event over a stale in-flight HTTP row", () =
         revision: 2,
         updated_at: "2026-09-29T12:01:00Z",
         has_running_session: true,
+        errands: { live: 1, waiting: false },
       },
     },
   });
@@ -142,6 +144,7 @@ it("keeps a newer task-wide running event over a stale in-flight HTTP row", () =
           revision: 1,
           updated_at: "2026-09-29T12:00:00Z",
           has_running_session: false,
+          errands: { live: 3, waiting: true },
         },
       }),
     ],
@@ -151,6 +154,7 @@ it("keeps a newer task-wide running event over a stale in-flight HTTP row", () =
   expect(store.getState().taskOverview.byId.one.statusSummary).toMatchObject({
     revision: 2,
     has_running_session: true,
+    errands: { live: 1, waiting: false },
   });
 });
 

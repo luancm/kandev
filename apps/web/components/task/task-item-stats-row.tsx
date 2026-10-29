@@ -5,11 +5,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Fragment, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isDebugUI } from "@/lib/config";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryErrands,
+  TaskStatusSummaryLaunchQueue,
+} from "@/lib/types/task-status-summary";
 import {
   SIDEBAR_TASK_ROW_DETAIL_KEYS,
   type SidebarTaskRowDetail,
@@ -183,6 +187,7 @@ function hasStatsToRender({
   hasPullRequestNumber,
   pollMode,
   queuedCount,
+  errandsSummary,
   wipQueue,
   launchQueue,
 }: {
@@ -191,6 +196,7 @@ function hasStatsToRender({
   hasPullRequestNumber: boolean;
   pollMode: SessionPollMode | null;
   queuedCount?: number;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
 }): boolean {
@@ -200,6 +206,7 @@ function hasStatsToRender({
     hasPullRequestNumber ||
     pollMode ||
     queuedCount ||
+    (errandsSummary && (errandsSummary.live > 0 || errandsSummary.waiting)) ||
     wipQueue ||
     launchQueue,
   );
@@ -216,6 +223,7 @@ export function TaskItemStatsRow({
   prInfo,
   primarySessionId,
   queuedCount,
+  errandsSummary,
   wipQueue,
   launchQueue,
   detailOrder = [...SIDEBAR_TASK_ROW_DETAIL_KEYS],
@@ -229,6 +237,7 @@ export function TaskItemStatsRow({
   prInfo?: { number: number; state: string; aggregateState?: string };
   primarySessionId?: string | null;
   queuedCount?: number;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   detailOrder?: SidebarTaskRowDetail[];
@@ -236,6 +245,7 @@ export function TaskItemStatsRow({
   showRepository?: boolean;
   showPullRequestNumber?: boolean;
 }) {
+  const errandsEnabled = useFeature("errands");
   const pollMode = useAppStore((s) =>
     isDebugUI() && primarySessionId
       ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null)
@@ -245,6 +255,7 @@ export function TaskItemStatsRow({
   const hasRelativeTime = showRelativeTime && !!updatedAt;
   const hasRepository = showRepository && !!repositoryLabel;
   const hasPullRequestNumber = showPullRequestNumber && !!prInfo;
+  const visibleErrandsSummary = errandsEnabled ? errandsSummary : undefined;
   if (
     !hasStatsToRender({
       hasRelativeTime,
@@ -252,6 +263,7 @@ export function TaskItemStatsRow({
       hasPullRequestNumber,
       pollMode,
       queuedCount,
+      errandsSummary: visibleErrandsSummary,
       wipQueue,
       launchQueue,
     })
@@ -274,12 +286,46 @@ export function TaskItemStatsRow({
         detailNodes[detail] ? <Fragment key={detail}>{detailNodes[detail]}</Fragment> : null,
       )}
       <QueuedPromptCount count={queuedCount} />
+      <ErrandsSummaryIndicator summary={visibleErrandsSummary} />
       <WipQueueIndicator wipQueue={wipQueue} />
       <LaunchQueueIndicator launchQueue={launchQueue} />
       <PollModeIndicator
         pollMode={pollMode}
         config={pollMode ? POLL_MODE_CONFIG[pollMode] : null}
       />
+    </span>
+  );
+}
+
+function ErrandsSummaryIndicator({ summary }: { summary?: TaskStatusSummaryErrands | null }) {
+  const { t } = useTranslation();
+  if (!summary || (summary.live <= 0 && !summary.waiting)) return null;
+
+  const liveLabel = summary.live > 0 ? t("sidebar:errandsLive", { count: summary.live }) : null;
+  const waitingLabel = summary.waiting ? t("sidebar:errandsWaiting") : null;
+  const fullLabel = [liveLabel, waitingLabel].filter(Boolean).join(", ");
+
+  return (
+    <span
+      data-testid="sidebar-task-errands"
+      title={fullLabel}
+      className="inline-flex min-w-0 max-w-full items-center gap-1 text-muted-foreground/60"
+    >
+      {liveLabel && (
+        <span data-testid="sidebar-task-errands-count" className="shrink-0">
+          {liveLabel}
+        </span>
+      )}
+      {waitingLabel && (
+        <span
+          data-testid="sidebar-task-errands-waiting"
+          aria-label={waitingLabel}
+          title={waitingLabel}
+          className="min-w-0 truncate"
+        >
+          {waitingLabel}
+        </span>
+      )}
     </span>
   );
 }

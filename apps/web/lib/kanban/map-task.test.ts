@@ -215,6 +215,7 @@ describe("toKanbanTask — pending and status fields", () => {
       revision: 7,
       updated_at: "2026-08-01T18:56:13.512Z",
       pending_action: "permission" as const,
+      errands: { live: 2, waiting: true },
       git: { additions: 4, deletions: 2, changed_files: 3 },
       pull_request: { count: 1, open_count: 1, attention: true, number: 42 },
     };

@@ -50,12 +50,14 @@ describe("status summary cache replacement", () => {
       summaryMessage({
         revision: 2,
         updated_at: UPDATED_AT,
+        errands: { live: 2, waiting: true },
         git: { additions: 4 },
       }),
     );
 
     expect(store.getState().kanban.tasks[0].statusSummary).toMatchObject({
       revision: 2,
+      errands: { live: 2, waiting: true },
       git: { additions: 4 },
     });
     expect(
@@ -78,6 +80,7 @@ describe("status summary monotonicity", () => {
             statusSummary: {
               revision: 3,
               updated_at: UPDATED_AT,
+              errands: { live: 4, waiting: true },
               git: { additions: 7 },
             },
           },
@@ -104,6 +107,7 @@ describe("status summary monotonicity", () => {
 
     expect(store.getState().kanban.tasks[0].statusSummary).toMatchObject({
       revision: 3,
+      errands: { live: 4, waiting: true },
       git: { additions: 7 },
     });
   });
@@ -125,6 +129,7 @@ describe("archived status summary cache", () => {
               statusSummary: {
                 revision: 5,
                 updated_at: UPDATED_AT,
+                errands: { live: 2, waiting: true },
                 queued_prompt_count: 11,
               },
             },
@@ -148,6 +153,7 @@ describe("archived status summary cache", () => {
     const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId[WORKSPACE_ID]?.[0];
     expect(archived?.statusSummary).toMatchObject({ revision: 6 });
     expect(archived?.statusSummary?.queued_prompt_count).toBeUndefined();
+    expect(archived?.statusSummary?.errands).toBeUndefined();
   });
 });
 
@@ -302,6 +308,7 @@ describe("task.updated summary preservation", () => {
               revision: 4,
               updated_at: UPDATED_AT,
               pending_action: "clarification",
+              errands: { live: 1, waiting: true },
             },
           },
         ],
@@ -326,6 +333,7 @@ describe("task.updated summary preservation", () => {
     expect(store.getState().kanban.tasks[0].statusSummary).toMatchObject({
       revision: 4,
       pending_action: "clarification",
+      errands: { live: 1, waiting: true },
     });
   });
 });

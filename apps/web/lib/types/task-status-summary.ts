@@ -52,6 +52,12 @@ export type TaskStatusSummaryCompletionGate = {
   blocked: boolean;
 };
 
+/** Bounded task-level view of live errands and an idle parent awaiting results. */
+export type TaskStatusSummaryErrands = {
+  live: number;
+  waiting: boolean;
+};
+
 export type TaskStatusSummary = {
   revision: number;
   updated_at: string;
@@ -71,6 +77,8 @@ export type TaskStatusSummary = {
   /** Automatic session launch waiting for admission, independent of the selected session. */
   launch_queue?: TaskStatusSummaryLaunchQueue | null;
   completion_gate?: TaskStatusSummaryCompletionGate | null;
+  /** Omitted when no errands are live and no parent is waiting on a result. */
+  errands?: TaskStatusSummaryErrands | null;
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;

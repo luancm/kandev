@@ -8,6 +8,7 @@ describe("TaskStatusSummary", () => {
       updated_at: "2026-08-01T18:56:13.512Z",
       primary_session: { id: "session-1", state: "WAITING_FOR_INPUT" },
       pending_action: "clarification",
+      errands: { live: 2, waiting: true },
       active_error: {
         session_id: "session-1",
         stamp: "error-4",
@@ -20,5 +21,6 @@ describe("TaskStatusSummary", () => {
 
     expect(summary).not.toHaveProperty("messages");
     expect(summary).not.toHaveProperty("files");
+    expect(summary.errands).toEqual({ live: 2, waiting: true });
   });
 });

@@ -70,6 +70,18 @@ describe("selectTaskStatusSummary", () => {
     expect(selectTaskStatusSummary(detail, [summary(3), live])).toBe(live);
   });
 
+  it("takes live and waiting errands together from the newest revision", () => {
+    const detail = summary(4);
+    detail.errands = { live: 3, waiting: true };
+    const live = summary(5);
+    live.errands = { live: 1, waiting: false };
+
+    expect(selectTaskStatusSummary(detail, [live])?.errands).toEqual({
+      live: 1,
+      waiting: false,
+    });
+  });
+
   it("lets a newer live reading clear an older detail error", () => {
     const detail = summary(5);
     detail.active_error = {

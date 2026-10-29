@@ -119,6 +119,7 @@ function sidebarStatus(
     prInfo: taskPRInfoFromSummary(summary),
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
+    errandsSummary: summary?.errands,
     launchQueue: summary?.launch_queue,
     wipQueue: context.wipQueueByTaskId?.get(task.id),
   };

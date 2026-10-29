@@ -6,6 +6,7 @@ import { IconArrowsMaximize, IconDots } from "@tabler/icons-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { KanbanCardDropdownMenuItems } from "@/components/kanban-card-menu-items";
 import type { KanbanCardActionProps } from "@/components/kanban-card-content";
+import { KanbanCardErrands } from "@/components/kanban-card-errands";
 import {
   renderSubagentCountChip,
   renderTaskStatusIcon,
@@ -176,6 +177,7 @@ export function KanbanCardActions({
         task,
         t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
       )}
+      <KanbanCardErrands summary={task.statusSummary?.errands} />
       {statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
         <OpenFullPageButton task={task} onOpenFullPage={onOpenFullPage} />
