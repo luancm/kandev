@@ -4617,6 +4617,9 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return nil, err
 	}
+	if err := r.StageTurnHistoryCleanupForSession(ctx, tx, session.ID); err != nil {
+		return nil, err
+	}
 	deletedAttachments, err := r.purgeTaskSessionStateTx(ctx, tx, session)
 	if err != nil {
 		return nil, err

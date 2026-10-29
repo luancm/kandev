@@ -25,6 +25,7 @@ export const defaultFeatureFlags = {
   codexAppServer: false,
   agentBackgroundWork: false,
   errands: false,
+  opencodePlugin: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

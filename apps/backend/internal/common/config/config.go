@@ -606,6 +606,10 @@ type FeaturesConfig struct {
 	// every shipped profile. Existing errand sessions stay workflow-detached
 	// whatever its value.
 	Errands bool `mapstructure:"errands" json:"errands"`
+
+	// OpenCodePlugin supplies the Kandev integration plugin to supported
+	// OpenCode v2 launches. Off in every shipped profile and restart-required.
+	OpenCodePlugin bool `mapstructure:"opencode_plugin" json:"opencodePlugin"`
 }
 
 // LoggingConfig holds logging configuration.
