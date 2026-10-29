@@ -67,8 +67,10 @@ stop that tunnel. **Other ports** lists detected and manually added ports that
 you can start forwarding. Each group sorts by target port number.
 
 A proxy URL is also available for each listed port. A proxy link alone does not
-mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
-group; stopping it keeps the port available to restart during that session visit.
+mean a dedicated tunnel is active. Dedicated tunnel URLs use HTTP on the returned
+port; proxy URLs use the configured backend URL and its scheme. Starting a tunnel
+moves the port to the top group; stopping it keeps the port available to restart
+during that session visit.
 Closing the port manager leaves active tunnels running.
 Reopening refreshes detected ports and current tunnel state while preserving
 your unfinished manual-port entry. Use **Refresh** to check for new listening
@@ -291,6 +293,23 @@ repository explicitly still requires its checkout to be available. If an
 existing local checkout's origin no longer matches the selected remote,
 Kandev reports a validation error. Correct its origin or select it explicitly
 as a local repository.
+
+### Recover an uncertain task creation
+
+A connection interruption can hide the result of **Start task**, **Start task in plan mode**, or **Create without starting agent**. The task can exist even when the dialog reports an error. Do not submit the same work again.
+
+When the dialog reports that creation is unconfirmed:
+
+1. Select **Check status**. Kandev checks the earlier submission and reports whether the task exists.
+2. If the task exists, select **Open task**. Review the task and its conversation.
+3. If no task exists and **Retry submission** is available, select it. Kandev sends the earlier values and keeps newer edits in the draft.
+4. Select **Close** to keep the unconfirmed submission for later. Closing does not cancel the agent or delete a task.
+
+An unconfirmed submission keeps its earlier values and start mode. A later error or an empty status check does not create a second task. After you open a recovered task, a new submission creates a new task.
+
+If **Check status** reports that creation is still in progress, open the task and wait. Recovery does not start or repair the task. If the task is no longer available, select **Close** and create a new task only when the work is still required.
+
+Phones show the same actions in the dialog footer. The status and actions stay above the safe area while the draft scrolls.
 
 ### Reduce downloads for a large remote repository
 
@@ -578,6 +597,10 @@ Task-session chat uploads files to the task's workspace. It also works when you 
 
 During workspace preparation, the initial message shows your uploaded screenshots and file labels. You can open image previews before the agent starts. The preview survives a page reload and remains visible if preparation fails. It does not indicate successful delivery to the agent.
 
+Open an image attachment or composer image to inspect it. The preview starts in
+**Fit**; select **Actual size** and scroll within the image to see fine detail.
+Select **Fit** to return to the whole image.
+
 Creating a fresh local branch is available only with the local executor. If the checkout is dirty, Kandev lists the affected paths and requires explicit consent before discarding those local changes. If another path becomes dirty after the warning, creation fails with a conflict and asks for consent again. Save or commit work before approving this operation.
 
 </details>
@@ -618,6 +641,44 @@ background** after its foreground yields while a recognized async subagent,
 `run_in_background` shell, or Monitor remains active. A follow-up is then sent
 immediately and the child may continue streaming. Other providers and
 foreground-generating Claude turns retain the coarse queueing behavior.
+
+### Inspect background work
+
+When an agent reports a background shell command, subagent, or monitor, Kandev
+adds a content-width chip directly above the message box. The chip counts the
+jobs that are running, waiting, or of unknown activity. Select it to open a
+summary. Selecting a job opens its own tab in the central area on desktop, or a
+full-height detail view on a phone. **View all** opens the Background Work
+overview. Closing a tab or view does not stop the job.
+
+Background inspection is standard behavior in the shipped profiles. Operators
+can disable it with the `features.agentBackgroundWork` runtime toggle
+(`KANDEV_FEATURES_AGENT_BACKGROUND_WORK`); when it is off, the chip, reads, and
+job controls are unavailable, and existing chat behavior is unchanged. The
+toggle is separate from the Claude background prompt handoff experiment.
+
+The chip never changes how a prompt is admitted. A foreground that is still
+generating keeps its normal **Queue** behavior. An idle foreground accepts an
+ordinary new prompt while earlier jobs continue, and those jobs keep their
+identity and history across the new turn.
+
+What a job row can show depends on the agent runtime:
+
+- **Running and waiting** counts come from a runtime that reports current job
+  activity and later completion.
+- **Unknown** means Kandev identified the launch but cannot establish current
+  activity, for example after a reconnect or when the runtime ends delivery with
+  the foreground prompt. Unknown is neither success nor verified running work.
+- **Completed** and **Failed** rows stay reachable after the active count reaches
+  zero. A failed row keeps its exit status and retained output when the runtime
+  reports them.
+
+Controls appear only when the runtime advertises them and the job is currently
+actionable. Runs that provide observation only, such as a detached OpenCode
+shell launch on a runtime without continuous delivery, show no Stop, Interrupt,
+or input controls, and their output is labeled unavailable rather than shown as
+live logs. The launch banner in the original tool message is not live command
+output.
 
 ### Prevent auto-start on open
 
@@ -1212,6 +1273,7 @@ retained resources exist. Older cleanup code cannot enforce that protection.
 
 ## Troubleshooting
 
+- **A task shows as temporarily unavailable:** Kandev retries the task and session reads automatically while the tab stays visible. Keep the tab open for up to about 30 seconds. If recovery stops, select **Retry**, or use **Back to task overview**. Task details that already appeared stay visible while a refresh retries.
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.

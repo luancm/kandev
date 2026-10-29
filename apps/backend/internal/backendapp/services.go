@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflowsync"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -550,6 +551,7 @@ func wireTaskWorkflowCrossReferences(
 		buildAgentProfileResolver(repos),
 		buildAgentProfileMatcher(repos, log),
 	)
+	workflowSvc.SetAgentProfileLookup(buildAgentProfileLookup(repos))
 	workflowSvc.SetImportProfileCatalog(newWorkflowImportProfileCatalog(repos))
 }
 
@@ -1873,6 +1875,7 @@ type pluginTaskWriteService interface {
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	FindTaskByExternalIDForCreate(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, bool, error)
 	UpdateTaskExact(ctx context.Context, id string, req taskservice.ExactTaskUpdateRequest) (*taskservice.ExactTaskUpdateResult, error)
 	MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
@@ -1884,6 +1887,17 @@ type pluginsTaskWriterAdapter struct {
 func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
 	created, _, err := a.createTask(ctx, in, "")
 	return created, err
+}
+
+func (a pluginsTaskWriterAdapter) FindTaskByExternalID(ctx context.Context, workspaceID, rawExternalID string) (*taskmodels.Task, bool, error) {
+	task, found, err := a.svc.FindTaskByExternalIDForCreate(ctx, workspaceID, rawExternalID)
+	if errors.Is(err, taskservice.ErrExternalIDInvalid) {
+		return nil, false, status.Error(codes.InvalidArgument, "external_id is required and must be valid")
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return task, found, nil
 }
 
 func (a pluginsTaskWriterAdapter) CreateTaskExact(ctx context.Context, in plugins.ExactTaskCreateInput) (*taskmodels.Task, bool, error) {
@@ -1949,13 +1963,23 @@ func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) err
 	return a.svc.DeleteTask(ctx, id)
 }
 
+// pluginTaskMetadata builds a plugin-created task's metadata. The launch
+// profiles are stored under the same keys native issue watchers use, so a task
+// that a workflow step starts later launches with the profiles the plugin chose.
 func pluginTaskMetadata(in plugins.TaskCreateInput) (map[string]interface{}, error) {
-	if in.Metadata == nil && in.Source == "" {
+	agentProfileID, executorProfileID := in.Launch.AgentProfileID, in.Launch.ExecutorProfileID
+	if in.Metadata == nil && in.Source == "" && agentProfileID == "" && executorProfileID == "" {
 		return nil, nil
 	}
-	metadata := make(map[string]interface{}, len(in.Metadata)+1)
+	metadata := make(map[string]interface{}, len(in.Metadata)+3)
 	for key, value := range in.Metadata {
 		metadata[key] = value
+	}
+	if agentProfileID != "" {
+		metadata[taskmodels.MetaKeyAgentProfileID] = agentProfileID
+	}
+	if executorProfileID != "" {
+		metadata[taskmodels.MetaKeyExecutorProfileID] = executorProfileID
 	}
 	if in.Source == "" {
 		return metadata, nil
@@ -2506,10 +2530,15 @@ func buildAgentProfileResolver(repos *Repositories) wfmodels.AgentProfileResolve
 		if err != nil || profile == nil {
 			return nil
 		}
+		options := maps.Clone(profile.ConfigOptions)
+		if options == nil {
+			options = map[string]string{}
+		}
 		return &wfmodels.AgentProfilePortable{
-			AgentName: profile.AgentDisplayName,
-			Model:     profile.Model,
-			Mode:      profile.Mode,
+			AgentName:     profile.AgentDisplayName,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			ConfigOptions: &options,
 		}
 	}
 }

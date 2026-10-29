@@ -2013,6 +2013,17 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return ErrSessionIdentityMismatch
 	}
+	// Queue storage is optional during repository initialization. A missing-table
+	// query would abort the caller's PostgreSQL transaction before other cleanup.
+	for _, table := range []string{"queued_messages", "queue_session_locks"} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return fmt.Errorf("check %s table: %w", table, err)
+		}
+		if !present {
+			return nil
+		}
+	}
 	if err := lockSessionTxIn(ctx, tx, db, identity.SessionID); err != nil {
 		return err
 	}

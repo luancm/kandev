@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
+import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import { createDebugLogger } from "@/lib/debug/log";
-import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { AppState } from "@/lib/state/store";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -24,7 +24,10 @@ import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fiel
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
-import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
+import {
+  isStaleSessionStateEvent,
+  sessionStateConfirmsAgentctlExecutionReady,
+} from "@/lib/session-state";
 import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import {
   sanitizeWorkspaceRestorationDetails,
@@ -286,6 +289,7 @@ function handleSessionRemoved(
   const wasActive =
     before.tasks.activeTaskId === taskId && before.tasks.activeSessionId === sessionId;
   const wasPinned = before.tasks.pinnedSessionId === sessionId;
+  retireSessionReads(store, sessionId);
   before.removeTaskSession(taskId, sessionId);
 
   const after = store.getState();
@@ -303,20 +307,6 @@ function handleSessionRemoved(
   } else if (wasPinned) {
     clearRemovedSessionPin(store, sessionId);
   }
-}
-
-/** Ignore subscribe snapshots that were read before a newer state landed. */
-export function isStaleSessionStateEvent(
-  existing: { updated_at?: string } | null | undefined,
-  payloadUpdatedAt: string | undefined,
-): boolean {
-  if (!payloadUpdatedAt || !existing?.updated_at) return false;
-  const payloadTime = parseStrictRfc3339Timestamp(payloadUpdatedAt);
-  const existingTime = parseStrictRfc3339Timestamp(existing.updated_at);
-  if (payloadTime === null || existingTime === null) return false;
-  // Strict less-than: equal timestamps are treated as not-stale so identical
-  // events upsert idempotently rather than being silently dropped.
-  return payloadTime < existingTime;
 }
 
 // Fields carried onto the update object verbatim whenever the payload defines
@@ -341,6 +331,7 @@ const CARRIED_WHEN_DEFINED = [
   "supports_steering",
   "cancellation_pending",
   "cancellation_revision",
+  "runtime_storage_health",
   "execution_profile_id",
   "route_generation",
   "route_state",

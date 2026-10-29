@@ -68,6 +68,8 @@
   "errandOpenWithStatusAria": "Abrir incumbência {{title}}, {{status}}",
   "errandShowObjective": "Mostrar objetivo",
   "expandClarification": "Expandir o esclarecimento",
+  "expandClarificationPanel": "Expandir até ao espaço disponível",
+  "resetClarificationPanel": "Repor o tamanho do painel",
   "expandMessage": "Expandir a mensagem",
   "failedToClearQueuedMessages": "Não foi possível limpar as mensagens em fila.",
   "failedToDeleteQuickChat": "Não foi possível eliminar o chat rápido",

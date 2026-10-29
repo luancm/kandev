@@ -68,6 +68,8 @@
   "errandOpenWithStatusAria": "開啟委託 {{title}}，{{status}}",
   "errandShowObjective": "顯示目標",
   "expandClarification": "展開澄清",
+  "expandClarificationPanel": "展開到可用空間",
+  "resetClarificationPanel": "重置面板大小",
   "expandMessage": "展開訊息",
   "failedToClearQueuedMessages": "清除排隊中的訊息失敗。",
   "failedToDeleteQuickChat": "刪除快速聊天失敗",

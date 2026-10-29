@@ -1,5 +1,6 @@
 import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { StoreApi } from "zustand";
+import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -472,6 +473,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       cleanupTaskStorage(deletedId, sessionIds, envIds);
       // Remove the deleted task before the next sidebar preference PATCH.
       currentState.removeTaskFromSidebarPrefs(deletedId);
+      for (const sid of sessionIds) retireSessionReads(store, sid);
       evictDeletedTaskSessions(currentState, deletedId, sessionIds);
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;

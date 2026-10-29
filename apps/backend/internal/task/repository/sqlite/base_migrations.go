@@ -105,6 +105,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"agent_delivery_effects.submission_id", `ALTER TABLE agent_delivery_effects ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.turn_id", `ALTER TABLE agent_delivery_effects ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.outcome", `ALTER TABLE agent_delivery_effects ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
+		{"task_session_background_work.capabilities", `ALTER TABLE task_session_background_work ADD COLUMN capabilities TEXT NOT NULL DEFAULT ''`},
 	} {
 		if err := r.migrate.Apply(migration.name, migration.query); err != nil {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
@@ -943,10 +944,10 @@ func jsonText(postgres bool, column, parent, key string) string {
 
 // timestampColumn normalizes a timestamp column for comparison. SQLite stores
 // timestamps as text and would compare them lexically, so it needs Julian days;
-// on Postgres the column is already a timestamp.
+// PostgreSQL timestamp columns store UTC without a timezone.
 func timestampColumn(postgres bool, column string) string {
 	if postgres {
-		return "(" + column + ")::timestamptz"
+		return "(" + column + " AT TIME ZONE 'UTC')"
 	}
 	return "julianday(" + column + ")"
 }

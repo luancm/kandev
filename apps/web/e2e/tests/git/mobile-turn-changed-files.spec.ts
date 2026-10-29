@@ -29,6 +29,11 @@ test.describe("mobile historical turn changed files", () => {
     try {
       const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
       await waitForTurnChangeCount(apiClient, sessionId, 1);
+      // The page can load the summary while capture is still pending. Rehydrate the
+      // finalized history after the backend readiness check before opening the card.
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
       await assertLatestTurnCardInView(session);
 
@@ -173,6 +178,7 @@ test("hides an unavailable empty capture after reload", async ({
     resetTurnQaFile(seedData.repositoryPath);
     const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
     await waitForTurnChangeCount(apiClient, sessionId, 1);
+    // Confirm the completed capture is visible before intercepting its persisted reload.
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle();

@@ -42,6 +42,8 @@ type httpWorkspaceSourcesRequest struct {
 
 const taskDeleteConfirmationHeader = "X-Kandev-Task-Delete-Confirmation"
 
+const archiveResponseWriteGrace = 5 * time.Second
+
 type workspaceSourceJSON struct {
 	Kind           string `json:"kind"`
 	RepositoryID   string `json:"repository_id"`
@@ -226,8 +228,17 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	includeEphemeral := c.Query("include_ephemeral") == queryValueTrue
 	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
+	commandPanelVisible := c.Query("command_panel_visible") == queryValueTrue
+	if commandPanelVisible && (workflowID == "" || query != "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "command panel listing requires a workflow and empty query"})
+		return
+	}
 
-	tasks, total, err := h.service.ListTasksByWorkspaceWithArchiveMode(
+	listTasks := h.service.ListTasksByWorkspaceWithArchiveMode
+	if commandPanelVisible {
+		listTasks = h.service.ListTasksByWorkspaceForCommandPanel
+	}
+	tasks, total, err := listTasks(
 		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived,
 	)
 	if err != nil {
@@ -621,6 +632,7 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 		}
 	}
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
+	dto.EnrichRuntimeStorageHealth(&result, h.runtimeStorageHealth)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	if session != nil && session.TaskEnvironmentID != "" {
 		operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
@@ -1160,7 +1172,7 @@ func validateAttachments(items []v1.MessageAttachment) error {
 func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	var body httpCreateTaskRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("invalid payload"))
 		return
 	}
 	labels, err := encodeTaskLabels(body.Labels)
@@ -1170,15 +1182,15 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 	if err := validateAttachments(body.Attachments); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage(err.Error()))
 		return
 	}
 	if body.WorkspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("workspace_id is required"))
 		return
 	}
 	if (body.StartAgent || body.PrepareSession) && body.AgentProfileID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "agent_profile_id is required to start agent"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("agent_profile_id is required to start agent"))
 		return
 	}
 	repos, ok := convertCreateTaskRepositories(c, body.Repositories)
@@ -1206,7 +1218,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
 	if body.StartAgent && len(description) > models.MaxInitialPromptSubmissionBytes {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "initial task prompt exceeds the maximum size"})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage("initial task prompt exceeds the maximum size"))
 		return
 	}
 	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
@@ -1220,7 +1232,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// post-create attach can record group membership / blocker chain.
 	wsPolicy, policyErr := h.resolveWorkspacePolicy(c.Request.Context(), body)
 	if policyErr != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": policyErr.Error()})
+		c.JSON(http.StatusBadRequest, rejectedCreateMessage(policyErr.Error()))
 		return
 	}
 	metadata := wsPolicy.MergeMetadataBlock(body.Metadata)
@@ -1264,6 +1276,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Position:                              body.Position,
 		Metadata:                              metadata,
 		MCPServerIDs:                          body.MCPServerIDs,
+		Attachments:                           body.Attachments,
 		DeferredLaunch:                        deferredLaunch,
 		RecordAgentProfileRecentUse:           true,
 		PlanMode:                              body.PlanMode,
@@ -1279,40 +1292,26 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		InitialWorkspaceLayout:                body.InitialWorkspaceLayout,
 	})
 	if err != nil {
-		handleNotFound(c, h.logger, err, "task not created")
+		if respondTaskCreateAttachmentError(c, err) {
+			return
+		}
+		handleTaskCreateFailure(c, h.logger, err)
 		return
 	}
 	// Both Found outcomes have no side effects: skip every post-create step
-	// below (attachment claim, workspace-policy attach, fresh-branch commit,
-	// session prepare/start, last-used recording, PR association) and return
-	// the existing task as-is. This is the data-loss guard's REST twin — the
+	// below (workspace-policy attach, fresh-branch commit, session
+	// prepare/start, last-used recording, PR association) and return the
+	// existing task as-is. This is the data-loss guard's REST twin — the
 	// steps below assume a task this request just created, and running them
-	// against someone else's task would misapply attachments/policy meant for
-	// the retry payload to a task that never asked for them.
+	// against someone else's task would misapply policy or repository work
+	// meant for the retry payload to a task that never asked for them.
+	// Creation attachments follow the same rule: the insert transaction never
+	// claims a retry upload for an existing task.
 	if result.Outcome != service.CreateTaskOutcomeCreated {
 		c.JSON(http.StatusOK, foundCreateTaskResponse(result))
 		return
 	}
 	task := result.Task
-	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
-		defer cancel()
-		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
-			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))
-		}
-		switch {
-		case errors.Is(err, service.ErrAttachmentTooLarge):
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
-		case errors.Is(err, service.ErrAttachmentForbidden), errors.Is(err, service.ErrAttachmentNotFound), errors.Is(err, service.ErrAttachmentClaimConflict):
-			c.JSON(http.StatusNotFound, gin.H{"error": "attachment not found"})
-		case errors.Is(err, service.ErrAttachmentInvalid), errors.Is(err, service.ErrAttachmentTotalTooLarge), errors.Is(err, service.ErrTooManyAttachments):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		default:
-			h.logger.Error("failed to claim task attachments", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
-		}
-		return
-	}
 
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
 		return
@@ -1373,6 +1372,26 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+// respondTaskCreateAttachmentError maps a creation-attachment rejection to its
+// HTTP response. It reports false for errors that are not attachment failures.
+func respondTaskCreateAttachmentError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, service.ErrAttachmentTooLarge):
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrAttachmentForbidden),
+		errors.Is(err, service.ErrAttachmentNotFound),
+		errors.Is(err, service.ErrAttachmentClaimConflict):
+		c.JSON(http.StatusNotFound, gin.H{"error": "attachment not found"})
+	case errors.Is(err, service.ErrAttachmentInvalid),
+		errors.Is(err, service.ErrAttachmentTotalTooLarge),
+		errors.Is(err, service.ErrTooManyAttachments):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	default:
+		return false
+	}
+	return true
 }
 
 // foundCreateTaskResponse builds the response for either Found outcome: the
@@ -1659,7 +1678,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 	var repos []dto.TaskRepositoryInput
 	for _, r := range inputs {
 		if r.RepositoryID == "" && r.LocalPath == "" && r.RemoteURL == "" && r.GitHubURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "repository_id, local_path, or remote_url is required"})
+			c.JSON(http.StatusBadRequest, rejectedCreateMessage("repository_id, local_path, or remote_url is required"))
 			return nil, false
 		}
 		repos = append(repos, dto.TaskRepositoryInput{
@@ -2243,6 +2262,11 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	// context.Background() also drops the request identity used by auth checks.
 	archiveCtx, cancel := archivecascade.ContinuationContext(c.Request.Context())
 	defer cancel()
+	// Keep the final response writable without extending the archive work budget.
+	deadline, _ := archiveCtx.Deadline()
+	if err := http.NewResponseController(c.Writer).SetWriteDeadline(deadline.Add(archiveResponseWriteGrace)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		h.logger.Warn("failed to set archive response write deadline", zap.Error(err))
+	}
 	// Office task-handoffs phase 6: when a HandoffService is wired,
 	// archive the whole subtree under a single cascade ID so
 	// descendants get tagged for scoped unarchive AND workspace-group
@@ -2866,6 +2890,7 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 			}
 		}
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichRuntimeStorageHealth(&sessionDTO, h.runtimeStorageHealth)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
 			operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(c.Request.Context(), item.Session.TaskEnvironmentID)

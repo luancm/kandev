@@ -150,6 +150,9 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
+		if userSvc != nil {
+			lifecycleMgr.SetPromptSuggestionsPreference(userSvc.PromptSuggestionsEnabled)
+		}
 		if terminalSvc != nil {
 			gateway.SetTerminalService(terminalSvc)
 		}

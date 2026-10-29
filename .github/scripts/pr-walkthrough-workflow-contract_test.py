@@ -182,16 +182,27 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertIn("managed runner", self.skill)
         self.assertIn("arbitrary Git or shell commands", self.skill)
 
-    def test_generation_uses_requested_model_native_high_reasoning_variant(self) -> None:
-        model = "opencode/deepseek-v4.1-flash-free"
-        variant = "high"
-        self.assertIn(f"PR_WALKTHROUGH_MODEL: {model}", self.workflow)
-        self.assertIn(f"PR_WALKTHROUGH_VARIANT: {variant}", self.workflow)
-        self.assertIn(f'model: "{model}"', self.generation)
-        self.assertIn('--model "$PR_WALKTHROUGH_MODEL"', self.generation)
-        self.assertIn('--variant "$PR_WALKTHROUGH_VARIANT"', self.generation)
-        self.assertNotIn("#high", self.workflow)
-        self.assertNotIn("reasoningEffort", self.generation)
+    def test_generation_discovers_models_and_keeps_a_fallback_model(self) -> None:
+        self.assertNotIn("PR_WALKTHROUGH_MODEL", self.workflow)
+        self.assertNotIn("PR_WALKTHROUGH_VARIANT", self.workflow)
+        self.assertIn('--model \'{model}\'', self.generation)
+        self.assertIn('--variant \'{variant}\'', self.generation)
+        self.assertNotIn('model: "opencode/deepseek-v4.1-flash-free"', self.generation)
+        self.assertIn("OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}", self.generation)
+        runner = (REPO_ROOT / ".github" / "scripts" / "pr-walkthrough-runner.py").read_text(
+            encoding="utf-8"
+        )
+        for value in (
+            'PREFERRED_FREE_MODEL = "opencode/deepseek-v4.1-flash-free"',
+            'FREE_MODEL_PROVIDER = "opencode"',
+            'GO_FALLBACK_MODEL = "opencode-go/muse-spark-1.3-contributor"',
+            '"models", "--verbose", "--refresh"',
+            "build_candidates",
+            "classify_provider_error",
+            "RATE_LIMIT_ERROR_PATTERNS",
+        ):
+            self.assertIn(value, runner)
+        self.assertIn("retain or train on", self.generation)
 
     def test_generation_keeps_untrusted_head_out_of_secret_bearing_workspace(self) -> None:
         self.assertIn("ref: ${{ github.workflow_sha }}", self.generation)
@@ -239,13 +250,48 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
             "python3 .github/scripts/pr-walkthrough-runner.py -- \\",
             '"$HOME/.opencode/bin/opencode" run',
             "--agent github-pr-walkthrough",
-            '--model "$PR_WALKTHROUGH_MODEL"',
-            '--variant "$PR_WALKTHROUGH_VARIANT"',
+            "--model '{model}'",
+            "--variant '{variant}'",
             "--file .pr-walkthrough/guidelines.md",
         ):
             self.assertIn(value, self.generation)
         self.assertNotIn("for attempt in 1 2; do", self.generation)
         self.assertNotIn("opencode_status", self.generation)
+
+    # @covers AC-UI-PR-WALKTHROUGH-001.15
+    def test_generation_is_best_effort_and_warns_instead_of_failing(self) -> None:
+        run_step = self.generation.split("- name: Run OpenCode walkthrough", 1)[1].split(
+            "- name:", 1
+        )[0]
+        self.assertIn("continue-on-error: true", run_step)
+        self.assertIn("--print-logs", run_step)
+
+        self.assertIn("generated: ${{ steps.report.outputs.generated }}", self.generation)
+        report_step = self.generation.split(
+            "- name: Report walkthrough generation outcome", 1
+        )[1]
+        self.assertIn('echo "generated=true" >> "$GITHUB_OUTPUT"', report_step)
+        self.assertIn('echo "generated=false" >> "$GITHUB_OUTPUT"', report_step)
+        self.assertIn("GENERATE_OUTCOME: ${{ steps.generate.outcome }}", report_step)
+        self.assertIn("PR_NUMBER: ${{ github.event.pull_request.number }}", report_step)
+        self.assertIn("HEAD_SHA: ${{ github.event.pull_request.head.sha }}", report_step)
+        self.assertIn("pr-walkthrough-${PR_NUMBER}-${HEAD_SHA}", report_step)
+        self.assertIn("::warning title=PR walkthrough skipped::", report_step)
+        self.assertIn("## PR walkthrough skipped", report_step)
+        self.assertIn("best effort", report_step)
+
+        self.assertIn(
+            "needs.pr-walkthrough-generate.outputs.generated == 'true'",
+            self.publication,
+        )
+        self.assertIn("if-no-files-found: warn", self.generation)
+        for step_name in ("Stage walkthrough artifact", "Upload walkthrough artifact"):
+            step = self.generation.split(f"- name: {step_name}", 1)[1].split(
+                "- name:", 1
+            )[0]
+            self.assertIn(
+                "continue-on-error: ${{ steps.generate.outcome != 'success' }}", step
+            )
 
     def test_generation_budgets_preparation_and_generation_time(self) -> None:
         self.assertIn("timeout-minutes: 25", self.generation)
@@ -350,7 +396,7 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn("- name: Stage walkthrough artifact\n        if: always()", self.generation)
         self.assertIn("path: pr-walkthrough-artifact/", self.generation)
-        self.assertIn("if-no-files-found: error", self.generation)
+        self.assertIn("if-no-files-found: warn", self.generation)
 
     def test_walkthrough_runs_are_serialized_for_the_entire_pr_pipeline(self) -> None:
         workflow_header = self.workflow.split("jobs:", 1)[0]

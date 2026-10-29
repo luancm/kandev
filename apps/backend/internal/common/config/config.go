@@ -1025,9 +1025,12 @@ func validate(cfg *Config) error {
 
 // DSN returns the PostgreSQL connection string.
 func (d *DatabaseConfig) DSN() string {
+	quote := func(value string) string {
+		return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
+	}
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode,
+		quote(d.Host), d.Port, quote(d.User), quote(d.Password), quote(d.DBName), quote(d.SSLMode),
 	)
 }
 

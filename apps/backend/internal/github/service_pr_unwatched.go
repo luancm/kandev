@@ -273,7 +273,7 @@ func (s *Service) fetchUnwatchedTaskPRs(
 }
 
 // batchedUnwatchedFetch runs the batched query under the same service-level
-// singleflight the watch path uses (see fetchBatchedWatchStatuses). Without it
+// singleflight the watch path uses (see fetchBatchedNumberedPhase). Without it
 // the on-demand sync, the workspace background refresh, and a second tab all
 // issue their own identical GraphQL call — the storm that singleflight exists
 // to damp. Keyed on the sorted ref set so equivalent callers share one flight,
@@ -432,13 +432,19 @@ func (s *Service) collectStaleWorkspaceSyncTargets(
 		for _, watch := range watches {
 			appendWatch(watch)
 		}
+		watchLifetimes, err := s.store.ListPRWatchesByTaskIncludingRetired(ctx, taskID)
+		if err != nil {
+			s.logger.Debug("list PR watch lifetimes for refresh failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			watchLifetimes = watches
+		}
 		rows, err := s.store.ListTaskPRsByTask(ctx, taskID)
 		if err != nil {
 			s.logger.Debug("list task PRs for refresh failed",
 				zap.String("task_id", taskID), zap.Error(err))
 			continue
 		}
-		pending = append(pending, unwatchedTaskPRs(rows, watches, now, false)...)
+		pending = append(pending, unwatchedTaskPRs(rows, watchLifetimes, now, false)...)
 	}
 	// Searching watches can be absent from the task-PR projection or can have
 	// a fresh cached row while still needing their adaptive discovery check.

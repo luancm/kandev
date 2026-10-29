@@ -21,6 +21,8 @@ function commandDialog(page: Page) {
   return page.locator('[role="dialog"]:has([cmdk-input])').last();
 }
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe.serial("Mobile Quick Chat cancellation", () => {
   test.describe.configure({ retries: 0 });
 
@@ -117,6 +119,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     cancellation.arm(quickSessionId);
     try {
       await cancelOption.tap();
+      await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
       await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
     } finally {
       cancellation.release();

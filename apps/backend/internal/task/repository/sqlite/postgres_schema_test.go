@@ -907,6 +907,9 @@ func TestPostgresSetSessionPrimaryIfNonterminalRejectsTerminalAndSerializesPromo
 // rather than returning an error. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresClearRecoveredAgentErrors(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := db.Exec("SET TIME ZONE 'Europe/Lisbon'"); err != nil {
+		t.Fatalf("set non-UTC connection timezone: %v", err)
+	}
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
