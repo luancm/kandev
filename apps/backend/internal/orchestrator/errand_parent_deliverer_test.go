@@ -17,6 +17,7 @@ func newErrandDelivererFixture(t *testing.T) (*Service, *ErrandParentDeliverer) 
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
 	return svc, NewErrandParentDeliverer(svc)
 }
 
@@ -46,6 +47,16 @@ func TestErrandParentDelivererBlocksWhileTurnRuns(t *testing.T) {
 	svc.activeTurns.Store("s1", "turn-1")
 
 	require.True(t, deliverer.NotificationBlocked(ctx, "s1"), "a running parent turn blocks notification")
+}
+
+func TestErrandParentDelivererIdleCheckDoesNotCreateTurn(t *testing.T) {
+	ctx := context.Background()
+	svc, deliverer := newErrandDelivererFixture(t)
+
+	require.False(t, deliverer.NotificationBlocked(ctx, "s1"))
+	turnID, err := svc.peekActiveTurnID(ctx, "s1")
+	require.NoError(t, err)
+	require.Empty(t, turnID, "checking delivery must not create an active turn")
 }
 
 func TestErrandParentDelivererRejectsUnknownParent(t *testing.T) {

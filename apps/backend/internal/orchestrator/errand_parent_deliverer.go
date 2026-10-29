@@ -34,8 +34,14 @@ func NewErrandParentDeliverer(svc *Service) *ErrandParentDeliverer {
 // turn to take the pending results.
 func (d *ErrandParentDeliverer) NotificationBlocked(ctx context.Context, parentSessionID string) bool {
 	s := d.svc
-	if s.messageQueue == nil || s.getActiveTurnID(parentSessionID) != "" ||
+	active, _ := s.activeTurns.Load(parentSessionID)
+	cachedTurnID, _ := active.(string)
+	if s.messageQueue == nil || cachedTurnID != "" || s.reservedPromptTurnID(parentSessionID) != "" ||
 		s.isQueuedDispatchInFlight(parentSessionID) {
+		return true
+	}
+	turnID, err := s.peekActiveTurnID(ctx, parentSessionID)
+	if err != nil || turnID != "" {
 		return true
 	}
 	status := s.messageQueue.GetStatus(ctx, parentSessionID)

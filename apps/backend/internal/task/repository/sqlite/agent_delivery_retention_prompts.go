@@ -177,7 +177,7 @@ const agentDeliveryPromptRetentionCandidateSQL = `
 				  AND wf.session_id = source.session_id AND wf.incarnation_id = source.incarnation_id
 				  AND wf.harness_generation = source.harness_generation AND wf.submission_id = source.id
 				  AND wf.turn_id = source.terminal_turn_id
-				  AND wf.outcome IN ('applied', 'no_automatic_transition', 'not_required')
+				  AND wf.outcome IN ('applied', 'no_automatic_transition', 'not_required', 'errands_outstanding')
 			  )
 			  AND NOT EXISTS (
 				SELECT 1 FROM agent_delivery_effects newer
@@ -327,7 +327,7 @@ const agentDeliveryPromptRetentionUpdateSQL = `
 				  AND workflow.harness_generation = agent_delivery_submissions.harness_generation
 				  AND workflow.submission_id = agent_delivery_submissions.id
 				  AND workflow.turn_id = agent_delivery_submissions.terminal_turn_id
-				  AND workflow.outcome IN ('applied', 'no_automatic_transition', 'not_required')
+				  AND workflow.outcome IN ('applied', 'no_automatic_transition', 'not_required', 'errands_outstanding')
 			  )
 			  AND NOT EXISTS (
 				SELECT 1 FROM agent_delivery_effects newer

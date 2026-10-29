@@ -1334,6 +1334,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if !changed {
 		return session, false
 	}
+	s.notifyErrandSessionStateChanged(ctx, sessionID)
 	if onChanged != nil {
 		onChanged()
 	}

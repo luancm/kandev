@@ -14,6 +14,19 @@ type ParentAwaitEnder interface {
 	EndParentAwaits(parentSessionID string)
 }
 
+func (s *Service) notifyErrandSessionStateChanged(ctx context.Context, sessionID string) {
+	observer, ok := s.errands.(interface {
+		OnSessionStateChanged(context.Context, string) error
+	})
+	if !ok {
+		return
+	}
+	if err := observer.OnSessionStateChanged(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to notify errands of session state change",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
 // SetParentAwaitEnder wires the registry that ends a cancelled parent turn's
 // awaits. Nil disables the hook.
 func (s *Service) SetParentAwaitEnder(ender ParentAwaitEnder) {
