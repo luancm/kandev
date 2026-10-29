@@ -11,9 +11,11 @@ import (
 // @covers AC-TASKS-ERRANDS-008.2
 func TestDrainQueuedLaunchesInCreationOrderWithTheStoredIdentityAndSnapshot(t *testing.T) {
 	h := newHarness(t)
+	h.mcp.excluded = []string{"excluded-at-admission"}
 	h.launcher.behave = func(int, LaunchRequest) error { return ErrCeilingRefused }
 	first, second := h.mustStart("first").Errand, h.mustStart("second").Errand
 	h.mcp.ids = []string{"changed-later"}
+	h.mcp.excluded = []string{"excluded-later"}
 
 	h.launcher.behave = nil
 	h.service.DrainQueued(context.Background())
@@ -29,6 +31,9 @@ func TestDrainQueuedLaunchesInCreationOrderWithTheStoredIdentityAndSnapshot(t *t
 		}
 		if len(call.MCPServerIDs) != 2 || call.MCPServerIDs[0] != "mcp-1" {
 			t.Fatalf("drain MCP = %v, want the stored snapshot", call.MCPServerIDs)
+		}
+		if len(call.MCPExcludedServerIDs) != 1 || call.MCPExcludedServerIDs[0] != "excluded-at-admission" {
+			t.Fatalf("drain exclusions = %v, want the admission snapshot", call.MCPExcludedServerIDs)
 		}
 	}
 	for _, id := range []string{first.ID, second.ID} {

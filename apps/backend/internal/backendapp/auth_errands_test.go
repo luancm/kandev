@@ -45,8 +45,8 @@ func (authErrandTestProfiles) CompatibleProfiles(context.Context, string) ([]err
 
 type authErrandTestMCP struct{}
 
-func (authErrandTestMCP) SessionServerIDs(context.Context, string, string) ([]string, error) {
-	return nil, nil
+func (authErrandTestMCP) SessionSnapshot(context.Context, string, string) (errands.MCPSnapshot, error) {
+	return errands.MCPSnapshot{}, nil
 }
 
 type authErrandTestEvents struct{}

@@ -258,12 +258,13 @@ func (p *fakeProfiles) ResolveProfile(_ context.Context, _ string, selector, def
 }
 
 type fakeMCP struct {
-	ids []string
-	err error
+	ids      []string
+	excluded []string
+	err      error
 }
 
-func (m *fakeMCP) SessionServerIDs(context.Context, string, string) ([]string, error) {
-	return m.ids, m.err
+func (m *fakeMCP) SessionSnapshot(context.Context, string, string) (MCPSnapshot, error) {
+	return MCPSnapshot{DefinitionIDs: m.ids, ExcludedDefinitionIDs: m.excluded}, m.err
 }
 
 type publishedEvent struct {

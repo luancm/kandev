@@ -40,7 +40,8 @@ type LaunchRequest struct {
 	SubmissionID    string
 	// MCPServerIDs is the parent's session MCP snapshot taken at start. The
 	// launcher drops definitions that are no longer enabled.
-	MCPServerIDs []string
+	MCPServerIDs         []string
+	MCPExcludedServerIDs []string
 }
 
 // Launcher starts an errand session on the task's shared workspace. It returns
@@ -71,9 +72,15 @@ type ParentDeliverer interface {
 	AdmitPrepared(ctx context.Context, parentSessionID, content string, metadata map[string]interface{}) error
 }
 
+// MCPSnapshot captures session additions and exclusions at errand admission.
+type MCPSnapshot struct {
+	DefinitionIDs         []string
+	ExcludedDefinitionIDs []string
+}
+
 // MCPSelections reads the session-level MCP selections of a parent session.
 type MCPSelections interface {
-	SessionServerIDs(ctx context.Context, taskID, sessionID string) ([]string, error)
+	SessionSnapshot(ctx context.Context, taskID, sessionID string) (MCPSnapshot, error)
 }
 
 // ResolvedProfile is the effective agent profile of an errand.

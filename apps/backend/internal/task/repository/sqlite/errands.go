@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -41,7 +42,7 @@ func (r *Repository) CreateErrand(ctx context.Context, errand *models.Errand) er
 	if err := errand.Validate(); err != nil {
 		return err
 	}
-	mcpServerIDs, err := encodeErrandMCPServerIDs(errand.MCPServerIDs)
+	mcpServerIDs, err := encodeErrandMCPSnapshot(errand)
 	if err != nil {
 		return err
 	}
@@ -238,7 +239,7 @@ func scanErrand(row errandRowScanner) (*models.Errand, error) {
 	); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(mcpServerIDs), &errand.MCPServerIDs); err != nil {
+	if err := decodeErrandMCPSnapshot(mcpServerIDs, &errand); err != nil {
 		return nil, fmt.Errorf("decode errand %s MCP servers: %w", errand.ID, err)
 	}
 	if len(errand.MCPServerIDs) == 0 {
@@ -250,15 +251,38 @@ func scanErrand(row errandRowScanner) (*models.Errand, error) {
 	return &errand, nil
 }
 
-func encodeErrandMCPServerIDs(ids []string) (string, error) {
-	if len(ids) == 0 {
+func encodeErrandMCPSnapshot(row *models.Errand) (string, error) {
+	ids := row.MCPServerIDs
+	if len(ids) == 0 && len(row.MCPExcludedServerIDs) == 0 {
 		return "[]", nil
 	}
-	encoded, err := json.Marshal(ids)
+	var value any = ids
+	if len(row.MCPExcludedServerIDs) > 0 {
+		value = errandMCPSnapshot{ServerIDs: ids, ExcludedServerIDs: row.MCPExcludedServerIDs}
+	}
+	encoded, err := json.Marshal(value)
 	if err != nil {
 		return "", fmt.Errorf("encode errand MCP servers: %w", err)
 	}
 	return string(encoded), nil
+}
+
+type errandMCPSnapshot struct {
+	ServerIDs         []string `json:"server_ids"`
+	ExcludedServerIDs []string `json:"excluded_server_ids"`
+}
+
+func decodeErrandMCPSnapshot(encoded string, row *models.Errand) error {
+	encoded = strings.TrimSpace(encoded)
+	if len(encoded) > 0 && encoded[0] == '{' {
+		var snapshot errandMCPSnapshot
+		if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
+			return err
+		}
+		row.MCPServerIDs, row.MCPExcludedServerIDs = snapshot.ServerIDs, snapshot.ExcludedServerIDs
+		return nil
+	}
+	return json.Unmarshal([]byte(encoded), &row.MCPServerIDs)
 }
 
 func utcTimeArg(value *time.Time) interface{} {

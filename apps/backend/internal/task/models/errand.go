@@ -101,36 +101,37 @@ var (
 
 // Errand is the bookkeeping row for one errand. ID equals the errand's
 // reserved session ID; a queued errand has no session row yet. ID, TaskID,
-// ParentSessionID, Title, Objective, AgentProfileID, MCPServerIDs,
+// ParentSessionID, Title, Objective, AgentProfileID, MCPServerIDs, MCPExcludedServerIDs,
 // FirstTurnID, SubmissionID, and CreatedAt are fixed at insert. Every other
 // change is a compare-and-set on Version.
 type Errand struct {
-	ID                  string
-	TaskID              string
-	ParentSessionID     string
-	Title               string
-	Objective           string
-	AgentProfileID      string
-	MCPServerIDs        []string
-	FirstTurnID         string
-	SubmissionID        string
-	Lifecycle           ErrandLifecycle
-	CancelSource        ErrandCancelSource
-	LastOutcome         ErrandOutcome
-	AwaitingResult      bool
-	ResultText          string
-	ResultTruncated     bool
-	ResultTurnID        string
-	ResultKind          ErrandResultKind
-	ResultState         ErrandResultState
-	DeliveredRoute      ErrandDeliveryRoute
-	DeliveryToken       string
-	DeliveredAt         *time.Time
-	LatestSettledTurnID string
-	Version             int64
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	SettledAt           *time.Time
+	ID                   string
+	TaskID               string
+	ParentSessionID      string
+	Title                string
+	Objective            string
+	AgentProfileID       string
+	MCPServerIDs         []string
+	MCPExcludedServerIDs []string
+	FirstTurnID          string
+	SubmissionID         string
+	Lifecycle            ErrandLifecycle
+	CancelSource         ErrandCancelSource
+	LastOutcome          ErrandOutcome
+	AwaitingResult       bool
+	ResultText           string
+	ResultTruncated      bool
+	ResultTurnID         string
+	ResultKind           ErrandResultKind
+	ResultState          ErrandResultState
+	DeliveredRoute       ErrandDeliveryRoute
+	DeliveryToken        string
+	DeliveredAt          *time.Time
+	LatestSettledTurnID  string
+	Version              int64
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	SettledAt            *time.Time
 }
 
 // Validate rejects an errand without its identity or with a value outside

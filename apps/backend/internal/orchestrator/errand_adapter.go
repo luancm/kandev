@@ -55,15 +55,18 @@ func (a *ErrandAdapter) StopErrandSession(ctx context.Context, sessionID, reason
 	return err
 }
 
-// SessionServerIDs returns the session-level MCP definitions selected for a
+// SessionSnapshot returns the session-level MCP additions and exclusions for a
 // session. Without a selection reader there is nothing to inherit.
-func (a *ErrandAdapter) SessionServerIDs(ctx context.Context, taskID, sessionID string) ([]string, error) {
+func (a *ErrandAdapter) SessionSnapshot(ctx context.Context, taskID, sessionID string) (errands.MCPSnapshot, error) {
 	if a.svc.mcpSelectionReader == nil {
-		return nil, nil
+		return errands.MCPSnapshot{}, nil
 	}
 	task, err := a.svc.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("load task for parent MCP selections: %w", err)
+		return errands.MCPSnapshot{}, fmt.Errorf("load task for parent MCP selections: %w", err)
 	}
-	return a.svc.mcpSelectionReader.List(ctx, mcpconfig.SelectionScopeTaskSession, task.WorkspaceID, sessionID)
+	snapshot, err := a.svc.mcpSelectionReader.ReadSnapshot(ctx, mcpconfig.SelectionOrigin{
+		Scope: mcpconfig.SelectionScopeTaskSession, WorkspaceID: task.WorkspaceID, OwnerID: sessionID,
+	})
+	return errands.MCPSnapshot{DefinitionIDs: snapshot.DefinitionIDs, ExcludedDefinitionIDs: snapshot.ExcludedDefinitionIDs}, err
 }

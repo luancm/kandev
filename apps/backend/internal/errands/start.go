@@ -68,7 +68,7 @@ type preparedStart struct {
 	req     StartRequest
 	parent  *models.TaskSession
 	profile ResolvedProfile
-	mcp     []string
+	mcp     MCPSnapshot
 }
 
 func (s *Service) prepareStart(ctx context.Context, req StartRequest) (*preparedStart, error) {
@@ -84,7 +84,7 @@ func (s *Service) prepareStart(ctx context.Context, req StartRequest) (*prepared
 		s.logStartRequest(req, StartOutcomeRejected, err)
 		return nil, err
 	}
-	mcp, err := s.mcp.SessionServerIDs(ctx, req.TaskID, parent.ID)
+	mcp, err := s.mcp.SessionSnapshot(ctx, req.TaskID, parent.ID)
 	if err != nil {
 		countStarted(StartOutcomeFailed)
 		startErr := fmt.Errorf("read parent MCP selections: %w", err)
@@ -146,8 +146,9 @@ func newQueuedErrand(prepared *preparedStart, now time.Time) *models.Errand {
 	return &models.Errand{
 		ID: errandID, TaskID: prepared.req.TaskID, ParentSessionID: prepared.parent.ID,
 		Title: prepared.req.Title, Objective: prepared.req.Objective,
-		AgentProfileID: prepared.profile.ID, MCPServerIDs: prepared.mcp,
-		FirstTurnID: turnID, SubmissionID: submissionID,
+		AgentProfileID: prepared.profile.ID, MCPServerIDs: append([]string(nil), prepared.mcp.DefinitionIDs...),
+		MCPExcludedServerIDs: append([]string(nil), prepared.mcp.ExcludedDefinitionIDs...),
+		FirstTurnID:          turnID, SubmissionID: submissionID,
 		Lifecycle: models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone,
 		AwaitingResult: true, CreatedAt: now, UpdatedAt: now,
 	}
@@ -171,6 +172,7 @@ func (s *Service) launchQueued(ctx context.Context, errand *models.Errand, remov
 		ErrandID: errand.ID, TaskID: errand.TaskID, ParentSessionID: errand.ParentSessionID,
 		Title: errand.Title, Objective: errand.Objective, AgentProfileID: errand.AgentProfileID,
 		TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID, MCPServerIDs: errand.MCPServerIDs,
+		MCPExcludedServerIDs: errand.MCPExcludedServerIDs,
 	})
 	switch {
 	case err == nil:

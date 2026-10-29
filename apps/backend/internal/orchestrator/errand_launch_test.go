@@ -252,6 +252,15 @@ func (r *fakeMCPSelectionReader) List(_ context.Context, scope mcpconfig.Selecti
 	return r.stored, nil
 }
 
+func (r *fakeMCPSelectionReader) ReadSnapshot(ctx context.Context, origin mcpconfig.SelectionOrigin) (mcpconfig.SelectionSnapshot, error) {
+	ids, err := r.List(ctx, origin.Scope, origin.WorkspaceID, origin.OwnerID)
+	return mcpconfig.SelectionSnapshot{DefinitionIDs: ids}, err
+}
+
+func (r *fakeMCPSelectionReader) InheritedDefinitionIDs(context.Context, string, string) ([]string, error) {
+	return r.stored, nil
+}
+
 func (r *fakeMCPSelectionReader) EnabledDefinitionIDs(_ context.Context, _ string, ids []string) ([]string, error) {
 	r.asked = append(r.asked, ids)
 	return r.enabled, nil
@@ -277,13 +286,13 @@ func TestErrandMCPInheritanceStoresOnlyStillEnabledServersAsTheSessionScope(t *t
 	f.svc.SetMCPSelectionReader(reader)
 	f.svc.SetMCPSelectionWriter(writer)
 
-	ids, err := NewErrandAdapter(f.svc).SessionServerIDs(ctx, f.taskID, f.parent)
+	snapshot, err := NewErrandAdapter(f.svc).SessionSnapshot(ctx, f.taskID, f.parent)
 	require.NoError(t, err)
-	require.Equal(t, []string{"mcp-1", "mcp-2"}, ids)
+	require.Equal(t, []string{"mcp-1", "mcp-2"}, snapshot.DefinitionIDs)
 	require.Equal(t, [2]string{"task_session:ws1", "parent-1"}, reader.listed[0], "the parent's task-session scope")
 
 	request := f.request()
-	request.MCPServerIDs = ids
+	request.MCPServerIDs = snapshot.DefinitionIDs
 	_, err = f.svc.LaunchErrandSession(ctx, request)
 	require.NoError(t, err)
 	require.Equal(t, [][]string{{"mcp-1", "mcp-2"}}, reader.asked)

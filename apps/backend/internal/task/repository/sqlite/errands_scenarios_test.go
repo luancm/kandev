@@ -40,7 +40,8 @@ func sampleErrand(id, taskID, parentID string, created time.Time) *models.Errand
 		ID: id, TaskID: taskID, ParentSessionID: parentID,
 		Title: "Title " + id, Objective: "Objective " + id, AgentProfileID: "profile-" + id,
 		MCPServerIDs: []string{"mcp-a", "mcp-b"}, FirstTurnID: "turn-" + id, SubmissionID: "submission-" + id,
-		Lifecycle: models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone,
+		MCPExcludedServerIDs: []string{"excluded-mcp"},
+		Lifecycle:            models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone,
 		AwaitingResult: true, CreatedAt: created, UpdatedAt: created,
 	}
 }
@@ -284,12 +285,14 @@ func exerciseErrandRoundTrip(t *testing.T, repo *Repository) {
 	immutable := *after
 	immutable.Title, immutable.Objective, immutable.ParentSessionID = "changed", "changed", "other-parent"
 	immutable.MCPServerIDs, immutable.FirstTurnID, immutable.SubmissionID = []string{"other"}, "other", "other"
+	immutable.MCPExcludedServerIDs = []string{"other-exclusion"}
 	if err := repo.UpdateErrand(ctx, &immutable); err != nil {
 		t.Fatalf("UpdateErrand with immutable changes: %v", err)
 	}
 	if fixed, err := repo.GetErrand(ctx, errand.ID); err != nil || fixed.Title != errand.Title ||
 		fixed.Objective != errand.Objective || fixed.ParentSessionID != errand.ParentSessionID ||
 		!reflect.DeepEqual(fixed.MCPServerIDs, errand.MCPServerIDs) || fixed.FirstTurnID != errand.FirstTurnID ||
+		!reflect.DeepEqual(fixed.MCPExcludedServerIDs, errand.MCPExcludedServerIDs) ||
 		fixed.SubmissionID != errand.SubmissionID {
 		t.Fatalf("immutable errand fields changed: %+v, err = %v", fixed, err)
 	}

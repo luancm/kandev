@@ -116,8 +116,8 @@ func (deletionNoticeProfiles) CompatibleProfiles(context.Context, string) ([]err
 
 type deletionNoticeMCP struct{}
 
-func (deletionNoticeMCP) SessionServerIDs(context.Context, string, string) ([]string, error) {
-	return nil, nil
+func (deletionNoticeMCP) SessionSnapshot(context.Context, string, string) (errands.MCPSnapshot, error) {
+	return errands.MCPSnapshot{}, nil
 }
 
 type deletionNoticeEvents struct{}

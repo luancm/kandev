@@ -24,6 +24,8 @@ func (s *Service) SetMCPSelectionWriter(writer MCPSelectionWriter) {
 // validation, as it does for writes.
 type MCPSelectionReader interface {
 	List(ctx context.Context, scope mcpconfig.SelectionScope, workspaceID, ownerID string) ([]string, error)
+	ReadSnapshot(context.Context, mcpconfig.SelectionOrigin) (mcpconfig.SelectionSnapshot, error)
+	InheritedDefinitionIDs(context.Context, string, string) ([]string, error)
 	EnabledDefinitionIDs(ctx context.Context, workspaceID string, ids []string) ([]string, error)
 }
 

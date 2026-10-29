@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kandev/kandev/internal/errands"
@@ -19,7 +20,8 @@ type ErrandLaunch struct {
 	ParentSessionID string
 	Title           string
 	// SubmissionID is the errand's reserved first-prompt submission identity.
-	SubmissionID string
+	SubmissionID         string
+	MCPExcludedServerIDs []string
 }
 
 // errandStartOrigin classifies errand launches as automatic: the parent's agent
@@ -57,6 +59,7 @@ func (s *Service) LaunchErrandSession(ctx context.Context, req errands.LaunchReq
 		Errand: &ErrandLaunch{
 			ErrandID: req.ErrandID, ParentSessionID: req.ParentSessionID,
 			Title: req.Title, SubmissionID: req.SubmissionID,
+			MCPExcludedServerIDs: req.MCPExcludedServerIDs,
 		},
 	})
 }
@@ -72,7 +75,13 @@ func (s *Service) enabledErrandMCPServers(ctx context.Context, req errands.Launc
 	if err != nil {
 		return nil, fmt.Errorf("load task for errand MCP selections: %w", err)
 	}
-	enabled, err := s.mcpSelectionReader.EnabledDefinitionIDs(ctx, task.WorkspaceID, req.MCPServerIDs)
+	ids := slices.DeleteFunc(slices.Clone(req.MCPServerIDs), func(id string) bool {
+		return slices.Contains(req.MCPExcludedServerIDs, id)
+	})
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	enabled, err := s.mcpSelectionReader.EnabledDefinitionIDs(ctx, task.WorkspaceID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("resolve errand MCP selections: %w", err)
 	}

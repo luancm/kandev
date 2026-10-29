@@ -1946,6 +1946,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
 		return nil, err
 	}
+	if opts.Errand != nil {
+		if err := s.applyErrandMCPExclusions(ctx, task.WorkspaceID, sessionID, opts.Errand.MCPExcludedServerIDs); err != nil {
+			return nil, err
+		}
+	}
 	// Session preparation can reuse an Office session that was parked after a
 	// native restore failure. Check at the shared start boundary so autonomous
 	// callers return the typed recovery error to Office instead of dispatching
