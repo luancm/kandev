@@ -147,5 +147,8 @@
   "statusWorking": "正在處理",
   "subagentCount_one": "{{count}} 個子代理程式",
   "subagentCount_other": "{{count}} 個子代理程式",
-  "title": "對話流"
+  "title": "對話流",
+  "errandsLive_one": "{{count}} 個委託",
+  "errandsLive_other": "{{count}} 個委託",
+  "errandsWaiting": "等待委託完成"
 }

@@ -6,6 +6,8 @@ import type {
   WorkflowReviewStatus,
 } from "@/lib/types/http";
 
+import type { TaskStatusSummaryErrands } from "@/lib/types/task-status-summary";
+
 type KanbanTask = KanbanState["tasks"][number];
 
 /**
@@ -28,6 +30,7 @@ export type ActiveThread = {
   taskPendingAction?: TaskPendingAction | null;
   taskState?: TaskState | null;
   reviewStatus?: WorkflowReviewStatus | null;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   activeSubagentCount: number;
   queuedPromptCount: number;
   lastActivityAt: string | null;
@@ -197,6 +200,7 @@ function buildThread({
     taskPendingAction,
     taskState: task.state ?? null,
     reviewStatus: task.reviewStatus ?? null,
+    errandsSummary: task.statusSummary?.errands,
     activeSubagentCount: task.statusSummary?.active_subagent_count ?? task.activeSubagentCount ?? 0,
     queuedPromptCount: task.statusSummary?.queued_prompt_count ?? 0,
     lastActivityAt: session.lastActivityAt,

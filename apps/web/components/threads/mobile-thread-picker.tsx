@@ -1,5 +1,7 @@
 "use client";
 
+import { ThreadErrandsIndicator } from "./thread-errands-indicator";
+
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
@@ -59,6 +61,7 @@ export function MobileThreadPicker({
                   {thread.workflowName}
                   {thread.stepTitle && ` · ${thread.stepTitle}`}
                 </span>
+                <ThreadErrandsIndicator summary={thread.errandsSummary} />
                 {(thread.activeSubagentCount > 0 || thread.queuedPromptCount > 0) && (
                   <span className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
                     {thread.activeSubagentCount > 0 && (

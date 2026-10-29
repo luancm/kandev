@@ -1,5 +1,7 @@
 "use client";
 
+import { ThreadErrandsIndicator } from "./thread-errands-indicator";
+
 import { IconArrowsMaximize, IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -61,6 +63,7 @@ export function MobileThreadColumnHeader({
         </Button>
         <ThreadTaskMenuButton taskId={thread.taskId} />
       </div>
+      <ThreadErrandsIndicator summary={thread.errandsSummary} />
       <div className="flex min-h-8 min-w-0 items-center justify-between gap-2 px-1">
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
           <span aria-hidden="true">

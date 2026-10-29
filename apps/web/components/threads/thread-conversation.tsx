@@ -1,5 +1,10 @@
 "use client";
 
+import { useCallback } from "react";
+import {
+  TaskSessionNavigationContext,
+  type OpenTaskSessionTarget,
+} from "@/components/task/chat/errands/task-session-navigation-context";
 import { TaskChatPanel } from "@/components/task/task-chat-panel";
 
 /**
@@ -16,14 +21,30 @@ import { TaskChatPanel } from "@/components/task/task-chat-panel";
  * mounted column advance its own Slack-style read cursor would mark threads
  * read that the user never looked at.
  */
-export function ThreadConversation({ taskId, sessionId }: { taskId: string; sessionId: string }) {
+export function ThreadConversation({
+  taskId,
+  sessionId,
+  onSelectSession,
+}: {
+  taskId: string;
+  sessionId: string;
+  onSelectSession: (sessionId: string) => void;
+}) {
+  const openSession = useCallback(
+    (target: OpenTaskSessionTarget) => {
+      if (target.taskId === taskId) onSelectSession(target.sessionId);
+    },
+    [taskId, onSelectSession],
+  );
   return (
-    <TaskChatPanel
-      sessionId={sessionId}
-      taskId={taskId}
-      hideSessionsDropdown
-      embedded
-      isVisible={false}
-    />
+    <TaskSessionNavigationContext.Provider value={openSession}>
+      <TaskChatPanel
+        sessionId={sessionId}
+        taskId={taskId}
+        hideSessionsDropdown
+        embedded
+        isVisible={false}
+      />
+    </TaskSessionNavigationContext.Provider>
   );
 }

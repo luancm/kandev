@@ -1,5 +1,7 @@
 "use client";
 
+import { ThreadErrandsIndicator } from "./thread-errands-indicator";
+
 import {
   useCallback,
   useEffect,
@@ -80,6 +82,7 @@ function ThreadMeta({
         <span className="font-medium text-foreground/70">{statusLabel}</span>
         <span className="truncate">{thread.workflowName}</span>
         {thread.stepTitle && <span className="truncate">{thread.stepTitle}</span>}
+        <ThreadErrandsIndicator summary={thread.errandsSummary} />
         {thread.activeSubagentCount > 0 && (
           <Badge variant="secondary" className="h-4 px-1.5 text-[10px] font-normal">
             {t("threads:subagentCount", { count: thread.activeSubagentCount })}
@@ -354,6 +357,7 @@ function ThreadColumnBody({
           key={selectedSession.id}
           taskId={taskId}
           sessionId={selectedSession.id}
+          onSelectSession={onSelectSession}
         />
       )}
     </div>

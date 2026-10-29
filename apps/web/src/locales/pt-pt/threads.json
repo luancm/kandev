@@ -142,12 +142,13 @@
   "statusNotStarted": "Não iniciada",
   "statusPermissionNeeded": "Permissão necessária",
   "statusQuestionFromAgent": "Pergunta do agente",
-  "statusReadyForReview": "Pronta para revisão",
   "statusStarting": "A iniciar",
   "statusTurnFinished": "Turno concluído",
-  "statusWaiting": "Em espera",
   "statusWorking": "A trabalhar",
   "subagentCount_one": "{{count}} subagente",
   "subagentCount_other": "{{count}} subagentes",
-  "title": "Tópicos"
+  "title": "Tópicos",
+  "errandsLive_one": "{{count}} incumbência",
+  "errandsLive_other": "{{count}} incumbências",
+  "errandsWaiting": "À espera de incumbências"
 }

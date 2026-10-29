@@ -147,5 +147,8 @@
   "statusWorking": "작업 중",
   "subagentCount_one": "하위 에이전트 {{count}}개",
   "subagentCount_other": "하위 에이전트 {{count}}개",
-  "title": "스레드"
+  "title": "스레드",
+  "errandsLive_one": "심부름 {{count}}개",
+  "errandsLive_other": "심부름 {{count}}개",
+  "errandsWaiting": "심부름 결과 대기 중"
 }

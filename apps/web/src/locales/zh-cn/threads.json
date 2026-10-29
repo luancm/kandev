@@ -142,12 +142,13 @@
   "statusNotStarted": "未开始",
   "statusPermissionNeeded": "需要权限",
   "statusQuestionFromAgent": "智能体提问",
-  "statusReadyForReview": "准备审查",
   "statusStarting": "正在启动",
   "statusTurnFinished": "回合已完成",
-  "statusWaiting": "等待中",
   "statusWorking": "正在处理",
   "subagentCount_one": "{{count}} 个子智能体",
   "subagentCount_other": "{{count}} 个子智能体",
-  "title": "对话流"
+  "title": "对话流",
+  "errandsLive_one": "{{count}} 个委托",
+  "errandsLive_other": "{{count}} 个委托",
+  "errandsWaiting": "等待委托完成"
 }

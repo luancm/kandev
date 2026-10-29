@@ -147,5 +147,8 @@
   "statusWorking": "作業中",
   "subagentCount_one": "{{count}} サブエージェント",
   "subagentCount_other": "{{count}} サブエージェント",
-  "title": "スレッド"
+  "title": "スレッド",
+  "errandsLive_one": "{{count}} 件の依頼",
+  "errandsLive_other": "{{count}} 件の依頼",
+  "errandsWaiting": "依頼の結果を待っています"
 }
