@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { Errand } from "@/lib/types/errands";
 import { cn } from "@/lib/utils";
 import { errandElapsedLabel } from "./errand-display";
+import { ErrandProfileLabel } from "./errand-profile-label";
 import { ErrandOpenButton } from "./errand-open-button";
 import { ErrandStatusLabel, errandStatusLabelKey } from "./errand-status";
 import { useOpenTaskSession } from "./use-open-task-session";
@@ -27,6 +28,11 @@ function RowSummary({ errand, nowMs, title }: { errand: Errand; nowMs: number; t
       <span className="truncate text-xs font-medium text-foreground" title={title}>
         {title}
       </span>
+      <ErrandProfileLabel
+        profileId={errand.agent_profile_id}
+        showLogo={false}
+        className="max-w-full text-[11px]"
+      />
       <span className="flex items-center gap-1.5">
         <ErrandStatusLabel status={errand.status} />
         {elapsed && (

@@ -40,7 +40,7 @@ function ParentHeading({ parentSessionId, id }: { parentSessionId: string; id: s
   );
 }
 
-function ParentGroup({
+export function ErrandsParentGroup({
   parentSessionId,
   errands,
   taskId,
@@ -79,7 +79,7 @@ function ParentGroup({
   );
 }
 
-function StopAllButton({ taskId, drawer }: { taskId: string; drawer: boolean }) {
+export function ErrandsStopAllButton({ taskId, drawer }: { taskId: string; drawer: boolean }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const { cancelAllErrands, isPending } = useErrandActions();
@@ -121,7 +121,7 @@ function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
       )}
     >
       {Object.entries(errandsByParent).map(([parentId, group]) => (
-        <ParentGroup
+        <ErrandsParentGroup
           key={parentId}
           parentSessionId={parentId}
           errands={group}
@@ -188,7 +188,7 @@ function PopoverPanelHeader({ total }: { total: number }) {
 export function ErrandsPanel(props: ErrandsPanelProps) {
   const { taskId, errands, liveCount, drawer } = props;
   const nowMs = useNow(CLOCK_TICK_MS);
-  const footer = liveCount > 0 && <StopAllButton taskId={taskId} drawer={drawer} />;
+  const footer = liveCount > 0 && <ErrandsStopAllButton taskId={taskId} drawer={drawer} />;
   if (drawer) {
     return (
       <div data-testid="errands-panel" className="flex min-h-0 flex-1 flex-col overflow-hidden">
