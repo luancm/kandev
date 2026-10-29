@@ -141,6 +141,7 @@ test("Auto-run off supports manual Send now and next-turn delivery without dupli
     );
     await waitDelivered(api, taskId, [errands[0].errand_id]);
     await waitParentIdle(api, taskId, parentId);
+    await api.setQueueAutoRun(identity, false);
     await gates[1].release();
     await expect
       .poll(async () => (await api.getQueueStatus(identity)).count, { timeout: 60_000 })

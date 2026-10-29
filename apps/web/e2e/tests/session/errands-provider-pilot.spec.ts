@@ -186,6 +186,7 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
       40_000,
     );
     await waitParentIdle(api, task.id, launched.session_id);
+    await writeFile(parentMarker, "release after cancellation");
     expect(
       (await listErrands(api, task.id)).find((row) => row.errand_id === errands[1].errand_id)
         ?.status,
@@ -198,6 +199,8 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
             ?.status,
       )
       .toBe("cancelled");
+    await waitDelivered(api, task.id, [errands[1].errand_id]);
+    await waitParentIdle(api, task.id, launched.session_id);
     await api.addUserMessage(
       task.id,
       launched.session_id,
@@ -208,6 +211,7 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
       task.id,
       errands.map((row) => row.errand_id),
     );
+    await waitParentIdle(api, task.id, launched.session_id);
     evidence.snapshots = await deliverySnapshots(api, launched.session_id);
     await release();
     release = null;

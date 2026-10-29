@@ -90,10 +90,12 @@ export async function deliverySnapshots(api: ApiClient, parentId: string) {
 }
 
 export async function expectTouchTarget(control: Locator) {
-  const box = await control.boundingBox();
-  expect(box).not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(44);
-  expect(box!.width).toBeGreaterThanOrEqual(44);
+  await expect
+    .poll(async () => {
+      const box = await control.boundingBox();
+      return box !== null && box.height >= 44 && box.width >= 44;
+    })
+    .toBe(true);
 }
 
 export async function expectNoHorizontalOverflow(page: Page) {

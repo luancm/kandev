@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// OnSessionStateChanged wakes joins after authoritative session persistence.
+// OnSessionStateChanged publishes the current projection and wakes joins after authoritative session persistence.
 func (s *Service) OnSessionStateChanged(ctx context.Context, sessionID string) error {
 	if !s.featureEnabled() {
 		return nil
@@ -19,6 +19,7 @@ func (s *Service) OnSessionStateChanged(ctx context.Context, sessionID string) e
 	if err != nil {
 		return err
 	}
+	s.publish(ctx, row)
 	s.wakeAwaits(row.ParentSessionID)
 	return nil
 }

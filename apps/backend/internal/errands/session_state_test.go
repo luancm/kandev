@@ -40,6 +40,10 @@ func TestAwaitAllWakesWhenCapturedResultSessionBecomesIdle(t *testing.T) {
 	if err := h.service.OnSessionStateChanged(ctx, row.ID); err != nil {
 		t.Fatal(err)
 	}
+	statuses := h.publisher.statuses()
+	if statuses[len(statuses)-1] != models.ErrandStatusDone {
+		t.Fatalf("latest published status = %q, want done after session becomes idle", statuses[len(statuses)-1])
+	}
 	select {
 	case <-waiter.wake:
 	default:

@@ -52,7 +52,7 @@ test("phone errands expand inline, open full screen, return and stop through tou
     await child.getByTestId(BACK).tap();
     await expect(chat).toBeVisible();
     await chat.getByTestId(CHIP).tap();
-    const drawer = page.getByTestId("errands-drawer");
+    const drawer = page.getByTestId("errands-drawer-content");
     await expect(drawer).toBeVisible();
     const stopAll = drawer.getByTestId("errands-stop-all");
     await expectTouchTarget(stopAll);
