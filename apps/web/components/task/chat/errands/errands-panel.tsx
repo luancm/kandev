@@ -11,6 +11,7 @@ import { useToast } from "@/components/toast-provider";
 import { useErrandActions } from "@/hooks/domains/session/use-errand-actions";
 import { useNow } from "@/hooks/use-now";
 import type { Errand } from "@/lib/types/errands";
+import { orderErrandPanel } from "@/lib/errand-panel-order";
 import { cn } from "@/lib/utils";
 import { selectSessionTabTitle } from "../../session-tab-title";
 import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
@@ -110,7 +111,8 @@ export function ErrandsStopAllButton({ taskId, drawer }: { taskId: string; drawe
 
 function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
   const { t } = useTranslation();
-  const { errandsByParent, taskId, nowMs, drawer, onClose, isLoaded } = props;
+  const { errands, taskId, nowMs, drawer, onClose, isLoaded } = props;
+  const ordered = orderErrandPanel(errands);
   return (
     <div
       data-testid="errands-panel-list"
@@ -120,17 +122,30 @@ function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
         drawer ? "min-h-0 flex-1 px-4 pb-3" : "max-h-64",
       )}
     >
-      {Object.entries(errandsByParent).map(([parentId, group]) => (
-        <ErrandsParentGroup
-          key={parentId}
-          parentSessionId={parentId}
-          errands={group}
-          taskId={taskId}
-          nowMs={nowMs}
-          drawer={drawer}
-          onClose={onClose}
-        />
-      ))}
+      {(
+        [
+          ["active", t("github:active")],
+          ["finished", t("automations:completed")],
+        ] as const
+      ).map(
+        ([section, label]) =>
+          ordered[section].length > 0 && (
+            <section key={section} aria-label={label} className="flex flex-col gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground">{label}</h2>
+              {ordered[section].map(({ parentId, errands: group }) => (
+                <ErrandsParentGroup
+                  key={parentId}
+                  parentSessionId={parentId}
+                  errands={group}
+                  taskId={taskId}
+                  nowMs={nowMs}
+                  drawer={drawer}
+                  onClose={onClose}
+                />
+              ))}
+            </section>
+          ),
+      )}
       {!isLoaded && (
         <p
           role="status"

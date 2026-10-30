@@ -4,7 +4,7 @@
 
 import { parseErrandStatus, type ErrandStatus } from "@/lib/types/errands";
 import type { KandevStatus } from "../messages/kandev/shared";
-import { pickArray, pickObject, pickString } from "../messages/kandev/parse";
+import { pickArray, pickNumber, pickObject, pickString } from "../messages/kandev/parse";
 
 /** Matches the backend's `result_preview` and delivery preview bound. */
 export const ERRAND_PREVIEW_MAX_CHARS = 280;
@@ -70,7 +70,11 @@ export type AwaitErrandRow = {
   resultReceived: boolean;
 };
 
+export type AwaitEndReason = "all_ready" | "any_ready" | "timeout" | "parent_ended";
+
 export type AwaitErrandsView = {
+  durationMs: number | null;
+  endReason: AwaitEndReason | null;
   mode: "all" | "any";
   rows: AwaitErrandRow[];
   errorText: string | null;
@@ -106,6 +110,15 @@ export function parseAwaitErrands(
   result: unknown,
   status: KandevStatus,
 ): AwaitErrandsView {
+  const duration = pickNumber(result, "duration_ms");
+  const reason = pickString(result, "end_reason");
+  const endReason =
+    reason === "all_ready" ||
+    reason === "any_ready" ||
+    reason === "timeout" ||
+    reason === "parent_ended"
+      ? reason
+      : null;
   const reported = awaitResultRows(result);
   const ids = requestedErrandIds(args);
   for (const id of reported.keys()) if (!ids.includes(id)) ids.push(id);
@@ -116,6 +129,9 @@ export function parseAwaitErrands(
         reported.get(errandId) ?? { errandId, status: null, pending: false, resultReceived: false },
     );
   return {
+    durationMs:
+      typeof duration === "number" && Number.isFinite(duration) && duration >= 0 ? duration : null,
+    endReason,
     mode: pickString(args, "mode") === "any" ? "any" : "all",
     rows,
     errorText: resolveErrorText(result, status, reported.size > 0),

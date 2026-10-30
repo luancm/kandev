@@ -70,8 +70,10 @@ type awaitErrandView struct {
 }
 
 type awaitErrandsResponse struct {
-	Errands []awaitErrandView `json:"errands"`
-	Ended   bool              `json:"ended,omitempty"`
+	DurationMS int64             `json:"duration_ms"`
+	EndReason  string            `json:"end_reason,omitempty"`
+	Errands    []awaitErrandView `json:"errands"`
+	Ended      bool              `json:"ended,omitempty"`
 }
 
 // handleStartErrand starts an errand for a verified parent session. The
@@ -154,7 +156,7 @@ func awaitErrandsView(result errands.AwaitResult) awaitErrandsResponse {
 			DeliveredVia: item.DeliveredVia,
 		})
 	}
-	return awaitErrandsResponse{Errands: views, Ended: result.Ended}
+	return awaitErrandsResponse{Errands: views, Ended: result.Ended, DurationMS: result.DurationMS, EndReason: result.EndReason}
 }
 
 // handleAwaitErrandsRelease returns the claim of an abandoned await so its

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatPromptDuration } from "@/lib/turn-duration";
+
 import { useState } from "react";
 import {
   IconChevronDown,
@@ -267,7 +269,9 @@ function AwaitErrandRowItem({
   const live = useLiveErrand(taskId, row.errandId);
   const title = live?.title || shortId(row.errandId);
   const status: ErrandStatusKind | null =
-    live?.status ?? row.status ?? (row.pending || awaitInFlight ? "running" : null);
+    (awaitInFlight ? live?.status : row.status) ??
+    row.status ??
+    (row.pending || awaitInFlight ? "running" : null);
   return (
     <li
       data-testid={`errand-await-row-${row.errandId}`}
@@ -289,6 +293,9 @@ function AwaitErrandRowItem({
         {title}
       </button>
       {status && <ErrandStatusLabel status={status} />}
+      {row.resultReceived && !awaitInFlight && (
+        <span className="text-muted-foreground">{t("chat:errandAwaitResultReturned")}</span>
+      )}
     </li>
   );
 }
@@ -313,13 +320,33 @@ function AwaitErrandsCard({ args, result, status, sessionId }: KandevRendererPro
     );
   }
   const inFlight = isInFlight(status);
+  const reasonKeys = {
+    all_ready: "chat:errandAwaitAllReady",
+    any_ready: "chat:errandAwaitAnyReady",
+    timeout: "chat:errandAwaitTimeout",
+    parent_ended: "chat:errandAwaitParentEnded",
+  } as const;
+  const duration =
+    view.durationMs === null
+      ? null
+      : formatPromptDuration(view.durationMs / 1000, {
+          s: t("task:durationUnitSeconds"),
+          m: t("task:durationUnitMinutes"),
+          h: t("task:durationUnitHours"),
+        });
   return (
     <div data-testid="errand-await-card" className={CARD_CLASS}>
-      <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 px-2.5 py-1.5">
         <IconHourglassHigh aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate font-medium text-foreground">
           {t(awaitHeadingKey(inFlight, view.mode), { count: view.rows.length })}
         </span>
+        {!inFlight && duration !== null && (
+          <span className="shrink-0 text-muted-foreground">{duration}</span>
+        )}
+        {!inFlight && view.endReason && (
+          <span className="text-muted-foreground">{t(reasonKeys[view.endReason])}</span>
+        )}
         {inFlight && (
           <span aria-hidden="true" className="inline-flex shrink-0">
             <GridSpinner className="text-[12px] text-muted-foreground" />

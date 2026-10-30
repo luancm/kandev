@@ -244,6 +244,9 @@ func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Await: %v", err)
 	}
+	if first.EndReason != "all_ready" || first.DurationMS < 0 {
+		t.Fatalf("await metadata = %+v", first)
+	}
 	if len(first.Errands) != 1 || first.Errands[0].Result != "the answer" {
 		t.Fatalf("first await = %+v, want the result", first.Errands)
 	}

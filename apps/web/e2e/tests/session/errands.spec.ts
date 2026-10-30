@@ -122,14 +122,16 @@ test("desktop errand rows read each child's persisted context window passively",
     const measuredRow = panel.getByTestId(`errands-panel-row-${firstId}`);
     const unmeasuredRow = panel.getByTestId(`errands-panel-row-${unmeasuredId}`);
     const unknownRow = panel.getByTestId(`errands-panel-row-${unknownId}`);
-    await expect(measuredRow).toContainText("Context window: 68% used");
-    await expect(unmeasuredRow).toContainText("Context window: usage not measured");
+    await expect(measuredRow).toContainText("Context window: 68.0K of 100.0K tokens");
+    await expect(unmeasuredRow).toContainText(
+      "Context window: usage not measured (N/A of 100.0K tokens)",
+    );
     await expect(unknownRow).not.toContainText("Context window");
     await expect(panel.getByTestId(`errand-open-${firstId}`)).toBeVisible();
     await expect(panel.getByTestId("errands-stop-all")).toHaveCount(0);
 
     await seedErrandContextWindow(api, taskId, firstId, childWindow(82_000));
-    await expect(measuredRow).toContainText("Context window: 82% used");
+    await expect(measuredRow).toContainText("Context window: 82.0K of 100.0K tokens");
     await expect(
       page.locator(`[data-testid="session-chat"][data-session-id="${firstId}"]`),
     ).toHaveCount(0);
@@ -142,10 +144,10 @@ test("desktop errand rows read each child's persisted context window passively",
     await reloadedParent.getByTestId("errands-chip").click();
     const reloadedPanel = page.getByTestId("errands-popover");
     await expect(reloadedPanel.getByTestId(`errands-panel-row-${firstId}`)).toContainText(
-      "Context window: 82% used",
+      "Context window: 82.0K of 100.0K tokens",
     );
     await expect(reloadedPanel.getByTestId(`errands-panel-row-${unmeasuredId}`)).toContainText(
-      "Context window: usage not measured",
+      "Context window: usage not measured (N/A of 100.0K tokens)",
     );
 
     await seedErrandContextWindow(api, taskId, firstId, null);
@@ -311,6 +313,15 @@ test("optional await joins the IDs actually returned by start", async ({
     await expect(
       parentChat(page, parentId).getByText("Errands parent returned", { exact: false }),
     ).toBeVisible();
+    const awaitCard = parentChat(page, parentId).getByTestId("errand-await-card");
+    await expect(awaitCard).toContainText("All finished");
+    await expect(awaitCard).toContainText(/\d+s/);
+    await expect(awaitCard).toContainText("Result returned");
+    await page.reload();
+    const reloadedAwait = parentChat(page, parentId).getByTestId("errand-await-card");
+    await expect(reloadedAwait).toContainText("All finished");
+    await expect(reloadedAwait).toContainText(/\d+s/);
+    await expect(reloadedAwait).toContainText("Result returned");
   } finally {
     await restore();
   }

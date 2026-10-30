@@ -1078,3 +1078,19 @@ Startup handoff accepted after inspecting Work admission, RUNNING session and th
 
 
 Task15 integration accepted, 2026-10-30: actual PostgreSQL selector passed at `/tmp/errands-delivery-20261029/pg/task15-context-window-test.log`; adjacent stop and stop-verification logs confirm the scratch server is stopped. Child live plan explicitly releases all processes and write ownership. No source changes were made in the PostgreSQL-only packet. Existing task14 changes are preserved; branch/head remain unchanged. Proceed to Deliver under current authorization; no PR, upstream push, live-instance mutation or shipped-default promotion.
+
+
+## Context readout refinement
+
+[Task 16](task-16-context-token-readout.md) is in progress after completed task15: used/capacity token counts plus a passive usage bar on desktop and phone, followed by fresh dark demo media with visible seeded context and parent follow-up while an errand runs. Existing images lacked readings because their demo did not seed context telemetry. The token readout is implemented and desktop/phone browser checks pass; refreshed dark media remains outstanding.
+
+
+[Task 17](task-17-panel-order.md) is in progress: show active errands above finished errands across parents, newest created first within parent groups, on desktop and phone. Parent groups remain identifiable in both sections.
+
+
+[Task 18](task-18-await-duration.md) is done: show actual elapsed await time in the completed chat entry with legacy-safe behavior and desktop/phone parity. The configured maximum wait is not a measurement.
+
+
+## Publication checkpoint, 2026-10-30
+
+The user authorized committing and pushing the current changes to origin. Task18 is done with real desktop/phone await and reload evidence. Task16 token-count/bar implementation and task17 ordering implementation are present; focused tests and desktop/phone suites pass. Task16 remains in progress for new dark images/video with visible context and parent follow-up; task17 remains in progress for explicit mixed-parent ordering browser coverage. Existing older media does not certify the current UI. Public coordination and agent-communication documentation matches the implemented behavior. No PR, upstream push, live-instance mutation or shipped-default promotion is authorized.

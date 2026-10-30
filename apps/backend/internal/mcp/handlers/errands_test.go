@@ -193,7 +193,7 @@ func TestStartErrandRefusesErrandOrUnverifiedSender(t *testing.T) {
 func TestAwaitErrandsForwardsParentAndReturnsView(t *testing.T) {
 	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
 	fake.awaitResult = errands.AwaitResult{
-		Token: "token-1",
+		Token: "token-1", DurationMS: 12000, EndReason: "all_ready",
 		Errands: []errands.AwaitErrand{
 			{ErrandID: "errand-1", Status: "done", Result: "found it"},
 			{ErrandID: "errand-2", Status: "done", DeliveredVia: "turn"},
@@ -212,9 +212,13 @@ func TestAwaitErrandsForwardsParentAndReturnsView(t *testing.T) {
 	assert.Equal(t, 30, fake.awaitReq.MaxWaitSeconds)
 
 	var body struct {
-		Errands []map[string]interface{} `json:"errands"`
+		Errands    []map[string]interface{} `json:"errands"`
+		DurationMS int64                    `json:"duration_ms"`
+		EndReason  string                   `json:"end_reason"`
 	}
 	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	require.Equal(t, int64(12000), body.DurationMS)
+	require.Equal(t, "all_ready", body.EndReason)
 	require.Len(t, body.Errands, 2)
 	assert.Equal(t, "found it", body.Errands[0]["result"])
 	assert.NotContains(t, body.Errands[0], "delivered_via")

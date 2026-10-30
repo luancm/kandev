@@ -28,7 +28,7 @@ With the experimental `features.errands` flag enabled and a compatible structure
 | Tool | Contract |
 |---|---|
 | `start_errand_kandev` | Accepts `title`, `prompt`, and optional `agent_profile`; returns `errand_id`, the identical `session_id`, status and effective profile. Start returns after admission; it does not wait for completion. |
-| `await_errands_kandev` | Optionally waits for actual start-returned `errand_ids`, with `mode` `all` or `any` and `max_wait_seconds` up to 600. The caller must own those errands. |
+| `await_errands_kandev` | Optionally waits for actual start-returned `errand_ids`, with `mode` `all` or `any` and `max_wait_seconds` up to 600. The caller must own those errands. Successful responses include `duration_ms` and `end_reason` (`all_ready`, `any_ready`, `timeout`, or `parent_ended`). |
 | `cancel_errand_kandev` | Stops the named `errand_id`. |
 | `message_task_kandev` | A parent can address the returned child `session_id` for follow-up work. Use the current task ID and the explicit child session ID. |
 | `list_task_sessions_kandev` | Discovers child sessions and their role, parent and state. Queued errand identities can exist before a session row is launched. |

@@ -3,7 +3,11 @@
 import { useId } from "react";
 import { IconChevronRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { deriveContextWindowUsage, type ContextWindowUsage } from "@/lib/context-window-usage";
+import {
+  deriveContextWindowUsage,
+  formatContextTokens,
+  type ContextWindowUsage,
+} from "@/lib/context-window-usage";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
 import type { Errand } from "@/lib/types/errands";
 import { cn } from "@/lib/utils";
@@ -27,7 +31,16 @@ type ErrandsPanelRowProps = {
 type ErrandsPanelRowPresentationProps = Omit<ErrandsPanelRowProps, "drawer"> & {
   contextUsage: ContextWindowUsage | undefined;
   contextDescriptionId: string;
+  contextSize: number;
+  contextUsed: number;
 };
+
+function contextBarColor(percent: number): string {
+  if (percent >= 90) return "bg-yellow-500";
+  if (percent >= 75) return "bg-yellow-300";
+  if (percent >= 50) return "bg-blue-500";
+  return "bg-blue-300";
+}
 
 function RowSummary({
   errand,
@@ -35,12 +48,16 @@ function RowSummary({
   title,
   contextUsage,
   contextDescriptionId,
+  contextSize,
+  contextUsed,
 }: {
   errand: Errand;
   nowMs: number;
   title: string;
   contextUsage: ContextWindowUsage | undefined;
   contextDescriptionId: string;
+  contextSize: number;
+  contextUsed: number;
 }) {
   const { t } = useTranslation();
   const elapsed = errandElapsedLabel(errand, nowMs);
@@ -63,11 +80,33 @@ function RowSummary({
       {contextUsage && (
         <span
           id={contextDescriptionId}
+          aria-label={
+            contextUsage.unmeasured
+              ? `${t("task:contextWindowNotMeasured")} ${t("task:contextWindowUsagePendingTokens", { size: contextSize.toLocaleString() })}`
+              : `${t("task:contextWindowUsed", { percent: contextUsage.roundedPercent })} ${t("task:contextWindowUsedTokens", { used: contextUsed.toLocaleString(), size: contextSize.toLocaleString() })}`
+          }
           className="max-w-full break-words text-[11px] leading-4 text-muted-foreground"
         >
           {contextUsage.unmeasured
-            ? t("task:contextWindowNotMeasured")
-            : t("task:contextWindowUsed", { percent: contextUsage.roundedPercent })}
+            ? `${t("task:contextWindowNotMeasured")} (${t("task:contextWindowUsagePendingTokens", { size: formatContextTokens(contextSize) })})`
+            : `${t("task:contextWindow")}: ${t("task:contextWindowUsedTokens", {
+                used: formatContextTokens(contextUsed),
+                size: formatContextTokens(contextSize),
+              })}`}
+          {!contextUsage.unmeasured && (
+            <span
+              aria-hidden="true"
+              className="mt-1 block h-1 w-full overflow-hidden rounded-full bg-muted"
+            >
+              <span
+                className={cn(
+                  "block h-full rounded-full",
+                  contextBarColor(contextUsage.usagePercent),
+                )}
+                style={{ width: `${contextUsage.usagePercent}%` }}
+              />
+            </span>
+          )}
         </span>
       )}
     </span>
@@ -83,6 +122,8 @@ function DrawerRow({
   onOpened,
   contextUsage,
   contextDescriptionId,
+  contextSize,
+  contextUsed,
 }: ErrandsPanelRowPresentationProps) {
   const { t } = useTranslation();
   const openSession = useOpenTaskSession();
@@ -111,6 +152,8 @@ function DrawerRow({
           title={title}
           contextUsage={contextUsage}
           contextDescriptionId={contextDescriptionId}
+          contextSize={contextSize}
+          contextUsed={contextUsed}
         />
         {errand.status !== "queued" && (
           <IconChevronRight aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -127,6 +170,8 @@ function PopoverRow({
   onOpened,
   contextUsage,
   contextDescriptionId,
+  contextSize,
+  contextUsed,
 }: ErrandsPanelRowPresentationProps) {
   const { t } = useTranslation();
   const title = errand.title || t("task:errandUntitled");
@@ -141,6 +186,8 @@ function PopoverRow({
         title={title}
         contextUsage={contextUsage}
         contextDescriptionId={contextDescriptionId}
+        contextSize={contextSize}
+        contextUsed={contextUsed}
       />
       <ErrandOpenButton
         taskId={taskId}
@@ -158,7 +205,13 @@ export function ErrandsPanelRow({ drawer, ...rest }: ErrandsPanelRowProps) {
   const contextWindow = useSessionContextWindow(rest.errand.errand_id, false);
   const contextUsage = deriveContextWindowUsage(contextWindow);
   const contextDescriptionId = useId();
-  const presentationProps = { ...rest, contextUsage, contextDescriptionId };
+  const presentationProps = {
+    ...rest,
+    contextUsage,
+    contextDescriptionId,
+    contextSize: contextWindow?.size ?? 0,
+    contextUsed: contextWindow?.used ?? 0,
+  };
 
   return drawer ? <DrawerRow {...presentationProps} /> : <PopoverRow {...presentationProps} />;
 }

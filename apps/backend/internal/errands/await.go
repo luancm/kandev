@@ -43,9 +43,11 @@ type AwaitErrand struct {
 // AwaitResult is the await response. Ended means the parent's turn cancelled
 // the wait: statuses are present and nothing was claimed.
 type AwaitResult struct {
-	Token   string
-	Errands []AwaitErrand
-	Ended   bool
+	DurationMS int64
+	EndReason  string
+	Token      string
+	Errands    []AwaitErrand
+	Ended      bool
 }
 
 // Await waits until the named errands satisfy mode, the deadline passes, or
@@ -64,11 +66,16 @@ func (s *Service) Await(ctx context.Context, req AwaitRequest) (AwaitResult, err
 	if err != nil {
 		return AwaitResult{}, err
 	}
+	started := time.Now()
 	waiter := s.awaits.register(req.ParentSessionID, req.Token)
 	defer s.awaits.remove(waiter)
 	deadline := time.NewTimer(time.Duration(req.MaxWaitSeconds) * time.Second)
 	defer deadline.Stop()
-	return s.awaitLoop(ctx, req, rows, waiter, deadline)
+	result, err := s.awaitLoop(ctx, req, rows, waiter, deadline)
+	if err == nil {
+		result.DurationMS = time.Since(started).Milliseconds()
+	}
+	return result, err
 }
 
 // ReleaseAwait returns results still delivered under token to pending.
@@ -161,7 +168,17 @@ func (s *Service) finishAwait(
 	if err != nil {
 		return AwaitResult{}, err
 	}
-	return AwaitResult{Token: req.Token, Errands: items, Ended: ended}, nil
+	reason := "all_ready"
+	if req.Mode == awaitModeAny {
+		reason = "any_ready"
+	}
+	if timedOut {
+		reason = "timeout"
+	}
+	if ended {
+		reason = "parent_ended"
+	}
+	return AwaitResult{Token: req.Token, Errands: items, Ended: ended, EndReason: reason}, nil
 }
 
 func (s *Service) claimAwait(ctx context.Context, req AwaitRequest, rows []*models.Errand) error {

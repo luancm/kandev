@@ -220,12 +220,19 @@ describe("await_errands_kandev card", () => {
       kandevToolCall({
         toolName: AWAIT_TOOL,
         input: { errand_ids: [ERRAND_ID], mode: "any" },
-        resultJson: { errands: [{ errand_id: ERRAND_ID, status: "done", result: "SECRET" }] },
+        resultJson: {
+          duration_ms: 12000,
+          end_reason: "any_ready",
+          errands: [{ errand_id: ERRAND_ID, status: "done", result: "SECRET" }],
+        },
       }),
     );
 
     const card = screen.getByTestId("errand-await-card");
     expect(card.textContent).toContain("Waited for 1 errand");
+    expect(card.textContent).toContain("12s");
+    expect(card.textContent).toContain("Wait condition met");
+    expect(card.textContent).toContain("Result returned");
     expect(card.textContent).not.toContain("SECRET");
     fireEvent.click(within(card).getByRole("button", { name: /Open errand/ }));
     expect(mocks.openSession).toHaveBeenCalledWith(

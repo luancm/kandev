@@ -44,7 +44,7 @@ Prefer existing localized task keys for the context label, measured percentage a
 
 Add the readout below title/profile/status in `RowSummary`. Keep desktop Open separate. Derive the context view once for each `ErrandsPanelRow` and pass it to its presentation branches. The phone `DrawerRow` is already a whole-row button; an interactive `TokenUsageDisplay` inside it would nest buttons. Use passive text instead. Associate the emitted text with the phone row using `aria-describedby` when present, so the existing explicit Open accessible name does not hide context information from assistive technology.
 
-The existing Errands drawer is the mobile exemplar: temporary task-wide navigation, one internal list scroller, a fixed bulk-action footer and safe-area clearance. Preserve its 44px row/actions, including 767px fine-pointer layouts. Allow the context line to wrap within the row; do not introduce horizontal scrolling, a second overlay or another tap target. Open retains the existing full-screen child view and Back. Exact token counts/source/compactions stay in that child's existing widget.
+The existing Errands drawer is the mobile exemplar: temporary task-wide navigation, one internal list scroller, a fixed bulk-action footer and safe-area clearance. Preserve its 44px row/actions, including 767px fine-pointer layouts. Allow the context line to wrap within the row; do not introduce horizontal scrolling, a second overlay or another tap target. Open retains the existing full-screen child view and Back. Source and compaction details stay in that child's existing widget.
 
 ## Verification and compatibility
 
@@ -61,3 +61,9 @@ Browser proof extends the existing desktop/phone Errands specs. Create real erra
 | Explicit null clear | Remove stale line until new data | Hook/event regressions and persisted browser clear |
 
 This change does not extend provider certification. The [work order](../../../plans/errands/task-15-context-window.md) owns implementation and exact checks.
+
+## Used-token and capacity refinement
+
+Replace the row percentage-only label with compact used/capacity token counts and a thin passive occupancy bar. Reuse the existing token-widget formatter convention and localized number formatting; preserve reliability, unmeasured, full-window and clear semantics. Keep original numeric values available for accessible descriptions. The bar is decorative (`aria-hidden`) because its reading is already described; it adds no focus target. Use a neutral track and existing context-widget occupancy color thresholds, with tabular numerals and wrapping counts. No percentage-only fallback when token counts are known. Do not change the opened widget or backend projection.
+
+Desktop and phone retain the current row hierarchy: title, profile/status, token counts, thin bar. The phone drawer remains the single list scroller with fixed footer and one row Open target. Missing readings add no line; unmeasured readings include known capacity and explicit wording, without a measured bar. Capture fixtures must persist child-specific readings through existing seedTaskSession metadata, preserving lifecycle fields. The dark-mode storyline shows a measured active child, parent follow-up while that child runs, parent response and subsequent delivery. Seeded telemetry is disclosed as synthetic demo data.

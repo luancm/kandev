@@ -166,8 +166,10 @@ test("phone errand rows expose passive context through one accessible Open targe
     const measured = drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     const unmeasured = drawer.getByTestId(`errands-panel-row-${errands[1].errand_id}`);
     const unknown = drawer.getByTestId(`errands-panel-row-${errands[2].errand_id}`);
-    await expect(measured).toContainText("Context window: 68% used");
-    await expect(unmeasured).toContainText("Context window: usage not measured");
+    await expect(measured).toContainText("Context window: 68.0K of 100.0K tokens");
+    await expect(unmeasured).toContainText(
+      "Context window: usage not measured (N/A of 100.0K tokens)",
+    );
     await expect(unknown).not.toContainText("Context window");
     await expect(measured).toHaveAttribute("aria-describedby", /.+/);
     await expect(unmeasured).toHaveAttribute("aria-describedby", /.+/);
@@ -183,7 +185,9 @@ test("phone errand rows expose passive context through one accessible Open targe
       .poll(() => list.evaluate((node) => node.scrollHeight > node.clientHeight))
       .toBe(true);
     const stopAll = drawer.getByTestId("errands-stop-all");
+    await measured.scrollIntoViewIfNeeded();
     await expect(measured).toBeInViewport();
+    await unmeasured.scrollIntoViewIfNeeded();
     await expect(unmeasured).toBeInViewport();
     await expect(stopAll).toBeInViewport();
     await expectNoHorizontalOverflow(page);
@@ -200,17 +204,17 @@ test("phone errand rows expose passive context through one accessible Open targe
     });
 
     await seedErrandContextWindow(api, taskId, errands[0].errand_id, childWindow(82_000));
-    await expect(measured).toContainText("Context window: 82% used");
+    await expect(measured).toContainText("Context window: 82.0K of 100.0K tokens");
     await page.reload();
     await parentChat(page, parentId).getByTestId(CHIP).tap();
     const reloadedDrawer = page.getByTestId(DRAWER);
     const reloadedMeasured = reloadedDrawer.getByTestId(
       `errands-panel-row-${errands[0].errand_id}`,
     );
-    await expect(reloadedMeasured).toContainText("Context window: 82% used");
+    await expect(reloadedMeasured).toContainText("Context window: 82.0K of 100.0K tokens");
     await expect(
       reloadedDrawer.getByTestId(`errands-panel-row-${errands[1].errand_id}`),
-    ).toContainText("Context window: usage not measured");
+    ).toContainText("Context window: usage not measured (N/A of 100.0K tokens)");
     await seedErrandContextWindow(api, taskId, errands[0].errand_id, null);
     await expect(reloadedMeasured).not.toContainText("Context window");
     await page.reload();
@@ -377,6 +381,43 @@ test("phone retains start and result history, completed drawer access and reader
     await expect(child.getByTestId("errand-header")).toHaveAttribute("data-layout", "phone");
     await child.getByTestId(BACK).tap();
     await expect(chat).toBeVisible();
+  } finally {
+    await restore();
+  }
+});
+
+test("phone await shows the elapsed wait and returned results after reload", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    const { taskId, parentId, errands, gates } = await startErrands(api, seed, backend, {
+      await: true,
+    });
+    await page.goto(`/t/${taskId}`);
+    await expect(parentChat(page, parentId).getByTestId("errand-await-card")).toBeVisible();
+    for (const gate of gates) await gate.release();
+    await waitDelivered(
+      api,
+      taskId,
+      errands.map((row) => row.errand_id),
+    );
+    await waitParentIdle(api, taskId, parentId);
+    const card = parentChat(page, parentId).getByTestId("errand-await-card");
+    await expect(card).toContainText("All finished");
+    await expect(card).toContainText("Result returned");
+    await expect(card).toContainText(/\d+s/);
+    await expectNoHorizontalOverflow(page);
+    await page.reload();
+    const reloaded = parentChat(page, parentId).getByTestId("errand-await-card");
+    await expect(reloaded).toContainText("All finished");
+    await expect(reloaded).toContainText("Result returned");
+    await expect(reloaded).toContainText(/\d+s/);
+    await expectNoHorizontalOverflow(page);
   } finally {
     await restore();
   }

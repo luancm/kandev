@@ -77,6 +77,23 @@ describe("parseStartErrand", () => {
 });
 
 describe("parseAwaitErrands", () => {
+  it("reads actual duration and outcome without guessing legacy values", () => {
+    const measured = parseAwaitErrands(
+      {},
+      { duration_ms: 12000, end_reason: "timeout", errands: [] },
+      "complete",
+    );
+    expect(measured.durationMs).toBe(12000);
+    expect(measured.endReason).toBe("timeout");
+    const legacy = parseAwaitErrands(
+      {},
+      { duration_ms: -1, end_reason: "other", errands: [] },
+      "complete",
+    );
+    expect(legacy.durationMs).toBeNull();
+    expect(legacy.endReason).toBeNull();
+    expect(parseAwaitErrands({}, { duration_ms: 0 }, "complete").durationMs).toBe(0);
+  });
   it("orders rows by the requested IDs and merges result statuses", () => {
     const view = parseAwaitErrands(
       { errand_ids: ["e-1", "e-2"], mode: "any", max_wait_seconds: 30 },
