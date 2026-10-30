@@ -94,6 +94,7 @@ function errand(id: string, overrides: Partial<Errand> = {}): Errand {
 function setState(enabled = true) {
   mocks.state = {
     features: { errands: enabled },
+    contextWindow: { bySessionId: {} },
     taskSessions: {
       items: {
         [MAIN]: { id: MAIN, task_id: TASK_ID, name: "Main" },
@@ -104,6 +105,8 @@ function setState(enabled = true) {
     agentProfiles: { items: [] },
     sessionModels: { bySessionId: {} },
     activeModel: { bySessionId: {} },
+    connection: { status: "connected" },
+    setContextWindow: vi.fn(),
   };
 }
 

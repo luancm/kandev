@@ -311,6 +311,9 @@ func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSess
 	if raw, ok := session.Metadata[models.SessionMetaKeyLastAgentError]; ok {
 		observation.Metadata[models.SessionMetaKeyLastAgentError] = raw
 	}
+	for key, value := range models.ProjectSessionContextMetadata(session.Metadata) {
+		observation.Metadata[key] = value
+	}
 	if label := models.ProjectSessionModelLabel(session.Metadata); label != nil {
 		observation.Metadata[models.SessionMetaKeyACPModelState] = label
 	}

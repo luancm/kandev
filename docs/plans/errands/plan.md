@@ -1,6 +1,6 @@
 ---
 created: 2026-10-23
-updated: 2026-10-29
+updated: 2026-10-30
 status: draft
 requirements:
   - REQ-TASKS-ERRANDS-001
@@ -16,12 +16,94 @@ requirements:
   - REQ-TASKS-ERRANDS-011
   - REQ-TASKS-ERRANDS-012
   - REQ-TASKS-ERRANDS-013
+  - REQ-TASKS-ERRANDS-CONTEXT-001
 system_design:
   - ../../specs/tasks/system-design/errands.md
+  - ../../specs/tasks/system-design/errand-context-window.md
 legacy_specs: []
 ---
 
 # Implementation Plan: Errands
+
+## Accepted UI refinement (2026-10-30)
+
+Personal use confirmed the status-bar pill and its panel as the preferred
+management entry point. Keep its task-wide parent groups, live and completed
+errands, Open, attention/live counts, and Stop all while work is live. Retain
+compact start entries, optional await entries, and separate immutable delivered
+result cards at their historical message positions. Remove the task-wide
+current inventory from the transcript: it repeats the panel's controls and
+the delivered card's identity/status while consuming conversation space.
+
+This supersedes the UI-11 inline inventory and its 010.10/011.6 criteria with
+010.11/011.7 in the owning requirements. The completed task 13 and earlier
+previews/results below describe the delivered baseline, not the next target.
+Implemented and verified on 2026-10-30 in
+[task 14](task-14-pill-owned-management.md): the duplicate inventory and its
+exclusive transcript slot are removed. Targeted frontend checks passed 183
+tests; managed production-build browsers passed eight desktop and five phone
+cases, including immutable history, completed access and scrolling. Typecheck
+(with a 6 GiB Node heap), changed-file lint, i18n and docs checks passed. Public
+coordination docs now describe the pill/panel flow. Evidence is in
+`/tmp/errands-refinement-20261030`. The provider pilot entry point was migrated
+but no new real-provider certification is claimed.
+
+Desktop keeps the pill's popover; phone keeps the existing bottom drawer,
+44px targets, safe-area clearance and internal list scroller. Open shows a
+full-screen child with Back. Chat keeps one scroller and preserves a
+scrolled-up reader and bottom-follow. Both paths retain access after all
+errands finish. Reuse the shipped Errands drawer and shared domain hooks;
+no new counter, loader, mutation or backend contract is needed.
+
+The original checkpoint recorded design only. The later explicit implementation
+request authorizes source, test and documentation updates for this refinement.
+
+## Context window follow-up (UI-12)
+
+Proposed on 2026-10-30 after the user delegated the trade-off decision. Worth
+adding: the opened child already has the full context widget, and the workspace
+already delivers readings for unopened children. A small passive row readout
+helps spot a child nearing its limit without changing the pill or reintroducing
+an inventory in chat. The tasks-owned
+[requirements](../../specs/tasks/requirements/errand-context-window.md) and
+[design](../../specs/tasks/system-design/errand-context-window.md) isolate this
+context contract from the near-limit main Errands documents.
+
+[Task 15](task-15-context-window.md) is done after completed task 14. It reuses the child session's shared metadata/cache with detail subscriptions disabled and one pure interpretation helper for the existing widget and the new row. Missing/invalid reports remain absent, known-but-unmeasured usage is explicit, and reset clears are authoritative. The corrected bounded backend summary projection restores persisted readings without extra requests, polling, full metadata or DTO changes. Task15 evidence includes 121 unit tests, desktop 11/11, phone 8/8, SQLite/service checks and actual PostgreSQL projection execution. Parent inspected the PostgreSQL pass, scratch shutdown and explicit ownership release; acceptance is complete, delivery remains separate.
+
+### ASCII UI preview
+
+UI-12 (AC-TASKS-ERRANDS-CONTEXT-001.1 through .4), entered from the existing
+pill. Labels and values are illustrative; secondary context and existing Open
+behavior are required. Context occupancy remains separate from errand status.
+
+```text
+Desktop popover                     Phone bottom drawer
+Parent                              Parent
+  Child A / profile                   [ Child A / profile           > ]
+  Running / elapsed      [Open]       [ Running / elapsed             ]
+  Context 68%                         [ Context 68%                   ]
+  Child B / profile                   [ Child B / profile           > ]
+  Running / elapsed      [Open]       [ Running / elapsed             ]
+  Context: not measured               [ Context: not measured         ]
+[Stop all errands]                  [Stop all errands]  fixed footer
+```
+
+Unknown context omits the line. The existing Errands drawer supplies the phone
+composition, safe-area clearance and internal list scrolling. Its entire row
+stays one 44px target; context is passive accessible text, not a nested ring
+button. Desktop retains separate Open. Phone Open/Back and the full child's
+context details stay as shipped. Retain 44px targets in narrow fine-pointer
+phone layouts and allow long localized labels to wrap without page overflow.
+
+Verification is one sequential work order: shared helper/hook/widget tests,
+existing event/store regressions, exact-file lint, typecheck and localization,
+then managed desktop/phone Errands and existing context-source browser suites.
+The work order names exact commands and the persisted workspace-event fixture.
+No new provider certification is claimed. Follow-up implementation and rendered
+verification are pending; this turn changes the design package only. Catalog,
+specification lint/tests, PR-documentation coverage preflight and scoped diff
+checks passed for the package.
 
 ## Current delivery checkpoint (2026-10-29)
 
@@ -357,6 +439,8 @@ is not acceptance of a newly found gap; the continuation owns those deltas.
 | 12 | [07](task-07-task-summary-indicators.md) | Finish board/sidebar/Threads indicators and nesting | 03, 05, 12 | Frontend | 006, 010 |
 | 13 | [13](task-13-inline-chat-summary.md) | Interactive current-Errands card inside chat | 07, 08 | Frontend | 010, 011 |
 | 14 | [09](task-09-e2e-and-docs.md) | Desktop/phone E2E, operating guide and pilot evidence | 13, 08 | Both | 003, 004, 005, 006, 007, 008, 009, 010, 011, 012 |
+| 15 | [14](task-14-pill-owned-management.md) | Pill-owned management; compact transcript history (done) | 13, 09 | Frontend | 010, 011 |
+| 16 | [15](task-15-context-window.md) | Passive per-child context occupancy with bounded reload projection (done) | 14 | Task sessions + frontend | ERRANDS-CONTEXT-001 |
 
 Progress:
 
@@ -368,6 +452,9 @@ Progress:
 - [x] Task 07: backend and frontend summaries and Threads navigation accepted.
 - [x] Task 13: inline current-Errands summary and desktop/phone scroll checks accepted.
 - [x] Task 09: deterministic browser journeys, docs and selected SQLite personal pilot accepted; broader support remains conditional.
+
+- [x] Task 14: removed duplicate transcript inventory; desktop/phone management, immutable history and scrolling verified.
+- [ ] Task 15: delegated to the sole implementation child; implementation and validation in progress.
 
 ## Continuation checkpoint (2026-10-27)
 
@@ -388,6 +475,9 @@ pass. Findings below identify missing implementation of the existing
 contract; they do not redefine accidental behavior as intended behavior.
 
 ### Inline chat summary (UI-11)
+
+Historical preview retained for task 13. Task 14 supersedes this surface with
+pill-owned management and removes the duplicate transcript inventory.
 
 The user requested reuse of the interactive chat surfaces shown by changed
 files and agent todo lists. Add task 13 before browser signoff. This is a
@@ -979,3 +1069,12 @@ NODE
 A later upstream proposal is a separate checkpoint after the personal pilot.
 Refresh canonical ancestry and watchpoints then; do not publish a PR or
 promote shipped defaults as a side effect of completing this planning turn.
+
+## Task 15 delegated execution (2026-10-30)
+
+The user explicitly authorized Simple Dev `68518eb1-22c5-4a51-85ab-9e4657afa222` as the alternative to unavailable Specialist. Context implementation child `3d2e4f18-282d-4d48-a663-c835df2d1a8b` owns the single task-15 theme, using configured Lunaldinho profile `188db592-1c5e-45e4-bb53-d84e6997f191`. Dependency: accepted task 14. Workspace mode: `inherit_parent`, `/home/luancm/.kandev/tasks/important-this-proje_45kr4xxl/kandev`; branch `feature/plan-errands-first-d-424`; admission HEAD `0a045f6d2c75d127aec9bf902dcc786ea6d3ba31`. Child launched into Work with move `d2afc6e7-5514-4da9-b840-6a6e15e5da04`, entry `428`; session `b6c5ee74-70cd-4a69-9604-9b3a0b38a1ae` confirmed RUNNING. The child acknowledged task-15 ownership and preserving task-14 changes. It is the sole source/test writer and must verify its binding before edits. Parent retains coordination/manifest ownership. Preserve all existing dirty changes. No commit, push, PR, redelegation, live-instance changes, default promotion or child auto-advance to Delivery.
+
+Startup handoff accepted after inspecting Work admission, RUNNING session and the child acknowledgment. Next decision: inspect implementation evidence and explicit stopped-process/write release before acceptance; integration must wait for that handoff and must not duplicate the child work. Do not resume unrelated completed reliability or isolated media children for this theme.
+
+
+Task15 integration accepted, 2026-10-30: actual PostgreSQL selector passed at `/tmp/errands-delivery-20261029/pg/task15-context-window-test.log`; adjacent stop and stop-verification logs confirm the scratch server is stopped. Child live plan explicitly releases all processes and write ownership. No source changes were made in the PostgreSQL-only packet. Existing task14 changes are preserved; branch/head remain unchanged. Proceed to Deliver under current authorization; no PR, upstream push, live-instance mutation or shipped-default promotion.

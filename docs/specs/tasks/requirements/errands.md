@@ -295,7 +295,8 @@ relationship. The rationale and boundaries are in
   **Stop** while live, and **Send result to parent** when eligible.
 - **AC-TASKS-ERRANDS-010.4:** The chat status bar shall show an errands chip
   only when the task has at least one errand. The chip shall open a panel
-  that groups errands by parent session with status and **Open**.
+  that groups live and completed errands by parent session with status and
+  **Open**, and shall remain available after all errands settle.
 - **AC-TASKS-ERRANDS-010.5:** Board cards, sidebar rows, and Threads rows
   shall show the live errand count and a waiting-on-errands status from the
   bounded task status summary, and shall show nothing when there are none.
@@ -305,22 +306,20 @@ relationship. The rationale and boundaries are in
   region, and every errand control shall be keyboard operable with an
   accessible name.
 - **AC-TASKS-ERRANDS-010.7:** Parent transcripts shall render each start as a
-  separate card (title, profile, live status, **Open**), await as a live-status
-  list card, and each delivered result as an **Errand finished** card (title,
-  status, result preview, **Open**). Result text and status blocks shall not
-  render as raw system text.
+  compact entry (title, profile, live status, **Open**), await as a live-status
+  list, and each result as an **Errand finished** card (title, status, preview,
+  **Open**). Delivered cards shall keep their placement and result snapshots.
+  Results and status blocks shall not render as raw system text.
 - **AC-TASKS-ERRANDS-010.8:** The errands panel shall offer
   **Stop all errands** while any errand of the task is live.
 - **AC-TASKS-ERRANDS-010.9:** The parent's composer shall stay enabled while
   its errands run, and the errands chip shall show the live errand count.
 
-- **AC-TASKS-ERRANDS-010.10:** With the flag on and task errands present,
-  each parent chat shall show one collapsed inline Errands summary using
-  the diff/todo card pattern. Its header shows total/live
-  counts and attention. Expansion groups rows by parent with title, profile,
-  status and **Open**; **Stop all errands** affects the task while any is live.
-  Actions shall not toggle disclosure; historical start/await/result cards
-  remain separate.
+- **AC-TASKS-ERRANDS-010.10:** Superseded by criterion 010.11.
+- **AC-TASKS-ERRANDS-010.11:** The chip/panel shall own task-wide management;
+  transcripts shall omit a duplicate current inventory. Start/await entries
+  and delivered cards shall remain separate; finishing an errand shall not
+  replace its start entry.
 
 ### REQ-TASKS-ERRANDS-011: Phone composition
 
@@ -344,10 +343,11 @@ relationship. The rationale and boundaries are in
   the screen width, and the parent's composer shall stay enabled while its
   errands run.
 
-- **AC-TASKS-ERRANDS-011.6:** The inline summary shall fit phone width,
-  expose 44px disclosure/actions, and expand within the chat scroller. Open
-  navigates to full-screen errand chat; the composer and reading position
-  remain usable.
+- **AC-TASKS-ERRANDS-011.6:** Superseded by criterion 011.7.
+- **AC-TASKS-ERRANDS-011.7:** On phones the chip/drawer shall replace the
+  transcript inventory. Start/result entries shall fit phone width; Open shall
+  show full-screen child chat with Back. Preserve one chat scroller, reading
+  position and a usable composer.
 
 ### REQ-TASKS-ERRANDS-012: Release toggle
 

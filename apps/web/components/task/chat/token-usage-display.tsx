@@ -5,6 +5,7 @@ import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { deriveContextWindowUsage } from "@/lib/context-window-usage";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
@@ -13,18 +14,6 @@ type TokenUsageDisplayProps = {
   detailActive?: boolean;
   className?: string;
 };
-
-/**
- * A context-window report is only trustworthy when we have a positive window
- * size and usage that does not exceed it. `used > size` is impossible for a
- * real window, so it means the agent (via the ACP bridge) reported a stale or
- * wrong `size` (for example, usage and window metadata from different turns).
- * In that case we hide the indicator instead of showing a confusing >100%.
- * `used === size` (exactly full) is valid and still renders.
- */
-export function isContextWindowReliable(size: number, used: number): boolean {
-  return size > 0 && used <= size;
-}
 
 function formatNumber(num: number): string {
   if (num >= 1_000_000) {
@@ -268,17 +257,14 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   if (!contextWindow) return null;
 
   const { size, used, source, compactionCount } = contextWindow;
+  const usage = deriveContextWindowUsage(contextWindow);
+  if (!usage) return null;
 
-  // Hide when there's no data yet (size 0) or the report is impossible
-  // (used > size) — see isContextWindowReliable.
-  if (!isContextWindowReliable(size, used)) return null;
-
-  const usagePercent = (used / size) * 100;
-  const pendingUsage = used === 0;
+  const { usagePercent, roundedPercent, unmeasured: pendingUsage } = usage;
 
   const usagePercentLabel = pendingUsage
     ? t("task:contextWindowUsagePendingPercent")
-    : `${usagePercent.toFixed(0)}%`;
+    : `${roundedPercent}%`;
   const usageTokenLabel = pendingUsage
     ? t("task:contextWindowUsagePendingTokens", { size: formatNumber(size) })
     : t("task:contextWindowUsedTokens", {
@@ -297,7 +283,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
             aria-label={
               pendingUsage
                 ? t("task:contextWindowNotMeasured")
-                : t("task:contextWindowUsed", { percent: usagePercent.toFixed(0) })
+                : t("task:contextWindowUsed", { percent: roundedPercent })
             }
             aria-expanded={tooltip.open}
             onClick={tooltip.onTriggerClick}

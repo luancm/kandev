@@ -33,8 +33,6 @@ import {
 import { TASK_DESCRIPTION_SYNTHETIC_ID } from "@/hooks/initial-prompt-preview";
 
 export type MessageListProps = {
-  /** Current-state content inside the transcript scroll and resize owner. */
-  transcriptTail?: ReactNode;
   items: RenderItem[];
   messages: Message[];
   /** Action messages rendered after the env prep error status in the footer. */

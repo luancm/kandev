@@ -64,7 +64,7 @@ Native subagent observation remains
 | `internal/mcp/handlers` | `mcp.start_errand`, `mcp.await_errands`, `mcp.cancel_errand`, `mcp.await_errands_release`; errand guards in existing mutation handlers; shared workspace-conflict mapping. |
 | `internal/sysprompt`, `config/prompts` | `errand.md`; flag-gated delegation and errand tool sections in `kandev-context.md`. |
 | `internal/task/statussummary` | `ErrandsSummary` on `TaskStatusSummary`. |
-| `apps/web` | Shared errand state, transcript/inline surfaces, navigation and row metadata. |
+| `apps/web` | Shared errand state, transcript history, navigation and row metadata. |
 
 ## Data and contracts
 
@@ -490,43 +490,38 @@ session, errand, and parent IDs as fields only.
 - **Chip/panel.** `errands-chip.tsx` in `chat-status-bar.tsx` opens the
   existing task-wide grouped popover/Drawer with Open and Stop-all actions.
   `errands-panel.tsx` and `errands-panel-row.tsx` supply shared list content.
+  Include live and completed rows; retain the chip after all work settles.
   Errand state never disables the parent's composer.
 - **Task rows.** Board/sidebar/Threads consume `statusSummary.errands`;
   `thread-session-switcher.tsx` nests sessions beneath parents.
 - **Copy/accessibility.** Use existing locale namespaces and seven shipped
   locales, keyboard-operable actions and one polite status announcer per view.
 
-### Inline current-errands summary
+### Current management and transcript history
 
-`errands/errands-inline-summary.tsx` uses `@kandev/ui/collapsible` and the
-bordered shell/count/action hierarchy of `TurnChangedFilesCard`. Todo
-messages use a separate `ExpandableRow`; its clickable `div` and hover-only
-chevron need semantic controls here. Use native React, not rich-output catalog
-interactions.
+Implemented refinement, 2026-10-30 ([task 14](../../../plans/errands/task-14-pill-owned-management.md)): the chip and its
+existing grouped panel own current task-wide management. Remove the
+`ErrandsInlineSummary` mount from `TaskChatPanel` and its transcript-tail
+integration. Preserve message-list reconciliation, `detailActive`, exact diff
+anchors and the existing scroll owner. No new endpoint, polling or loader.
 
-`TaskChatPanel` supplies a new optional `transcriptTail` React-node prop via
-`MessageListProps` in `message-list-shared.tsx`. `NativeMessageListBody` mounts
-it between `TranscriptMessageItems` and `NativeMessageListFooter`, inside
-`data-chat-content` and its existing resize/scroll owner. Preserve upstream
-`detailActive` and reconciliation; no generic widget registry is needed.
-
-Mount once in eligible parent chats while enabled and task rows exist; hide
-in child chats and empty/off states. Default collapsed, with local expansion
-keyed to task/session. Shared live selectors drive total/live/attention and
-parent groups; Open and task-wide Stop all reuse existing handlers. Reuse
-list/action content, not the overlay wrapper. Keep all groups visible within
-that disclosure so bulk scope matches the chip. No new endpoint, polling or
-per-surface loader. Starts, awaits, results and exact historical diff anchors
-retain their existing renderers; never bind mutable state to an old turn.
+`StartErrandRenderer` retains a compact entry per start with its title,
+profile, status and Open. Optional awaits retain their scoped lists.
+`errand_delivery` snapshots remain separate finished cards in the original
+message position; finishing a child never transforms its start entry into
+a result. The panel continues using shared state and action hooks for all
+parent groups, including completed children. Task-wide Stop all remains in
+the panel while any child is live.
 
 ### Phone composition
 
 Sessions nest children; Open navigates to full-screen errand chat with visible
 Back and actions. The chip retains its grouped bottom Drawer, one internal
-scroll owner and fixed Stop-all footer. The inline summary stays full-width
-inside the chat, stacks header/actions as needed, and uses the chat scroller
-rather than another overlay or nested scroller. Visible disclosure/Open/bulk
-controls have 44px phone/coarse-pointer targets; desktop stays compact.
+scroll owner and fixed Stop-all footer. Reuse this shipped Errands drawer as
+the mobile exemplar, retaining its safe-area clearance and viewport bound.
+The chat contains compact start entries and delivered results, without a
+second inventory. Open and bulk controls have 44px phone/coarse-pointer
+targets, including narrow fine-pointer layouts; desktop stays compact.
 Preserve bottom-follow when enabled and reading position when scrolled up.
 Finished cards fit phone width and the parent composer remains enabled.
 

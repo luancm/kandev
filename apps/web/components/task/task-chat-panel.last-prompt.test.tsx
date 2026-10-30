@@ -122,11 +122,6 @@ vi.mock("./chat/chat-input-area", () => ({
   useSubmitHandler: () => ({ isSending: false, handleSubmit: vi.fn() }),
   useChatPanelHandlers: () => ({ handleCancelTurn: vi.fn() }),
 }));
-vi.mock("./chat/errands/errands-inline-summary", () => ({
-  ErrandsInlineSummary: ({ taskId, sessionId }: { taskId: string; sessionId: string }) => (
-    <span data-testid="inline-errands-host" data-task-id={taskId} data-session-id={sessionId} />
-  ),
-}));
 vi.mock("@/components/task/chat/message-list", () => ({
   MessageList: ({
     ref,
@@ -148,6 +143,7 @@ vi.mock("@/components/task/chat/message-list", () => ({
         data-prompt-id={lastPromptMessageId ?? ""}
         data-bar-height={anchoredBarHeight ?? 0}
         data-sticky-prompt-bar={stickyPromptBar ? "present" : "absent"}
+        data-transcript-tail={transcriptTail ? "present" : "absent"}
       >
         {transcriptTail}
       </div>
@@ -307,11 +303,9 @@ describe("unloaded last prompt (AC-UI-PINNED-PROMPT-AVAILABILITY-001.1/.2/.6/.9)
   });
 });
 
-// @covers AC-TASKS-ERRANDS-010.10
-it("supplies the viewed task and session to the transcript tail", () => {
+// @covers AC-TASKS-ERRANDS-010.11
+it("keeps the current errand inventory out of the transcript", () => {
   render(<TaskChatPanel sessionId={SESSION} taskId="task" />);
-  const summary = screen.getByTestId("inline-errands-host");
-  expect(summary.getAttribute("data-task-id")).toBe("task");
-  expect(summary.getAttribute("data-session-id")).toBe(SESSION);
-  expect(screen.getByTestId(MESSAGE_LIST_ID).contains(summary)).toBe(true);
+  expect(screen.getByTestId(MESSAGE_LIST_ID)).toBeTruthy();
+  expect(screen.getByTestId(MESSAGE_LIST_ID).getAttribute("data-transcript-tail")).toBe("absent");
 });

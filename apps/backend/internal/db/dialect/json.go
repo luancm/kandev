@@ -62,6 +62,15 @@ func JSONTypeIsString(driver, col, path string) string {
 	return fmt.Sprintf("json_type(%s, '$.%s') = 'text'", col, path)
 }
 
+// JSONTypeIsStringPath is the nested-path form of JSONTypeIsString.
+func JSONTypeIsStringPath(driver, col string, segments ...string) string {
+	typeExpression := JSONType(driver, col, segments...)
+	if IsPostgres(driver) {
+		return typeExpression + " = 'string'"
+	}
+	return typeExpression + " = 'text'"
+}
+
 // JSONTypeIsBoolean returns a WHERE-clause fragment asserting that the JSON
 // value at path is a boolean.
 func JSONTypeIsBoolean(driver, col, path string) string {
@@ -69,6 +78,27 @@ func JSONTypeIsBoolean(driver, col, path string) string {
 		return fmt.Sprintf("jsonb_typeof(%s::jsonb->'%s') = 'boolean'", col, path)
 	}
 	return fmt.Sprintf("json_type(%s, '$.%s') IN ('true', 'false')", col, path)
+}
+
+// JSONType returns the declared JSON type at a nested path. Unlike extracting
+// a value, this distinguishes an explicitly stored null from a missing key.
+func JSONType(driver, col string, segments ...string) string {
+	if IsPostgres(driver) {
+		path := strings.Join(segments, ",")
+		return fmt.Sprintf("jsonb_typeof(%s::jsonb #> '{%s}')", col, path)
+	}
+	path := strings.Join(segments, ".")
+	return fmt.Sprintf("json_type(%s, '$.%s')", col, path)
+}
+
+// JSONTypeIsNumber returns a predicate that accepts JSON numeric values while
+// excluding booleans and numeric-looking strings on both supported drivers.
+func JSONTypeIsNumber(driver, col string, segments ...string) string {
+	typeExpression := JSONType(driver, col, segments...)
+	if IsPostgres(driver) {
+		return typeExpression + " = 'number'"
+	}
+	return typeExpression + " IN ('integer', 'real')"
 }
 
 // JSONExtractIsNotNull returns the SQL fragment to check that a JSON path is not null.

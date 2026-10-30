@@ -3,10 +3,42 @@ import type { ApiClient } from "./api-client";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { Errand } from "../../lib/types/errands";
+import type { TaskSessionState } from "../../lib/types/http";
 import { mockTurnGate } from "./mock-turn-gate";
+
+export type ErrandContextWindowFixture = {
+  size: number;
+  used: number;
+  remaining: number;
+  efficiency: number;
+  source: "acp" | "api";
+} | null;
 
 export async function listErrands(api: ApiClient, taskId: string): Promise<Errand[]> {
   return (await api.wsRequest<{ errands: Errand[] }>("errand.list", { task_id: taskId })).errands;
+}
+
+export async function seedErrandContextWindow(
+  api: ApiClient,
+  taskId: string,
+  sessionId: string,
+  contextWindow: ErrandContextWindowFixture,
+): Promise<void> {
+  const session = (await api.listTaskSessions(taskId)).sessions.find((row) => row.id === sessionId);
+  if (!session) throw new Error(`Expected session ${sessionId} to exist before context seeding`);
+
+  await api.seedTaskSession(taskId, {
+    sessionId,
+    state: session.state as TaskSessionState,
+    agentProfileId: session.agent_profile_id,
+    startedAt: session.started_at,
+    completedAt: session.completed_at ?? undefined,
+    errorMessage: session.error_message ?? undefined,
+    metadata: {
+      ...(session.metadata ?? {}),
+      context_window: contextWindow,
+    },
+  });
 }
 
 export function parentChat(page: Page, sessionId: string) {
@@ -80,6 +112,26 @@ export async function waitDelivered(api: ApiClient, taskId: string, ids: string[
       { timeout: 60_000, message: "Settled errand results reach their parent" },
     )
     .toEqual(ids.map(() => "delivered"));
+}
+
+/** A claimed result precedes provider execution; wait for the new notification turn to finish. */
+export async function waitNewParentTurnSettled(
+  api: ApiClient,
+  parentId: string,
+  previousTurnIds: string[],
+) {
+  const previous = new Set(previousTurnIds);
+  await expect
+    .poll(
+      async () => {
+        const turns = (await api.listSessionTurns(parentId)).turns.filter(
+          (turn) => !previous.has(turn.id),
+        );
+        return turns.length === 1 && Boolean(turns[0].completed_at);
+      },
+      { message: "The result notification's new parent turn completes", timeout: 60_000 },
+    )
+    .toBe(true);
 }
 
 export async function deliverySnapshots(api: ApiClient, parentId: string) {

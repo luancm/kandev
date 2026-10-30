@@ -129,9 +129,9 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
     await waitParentIdle(api, task.id, launched.session_id);
     await page.goto(`/t/${task.id}`);
     const chat = parentChat(page, launched.session_id);
-    await chat.getByTestId("errands-inline-disclosure").click();
-    await chat
-      .getByTestId("errands-inline-summary")
+    await chat.getByTestId("errands-chip").click();
+    await page
+      .getByTestId("errands-popover")
       .getByTestId(`errand-open-${errands[0].errand_id}`)
       .click();
     await expect(parentChat(page, errands[0].errand_id).getByTestId("errand-header")).toBeVisible();
@@ -216,7 +216,7 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
     await release();
     release = null;
     await page.reload();
-    await expect(page.getByTestId("errands-inline-summary")).toHaveCount(0);
+    await expect(page.getByTestId("errands-chip")).toHaveCount(0);
     const retained = (await api.listTaskSessions(task.id)).sessions.filter((row) =>
       errands.some((errand) => errand.errand_id === row.id),
     );

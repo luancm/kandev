@@ -103,6 +103,27 @@ func TestJSONTypeIsBoolean(t *testing.T) {
 	}
 }
 
+func TestJSONTypeAndNumber(t *testing.T) {
+	if got := JSONType(SQLite3, "metadata", "context_window"); got != "json_type(metadata, '$.context_window')" {
+		t.Errorf("sqlite root type: got %q", got)
+	}
+	if got := JSONType(PGX, "metadata", "context_window"); got != "jsonb_typeof(metadata::jsonb #> '{context_window}')" {
+		t.Errorf("postgres root type: got %q", got)
+	}
+	if got := JSONTypeIsNumber(SQLite3, "metadata", "context_window", "size"); got != "json_type(metadata, '$.context_window.size') IN ('integer', 'real')" {
+		t.Errorf("sqlite number type: got %q", got)
+	}
+	if got := JSONTypeIsNumber(PGX, "metadata", "context_window", "size"); got != "jsonb_typeof(metadata::jsonb #> '{context_window,size}') = 'number'" {
+		t.Errorf("postgres number type: got %q", got)
+	}
+	if got := JSONTypeIsStringPath(SQLite3, "metadata", "context_window", "source"); got != "json_type(metadata, '$.context_window.source') = 'text'" {
+		t.Errorf("sqlite string type: got %q", got)
+	}
+	if got := JSONTypeIsStringPath(PGX, "metadata", "context_window", "source"); got != "jsonb_typeof(metadata::jsonb #> '{context_window,source}') = 'string'" {
+		t.Errorf("postgres string type: got %q", got)
+	}
+}
+
 func TestJSONExtractIsNotNull(t *testing.T) {
 	got := JSONExtractIsNotNull(SQLite3, "m", "id")
 	if got != "json_extract(m, '$.id') IS NOT NULL" {

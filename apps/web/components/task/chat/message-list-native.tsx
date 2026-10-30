@@ -459,7 +459,6 @@ function MessageRow({
 }
 
 type NativeMessageListBodyProps = {
-  transcriptTail?: MessageListProps["transcriptTail"];
   items: RenderItem[];
   messages: Message[];
   footerActionMessages?: Message[];
@@ -644,7 +643,6 @@ function useDividerUserScrolling(
 /** Sentinel, status/footer, and transcript rows — everything below the
  * (optional) anchored prompt bar inside the scroll container. */
 function NativeMessageListBody({
-  transcriptTail,
   items,
   messages,
   footerActionMessages,
@@ -719,8 +717,6 @@ function NativeMessageListBody({
         onScrollToMessage={onScrollToMessage}
         dividerBeforeItemKey={dividerBeforeItemKey}
       />
-
-      {transcriptTail}
 
       <NativeMessageListFooter
         sessionState={sessionState}
@@ -943,7 +939,6 @@ export const NativeMessageList = memo(
   // eslint-disable-next-line max-lines-per-function -- native transcript composition owns scrolling.
   forwardRef<MessageListHandle, MessageListProps>(function NativeMessageList(
     {
-      transcriptTail,
       items,
       messages,
       footerActionMessages,
@@ -1086,7 +1081,6 @@ export const NativeMessageList = memo(
           live={isVisible && !messagesLoading && !historyRefreshPending && !isLoadingMore}
         >
           <NativeMessageListBody
-            transcriptTail={transcriptTail}
             items={visibleItems}
             messages={visibleMessages}
             footerActionMessages={visibleFooterActionMessages}

@@ -6,7 +6,8 @@ import {
   type ClarificationEscapeGuardEntry,
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
-import { isContextWindowReliable, TokenUsageDisplay } from "./token-usage-display";
+import { isContextWindowReliable } from "@/lib/context-window-usage";
+import { TokenUsageDisplay } from "./token-usage-display";
 
 const TOOLTIP_ROOT_TESTID = "tooltip-root";
 

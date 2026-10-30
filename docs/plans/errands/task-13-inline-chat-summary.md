@@ -24,6 +24,12 @@ system_design:
 
 # Task 13: Reuse interactive chat cards for current errands
 
+Historical delivery: completed and accepted on 2026-10-29. The approved
+2026-10-30 refinement in [the manifest](plan.md#accepted-ui-refinement-2026-10-30)
+supersedes this order's inline-inventory target and criteria 010.10/011.6.
+Keep this order as its delivery receipt; [task 14](task-14-pill-owned-management.md)
+implemented and verified the removal on 2026-10-30.
+
 ## Summary
 
 Add a compact, expandable current-Errands summary inside the parent chat,

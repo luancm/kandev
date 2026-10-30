@@ -39,10 +39,14 @@ Errands are opt-in child conversations within one task. Ask the task's agent to 
 
 1. Enable **Errands** in **Settings > System > Feature Toggles**, then restart Kandev. Alternatively, set `KANDEV_FEATURES_ERRANDS=true` in the environment used by your launcher and restart it. An explicit environment value takes precedence over the settings override.
 2. Open a task with a compatible structured agent profile and an existing task workspace. Ask the agent, for example: "Start an errand to review the error handling in this task's changed files. Report its findings, and keep this parent conversation available."
-3. Watch the collapsed **Errands** summary in the parent chat or open the Errands chip. Expand it and choose **Open** to inspect a child's full conversation. On phones, Open shows the child full screen; the Back control returns to its parent.
+3. Watch the **Errands** pill in the chat status bar. Open it for the task-wide list of live and completed errands, grouped by parent, then choose **Open** to inspect a child's full conversation. On phones, the pill opens a bottom drawer; choosing a child shows it full screen, and Back returns to its parent.
 4. The delivered result appears as an **Errand finished** card in the parent transcript. The parent receives it through an optional await, its next turn, or a notification turn. With queue Auto-run off, the notification waits for manual Send now or the next parent turn.
 
-The summary groups all errands of the task by parent. Its **Stop all errands** action has task-wide scope and remains separate from expanding the list. An opened child offers **Stop** while live, a follow-up composer, and **Send result to parent** when a user-initiated result is eligible. Cancelling the parent's current turn leaves its errands running; stopping or deleting the parent/task cascades to its errands.
+The pill remains available after all errands finish. Its panel offers **Stop all errands** while any errand is live, with task-wide scope. Compact start entries confirm what the agent delegated; separate finished cards preserve delivered results in conversation history.
+
+Errand rows also show the child's context-window usage when a reliable reading is available, or say that usage is not measured when the window is known but has no positive sample. Rows without a usable window omit the readout. Open the child to inspect the full usage, source, and compaction details.
+
+An opened child offers **Stop** while live, a follow-up composer, and **Send result to parent** when a user-initiated result is eligible. Cancelling the parent's current turn leaves its errands running; stopping or deleting the parent/task cascades to its errands.
 
 Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
 

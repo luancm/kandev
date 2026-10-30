@@ -69,7 +69,6 @@ import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { JumpToLatestButton } from "./chat/jump-to-latest-button";
 import { ConversationUsageDisplay } from "./chat/conversation-usage-display";
-import { ErrandsInlineSummary } from "./chat/errands/errands-inline-summary";
 import { ErrandHeader } from "./chat/errands/errand-header";
 import { ErrandStatusAnnouncer } from "./chat/errands/errand-status-announcer";
 
@@ -1592,13 +1591,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                 onOpenFile={onOpenFile}
               >
                 <MessageList
-                  transcriptTail={
-                    <ErrandsInlineSummary
-                      taskId={taskId ?? summaryTaskId}
-                      sessionId={resolvedSessionId}
-                      sessionRole={session?.role}
-                    />
-                  }
                   ref={messageListRef}
                   items={groupedItems}
                   messages={allMessages}
