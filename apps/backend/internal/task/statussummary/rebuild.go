@@ -73,6 +73,8 @@ type RebuildInput struct {
 	PRObserved       bool
 	// QueuedPromptCount is the authoritative pending prompt count for the task
 	// (all sessions). Supplied by the caller; 0 means nothing is queued.
+	Errands                ErrandsSummary
+	ErrandsObserved        bool
 	QueuedPromptCount      int
 	LaunchQueue            *LaunchQueueSummary
 	CompletionGate         *CompletionGateSummary
@@ -103,6 +105,9 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 		launchQueue:            cloneLaunchQueue(input.LaunchQueue),
 		completionGateObserved: input.CompletionGateObserved,
 		completionGate:         cloneCompletionGate(input.CompletionGate),
+	}
+	if input.ErrandsObserved {
+		state.errands = normalizeErrands(input.Errands)
 	}
 	for _, inputSession := range input.Sessions {
 		if strings.TrimSpace(inputSession.ID) == "" {

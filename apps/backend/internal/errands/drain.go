@@ -12,8 +12,13 @@ import (
 // earlier. It walks the queue by task and creation order, reuses each row's
 // reserved identity and MCP snapshot, and stops a task's walk at its first
 // ceiling refusal or busy row so a later errand never overtakes an earlier
-// one. Any other launch failure fails that errand and the walk continues.
+// one. Unknown launch evidence stops only that task; a positively proved
+// rejection may settle that errand and let the walk continue.
 func (s *Service) DrainQueued(ctx context.Context) {
+	s.drainQueued(ctx, nil)
+}
+
+func (s *Service) drainQueued(ctx context.Context, owners *lifecycleInventory) {
 	queued, err := s.store.ListQueuedErrands(ctx)
 	if err != nil {
 		s.logger.Warn("errand queue drain could not list queued errands", zap.Error(err))
@@ -25,6 +30,10 @@ func (s *Service) DrainQueued(ctx context.Context) {
 			return
 		}
 		if _, stop := blocked[errand.TaskID]; stop {
+			continue
+		}
+		if owners != nil && !owners.permits(errand) {
+			blocked[errand.TaskID] = struct{}{}
 			continue
 		}
 		if !s.drainOne(ctx, errand) {
@@ -42,6 +51,19 @@ func (s *Service) drainOne(ctx context.Context, errand *models.Errand) bool {
 	current, err := s.store.GetErrand(ctx, errand.ID)
 	if err != nil || current.Lifecycle != models.ErrandLifecycleQueued {
 		return err == nil
+	}
+	live, err := s.checkLaunchOwner(ctx, current)
+	if err != nil {
+		s.logger.Warn("errand queue ownership is unreadable", s.errandFields(current, "error", err.Error())...)
+		return false
+	}
+	if !live {
+		_, err := s.cascade(ctx, []*models.Errand{current})
+		if err != nil {
+			s.logger.Warn("errand queue cascade failed", s.errandFields(current, "error", err.Error())...)
+		}
+		fresh, readErr := s.store.GetErrand(ctx, current.ID)
+		return readErr == nil && fresh.Lifecycle == models.ErrandLifecycleCancelled
 	}
 	outcome, err := s.launchQueued(ctx, current, false)
 	if err != nil {

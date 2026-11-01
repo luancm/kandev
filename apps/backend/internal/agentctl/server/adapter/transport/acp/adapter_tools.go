@@ -167,6 +167,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 		parentToolCallID = codexParentToolCallID
 	}
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
+	a.trackAwaitReceiptCall(sessionID, toolCallID, tc, parentToolCallID)
 
 	return &AgentEvent{
 		Type:              eventType,
@@ -793,7 +794,9 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		parentToolCallID = a.toolCallParents[emittedToolCallID]
 	}
 
+	receipt := a.codexAwaitReceiptLocked(sessionID, toolCallID, parentToolCallID, status, tcu.RawOutput, tcu.RawInput)
 	if isTerminal {
+		delete(a.awaitReceiptCalls, toolCallID)
 		if payload == nil || !payload.IsActiveBackgroundWork() {
 			delete(a.activeToolCalls, emittedToolCallID)
 			a.forgetPromptHandoffToolLocked(emittedToolCallID)
@@ -806,6 +809,10 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		}
 	}
 	emittedPayload := cloneSubagentPayload(payload)
+	emittedToolName := ""
+	if canonicalMCPUpdate {
+		emittedToolName = payload.Generic().Name
+	}
 	a.mu.Unlock()
 
 	// ScheduleWakeup tracking: tool_call_update is where rawInput.prompt and
@@ -851,14 +858,16 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 
 	return &AgentEvent{
-		Type:              streams.EventTypeToolUpdate,
-		SessionID:         sessionID,
-		ToolCallID:        emittedToolCallID,
-		ParentToolCallID:  parentToolCallID,
-		ToolTitle:         title,
-		ToolStatus:        status,
-		NormalizedPayload: emittedPayload,
-		ToolCallContents:  convertedContents,
+		Type:               streams.EventTypeToolUpdate,
+		SessionID:          sessionID,
+		ToolCallID:         emittedToolCallID,
+		ParentToolCallID:   parentToolCallID,
+		ToolTitle:          title,
+		ToolStatus:         status,
+		ToolName:           emittedToolName,
+		ErrandAwaitReceipt: receipt,
+		NormalizedPayload:  emittedPayload,
+		ToolCallContents:   convertedContents,
 	}
 }
 

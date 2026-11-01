@@ -49,7 +49,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
 	stampTurnDefaults(turn)
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, r.insertTurnWithSessionLock(ctx, turn)
 	}
@@ -60,10 +60,13 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 		}
 	}()
 
+	if err := r.guardErrandTurnReservation(ctx, tx, turn.TaskSessionID, turn.ID); err != nil {
+		return false, err
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
 		return false, err
 	}
-	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
+	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx.Tx, turn.TaskID)
 	if stepErr != nil {
 		_ = tx.Rollback()
 		committed = true
@@ -168,6 +171,9 @@ func (r *Repository) insertTurnWithSessionLock(ctx context.Context, turn *models
 		return fmt.Errorf("begin turn creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardErrandTurnReservation(ctx, tx, turn.TaskSessionID, turn.ID); err != nil {
+		return err
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
 		return err
 	}
@@ -1712,6 +1718,9 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 		return models.PromptableTaskSessionClaim{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.guardErrandTurnReservation(ctx, tx, id, ""); err != nil {
+		return models.PromptableTaskSessionClaim{}, err
+	}
 
 	var state models.TaskSessionState
 	var active bool
@@ -4373,6 +4382,11 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		if err := lockErrandTask(ctx, tx, ""); err != nil {
+			return 0, err
+		}
+	}
 
 	var taskIDs []string
 	if err := tx.SelectContext(ctx, &taskIDs, r.db.Rebind(`
@@ -4414,6 +4428,9 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 		}
 		if !stillEligible {
 			continue
+		}
+		if err := lockErrandTask(ctx, tx, taskID); err != nil {
+			return 0, err
 		}
 		sessions, err := r.taskQueueSessionsInTx(ctx, tx, taskID)
 		if err != nil {
@@ -4602,6 +4619,9 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
+		return nil, err
+	}
+	if err := lockErrandTask(ctx, tx, session.TaskID); err != nil {
 		return nil, err
 	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {

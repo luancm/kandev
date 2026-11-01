@@ -294,8 +294,9 @@ func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSess
 		return nil
 	}
 	observation := &models.TaskSessionSummaryObservation{
-		ID: session.ID, TaskID: session.TaskID, QueueIncarnationID: session.QueueIncarnationID,
-		Name: session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
+		ID: session.ID, TaskID: session.TaskID, Role: session.Role, ParentSessionID: session.ParentSessionID,
+		QueueIncarnationID: session.QueueIncarnationID,
+		Name:               session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
 		AgentProfileID: session.AgentProfileID, ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration: session.RouteGeneration, RouteState: session.RouteState, RouteReason: session.RouteReason,
 		ExecutorID: session.ExecutorID, ExecutorProfileID: session.ExecutorProfileID,

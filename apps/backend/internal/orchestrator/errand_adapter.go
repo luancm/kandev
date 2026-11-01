@@ -20,6 +20,7 @@ type ErrandAdapter struct {
 var (
 	_ errands.Launcher       = (*ErrandAdapter)(nil)
 	_ errands.SessionStopper = (*ErrandAdapter)(nil)
+	_ errands.ErrandTeardown = (*ErrandAdapter)(nil)
 	_ errands.MCPSelections  = (*ErrandAdapter)(nil)
 )
 
@@ -28,14 +29,10 @@ func NewErrandAdapter(svc *Service) *ErrandAdapter {
 	return &ErrandAdapter{svc: svc}
 }
 
-// LaunchErrand starts the errand session and reports a ceiling refusal as
-// errands.ErrCeilingRefused.
-func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) error {
-	_, err := a.svc.LaunchErrandSession(ctx, request)
-	if errors.Is(err, ErrSessionCeilingRefused) {
-		return fmt.Errorf("%w: %w", errands.ErrCeilingRefused, err)
-	}
-	return err
+// LaunchErrand shares guarded classification and admission with direct callers.
+func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) (errands.LaunchResult, error) {
+	result, _, err := a.svc.launchErrand(ctx, request)
+	return result, err
 }
 
 // StopErrandSession stops an errand's runtime. A session that does not exist

@@ -11,6 +11,8 @@ type mcpExecutionContextKey struct{}
 // MCPExecutionContext identifies the backend-owned execution behind one
 // in-session MCP stream. Agent-controlled request payloads cannot override it.
 type MCPExecutionContext struct {
+	ParentIncarnationID       string
+	HarnessGeneration         int64
 	ExecutionID               string
 	TaskID                    string
 	SessionID                 string

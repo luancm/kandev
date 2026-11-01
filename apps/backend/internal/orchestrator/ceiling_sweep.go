@@ -155,7 +155,28 @@ func (s *Service) ceilingSweepTick(ctx context.Context) {
 	if s.sessionCeiling != nil {
 		s.sessionCeiling.expireStaleReservations()
 	}
+	lifecycleAvailable := s.reconcileErrandLifecycle(ctx)
 	s.drainDeferredCeilingLaunches(ctx)
-	s.drainQueuedErrands(ctx)
-	s.sweepErrandDelivery(ctx)
+	if lifecycleAvailable {
+		s.drainQueuedErrands(ctx)
+		s.sweepErrandDelivery(ctx)
+	}
+}
+
+// An installed controller without recovery cannot authorize admission or
+// notifications. Row failures remain local: drain and delivery validate their
+// own task inventories rather than treating a partial pass as global success.
+func (s *Service) reconcileErrandLifecycle(ctx context.Context) bool {
+	if s.errands == nil {
+		return false
+	}
+	reconciler, ok := s.errands.(interface{ ReconcileLifecycle(context.Context) error })
+	if !ok {
+		s.logger.Warn("errand lifecycle recovery capability is unavailable")
+		return false
+	}
+	if err := reconciler.ReconcileLifecycle(ctx); err != nil {
+		s.logger.Warn("errand lifecycle sweep remains incomplete", zap.Error(err))
+	}
+	return true
 }

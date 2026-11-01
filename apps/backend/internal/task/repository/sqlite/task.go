@@ -3782,6 +3782,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if !found {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
+	if err := lockErrandTask(ctx, tx, id); err != nil {
+		return "", err
+	}
 	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
 	}
@@ -5589,6 +5592,10 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		if errors.Is(err, ErrTaskNotFound) {
 			return false, nil
 		}
+		return false, err
+	}
+
+	if err := lockErrandTask(ctx, tx, id); err != nil {
 		return false, err
 	}
 

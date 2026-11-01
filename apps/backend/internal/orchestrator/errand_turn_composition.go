@@ -52,8 +52,8 @@ func (s *Service) errandComposer() (errandTurnComposer, bool) {
 // composeErrandTurn prepends the errand status block to a parent turn's prompt
 // and returns the claim token that marks its results delivered. A notification
 // entry dispatched with no pending result returns errErrandNotificationEmpty.
-// A composition failure is logged and the prompt proceeds unchanged: errand
-// state never gates a parent prompt, and undelivered results stay pending.
+// Ordinary read failures leave the prompt unchanged. An unknown claim commit
+// stops dispatch and retains its ownership for readback.
 func (s *Service) composeErrandTurn(
 	ctx context.Context, sessionID, prompt string, options *promptTaskOptions,
 ) (string, string, error) {
@@ -67,6 +67,9 @@ func (s *Service) composeErrandTurn(
 	}
 	composition, err := composer.ComposeParentTurn(ctx, sessionID, route)
 	if err != nil {
+		if errors.Is(err, models.ErrErrandClaimCommitUnknown) {
+			return "", "", err
+		}
 		s.logger.Warn("errand status block unavailable; prompt sent without it",
 			zap.String("session_id", sessionID), zap.Error(err))
 		return prompt, "", nil

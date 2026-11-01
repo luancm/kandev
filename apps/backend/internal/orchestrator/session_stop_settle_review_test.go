@@ -55,8 +55,12 @@ func TestStopSession_ExecutionLessSettlementSerializesPromptAdmission(t *testing
 			svc, repo, _, sessionID, originalTurn := newExecutionLessStopService(t, models.TaskSessionStateWaitingForInput)
 			var admitted bool
 			var once atomic.Bool
+			var roleRead atomic.Bool
 			svc.repo = &coordinatorStopRepoHooks{repoStore: repo, getSessionFunc: func(ctx context.Context, id string) (*models.TaskSession, error) {
 				snapshot, err := repo.GetTaskSession(ctx, id)
+				if roleRead.CompareAndSwap(false, true) {
+					return snapshot, err
+				}
 				if err != nil || !once.CompareAndSwap(false, true) {
 					return snapshot, err
 				}
@@ -198,8 +202,12 @@ func TestStopSession_ExecutionLessSettlementPreservesSuccessorTurn(t *testing.T)
 	svc, repo, _, sessionID, original := newExecutionLessStopService(t, models.TaskSessionStateWaitingForInput)
 	var successor *models.Turn
 	var once atomic.Bool
+	var roleRead atomic.Bool
 	svc.repo = &coordinatorStopRepoHooks{repoStore: repo, getSessionFunc: func(ctx context.Context, id string) (*models.TaskSession, error) {
 		session, err := repo.GetTaskSession(ctx, id)
+		if roleRead.CompareAndSwap(false, true) {
+			return session, err
+		}
 		if err == nil && once.CompareAndSwap(false, true) {
 			require.NoError(t, repo.CompleteTurn(ctx, original))
 			successor, err = svc.turnService.StartTurn(ctx, id)

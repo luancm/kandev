@@ -283,6 +283,10 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
 	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
+	if s.mcpServer != nil && s.mcpBackendClient != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); s.mcpServer.ReplayAwaitAborts(ctx) }()
+	}
 	wg.Wait()
 	if s.mcpBackendClient != nil {
 		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))

@@ -80,6 +80,15 @@ const (
 	ErrandDeliveryNotification ErrandDeliveryRoute = "notification"
 )
 
+// ErrandDeliveryState is current-revision reception evidence. Empty means
+// unavailable or still in progress, never received.
+type ErrandDeliveryState string
+
+const (
+	ErrandDeliveryReceived  ErrandDeliveryState = "received"
+	ErrandDeliveryUncertain ErrandDeliveryState = "uncertain"
+)
+
 // ErrandStatus is the single projected status reported for an errand.
 type ErrandStatus string
 
@@ -102,36 +111,43 @@ var (
 // Errand is the bookkeeping row for one errand. ID equals the errand's
 // reserved session ID; a queued errand has no session row yet. ID, TaskID,
 // ParentSessionID, Title, Objective, AgentProfileID, MCPServerIDs, MCPExcludedServerIDs,
-// FirstTurnID, SubmissionID, and CreatedAt are fixed at insert. Every other
-// change is a compare-and-set on Version.
+// FirstTurnID, SubmissionID, and CreatedAt are fixed at insert. ResultRevision
+// and ParentAdmissionGeneration are repository-owned. Other changes use Version
+// compare-and-set; admission and claim transactions also advance Version.
 type Errand struct {
-	ID                   string
-	TaskID               string
-	ParentSessionID      string
-	Title                string
-	Objective            string
-	AgentProfileID       string
-	MCPServerIDs         []string
-	MCPExcludedServerIDs []string
-	FirstTurnID          string
-	SubmissionID         string
-	Lifecycle            ErrandLifecycle
-	CancelSource         ErrandCancelSource
-	LastOutcome          ErrandOutcome
-	AwaitingResult       bool
-	ResultText           string
-	ResultTruncated      bool
-	ResultTurnID         string
-	ResultKind           ErrandResultKind
-	ResultState          ErrandResultState
-	DeliveredRoute       ErrandDeliveryRoute
-	DeliveryToken        string
-	DeliveredAt          *time.Time
-	LatestSettledTurnID  string
-	Version              int64
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	SettledAt            *time.Time
+	ID                        string
+	TaskID                    string
+	ParentSessionID           string
+	Title                     string
+	Objective                 string
+	AgentProfileID            string
+	MCPServerIDs              []string
+	MCPExcludedServerIDs      []string
+	FirstTurnID               string
+	SubmissionID              string
+	Lifecycle                 ErrandLifecycle
+	CancelSource              ErrandCancelSource
+	LastOutcome               ErrandOutcome
+	AwaitingResult            bool
+	ParentAdmissionGeneration int64
+	ResultRevision            string
+	ResultText                string
+	ResultTruncated           bool
+	ResultTurnID              string
+	ResultKind                ErrandResultKind
+	ResultState               ErrandResultState
+	DeliveredRoute            ErrandDeliveryRoute
+	DeliveryToken             string
+	// DeliveryState is read-derived from the exact current await claim. It is
+	// never written as part of an errand snapshot or lifecycle transition.
+	DeliveryState       ErrandDeliveryState `json:"-"`
+	DeliveredAt         *time.Time
+	LatestSettledTurnID string
+	TeardownIntent      *ErrandTeardownIntent `json:"-"`
+	Version             int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	SettledAt           *time.Time
 }
 
 // Validate rejects an errand without its identity or with a value outside
@@ -154,6 +170,9 @@ func (e *Errand) Validate() error {
 		return fmt.Errorf("%w: result state %q", ErrInvalidErrand, e.ResultState)
 	case !slices.Contains([]ErrandDeliveryRoute{"", ErrandDeliveryAwait, ErrandDeliveryTurnContext, ErrandDeliveryNotification}, e.DeliveredRoute):
 		return fmt.Errorf("%w: delivery route %q", ErrInvalidErrand, e.DeliveredRoute)
+	}
+	if err := e.TeardownIntent.validateFor(e); err != nil {
+		return err
 	}
 	return nil
 }
@@ -191,4 +210,10 @@ func AddSessionRoleFields(payload map[string]interface{}, session *TaskSession) 
 	if session.ParentSessionID != "" {
 		payload["parent_session_id"] = session.ParentSessionID
 	}
+}
+
+// ErrandClaimCandidate identifies the version observed while preparing a claim.
+type ErrandClaimCandidate struct {
+	ID      string
+	Version int64
 }

@@ -37,6 +37,9 @@ type TurnSettlement struct {
 // errand is ignored. Capture of a parent-initiated turn is idempotent on the
 // result turn id.
 func (s *Service) OnErrandTurnSettled(ctx context.Context, settlement TurnSettlement) error {
+	if store, ok := s.store.(terminalDecisionStore); ok {
+		return s.settleExactTerminal(ctx, store, settlement)
+	}
 	return s.onErrandTurnSettled(ctx, settlement, "")
 }
 
@@ -108,35 +111,6 @@ func (s *Service) OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, 
 		SessionID: sessionID, TurnID: turnID, SubmissionID: submissionID,
 		Outcome: outcome, FailureSummary: interruptedTurnNotice, Interrupted: interrupted,
 	})
-}
-
-// OnParentPromptAdmitted marks that the errand's parent admitted a prompt.
-// The sender must be that parent. An undelivered result is superseded so it
-// is never delivered after the new turn starts.
-func (s *Service) OnParentPromptAdmitted(ctx context.Context, errandSessionID, senderSessionID string) error {
-	if errandSessionID == "" || senderSessionID == "" {
-		return nil
-	}
-	errand, err := s.store.GetErrand(ctx, errandSessionID)
-	if errors.Is(err, models.ErrErrandNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("load errand for parent prompt: %w", err)
-	}
-	if errand.ParentSessionID != senderSessionID {
-		return nil
-	}
-	unlock := s.parentLocks.lock(errand.ParentSessionID)
-	defer unlock()
-	row, changed, err := s.update(ctx, errand.ID, applyParentAdmission)
-	if err != nil {
-		return fmt.Errorf("record parent prompt: %w", err)
-	}
-	if changed {
-		s.publish(ctx, row)
-	}
-	return nil
 }
 
 // SendResult captures the latest settled turn as a pending result when the
@@ -246,23 +220,13 @@ func (s *Service) readTurn(ctx context.Context, sessionID, turnID string) (TurnV
 	return view, nil
 }
 
-func applyParentAdmission(e *models.Errand) bool {
-	if e.Lifecycle == models.ErrandLifecycleCancelled {
-		return false
-	}
-	changed := !e.AwaitingResult
-	e.AwaitingResult = true
-	if e.ResultState == models.ErrandResultPending {
-		e.ResultState = models.ErrandResultSuperseded
-		changed = true
-	}
-	return changed
-}
-
 func applySettlement(
 	e *models.Errand, settlement TurnSettlement, parentInitiated bool,
 	text string, truncated bool, kind models.ErrandResultKind, now time.Time,
 ) bool {
+	if e.Lifecycle == models.ErrandLifecycleCancelled {
+		return false
+	}
 	changed := e.LatestSettledTurnID != settlement.TurnID
 	e.LatestSettledTurnID = settlement.TurnID
 	if !parentInitiated {

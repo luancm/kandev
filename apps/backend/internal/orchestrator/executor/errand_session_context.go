@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -22,23 +23,23 @@ func errandParentFromContext(ctx context.Context) (string, bool) {
 
 // applyErrandSessionIdentity stamps the errand role and parent on a session
 // about to be inserted and keeps it out of primary selection.
-func applyErrandSessionIdentity(ctx context.Context, session *models.TaskSession) bool {
-	parent, ok := errandParentFromContext(ctx)
-	if !ok {
-		return false
+func applyErrandSessionIdentity(ctx context.Context, session *models.TaskSession) (bool, error) {
+	parent, requested := ctx.Value(errandSessionKey{}).(string)
+	if !requested {
+		return false, nil
+	}
+	identity, reserved, err := models.ReadReservedLaunchIdentity(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !reserved {
+		return false, fmt.Errorf("%w: errand context requires a reservation", models.ErrInvalidErrandLaunchAuthority)
 	}
 	session.Role = models.SessionRoleErrand
 	session.ParentSessionID = parent
 	session.IsPrimary = false
-	return true
-}
-
-// sessionIsErrand reports whether the stored session is an errand. A session
-// that cannot be read is treated as an ordinary session.
-func (e *Executor) sessionIsErrand(ctx context.Context, sessionID string) bool {
-	if sessionID == "" {
-		return false
+	if err := models.BindErrandLaunchAuthority(session, identity, parent); err != nil {
+		return false, err
 	}
-	session, err := e.repo.GetTaskSession(ctx, sessionID)
-	return err == nil && models.IsErrandSession(session)
+	return true, nil
 }

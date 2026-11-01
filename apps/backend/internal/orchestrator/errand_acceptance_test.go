@@ -80,8 +80,9 @@ func TestParentTurnCompletingWithNothingOutstandingRunsItsWorkflow(t *testing.T)
 	controller := &settlingErrandController{outstanding: false}
 	svc.SetErrandController(controller)
 
-	require.False(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone),
-		"a turn that completes with nothing outstanding must not skip workflow completion")
+	outstanding, err := svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.False(t, outstanding, "a turn that completes with nothing outstanding must not skip workflow completion")
 	require.Equal(t, []errands.SettleCause{errands.SettleCauseTurnDone}, controller.causes)
 }
 
@@ -90,11 +91,13 @@ func TestParentWorkflowWaitsForTheFirstTurnWithNoOutstandingErrands(t *testing.T
 	controller := &settlingErrandController{outstanding: true}
 	svc.SetErrandController(controller)
 
-	require.True(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone),
-		"a completed parent turn with outstanding errands must defer workflow completion")
+	outstanding, err := svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.True(t, outstanding, "a completed parent turn with outstanding errands must defer workflow completion")
 	controller.outstanding = false
-	require.False(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone),
-		"workflow completion resumes on the first completed parent turn with no outstanding results")
+	outstanding, err = svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.False(t, outstanding, "workflow completion resumes on the first completed parent turn with no outstanding results")
 	require.Equal(t, []errands.SettleCause{errands.SettleCauseTurnDone, errands.SettleCauseTurnDone}, controller.causes)
 }
 

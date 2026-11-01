@@ -14,18 +14,32 @@ import (
 )
 
 type memoryStore struct {
-	mu       sync.Mutex
-	errands  map[string]*models.Errand
-	sessions map[string]*models.TaskSession
-	pending  map[string]models.TaskPendingAction
-	updates  int
+	mu         sync.Mutex
+	errands    map[string]*models.Errand
+	sessions   map[string]*models.TaskSession
+	pending    map[string]models.TaskPendingAction
+	updates    int
+	admissions map[models.ErrandParentAdmission]models.ErrandAdmissionState
+	aborted    map[string]bool
+	claims     map[string][]models.ErrandResultClaim
+}
+
+func (s *memoryStore) BeginErrandAwait(context.Context, models.ErrandAwaitIdentity) error { return nil }
+func (s *memoryStore) OfferErrandAwait(context.Context, models.ErrandAwaitIdentity, []models.ErrandAwaitDeliveryItem) error {
+	return nil
+}
+func (s *memoryStore) AbortErrandAwait(ctx context.Context, id models.ErrandAwaitIdentity) ([]*models.Errand, error) {
+	return s.AbortAwait(ctx, id.TaskID, id.ParentSessionID, id.Token)
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
-		errands:  map[string]*models.Errand{},
-		sessions: map[string]*models.TaskSession{},
-		pending:  map[string]models.TaskPendingAction{},
+		errands:    map[string]*models.Errand{},
+		sessions:   map[string]*models.TaskSession{},
+		pending:    map[string]models.TaskPendingAction{},
+		admissions: map[models.ErrandParentAdmission]models.ErrandAdmissionState{},
+		aborted:    map[string]bool{},
+		claims:     map[string][]models.ErrandResultClaim{},
 	}
 }
 
@@ -39,6 +53,50 @@ func (s *memoryStore) setSessionState(id string, state models.TaskSessionState) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessions[id].State = state
+}
+
+func (s *memoryStore) ClaimResults(_ context.Context, taskID, parentID string, route models.ErrandDeliveryRoute, token string, candidates []models.ErrandClaimCandidate, at time.Time, inventory []models.ErrandClaimCandidate) ([]*models.Errand, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.aborted[token] {
+		return nil, models.ErrErrandVersionConflict
+	}
+	expected := make(map[string]int64, len(inventory))
+	for _, item := range inventory {
+		expected[item.ID] = item.Version
+	}
+	count := 0
+	for _, row := range s.errands {
+		if row.TaskID != taskID || row.ParentSessionID != parentID {
+			continue
+		}
+		count++
+		if expected[row.ID] != row.Version {
+			return nil, models.ErrErrandVersionConflict
+		}
+	}
+	if count != len(inventory) {
+		return nil, models.ErrErrandVersionConflict
+	}
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		row := s.errands[c.ID]
+		if seen[c.ID] || row == nil || row.TaskID != taskID || row.ParentSessionID != parentID || row.Version != c.Version || row.ResultState != models.ErrandResultPending {
+			return nil, models.ErrErrandVersionConflict
+		}
+		seen[c.ID] = true
+	}
+	var claimed []*models.Errand
+	for _, c := range candidates {
+		row := s.errands[c.ID]
+		row.ResultState, row.DeliveredRoute, row.DeliveryToken, row.DeliveredAt = models.ErrandResultDelivered, route, token, &at
+		row.Version++
+		copy := *row
+		claimed = append(claimed, &copy)
+		s.claims[token] = append(s.claims[token], models.ErrandResultClaim{ErrandID: row.ID, ResultRevision: row.ResultRevision,
+			ParentAdmissionGeneration: row.ParentAdmissionGeneration, Token: token, Route: route})
+	}
+	return claimed, nil
 }
 
 func (s *memoryStore) CreateErrand(_ context.Context, errand *models.Errand) error {
@@ -158,6 +216,22 @@ func (s *memoryStore) GetTaskSession(_ context.Context, id string) (*models.Task
 	return &copied, nil
 }
 
+func (s *memoryStore) GetTask(_ context.Context, id string) (*models.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, session := range s.sessions {
+		if session.TaskID == id {
+			return &models.Task{ID: id}, nil
+		}
+	}
+	for _, row := range s.errands {
+		if row.TaskID == id {
+			return &models.Task{ID: id}, nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *memoryStore) GetPendingActionsBySessionIDs(_ context.Context, ids []string) (map[string]models.TaskPendingAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -181,7 +255,7 @@ type fakeLauncher struct {
 	onCall func(request LaunchRequest)
 }
 
-func (l *fakeLauncher) LaunchErrand(ctx context.Context, request LaunchRequest) error {
+func (l *fakeLauncher) LaunchErrand(ctx context.Context, request LaunchRequest) (LaunchResult, error) {
 	l.mu.Lock()
 	call := len(l.requests)
 	l.requests = append(l.requests, request)
@@ -193,14 +267,25 @@ func (l *fakeLauncher) LaunchErrand(ctx context.Context, request LaunchRequest) 
 	}
 	if l.behave != nil {
 		if err := l.behave(call, request); err != nil {
-			return err
+			if errors.Is(err, ErrCeilingRefused) {
+				return LaunchResult{Disposition: LaunchQueued}, nil
+			}
+			return LaunchResult{Disposition: LaunchBlocked}, err
 		}
+	}
+	row, err := l.store.GetErrand(ctx, request.ErrandID)
+	if err != nil {
+		return LaunchResult{Disposition: LaunchBlocked}, err
+	}
+
+	if row.Lifecycle == models.ErrandLifecycleCancelled {
+		return LaunchResult{Disposition: LaunchBlocked}, context.Canceled
 	}
 	l.store.addSession(&models.TaskSession{
 		ID: request.ErrandID, TaskID: request.TaskID, Role: models.SessionRoleErrand,
 		ParentSessionID: request.ParentSessionID, State: models.TaskSessionStateRunning,
 	})
-	return nil
+	return LaunchResult{Disposition: LaunchAdmitted, SessionID: request.ErrandID, TurnID: request.TurnID, SubmissionID: request.SubmissionID}, nil
 }
 
 func (l *fakeLauncher) calls() []LaunchRequest {

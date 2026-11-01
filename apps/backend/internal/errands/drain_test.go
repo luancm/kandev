@@ -86,7 +86,7 @@ func TestDrainQueuedFailsAnErrandWhoseLaunchFailsAndContinues(t *testing.T) {
 
 	h.launcher.behave = func(_ int, request LaunchRequest) error {
 		if request.ErrandID == broken.ID {
-			return errors.New("profile no longer exists")
+			return &ErrLaunchRejected{Err: errors.New("profile no longer exists")}
 		}
 		return nil
 	}
@@ -134,5 +134,37 @@ func TestDrainQueuedLeavesAnErrandHeldByAnInFlightStart(t *testing.T) {
 	h.service.launching.release(errand.ID)
 	if len(h.launcher.calls()) != before {
 		t.Fatal("drain launched an errand that another launch holds")
+	}
+}
+
+func TestDrainQueuedBlocksUnknownLaunchWithoutOvertaking(t *testing.T) {
+	h := newHarness(t)
+	h.launcher.behave = func(int, LaunchRequest) error { return ErrCeilingRefused }
+	first, second := h.mustStart("unknown first").Errand, h.mustStart("later").Errand
+	h.store.addSession(&models.TaskSession{ID: "other-parent", TaskID: "task-z", State: models.TaskSessionStateWaitingForInput})
+	other, err := h.service.Start(context.Background(), StartRequest{TaskID: "task-z", ParentSessionID: "other-parent", Title: "independent", Objective: "independent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(h.launcher.calls())
+	h.launcher.behave = func(_ int, request LaunchRequest) error {
+		if request.ErrandID == first.ID {
+			return errors.New("unreadable launch evidence")
+		}
+		return nil
+	}
+	h.service.DrainQueued(context.Background())
+	if len(h.launcher.calls()) != before+2 {
+		t.Fatal("unverified launch let a later row overtake it")
+	}
+	healthy, err := h.store.GetErrand(context.Background(), other.Errand.ID)
+	if err != nil || healthy.Lifecycle != models.ErrandLifecycleLaunched {
+		t.Fatalf("independent task was blocked: %+v, %v", healthy, err)
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		row, err := h.store.GetErrand(context.Background(), id)
+		if err != nil || row.Lifecycle != models.ErrandLifecycleQueued || row.ResultState != models.ErrandResultNone || !row.AwaitingResult {
+			t.Fatalf("blocked reservation changed: %+v, %v", row, err)
+		}
 	}
 }

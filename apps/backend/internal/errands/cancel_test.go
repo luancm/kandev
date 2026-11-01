@@ -39,8 +39,8 @@ func TestCancelMarksTheRowBeforeStoppingAndIsIdempotent(t *testing.T) {
 	if h.store.updates != updates || len(h.publisher.statuses()) != events {
 		t.Fatal("a repeated cancel changed the row or published again")
 	}
-	if len(h.stopper.stops()) != 2 {
-		t.Fatalf("stops = %d, want the stop retried on a repeat", len(h.stopper.stops()))
+	if len(h.stopper.stops()) != 1 {
+		t.Fatalf("stops = %d, want no stop after its durable receipt", len(h.stopper.stops()))
 	}
 }
 
@@ -118,7 +118,7 @@ func TestCancelIsScopedToTheCallerTaskAndParent(t *testing.T) {
 	}
 }
 
-func TestCancelledStartingErrandStopsTheSessionItJustLaunched(t *testing.T) {
+func TestCancelledStartingErrandCannotBecomeRunnable(t *testing.T) {
 	h := newHarness(t)
 	h.launcher.onCall = func(request LaunchRequest) {
 		if _, err := h.service.Cancel(context.Background(), CancelRequest{
@@ -132,8 +132,8 @@ func TestCancelledStartingErrandStopsTheSessionItJustLaunched(t *testing.T) {
 	if result.Status != models.ErrandStatusCancelled || result.Errand.Lifecycle != models.ErrandLifecycleCancelled {
 		t.Fatalf("result = %s/%s, want the cancel to win over the launch", result.Status, result.Errand.Lifecycle)
 	}
-	if len(h.stopper.stops()) == 0 || h.stopper.stops()[len(h.stopper.stops())-1] != result.Errand.ID {
-		t.Fatalf("stops = %v, want the just-launched session stopped", h.stopper.stops())
+	if session, _ := h.store.GetTaskSession(context.Background(), result.Errand.ID); session != nil {
+		t.Fatal("a cancelled reservation became runnable")
 	}
 }
 
@@ -226,7 +226,7 @@ func TestCancelForTaskCancelsQueuedErrandsToo(t *testing.T) {
 	}
 }
 
-func TestCancelOnSessionStopRecordsAUserCancelWithoutStoppingAgain(t *testing.T) {
+func TestCancelOnSessionStopOwnsTheExactRuntimeStop(t *testing.T) {
 	h := newHarness(t)
 	errand := h.mustStart("audit").Errand
 	if err := h.service.CancelOnSessionStop(context.Background(), errand.ID); err != nil {
@@ -236,8 +236,8 @@ func TestCancelOnSessionStopRecordsAUserCancelWithoutStoppingAgain(t *testing.T)
 	if row.Lifecycle != models.ErrandLifecycleCancelled || row.CancelSource != models.ErrandCancelSourceUser {
 		t.Fatalf("errand = %s/%s, want cancelled by the user", row.Lifecycle, row.CancelSource)
 	}
-	if len(h.stopper.stops()) != 0 {
-		t.Fatal("the stop hook stopped the runtime that its caller is already stopping")
+	if len(h.stopper.stops()) != 1 {
+		t.Fatal("the identity-aware stop hook must own exactly one physical stop")
 	}
 	if err := h.service.CancelOnSessionStop(context.Background(), testParent); err != nil {
 		t.Fatalf("an ordinary session must be ignored, got %v", err)

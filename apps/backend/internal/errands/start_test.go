@@ -3,6 +3,7 @@ package errands
 import (
 	"context"
 	"errors"
+	"expvar"
 	"fmt"
 	"strings"
 	"sync"
@@ -165,7 +166,7 @@ func TestStartQueuesWhenTheCeilingRefusesAndWritesNoSession(t *testing.T) {
 func TestStartRemovesTheErrandWhenLaunchFailsBeforeAnySession(t *testing.T) {
 	h := newHarness(t)
 	workspaceErr := errors.New("workspace preparing")
-	h.launcher.behave = func(int, LaunchRequest) error { return workspaceErr }
+	h.launcher.behave = func(int, LaunchRequest) error { return &ErrLaunchRejected{Err: workspaceErr} }
 	_, err := h.start("audit")
 
 	if !errors.Is(err, workspaceErr) {
@@ -188,7 +189,7 @@ func TestStartKeepsAFailedErrandWhenTheLaunchLeftASession(t *testing.T) {
 			ID: request.ErrandID, TaskID: request.TaskID, Role: models.SessionRoleErrand,
 			ParentSessionID: request.ParentSessionID, State: models.TaskSessionStateFailed,
 		})
-		return errors.New("agent failed to start")
+		return &ErrLaunchRejected{Err: errors.New("agent failed to start")}
 	}
 	result := h.mustStart("audit")
 
@@ -217,5 +218,67 @@ func assertNothingCreated(t *testing.T, h *harness) {
 	rows, _ := h.store.ListErrandsByTask(context.Background(), testTask)
 	if len(rows) != 0 || len(h.launcher.calls()) != 0 || len(h.publisher.statuses()) != 0 {
 		t.Fatalf("rows=%d launches=%d events=%d, want none", len(rows), len(h.launcher.calls()), len(h.publisher.statuses()))
+	}
+}
+
+func TestStartRetainsUnknownLaunchForRecovery(t *testing.T) {
+	h := newHarness(t)
+	inspectionErr := errors.New("runtime inventory temporarily unreadable")
+	h.launcher.behave = func(int, LaunchRequest) error { return inspectionErr }
+	_, err := h.start("recover later")
+	if !errors.Is(err, inspectionErr) {
+		t.Fatalf("start error = %v", err)
+	}
+	rows, err := h.store.ListErrandsByTask(context.Background(), testTask)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("retained reservations = %d, %v", len(rows), err)
+	}
+	row := rows[0]
+	if row.Lifecycle != models.ErrandLifecycleQueued || !row.AwaitingResult || row.ResultState != models.ErrandResultNone || row.LastOutcome != "" {
+		t.Fatalf("unknown launch became a failure: %+v", row)
+	}
+	if len(h.deliverer.delivered()) != 0 {
+		t.Fatal("unknown launch must not notify a failed result")
+	}
+}
+
+type launchProjectionFaultStore struct{ Store }
+
+func (s launchProjectionFaultStore) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if row, err := s.GetErrand(ctx, id); err == nil && row.Lifecycle == models.ErrandLifecycleLaunched {
+		return nil, errors.New("injected projection read failure after admission commit")
+	}
+	return s.Store.GetTaskSession(ctx, id)
+}
+
+func committedStartCount() int64 {
+	value := startedTotal.Get("outcome=started")
+	if value == nil {
+		return 0
+	}
+	return value.(*expvar.Int).Value()
+}
+
+func TestStartCountsCommittedAdmissionWhenProjectionFails(t *testing.T) {
+	h := newHarness(t)
+	h.service.store = launchProjectionFaultStore{Store: h.store}
+	before := committedStartCount()
+	_, err := h.start("projection read fault")
+	if err == nil || !strings.Contains(err.Error(), "injected projection read failure") {
+		t.Fatalf("start error = %v", err)
+	}
+	rows, err := h.store.ListErrandsByTask(context.Background(), testTask)
+	if err != nil || len(rows) != 1 || rows[0].Lifecycle != models.ErrandLifecycleLaunched {
+		t.Fatalf("committed row = %+v, %v", rows, err)
+	}
+	if committedStartCount() != before+1 {
+		t.Fatal("committed admission was not counted after projection read failure")
+	}
+	h.service.store = h.store
+	if _, err := h.service.recordLaunched(context.Background(), rows[0]); err != nil {
+		t.Fatal(err)
+	}
+	if committedStartCount() != before+1 {
+		t.Fatal("bookkeeping retry counted admission twice")
 	}
 }

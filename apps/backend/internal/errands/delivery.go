@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -99,24 +100,13 @@ func (s *Service) hasPendingResult(ctx context.Context, parentSessionID string) 
 
 // SweepDelivery retries delivery for every parent holding a pending result.
 // The ceiling sweep calls it so a refused notification is not stranded.
-func (s *Service) SweepDelivery(ctx context.Context) error {
+func (s *Service) SweepDelivery(ctx context.Context) (err error) {
+	teardownErr := s.retryPendingTeardowns(ctx)
+	defer func() { err = errors.Join(teardownErr, err) }()
 	if !s.featureEnabled() {
 		return nil
 	}
-	rows, err := s.store.ListErrands(ctx)
-	if err != nil {
-		return fmt.Errorf("list errands for delivery sweep: %w", err)
-	}
-	parents := map[string]struct{}{}
-	for _, row := range rows {
-		if row.ResultState == models.ErrandResultPending {
-			parents[row.ParentSessionID] = struct{}{}
-		}
-	}
-	for _, parentID := range sortedKeys(parents) {
-		s.deliverPending(ctx, parentID)
-	}
-	return nil
+	return s.deliverForPendingParents(ctx)
 }
 
 // PreserveCancellationNotice cancels an errand whose session is being deleted

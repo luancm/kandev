@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -23,7 +24,9 @@ type fakeErrandService struct {
 	awaitReq       errands.AwaitRequest
 	awaitResult    errands.AwaitResult
 	awaitErr       error
+	abortOwner     models.ErrandAwaitIdentity
 	releaseToken   string
+	releaseParent  string
 	releaseCalls   int
 	cancelReq      errands.CancelRequest
 	cancelStatus   models.ErrandStatus
@@ -50,12 +53,26 @@ func (f *fakeErrandService) Start(_ context.Context, req errands.StartRequest) (
 
 func (f *fakeErrandService) Await(_ context.Context, req errands.AwaitRequest) (errands.AwaitResult, error) {
 	f.awaitReq = req
-	return f.awaitResult, f.awaitErr
+	result := f.awaitResult
+	result.Delivery = models.ErrandAwaitDelivery{Version: 1, Token: req.Token, Items: []models.ErrandAwaitDeliveryItem{}}
+	return result, f.awaitErr
 }
 
-func (f *fakeErrandService) ReleaseAwait(_ context.Context, token string) error {
+func (f *fakeErrandService) OfferAwait(context.Context, models.ErrandAwaitIdentity, models.ErrandAwaitDelivery) error {
+	return nil
+}
+func (f *fakeErrandService) AbortOwnedAwait(ctx context.Context, id models.ErrandAwaitIdentity) error {
+	f.abortOwner = id
+	return f.AbortAwait(ctx, id.ParentSessionID, id.Token)
+}
+func awaitTestContext(taskID, sessionID string) context.Context {
+	return streams.WithMCPExecutionContext(context.Background(), streams.MCPExecutionContext{TaskID: taskID, SessionID: sessionID, ParentIncarnationID: "launched", HarnessGeneration: 1})
+}
+
+func (f *fakeErrandService) AbortAwait(_ context.Context, parentID string, token string) error {
 	f.releaseCalls++
 	f.releaseToken = token
+	f.releaseParent = parentID
 	return nil
 }
 
@@ -200,10 +217,10 @@ func TestAwaitErrandsForwardsParentAndReturnsView(t *testing.T) {
 		},
 	}
 	msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, primary, map[string]interface{}{
-		"errand_ids": []string{"errand-1", "errand-2"}, "mode": "all", "max_wait_seconds": 30,
+		"errand_ids": []string{"errand-1", "errand-2"}, "mode": "all", "max_wait_seconds": 30, "await_token": "token-1",
 	}))
 
-	resp, err := h.handleAwaitErrands(context.Background(), msg)
+	resp, err := h.handleAwaitErrands(awaitTestContext(task.ID, primary.ID), msg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	assert.Equal(t, primary.ID, fake.awaitReq.ParentSessionID)
@@ -245,11 +262,12 @@ func TestAwaitErrandsReleaseReturnsClaimWithToken(t *testing.T) {
 		"await_token": "token-1",
 	}))
 
-	resp, err := h.handleAwaitErrandsRelease(context.Background(), msg)
+	resp, err := h.handleAwaitErrandsRelease(awaitTestContext(task.ID, primary.ID), msg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	assert.Equal(t, 1, fake.releaseCalls)
 	assert.Equal(t, "token-1", fake.releaseToken)
+	assert.Equal(t, primary.ID, fake.releaseParent)
 }
 
 func TestCancelErrandUsesParentSourceAndReturnsStatus(t *testing.T) {

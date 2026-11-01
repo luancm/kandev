@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sort"
 
-	"go.uber.org/zap"
-
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -26,8 +24,7 @@ type CancelRequest struct {
 }
 
 // Cancel cancels one errand of the caller's task. The row is marked cancelled
-// before its runtime is stopped, and a repeated cancel changes no row but
-// retries the stop.
+// before its runtime is stopped. Repeated calls retry only a pending intent.
 func (s *Service) Cancel(ctx context.Context, req CancelRequest) (*Snapshot, error) {
 	if req.TaskID == "" || req.ErrandID == "" {
 		return nil, fmt.Errorf("%w: task and errand are required", ErrInvalidRequest)
@@ -43,17 +40,17 @@ func (s *Service) Cancel(ctx context.Context, req CancelRequest) (*Snapshot, err
 		return nil, notFound()
 	}
 	row, changed, err := s.cancelRow(ctx, errand.ID, req.Source)
-	if err != nil {
-		return nil, err
-	}
-	stopErr := s.stopRuntime(ctx, row)
 	if changed && req.Source == models.ErrandCancelSourceUser {
 		s.deliverPending(ctx, row.ParentSessionID)
 	}
-	if stopErr != nil {
-		return nil, stopErr
+	if err != nil {
+		return nil, err
 	}
-	return &Snapshot{Errand: row, Status: models.ErrandStatusCancelled}, nil
+	status, err := s.Project(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	return &Snapshot{Errand: row, Status: status}, nil
 }
 
 // CancelAll cancels every live errand of a task for the user, under the task
@@ -66,34 +63,11 @@ func (s *Service) CancelAll(ctx context.Context, taskID string) (int, error) {
 	unlock := s.taskLocks.lock(taskID)
 	defer unlock()
 
-	snapshots, err := s.list(ctx, taskID)
+	rows, err := s.store.ListErrandsByTask(ctx, taskID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("list errands for cancellation: %w", err)
 	}
-	var failures []error
-	cancelled := 0
-	parents := map[string]struct{}{}
-	for _, snapshot := range snapshots {
-		if !IsLive(snapshot.Status) {
-			continue
-		}
-		row, changed, err := s.cancelRow(ctx, snapshot.Errand.ID, models.ErrandCancelSourceUser)
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		if changed {
-			cancelled++
-			parents[row.ParentSessionID] = struct{}{}
-		}
-		if err := s.stopRuntime(ctx, row); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	for _, parentID := range sortedKeys(parents) {
-		s.deliverPending(ctx, parentID)
-	}
-	return cancelled, errors.Join(failures...)
+	return s.cancelRows(ctx, rows, models.ErrandCancelSourceUser)
 }
 
 // CancelForParent cancels every live errand of a parent session with the
@@ -118,73 +92,64 @@ func (s *Service) CancelForTask(ctx context.Context, taskID string) (int, error)
 }
 
 func (s *Service) cascade(ctx context.Context, errands []*models.Errand) (int, error) {
+	return s.cancelRows(ctx, errands, models.ErrandCancelSourceCascade)
+}
+
+// cancelRows inspects private teardown obligations before public projection.
+// A failed row leaves siblings eligible and never erases a committed decision.
+func (s *Service) cancelRows(ctx context.Context, rows []*models.Errand, source models.ErrandCancelSource) (int, error) {
 	var failures []error
 	cancelled := 0
-	for _, errand := range errands {
-		status, err := s.Project(ctx, errand)
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
-		if !IsLive(status) {
-			if err := s.discardPending(ctx, errand.ID); err != nil {
-				failures = append(failures, err)
-			}
-			continue
-		}
-		row, changed, err := s.cancelRow(ctx, errand.ID, models.ErrandCancelSourceCascade)
-		if err != nil {
-			failures = append(failures, err)
-			continue
-		}
+	parents := map[string]struct{}{}
+	for _, observed := range rows {
+		row, changed, err := s.cancelObserved(ctx, observed, source)
 		if changed {
 			cancelled++
+			if source == models.ErrandCancelSourceUser {
+				parents[row.ParentSessionID] = struct{}{}
+			}
 		}
-		if err := s.stopRuntime(ctx, row); err != nil {
-			failures = append(failures, err)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("errand %s: %w", observed.ID, err))
 		}
+	}
+	for _, parentID := range sortedKeys(parents) {
+		s.deliverPending(ctx, parentID)
 	}
 	return cancelled, errors.Join(failures...)
 }
 
-// CancelOnSessionStop records a user stop of an errand session that the caller
-// is already stopping. It does not stop the runtime again. A session that is
-// not an errand, or an errand already cancelled, is left alone.
+func (s *Service) cancelObserved(ctx context.Context, row *models.Errand, source models.ErrandCancelSource) (*models.Errand, bool, error) {
+	if pendingTeardown(row) {
+		return row, false, s.retryTeardown(ctx, row)
+	}
+	if row.Lifecycle == models.ErrandLifecycleCancelled {
+		return row, false, nil
+	}
+	status, err := s.Project(ctx, row)
+	if err != nil {
+		return row, false, err
+	}
+	if !IsLive(status) {
+		if source == models.ErrandCancelSourceCascade {
+			err = s.discardPending(ctx, row.ID)
+		}
+		return row, false, err
+	}
+	return s.cancelRow(ctx, row.ID, source)
+}
+
+// CancelOnSessionStop owns the complete errand stop. The generic stop caller
+// must return its result rather than stopping the same session again.
 func (s *Service) CancelOnSessionStop(ctx context.Context, sessionID string) error {
 	row, changed, err := s.cancelRow(ctx, sessionID, models.ErrandCancelSourceUser)
 	if errors.Is(err, models.ErrErrandNotFound) {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
 	if changed {
 		s.deliverPending(ctx, row.ParentSessionID)
 	}
-	return nil
-}
-
-// cancelRow marks an errand cancelled with a version-guarded write, publishes
-// the change, and counts it. A row that is already cancelled is returned
-// unchanged.
-func (s *Service) cancelRow(
-	ctx context.Context, id string, source models.ErrandCancelSource,
-) (*models.Errand, bool, error) {
-	row, changed, err := s.update(ctx, id, func(e *models.Errand) bool {
-		return s.applyCancel(e, source)
-	})
-	if err != nil {
-		if errors.Is(err, models.ErrErrandNotFound) {
-			return nil, false, err
-		}
-		return nil, false, fmt.Errorf("cancel errand: %w", err)
-	}
-	if changed {
-		s.events.PublishErrandUpdated(ctx, row, models.ErrandStatusCancelled)
-		countSettled(models.ErrandStatusCancelled)
-		s.logger.Info("errand.cancelled", s.errandFields(row, "source", string(source))...)
-	}
-	return row, changed, nil
+	return err
 }
 
 // applyCancel moves an errand to cancelled. A user cancel of an outstanding
@@ -236,20 +201,6 @@ func (s *Service) discardPending(ctx context.Context, id string) error {
 	}
 	if changed {
 		s.publish(ctx, row)
-	}
-	return nil
-}
-
-// stopRuntime stops the session of a launched errand. A queued errand has no
-// runtime; a failure is logged and returned so a repeated cancel can retry.
-func (s *Service) stopRuntime(ctx context.Context, errand *models.Errand) error {
-	if errand == nil || errand.Lifecycle == models.ErrandLifecycleQueued {
-		return nil
-	}
-	if err := s.stopper.StopErrandSession(ctx, errand.ID, StopReasonErrandCancelled); err != nil {
-		s.logger.Warn("errand runtime stop failed",
-			zap.String("errand_id", errand.ID), zap.String("task_id", errand.TaskID), zap.Error(err))
-		return fmt.Errorf("stop errand session: %w", err)
 	}
 	return nil
 }

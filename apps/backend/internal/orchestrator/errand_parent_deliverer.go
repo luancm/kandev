@@ -86,6 +86,8 @@ func (d *ErrandParentDeliverer) admit(
 	// Queue admission can race the parent's ready event. Recheck using the
 	// captured incarnation so an idle Auto-run parent starts promptly without
 	// dispatching into a replacement session.
-	s.CheckQueueAdmissionReadiness(ctx, identity)
+	if !workflowProfileSwitchGuardIsHeld(ctx, parentSessionID) && !cancelInFlightGuardHeldForSession(ctx, parentSessionID) {
+		s.CheckQueueAdmissionReadiness(ctx, identity)
+	}
 	return nil
 }

@@ -181,3 +181,31 @@ func TestPullRequestChecksWithAnIncompleteUnknownRollupArePending(t *testing.T) 
 		t.Fatalf("pull request summary = %+v, want pending while checks are incomplete", got.PullRequest)
 	}
 }
+
+// @covers AC-TASKS-ERRANDS-010.5
+func TestBuildFromAuthoritativeIncludesErrands(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		value    ErrandsSummary
+		observed bool
+		want     *ErrandsSummary
+	}{
+		{"live", ErrandsSummary{Live: 2, Waiting: true}, true, &ErrandsSummary{Live: 2, Waiting: true}},
+		{"waiting_only", ErrandsSummary{Waiting: true}, true, &ErrandsSummary{Waiting: true}},
+		{"zero", ErrandsSummary{}, true, nil},
+		{"unobserved", ErrandsSummary{Live: 2}, false, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := BuildFromAuthoritative(RebuildInput{Errands: test.value, ErrandsObserved: test.observed})
+			if got.Errands == nil || test.want == nil {
+				if got.Errands != test.want {
+					t.Fatalf("errands = %+v, want %+v", got.Errands, test.want)
+				}
+				return
+			}
+			if *got.Errands != *test.want {
+				t.Fatalf("errands = %+v, want %+v", got.Errands, test.want)
+			}
+		})
+	}
+}

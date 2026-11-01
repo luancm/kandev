@@ -96,6 +96,9 @@ func assertErrandSchema(t *testing.T, repo *Repository) {
 	if exists, err := db.TableExistsContext(ctx, repo.db, "task_session_errands"); err != nil || !exists {
 		t.Fatalf("task_session_errands exists = %v, err = %v", exists, err)
 	}
+	if exists, err := db.ColumnExistsContext(ctx, repo.db, "task_session_errands", "teardown_intent"); err != nil || !exists {
+		t.Fatalf("task_session_errands.teardown_intent exists = %v, err = %v", exists, err)
+	}
 	for _, index := range []string{
 		"idx_task_sessions_parent_session_id",
 		"idx_task_session_errands_task_lifecycle",

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -98,11 +99,53 @@ func (d *deletionNoticeAdmission) AdmitPrepared(_ context.Context, _, content st
 
 type deletionNoticeLauncher struct{}
 
-func (deletionNoticeLauncher) LaunchErrand(context.Context, errands.LaunchRequest) error { return nil }
+func (deletionNoticeLauncher) LaunchErrand(_ context.Context, r errands.LaunchRequest) (errands.LaunchResult, error) {
+	return errands.LaunchResult{Disposition: errands.LaunchAdmitted, SessionID: r.ErrandID, TurnID: r.TurnID, SubmissionID: r.SubmissionID}, nil
+}
 
-type deletionNoticeStopper struct{}
+type deletionNoticeStopper struct {
+	store interface {
+		errands.Store
+		errands.TeardownIntentStore
+	}
+}
 
 func (deletionNoticeStopper) StopErrandSession(context.Context, string, string) error { return nil }
+
+// This fixture owns no physical runtime and acknowledges the exact stored intent.
+func (s deletionNoticeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
+	target := errands.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID}
+	session, err := s.store.GetTaskSession(ctx, row.ID)
+	switch {
+	case errors.Is(err, models.ErrTaskSessionNotFound):
+		target.FirstTurnID, target.ReservedSubmissionID = row.FirstTurnID, row.SubmissionID
+	case err != nil:
+		return err
+	default:
+		target.SessionIncarnation, target.NoTurn = session.QueueIncarnationID, true
+	}
+	if err := commit(target); err != nil {
+		return err
+	}
+	current, err := s.store.GetErrand(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	_, err = s.RetryErrandTeardown(ctx, *current.TeardownIntent)
+	return err
+}
+
+func (s deletionNoticeStopper) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
+	row, err := s.store.GetErrand(ctx, intent.Target.SessionID)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.store.TransitionErrandTeardownIntent(ctx, row.ID, intent.ID, row.Version, models.ErrandTeardownIntentCompleted)
+	if err != nil {
+		return "", err
+	}
+	return errands.TeardownCompleted, nil
+}
 
 type deletionNoticeProfiles struct{}
 
@@ -137,6 +180,19 @@ func TestDeleteErrandSessionAdmitsCancellationNoticeOnlyWhenEnabled(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCancelTurnFixture(t)
 			errID := "errand-delete"
+			lookup, activity := f.agentMgr.getExecutionIDForSessionFunc, f.agentMgr.getPromptActivityForSessionFunc
+			f.agentMgr.getExecutionIDForSessionFunc = func(ctx context.Context, id string) (string, error) {
+				if id != errID && lookup != nil {
+					return lookup(ctx, id)
+				}
+				return "", agentruntime.ErrNoExecutionForSession
+			}
+			f.agentMgr.getPromptActivityForSessionFunc = func(id string) (string, uint64, uint64, time.Time, error) {
+				if id != errID && activity != nil {
+					return activity(id)
+				}
+				return "", 0, 0, time.Time{}, agentruntime.ErrNoExecutionForSession
+			}
 			require.NoError(t, f.repo.CreateErrand(t.Context(), &models.Errand{
 				ID: errID, TaskID: "t1", ParentSessionID: "s1", Title: "Review the change",
 				Objective: "Review the change", AgentProfileID: "profile-reviewer", FirstTurnID: "turn-first",
@@ -150,7 +206,7 @@ func TestDeleteErrandSessionAdmitsCancellationNoticeOnlyWhenEnabled(t *testing.T
 
 			admission := &deletionNoticeAdmission{}
 			errService, err := errands.New(errands.Dependencies{
-				Store: f.repo, Launcher: deletionNoticeLauncher{}, Stopper: deletionNoticeStopper{},
+				Store: f.repo, Launcher: deletionNoticeLauncher{}, Stopper: deletionNoticeStopper{store: f.repo},
 				Profiles: deletionNoticeProfiles{}, MCP: deletionNoticeMCP{}, Events: deletionNoticeEvents{},
 				Deliverer: admission,
 			})

@@ -795,6 +795,8 @@ type startCreatedSessionOptions struct {
 	deliveryProtocol                      string
 	deliveryPayloadHash                   string
 	deliveryClaimUpdater                  deliveryClaimUpdater
+	errandParentOrigin                    errands.ParentPromptOrigin
+	errandParentSources                   []messagequeue.QueuedMessage
 	prepareInitialPrompt                  func(context.Context, string) (string, bool, error)
 	cacheEffectivePromptForTransientRetry bool
 	// ceilingEntryBinding is carried by a replay and checked at both the
@@ -845,13 +847,20 @@ func (s *Service) startCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
+	if session == nil {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	isErrandSession := models.IsErrandSession(session)
 	// Accept CREATED (normal) or WAITING_FOR_INPUT (after on_turn_start step transition).
 	// When the user sends the first message to a prepared session, on_turn_start may fire
 	// and move the step, which sets the session to WAITING_FOR_INPUT before we get here.
 	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
+		if isErrandSession && isTerminalSessionState(session.State) {
+			return nil, &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
+		}
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
 			return nil, executor.ErrExecutionAlreadyRunning
 		}
@@ -873,7 +882,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitCreatedSessionLaunch(ctx, session, originFromAutoStart(autoStart), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -887,40 +896,21 @@ func (s *Service) startCreatedSession(
 	// session state this start owns, and a gate that claims the intent during
 	// that work launches its own session alongside it. Deferred release covers
 	// every failure path; see deferredLaunchClaim.
-	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
+	deferredClaimOptions := startTaskOptions{}
+	if isErrandSession {
+		deferredClaimOptions.Errand = &ErrandLaunch{}
+	}
+	launchClaim := s.deferredLaunchClaimForStart(ctx, taskID, deferredClaimOptions)
 	defer launchClaim.releaseIfHeld(ctx)
 
-	// Use agent profile from request, fall back to session's stored value.
-	effectiveProfileID := agentProfileID
-	if effectiveProfileID == "" {
-		effectiveProfileID = session.AgentProfileID
-	}
-
-	// Resolve the workflow step override / workflow default before the
-	// required-profile guard, so a session without its own agent_profile_id
-	// inherits the workflow's default agent. resolveEffectiveAgentProfile keeps
-	// the caller profile only when neither a step override nor a workflow
-	// default applies; either of those overrides a non-empty caller.
-	effectiveProfileID, err = s.resolveEffectiveAgentProfile(ctx, taskID, "", effectiveProfileID)
+	effectiveProfileID, err := s.resolveCreatedSessionProfile(ctx, taskID, session, agentProfileID)
 	if err != nil {
-		return nil, err
-	}
-
-	if effectiveProfileID == "" {
-		return nil, fmt.Errorf("agent_profile_id is required")
-	}
-	if s.profileExecutionResolver != nil {
-		if err := s.profileExecutionResolver.ValidateProfile(ctx, effectiveProfileID); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.refuseMaterializedRouteProfileChange(ctx, session, effectiveProfileID); err != nil {
 		return nil, err
 	}
 
 	// If the workflow step overrode the profile, update the session record in DB
 	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
-	if effectiveProfileID != session.AgentProfileID {
+	if !isErrandSession && effectiveProfileID != session.AgentProfileID {
 		observedState := session.State
 		s.logger.Info("updating session agent profile for workflow step override",
 			zap.String("session_id", sessionID),
@@ -989,6 +979,9 @@ func (s *Service) startCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session: %w", err)
 	}
+	if isErrandSession && isTerminalSessionState(session.State) {
+		return nil, &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
+	}
 	if session.State == models.TaskSessionStateCompleted {
 		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if activeErr != nil || activeSession == nil {
@@ -999,10 +992,14 @@ func (s *Service) startCreatedSession(
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
-	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
+	if !isErrandSession {
+		s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
+	}
 
-	if effectiveProfileID, err = s.resolveDynamicLaunchExecution(ctx, session, effectiveProfileID, true); err != nil {
-		return nil, err
+	if !isErrandSession {
+		if effectiveProfileID, err = s.resolveDynamicLaunchExecution(ctx, session, effectiveProfileID, true); err != nil {
+			return nil, err
+		}
 	}
 
 	// Apply workflow step prompt wrapping and plan mode injection.
@@ -1015,11 +1012,13 @@ func (s *Service) startCreatedSession(
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
 	configMode := false
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		configMode = true
+	if !isErrandSession {
+		if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+			configMode = true
+		}
 	}
 	titleOwner := false
-	if !configMode {
+	if !isErrandSession && !configMode {
 		titleOwner, err = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
@@ -1027,16 +1026,20 @@ func (s *Service) startCreatedSession(
 	}
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
+		workflowStepID := dbTask.WorkflowStepID
+		if isErrandSession {
+			workflowStepID = ""
+		}
 		var generatedPromptReferenceContext string
 		if options.preserveDirectPrompt {
 			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
-				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+				ctx, effectivePrompt, taskID, sessionID, workflowStepID,
 				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
 				options.promptReferencesPrepared, true,
 			)
 		} else {
 			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
-				ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+				ctx, effectivePrompt, taskID, sessionID, workflowStepID,
 				planMode, task.IsEphemeral, session.IsPassthrough, false, promptReferenceContext,
 				options.promptReferencesPrepared, false,
 			)
@@ -1064,7 +1067,7 @@ func (s *Service) startCreatedSession(
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	includeCanvasGuidance := false
-	if (effectivePrompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
+	if (effectivePrompt != "" || len(attachments) > 0) && !isErrandSession && !isOfficeTask && !session.IsPassthrough && !configMode {
 		if options.canvasGuidanceResolved {
 			includeCanvasGuidance = options.includeCanvasGuidance
 		} else {
@@ -1104,7 +1107,10 @@ func (s *Service) startCreatedSession(
 	var initialTurnID string
 	var initialTurnCreated bool
 	if !options.noInitialTurn {
-		initialTurnID, initialTurnCreated = s.startTurnForSessionWithOwnership(ctx, sessionID)
+		initialTurnID, initialTurnCreated, err = s.startInitialLaunchTurn(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	ctx = bindWorkflowStartPromptAttemptTurn(ctx, initialTurnID)
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
@@ -1158,14 +1164,28 @@ func (s *Service) startCreatedSession(
 		return nil, err
 	}
 	if effectivePrompt != "" || len(attachments) > 0 || options.deliverySubmissionID != "" {
+		if options.errandParentOrigin.SenderSessionID == "" {
+			options.errandParentOrigin = errands.ParentPromptOriginFromContext(ctx)
+		}
 		s.configureInitialDeliveryAdmission(session, options, &launchOptions)
+	}
+	if _, reserved := ctx.Value(errandLaunchReservationKey{}).(errands.LaunchRequest); reserved {
+		if err := s.configureReservedErrandTurn(ctx, session, &launchOptions); err != nil {
+			return nil, err
+		}
+		s.fenceErrandInitialLaunch(session, &launchOptions)
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
 		}
 	}
-	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
+	var execution *executor.TaskExecution
+	if isErrandSession {
+		execution, err = s.launchConcretePreparedSession(ctx, task, sessionID, launchOptions)
+	} else {
+		execution, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
+	}
 	if err != nil {
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
@@ -1379,6 +1399,12 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 		}
 		return fmt.Errorf("session %s is %s; cannot schedule task", session.ID, session.State)
 	}
+	isErrandSession := models.IsErrandSession(session)
+	if isErrandSession {
+		if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
+			return err
+		}
+	}
 	task, err := s.taskRepo.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -1396,6 +1422,9 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 	case "", v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateReview:
 	default:
 		return fmt.Errorf("task %s is %s; cannot schedule session %s", taskID, task.State, sessionID)
+	}
+	if isErrandSession {
+		return nil
 	}
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, taskID, v1.TaskStateScheduling, []v1.TaskState{task.State})
 	if err != nil || updated {
@@ -2148,7 +2177,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, failPreparedLaunch(err)
 		}
 	}
-	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	initialTurnID, initialTurnCreated, err := s.startInitialLaunchTurn(ctx, sessionID)
+	if err != nil {
+		return nil, failPreparedLaunch(err)
+	}
 	if claimedCeilingBinding {
 		if err := s.validateClaimedCeilingBinding(ctx, taskID, opts.ceilingEntryBinding); err != nil {
 			if initialTurnCreated {
@@ -2191,7 +2223,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.configureRetryInitialLaunch(ctx, sessionID, initialTurnID, &launchOptions); err != nil {
 		return nil, failPreparedLaunch(err)
 	}
-	s.configureErrandInitialLaunch(ctx, opts.Errand, launchSession, &launchOptions)
+	if err := s.configureErrandInitialLaunch(ctx, opts.Errand, launchSession, &launchOptions); err != nil {
+		return nil, failPreparedLaunch(err)
+	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
 		if initialTurnCreated {
@@ -2744,6 +2778,11 @@ func (s *Service) createStartSessionWithWorkflowRoute(
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (string, bool, error) {
+	release, err := s.guardErrandSessionCreation(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer release()
 	if workflowRoute != nil {
 		if err := s.workflowRouteMutationAllowed(ctx, task.ID); err != nil {
 			return "", false, err
@@ -5803,7 +5842,9 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	if err = s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
-	s.cancelErrandOnUserStop(ctx, sessionID)
+	if handled, stopErr := s.stopErrandOnUserStop(ctx, sessionID); handled || stopErr != nil {
+		return stopErr
+	}
 	defer func() {
 		if err == nil {
 			s.cascadeErrandsOfParent(sessionID)
@@ -5888,10 +5929,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	lock.Lock()
-	defer lock.Unlock()
+	guard, err := s.lockCancelInFlightGuardWithContext(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer guard.release()
 	if s.isSessionResetInProgress(sessionID) {
 		return ErrSessionResetInProgress
 	}
@@ -5912,7 +5954,8 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// The errand row is removed with its session, so its cancellation notice is
 	// admitted first and a refusal keeps the row. A deleted parent cancels its
 	// errands once it is gone.
-	if err := s.preserveErrandNoticeOnDelete(ctx, sessionID); err != nil {
+	session, err = s.preserveErrandDeletionWithOwnership(ctx, session, guard)
+	if err != nil {
 		return fmt.Errorf("record errand deletion: %w", err)
 	}
 
@@ -6944,10 +6987,13 @@ type promptTaskOptions struct {
 	// Durable queue claims negotiate their delivery protocol immediately before
 	// harness dispatch. The updater persists that choice on the exact claim so
 	// a restart can reconcile the same immutable submission.
-	deliveryProtocol     string
-	deliverySubmissionID string
-	deliveryPayloadHash  string
-	deliveryClaimUpdater deliveryClaimUpdater
+	deliveryProtocol      string
+	deliverySubmissionID  string
+	deliveryPayloadHash   string
+	deliveryClaimUpdater  deliveryClaimUpdater
+	errandParentOrigin    errands.ParentPromptOrigin
+	errandParentSources   []messagequeue.QueuedMessage
+	errandAdmissionTurnID string
 }
 
 type allowRouteActionPromptClaim struct{}
@@ -7063,6 +7109,9 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
+	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -7384,11 +7433,16 @@ func (s *Service) runPromptTurn(
 		return nil, deliveryErr
 	}
 	options.deliveryProtocol = protocol
+	options.errandParentOrigin = errandPromptOrigin(promptCtx, session, options)
+	options.errandAdmissionTurnID = rollback.turnID
+	if options.deliverySubmissionID == "" {
+		options.deliverySubmissionID = options.errandParentOrigin.SubmissionID
+	}
+	if options.deliverySubmissionID == "" {
+		options.deliverySubmissionID = "internal:" + uuid.NewString()
+	}
 	var submissionID string
 	if protocol == messagequeue.DeliveryProtocolV1 {
-		if options.deliverySubmissionID == "" {
-			options.deliverySubmissionID = "internal:" + uuid.NewString()
-		}
 		submissionID = normalizeDeliverySubmissionID(options.deliverySubmissionID)
 	}
 	result, delivery, execErr := s.dispatchPreparedPrompt(
@@ -8029,6 +8083,18 @@ func (s *Service) finishPromptDispatchFailure(
 		rollback.reservedTurnAccepted = true
 	}
 	fallbackStartOptions := options.fallbackStartOptions
+	if options.errandParentOrigin.SenderSessionID != "" {
+		copied := startCreatedSessionOptions{}
+		if fallbackStartOptions != nil {
+			copied = *fallbackStartOptions
+		}
+		copied.errandParentOrigin = options.errandParentOrigin
+		copied.deliverySubmissionID = options.deliverySubmissionID
+		copied.deliveryProtocol = options.deliveryProtocol
+		copied.deliveryPayloadHash = options.deliveryPayloadHash
+		copied.deliveryClaimUpdater = options.deliveryClaimUpdater
+		fallbackStartOptions = &copied
+	}
 	if fallbackStartOptions != nil && options.promptAccepted != nil {
 		copied := *fallbackStartOptions
 		accepted := copied.onInitialPromptAccepted
@@ -10415,6 +10481,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 }
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
+	if err := s.reconcileErrandTerminalDecisions(ctx, identity.SessionID); err != nil {
+		return false, err
+	}
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
 		return false, nil
 	}
@@ -11775,9 +11844,11 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 	if expected, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry); expected == nil {
 		s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)
 	}
-	if session != nil && !models.IsErrandSession(session) &&
-		s.settleParentTurn(ctx, session.ID, errands.SettleCauseUserCancel) {
-		return nil
+	if session != nil && !models.IsErrandSession(session) {
+		outstanding, settleErr := s.settleParentTurn(ctx, session.ID, errands.SettleCauseUserCancel)
+		if outstanding || settleErr != nil {
+			return nil
+		}
 	}
 	s.reconcileCancelledAgentWorkflow(ctx, session, prepared.completionEligible)
 	return nil

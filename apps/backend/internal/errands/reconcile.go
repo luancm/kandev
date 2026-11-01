@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -19,7 +20,6 @@ const (
 	reconcileActionCompletedTurn    = "completed_parent_turn"
 	reconcileActionInterruptedTurn  = "interrupted_parent_turn"
 	reconcileActionFailedLaunch     = "failed_launched_row"
-	reconcileActionDiscardedResult  = "terminal_parent_result_discarded"
 	reconcileActionReleasedDelivery = "orphaned_delivery_claim_released"
 )
 
@@ -28,25 +28,36 @@ const (
 // existing errands stay governed. Each step is independent: a failed row is
 // logged and skipped, and the next boot retries it.
 //
-// Order: launched rows first, then claims whose delivery token reached no
-// parent message, then pending results of terminal parents, then delivery for
-// every parent still holding a pending result.
-func (s *Service) Reconcile(ctx context.Context) error {
+// Order: recover durable owner cascades before launched results, orphaned
+// claims or notifications. Unreadable owners exclude only their task.
+func (s *Service) Reconcile(ctx context.Context) (err error) {
+	teardownErr := s.retryPendingTeardowns(ctx)
+	owners, lifecycleErr := s.reconcileLifecycle(ctx)
+	defer func() { err = errors.Join(teardownErr, lifecycleErr, err) }()
+	if owners == nil {
+		return nil
+	}
+	// Queue recovery shares the normal FIFO and launch guard. Adoption happens
+	// before result recovery, so an admitted reservation is never replayed.
+	s.drainQueued(ctx, owners)
 	rows, err := s.store.ListErrands(ctx)
 	if err != nil {
 		return fmt.Errorf("list errands for reconciliation: %w", err)
 	}
 	for _, row := range rows {
+		if !owners.permits(row) {
+			continue
+		}
 		if err := s.reconcileLaunched(ctx, row); err != nil {
 			fields := s.errandFields(row)
 			fields = append(fields, zap.Error(err))
 			s.logger.Warn("errand reconciliation skipped a launched row", fields...)
 		}
 	}
-	if err := s.releaseUndeliveredClaims(ctx); err != nil {
+	if err := s.reconcileAwaitRecovery(ctx); err != nil {
 		return err
 	}
-	if err := s.discardTerminalParentResults(ctx); err != nil {
+	if err := s.releaseUndeliveredClaims(ctx, owners); err != nil {
 		return err
 	}
 	return s.deliverForPendingParents(ctx)
@@ -55,6 +66,11 @@ func (s *Service) Reconcile(ctx context.Context) error {
 func (s *Service) reconcileLaunched(ctx context.Context, row *models.Errand) error {
 	if row.Lifecycle != models.ErrandLifecycleLaunched {
 		return nil
+	}
+	// Production stores retain exact terminal intents. Session projection alone
+	// cannot decide that an admitted or uncertain initial prompt failed.
+	if _, exact := s.store.(terminalDecisionStore); exact {
+		return s.ReconcileTerminalDecisions(ctx, row.ID)
 	}
 	session, err := s.store.GetTaskSession(ctx, row.ID)
 	if err != nil && !isMissingSession(err) {
@@ -72,6 +88,9 @@ func (s *Service) reconcileLaunched(ctx context.Context, row *models.Errand) err
 // settleAbandonedOrCompleted captures a completed, uncaptured parent-initiated
 // turn, and marks an abandoned one interrupted.
 func (s *Service) settleAbandonedOrCompleted(ctx context.Context, row *models.Errand) error {
+	if _, ok := s.store.(terminalDecisionStore); ok {
+		return s.ReconcileTerminalDecisions(ctx, row.ID)
+	}
 	if s.turns == nil {
 		return nil
 	}
@@ -94,6 +113,9 @@ func (s *Service) settleAbandonedOrCompleted(ctx context.Context, row *models.Er
 		return nil
 	}
 	return s.writeReconciled(ctx, row, reconcileActionInterruptedTurn, func(e *models.Errand) bool {
+		if !sameReconciliationSnapshot(e, row) || e.Lifecycle != models.ErrandLifecycleLaunched || !e.AwaitingResult {
+			return false
+		}
 		e.LastOutcome = models.ErrandOutcomeFailed
 		e.AwaitingResult = false
 		writePendingResult(e, interruptedNotice, false, turnID, models.ErrandResultInterrupted, s.clock.Now())
@@ -103,11 +125,22 @@ func (s *Service) settleAbandonedOrCompleted(ctx context.Context, row *models.Er
 
 func (s *Service) failLaunchedRow(ctx context.Context, row *models.Errand) error {
 	return s.writeReconciled(ctx, row, reconcileActionFailedLaunch, func(e *models.Errand) bool {
+		if !sameReconciliationSnapshot(e, row) || e.Lifecycle != models.ErrandLifecycleLaunched ||
+			e.ResultState != models.ErrandResultNone {
+			return false
+		}
 		e.LastOutcome = models.ErrandOutcomeFailed
 		e.AwaitingResult = false
 		writePendingResult(e, failureNotice, false, e.ResultTurnID, models.ErrandResultFailure, s.clock.Now())
 		return true
 	})
+}
+
+func sameReconciliationSnapshot(current, observed *models.Errand) bool {
+	return current != nil && observed != nil && current.Version == observed.Version &&
+		current.Lifecycle == observed.Lifecycle && current.AwaitingResult == observed.AwaitingResult &&
+		current.LatestSettledTurnID == observed.LatestSettledTurnID &&
+		current.ResultTurnID == observed.ResultTurnID && current.ResultState == observed.ResultState
 }
 
 // writeReconciled applies one version-guarded change under the parent's mutex,
@@ -137,7 +170,7 @@ func (s *Service) logReconciled(errand *models.Errand, action string) {
 // persisted parent transcript. Direct prompts attach the snapshot to their
 // existing user message before provider admission, and queued prompts persist
 // it with their transcript message before dispatch.
-func (s *Service) releaseUndeliveredClaims(ctx context.Context) error {
+func (s *Service) releaseUndeliveredClaims(ctx context.Context, owners *lifecycleInventory) error {
 	if s.receipts == nil {
 		return nil
 	}
@@ -148,7 +181,7 @@ func (s *Service) releaseUndeliveredClaims(ctx context.Context) error {
 	orphaned := map[string]struct{}{}
 	candidates := map[string][]*models.Errand{}
 	for _, row := range rows {
-		if row.ResultState != models.ErrandResultDelivered || row.DeliveryToken == "" ||
+		if !owners.permits(row) || row.ResultState != models.ErrandResultDelivered || row.DeliveryToken == "" ||
 			(row.DeliveredRoute != models.ErrandDeliveryNotification && row.DeliveredRoute != models.ErrandDeliveryTurnContext) {
 			continue
 		}
@@ -186,39 +219,6 @@ func (s *Service) logReleasedDelivery(ctx context.Context, candidate *models.Err
 	s.logReconciled(updated, reconcileActionReleasedDelivery)
 }
 
-// discardTerminalParentResults marks pending results of a parent that can no
-// longer receive them as discarded.
-func (s *Service) discardTerminalParentResults(ctx context.Context) error {
-	rows, err := s.store.ListErrands(ctx)
-	if err != nil {
-		return fmt.Errorf("list errands for terminal parents: %w", err)
-	}
-	for _, row := range rows {
-		if row.ResultState != models.ErrandResultPending {
-			continue
-		}
-		parent, err := s.store.GetTaskSession(ctx, row.ParentSessionID)
-		if err != nil && !isMissingSession(err) {
-			return fmt.Errorf("load parent session: %w", err)
-		}
-		if parent != nil && !isTerminalParent(parent.State) {
-			continue
-		}
-		if err := s.writeReconciled(ctx, row, reconcileActionDiscardedResult, discardResult); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func discardResult(e *models.Errand) bool {
-	if e.ResultState != models.ErrandResultPending {
-		return false
-	}
-	e.ResultState = models.ErrandResultDiscarded
-	return true
-}
-
 func isTerminalParent(state models.TaskSessionState) bool {
 	return state == models.TaskSessionStateCompleted ||
 		state == models.TaskSessionStateFailed ||
@@ -232,16 +232,17 @@ func (s *Service) deliverForPendingParents(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list errands for delivery: %w", err)
 	}
+	owners := s.inspectLifecycle(ctx, rows)
 	parents := map[string]struct{}{}
 	for _, row := range rows {
-		if row.ResultState == models.ErrandResultPending {
+		if owners.permits(row) && row.ResultState == models.ErrandResultPending {
 			parents[row.ParentSessionID] = struct{}{}
 		}
 	}
 	for _, parentID := range sortedKeys(parents) {
 		s.deliverPending(ctx, parentID)
 	}
-	return nil
+	return owners.err
 }
 
 func sortedTokens(set map[string]struct{}) []string {

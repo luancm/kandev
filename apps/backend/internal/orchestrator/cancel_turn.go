@@ -107,7 +107,7 @@ func (s *Service) runTurnCancellationOwned(ctx context.Context, taskID, sessionI
 	// A user cancel never starts a result notification; pending results wait
 	// for a later parent turn.
 	if !models.IsErrandSession(session) {
-		s.settleParentTurn(ctx, sessionID, errands.SettleCauseUserCancel)
+		_, _ = s.settleParentTurn(ctx, sessionID, errands.SettleCauseUserCancel)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -249,6 +250,11 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if observation := readAwaitObservation(event); observation != nil && event.TaskID != "" {
+		if err := db.LockErrandDelivery(ctx, tx, r.db.DriverName(), event.TaskID); err != nil {
+			return false, err
+		}
+	}
 	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), []string{event.SessionID}, []string{event.StreamID}, !event.Terminal); err != nil {
 		return false, err
 	}
@@ -286,6 +292,9 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 		if err != nil {
 			return 0, err
 		}
+	}
+	if err := r.receiveErrandAwaitReceiptTx(ctx, tx, event); err != nil {
+		return 0, err
 	}
 	if !cursorExists {
 		cursor = models.AgentDeliveryCursor{

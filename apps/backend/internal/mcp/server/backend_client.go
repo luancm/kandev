@@ -167,6 +167,7 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
+	mcporigin.AttachAwaitInvocation(ctx, msg)
 	if mcporigin.IsTrustedInternalCall(ctx) {
 		mcporigin.AttachTrustedInternalCall(msg)
 	}

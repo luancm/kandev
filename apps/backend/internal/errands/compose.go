@@ -2,7 +2,9 @@ package errands
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,22 +76,19 @@ func (s *Service) ComposeParentTurn(
 	}
 	unlock := s.parentLocks.lock(parentSessionID)
 	defer unlock()
-	included, err := s.includedErrands(ctx, parentSessionID)
-	if err != nil || len(included) == 0 {
-		return Composition{}, err
-	}
 	token := uuid.NewString()
-	claimed, err := s.claimPending(ctx, included, route, token)
-	if err != nil {
-		return Composition{}, err
+	for attempt := 0; attempt < claimSnapshotAttempts; attempt++ {
+		result, err := s.composeParentSnapshot(ctx, parentSessionID, route, token)
+		if !errors.Is(err, models.ErrErrandVersionConflict) {
+			return result, err
+		}
 	}
-	block := renderStatusBlock(included, claimed, s.clock.Now())
-	return Composition{Token: token, Block: block, Route: route, Items: deliveryItems(included, claimed)}, nil
+	return Composition{Token: token}, fmt.Errorf("compose errand snapshot retry exhausted: %w", models.ErrErrandVersionConflict)
 }
 
-// ReleaseTurnClaim returns every result still delivered under token to pending.
+// ReleaseTurnClaim releases exact receipts, preserving successor generations.
 func (s *Service) ReleaseTurnClaim(ctx context.Context, token string) error {
-	return s.releaseClaim(ctx, token)
+	return s.releaseClaim(ctx, token, models.ErrandDeliveryTurnContext, models.ErrandDeliveryNotification)
 }
 
 func (s *Service) parentAcceptsBlock(ctx context.Context, parentSessionID string) bool {
@@ -103,11 +102,29 @@ func (s *Service) parentAcceptsBlock(ctx context.Context, parentSessionID string
 	return true
 }
 
-func (s *Service) includedErrands(ctx context.Context, parentSessionID string) ([]composedErrand, error) {
-	rows, err := s.store.ListErrandsByParent(ctx, parentSessionID)
+const claimSnapshotAttempts = 3
+
+func (s *Service) composeParentSnapshot(ctx context.Context, parent string, route models.ErrandDeliveryRoute, token string) (Composition, error) {
+	rows, err := s.store.ListErrandsByParent(ctx, parent)
 	if err != nil {
-		return nil, fmt.Errorf("list errands for status block: %w", err)
+		return Composition{Token: token}, err
 	}
+	included, err := s.includedErrands(ctx, rows)
+	if err != nil {
+		return Composition{Token: token}, err
+	}
+	if len(included) == 0 {
+		return Composition{}, nil
+	}
+	claimed, err := s.claimPending(ctx, included, route, token, models.ErrandInventory(rows))
+	if err != nil {
+		return Composition{Token: token}, err
+	}
+	block := renderStatusBlock(included, claimed, s.clock.Now())
+	return Composition{Token: token, Block: block, Route: route, Items: deliveryItems(included, claimed)}, nil
+}
+
+func (s *Service) includedErrands(ctx context.Context, rows []*models.Errand) ([]composedErrand, error) {
 	var included []composedErrand
 	for _, row := range rows {
 		status, err := s.Project(ctx, row)
@@ -175,39 +192,29 @@ func errandBefore(live bool, when time.Time, id string, prevLive bool, prevWhen 
 }
 
 func (s *Service) claimPending(
-	ctx context.Context, included []composedErrand, route models.ErrandDeliveryRoute, token string,
+	ctx context.Context, included []composedErrand, route models.ErrandDeliveryRoute, token string, inventory []models.ErrandClaimCandidate,
 ) (map[string]*models.Errand, error) {
 	claimed := map[string]*models.Errand{}
-	now := s.clock.Now()
+	var candidates []models.ErrandClaimCandidate
+	var taskID, parentID string
 	for _, row := range included {
+		taskID, parentID = row.errand.TaskID, row.errand.ParentSessionID
 		if row.errand.ResultState != models.ErrandResultPending {
 			continue
 		}
-		updated, changed, err := s.update(ctx, row.errand.ID, func(e *models.Errand) bool {
-			return claimResult(e, route, token, now)
-		})
-		if err != nil {
-			return claimed, fmt.Errorf("claim errand result: %w", err)
-		}
-		if changed {
-			claimed[updated.ID] = updated
-			countDelivery(route)
-			s.logger.Info("errand.delivered", s.errandFields(updated, "route", string(route))...)
-			s.publish(ctx, updated)
-		}
+		candidates = append(candidates, models.ErrandClaimCandidate{ID: row.errand.ID, Version: row.errand.Version})
+	}
+	rows, err := s.store.ClaimResults(ctx, taskID, parentID, route, token, candidates, s.clock.Now(), inventory)
+	if err != nil {
+		return nil, fmt.Errorf("claim errand results: %w", err)
+	}
+	for _, updated := range rows {
+		claimed[updated.ID] = updated
+		countDelivery(route)
+		s.logger.Info("errand.delivered", s.errandFields(updated, "route", string(route))...)
+		s.publish(ctx, updated)
 	}
 	return claimed, nil
-}
-
-func claimResult(e *models.Errand, route models.ErrandDeliveryRoute, token string, now time.Time) bool {
-	if e.ResultState != models.ErrandResultPending {
-		return false
-	}
-	e.ResultState = models.ErrandResultDelivered
-	e.DeliveredRoute = route
-	e.DeliveryToken = token
-	e.DeliveredAt = &now
-	return true
 }
 
 func renderStatusBlock(included []composedErrand, claimed map[string]*models.Errand, now time.Time) string {
@@ -318,7 +325,7 @@ func deliveryRoute(route models.ErrandDeliveryRoute) bool {
 	}
 }
 
-func (s *Service) releaseClaim(ctx context.Context, token string) error {
+func (s *Service) releaseClaim(ctx context.Context, token string, routes ...models.ErrandDeliveryRoute) error {
 	if token == "" {
 		return nil
 	}
@@ -326,26 +333,52 @@ func (s *Service) releaseClaim(ctx context.Context, token string) error {
 	if err != nil {
 		return fmt.Errorf("list errands to release delivery: %w", err)
 	}
-	parents := map[string]struct{}{}
+	type owner struct{ task, parent string }
+	groups := map[owner]struct{}{}
 	for _, row := range rows {
 		if row.DeliveryToken != token || row.ResultState != models.ErrandResultDelivered {
 			continue
 		}
-		unlock := s.parentLocks.lock(row.ParentSessionID)
-		released, changed, updateErr := s.update(ctx, row.ID, releaseResult)
-		unlock()
-		if updateErr != nil {
-			return fmt.Errorf("release errand delivery: %w", updateErr)
+		if len(routes) > 0 && !slices.Contains(routes, row.DeliveredRoute) {
+			continue
 		}
-		if changed {
-			parents[released.ParentSessionID] = struct{}{}
-			s.publish(ctx, released)
+		key := owner{row.TaskID, row.ParentSessionID}
+		groups[key] = struct{}{}
+	}
+	for key := range groups {
+		if err := s.releaseParentClaim(ctx, key.task, key.parent, token, routes); err != nil {
+			return err
 		}
 	}
-	for _, parentID := range sortedKeys(parents) {
-		s.wakeAwaits(parentID)
-		s.deliverPending(ctx, parentID)
+	return nil
+}
+
+func (s *Service) releaseParentClaim(ctx context.Context, taskID, parentID, token string, routes []models.ErrandDeliveryRoute) error {
+	stored, err := s.store.ListErrandResultClaims(ctx, taskID, parentID, token)
+	if err != nil {
+		return err
 	}
+	claims := slices.DeleteFunc(stored, func(c models.ErrandResultClaim) bool { return len(routes) > 0 && !slices.Contains(routes, c.Route) })
+	if len(claims) == 0 {
+		return nil
+	}
+	var released []*models.Errand
+	if claims[0].Route == models.ErrandDeliveryAwait {
+		released, err = s.store.AbortAwait(ctx, taskID, parentID, token)
+	} else {
+		released, err = s.store.ReleaseErrandResultClaims(ctx, taskID, parentID, claims)
+	}
+	if err != nil {
+		return fmt.Errorf("release errand delivery: %w", err)
+	}
+	if len(released) == 0 {
+		return nil
+	}
+	for _, row := range released {
+		s.publish(ctx, row)
+	}
+	s.wakeAwaits(parentID)
+	s.deliverPending(ctx, parentID)
 	return nil
 }
 

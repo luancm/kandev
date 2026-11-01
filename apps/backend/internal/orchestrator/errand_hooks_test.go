@@ -69,14 +69,14 @@ func TestCeilingSweepTickDrainsQueuedErrandsAfterDeferredLaunches(t *testing.T) 
 }
 
 // @covers AC-TASKS-ERRANDS-007.1 AC-TASKS-ERRANDS-007.2
-func TestStopSessionRecordsTheUserStopBeforeStoppingAndCascadesAfterSuccess(t *testing.T) {
+func TestStopSessionCascadesOrdinaryParentAfterSuccess(t *testing.T) {
 	ctx := context.Background()
 	svc, _, _, sessionID, _ := newExecutionLessStopService(t, models.TaskSessionStateWaitingForInput)
 	controller := &recordingErrandController{}
 	svc.SetErrandController(controller)
 
 	require.NoError(t, svc.StopSession(ctx, sessionID, "stopped via API", false))
-	require.Equal(t, []string{"cancel-on-stop:" + sessionID, "cascade-parent:" + sessionID}, controller.seen())
+	require.Equal(t, []string{"cascade-parent:" + sessionID}, controller.seen())
 }
 
 func TestStopSessionDoesNotCascadeWhenTheStopFails(t *testing.T) {
@@ -86,7 +86,7 @@ func TestStopSessionDoesNotCascadeWhenTheStopFails(t *testing.T) {
 	svc.SetErrandController(controller)
 
 	require.Error(t, svc.StopSession(ctx, sessionID, "stopped via API", false))
-	require.Equal(t, []string{"cancel-on-stop:" + sessionID}, controller.seen(),
+	require.Equal(t, []string(nil), controller.seen(),
 		"a failed stop leaves the parent running, so its errands keep running")
 }
 
@@ -111,7 +111,7 @@ func TestDeleteSessionRecordsTheDeletionAndCascadesToItsErrands(t *testing.T) {
 	f.svc.SetErrandController(controller)
 
 	require.NoError(t, f.svc.DeleteSession(ctx, "s1"))
-	require.Equal(t, []string{"cancel-on-stop:s1", "cascade-parent:s1"}, controller.seen())
+	require.Equal(t, []string{"cascade-parent:s1"}, controller.seen())
 }
 
 func TestCancelErrandsForTaskQueuesTheTaskCascade(t *testing.T) {

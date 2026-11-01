@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,11 +28,53 @@ import (
 
 type authErrandTestLauncher struct{}
 
-func (authErrandTestLauncher) LaunchErrand(context.Context, errands.LaunchRequest) error { return nil }
+func (authErrandTestLauncher) LaunchErrand(_ context.Context, r errands.LaunchRequest) (errands.LaunchResult, error) {
+	return errands.LaunchResult{Disposition: errands.LaunchAdmitted, SessionID: r.ErrandID, TurnID: r.TurnID, SubmissionID: r.SubmissionID}, nil
+}
 
-type authErrandTestStopper struct{}
+type authErrandTestStopper struct {
+	store interface {
+		errands.Store
+		errands.TeardownIntentStore
+	}
+}
 
 func (authErrandTestStopper) StopErrandSession(context.Context, string, string) error { return nil }
+
+// This fixture owns no physical runtime and acknowledges the exact stored intent.
+func (s authErrandTestStopper) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
+	target := errands.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID}
+	session, err := s.store.GetTaskSession(ctx, row.ID)
+	switch {
+	case errors.Is(err, models.ErrTaskSessionNotFound):
+		target.FirstTurnID, target.ReservedSubmissionID = row.FirstTurnID, row.SubmissionID
+	case err != nil:
+		return err
+	default:
+		target.SessionIncarnation, target.NoTurn = session.QueueIncarnationID, true
+	}
+	if err := commit(target); err != nil {
+		return err
+	}
+	current, err := s.store.GetErrand(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	_, err = s.RetryErrandTeardown(ctx, *current.TeardownIntent)
+	return err
+}
+
+func (s authErrandTestStopper) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
+	row, err := s.store.GetErrand(ctx, intent.Target.SessionID)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.store.TransitionErrandTeardownIntent(ctx, row.ID, intent.ID, row.Version, models.ErrandTeardownIntentCompleted)
+	if err != nil {
+		return "", err
+	}
+	return errands.TeardownCompleted, nil
+}
 
 type authErrandTestProfiles struct{}
 
@@ -103,7 +146,7 @@ func TestGatewayAuthorizesQueuedErrandIDsThroughTheirOwningTask(t *testing.T) {
 	}))
 
 	errService, err := errands.New(errands.Dependencies{
-		Store: taskRepo, Launcher: authErrandTestLauncher{}, Stopper: authErrandTestStopper{},
+		Store: taskRepo, Launcher: authErrandTestLauncher{}, Stopper: authErrandTestStopper{store: taskRepo},
 		Profiles: authErrandTestProfiles{}, MCP: authErrandTestMCP{}, Events: authErrandTestEvents{},
 	})
 	require.NoError(t, err)

@@ -2632,7 +2632,6 @@ func registerMCPAndDebugRoutes(
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
-	mcpHandlers.SetErrandParentPromptRecorder(p.orchestratorSvc)
 	if p.errandService != nil {
 		mcpHandlers.SetErrands(p.errandService, p.features.Errands)
 	}

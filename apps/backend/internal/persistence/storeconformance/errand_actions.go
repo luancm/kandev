@@ -3,6 +3,7 @@ package storeconformance
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	testconformance "github.com/kandev/kandev/internal/testutil/storeconformance"
@@ -22,24 +23,9 @@ func errandAction() apiAction {
 	}
 	action.read = readConformanceErrand
 	action.update = func(s testconformance.ScenarioContext, id string, _ any) error {
-		return updateConformanceErrand(s, id, func(errand *taskmodels.Errand) {
-			errand.Lifecycle = taskmodels.ErrandLifecycleLaunched
-			errand.ResultState = taskmodels.ErrandResultPending
-			errand.ResultText = "updated-" + id
-		})
+		return updateConformanceErrand(s, id, markConformanceErrandCancelled)
 	}
-	action.assertUpdated = func(before, after any, id string) error {
-		previous, okBefore := before.(*taskmodels.Errand)
-		current, okAfter := after.(*taskmodels.Errand)
-		if !okBefore || !okAfter || previous == nil || current == nil {
-			return fmt.Errorf("GetErrand returned %T and %T", before, after)
-		}
-		if current.ResultText != "updated-"+id || current.Version != previous.Version+1 {
-			return fmt.Errorf("errand after update = (%q, version %d), want (%q, version %d)",
-				current.ResultText, current.Version, "updated-"+id, previous.Version+1)
-		}
-		return nil
-	}
+	action.assertUpdated = assertConformanceErrandTeardownIntent
 	action.delete = func(s testconformance.ScenarioContext, id string) error {
 		store, err := taskFactory(s)
 		if err != nil {
@@ -67,6 +53,38 @@ func errandAction() apiAction {
 	return action
 }
 
+func markConformanceErrandCancelled(errand *taskmodels.Errand) {
+	errand.Lifecycle = taskmodels.ErrandLifecycleCancelled
+	errand.CancelSource = taskmodels.ErrandCancelSourceUser
+	errand.ResultState = taskmodels.ErrandResultPending
+	errand.ResultText = "updated-" + errand.ID
+	errand.TeardownIntent = &taskmodels.ErrandTeardownIntent{
+		Version: taskmodels.ErrandTeardownIntentVersion, ID: "intent-" + errand.ID,
+		State:       taskmodels.ErrandTeardownIntentPending,
+		RequestedAt: time.Date(2026, time.November, 1, 12, 30, 0, 0, time.UTC),
+		Target: taskmodels.ErrandTeardownTarget{
+			TaskID: errand.TaskID, SessionID: errand.ID,
+			FirstTurnID: errand.FirstTurnID, ReservedSubmissionID: errand.SubmissionID,
+		},
+	}
+}
+
+func assertConformanceErrandTeardownIntent(before, after any, id string) error {
+	previous, okBefore := before.(*taskmodels.Errand)
+	current, okAfter := after.(*taskmodels.Errand)
+	if !okBefore || !okAfter || previous == nil || current == nil {
+		return fmt.Errorf("GetErrand returned %T and %T", before, after)
+	}
+	if current.ResultText != "updated-"+id || current.Version != previous.Version+1 ||
+		current.Lifecycle != taskmodels.ErrandLifecycleCancelled || current.CancelSource != taskmodels.ErrandCancelSourceUser ||
+		current.TeardownIntent == nil || current.TeardownIntent.State != taskmodels.ErrandTeardownIntentPending ||
+		current.TeardownIntent.Target.FirstTurnID != previous.FirstTurnID ||
+		current.TeardownIntent.Target.ReservedSubmissionID != previous.SubmissionID {
+		return fmt.Errorf("errand after update = (%+v, version %d), want cancelled with pending exact teardown intent at version %d", current, current.Version, previous.Version+1)
+	}
+	return nil
+}
+
 func createConformanceErrand(s testconformance.ScenarioContext, id, taskID, parentSessionID string) (*taskmodels.Errand, error) {
 	store, err := taskFactory(s)
 	if err != nil {
@@ -76,7 +94,8 @@ func createConformanceErrand(s testconformance.ScenarioContext, id, taskID, pare
 		ID: id, TaskID: taskID, ParentSessionID: parentSessionID,
 		Title: "Conformance errand", Objective: "Conformance objective",
 		MCPServerIDs: []string{"conformance-mcp"},
-		Lifecycle:    taskmodels.ErrandLifecycleQueued, ResultState: taskmodels.ErrandResultNone,
+		FirstTurnID:  "first-turn-" + id, SubmissionID: "submission-" + id,
+		Lifecycle: taskmodels.ErrandLifecycleQueued, ResultState: taskmodels.ErrandResultNone,
 	}
 	if err := invokeError(store, "CreateErrand", s.Context, errand); err != nil {
 		return nil, err

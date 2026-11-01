@@ -7,12 +7,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -27,6 +29,14 @@ type errandLaunchManager struct {
 	captured     sync.Mutex
 	bound        []string
 	launchedWith []*executor.LaunchAgentRequest
+	runtimes     map[string]*agentruntime.AgentExecution
+}
+
+func (m *errandLaunchManager) GetExecution(id string) (*agentruntime.AgentExecution, bool) {
+	m.captured.Lock()
+	defer m.captured.Unlock()
+	execution, ok := m.runtimes[id]
+	return execution, ok
 }
 
 func (m *errandLaunchManager) SetInitialDeliverySubmissionID(_ context.Context, _, submissionID string) error {
@@ -37,6 +47,7 @@ func (m *errandLaunchManager) SetInitialDeliverySubmissionID(_ context.Context, 
 }
 
 type errandLaunchFixture struct {
+	t        *testing.T
 	svc      *Service
 	repo     *sqliterepo.Repository
 	taskRepo *mockTaskRepo
@@ -75,31 +86,54 @@ func newErrandLaunchFixture(t *testing.T) *errandLaunchFixture {
 	}
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf1", Name: "Work", AgentProfileID: "step-profile"}
-	f := &errandLaunchFixture{repo: repo, taskRepo: taskRepo, parent: "parent-1", taskID: "task-1", launchError: launchError}
-	f.manager = &errandLaunchManager{mockAgentManager: &mockAgentManager{}}
+	f := &errandLaunchFixture{t: t, repo: repo, taskRepo: taskRepo, parent: "parent-1", taskID: "task-1", launchError: launchError}
+	f.manager = &errandLaunchManager{mockAgentManager: &mockAgentManager{}, runtimes: map[string]*agentruntime.AgentExecution{}}
 	f.manager.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 		f.manager.captured.Lock()
+		id := "execution-" + req.SessionID
+		f.manager.runtimes[id] = &agentruntime.AgentExecution{ID: id, TaskID: req.TaskID, SessionID: req.SessionID, DeliveryIncarnationID: req.DeliveryIncarnationID}
 		f.manager.launchedWith = append(f.manager.launchedWith, req)
 		f.manager.captured.Unlock()
-		return &executor.LaunchAgentResponse{AgentExecutionID: "errand-execution"}, nil
+		return &executor.LaunchAgentResponse{AgentExecutionID: id}, nil
 	}
 	f.manager.getExecutionIDForSessionFunc = func(_ context.Context, sessionID string) (string, error) {
+		if _, ok := f.manager.GetExecution("execution-" + sessionID); !ok {
+			return "", agentruntime.ErrNoExecutionForSession
+		}
 		return "execution-" + sessionID, nil
 	}
+	f.manager.getPromptActivityForSessionFunc = func(sessionID string) (string, uint64, uint64, time.Time, error) {
+		id, err := f.manager.getExecutionIDForSessionFunc(context.Background(), sessionID)
+		return id, 0, 0, time.Time{}, err
+	}
+	f.manager.stopAgentWithReasonFunc = func(_ context.Context, id, _ string, _ bool) error {
+		f.manager.captured.Lock()
+		delete(f.manager.runtimes, id)
+		f.manager.captured.Unlock()
+		return nil
+	}
 	f.svc = createTestServiceWithScheduler(repo, stepGetter, taskRepo, f.manager)
+	turnBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(turnBus.Close)
 	f.svc.SetTurnService(taskservice.NewService(taskservice.Repos{
 		Tasks: repo, TaskRepos: repo, Workspaces: repo, Workflows: repo, Messages: repo, Turns: repo,
 		Sessions: repo, Executors: repo, TaskEnvironments: repo,
-	}, nil, testLogger(), taskservice.RepositoryDiscoveryConfig{}))
+	}, turnBus, testLogger(), taskservice.RepositoryDiscoveryConfig{}))
 	f.svc.executor.SetOnTaskRuntimeStateReconcile(f.svc.reconcileTaskStateForRuntime)
 	return f
 }
 
 func (f *errandLaunchFixture) request() errands.LaunchRequest {
-	return errands.LaunchRequest{
+	req := errands.LaunchRequest{
 		ErrandID: "errand-1", TaskID: f.taskID, ParentSessionID: f.parent, Title: "Audit", Objective: "audit the handlers",
 		AgentProfileID: "errand-profile", TurnID: "turn-1", SubmissionID: "prompt:errand:sub-1",
 	}
+	if _, err := f.repo.GetErrand(f.t.Context(), req.ErrandID); errors.Is(err, models.ErrErrandNotFound) {
+		seedErrandLaunchReservation(f.t, f, req)
+	} else {
+		require.NoError(f.t, err)
+	}
+	return req
 }
 
 // @covers AC-TASKS-ERRANDS-001.1 AC-TASKS-ERRANDS-001.2
@@ -131,7 +165,7 @@ func TestLaunchErrandSessionCreatesOneNonPrimaryErrandSessionWithReservedIdentit
 	require.Equal(t, "prompt:errand:sub-1", launched.InitialDeliverySubmissionID)
 	require.Contains(t, f.manager.bound, "prompt:errand:sub-1")
 
-	turn, err := f.repo.GetActiveTurnBySessionID(ctx, "errand-1")
+	turn, err := f.repo.GetTurn(ctx, "turn-1")
 	require.NoError(t, err)
 	require.NotNil(t, turn)
 	require.Equal(t, "turn-1", turn.ID, "the first turn honors the reserved turn ID")
@@ -234,7 +268,9 @@ func TestErrandAdapterMapsCeilingRefusalAndStopsOnlyExistingSessions(t *testing.
 	require.True(t, f.svc.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: "occupier", sessionID: "occupier-session", origin: launchOriginAutomatic, seam: "test-setup",
 	}).admitted)
-	require.ErrorIs(t, adapter.LaunchErrand(ctx, f.request()), errands.ErrCeilingRefused)
+	result, err := adapter.LaunchErrand(ctx, f.request())
+	require.NoError(t, err)
+	require.Equal(t, errands.LaunchQueued, result.Disposition)
 
 	require.NoError(t, adapter.StopErrandSession(ctx, "never-created", errands.StopReasonErrandCancelled),
 		"a queued errand has no session to stop")
@@ -325,8 +361,12 @@ func TestErrandMCPInheritanceLeavesTheDefaultScopeWhenNothingRemainsEnabled(t *t
 func TestErrandAdapterTreatsAnAlreadyGoneRuntimeAsStopped(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
+	newErrandServiceOnRealStack(t, f)
 	_, err := f.svc.LaunchErrandSession(ctx, f.request())
 	require.NoError(t, err)
+	f.manager.captured.Lock()
+	delete(f.manager.runtimes, "execution-errand-1")
+	f.manager.captured.Unlock()
 	f.manager.getExecutionIDForSessionFunc = func(_ context.Context, sessionID string) (string, error) {
 		return "", fmt.Errorf("%w: %s", agentruntime.ErrNoExecutionForSession, sessionID)
 	}

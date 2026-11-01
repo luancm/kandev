@@ -2,43 +2,98 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-type recordingErrandPromptRecorder struct {
-	calls [][2]string
+type uncertainErrandPromptTestError struct{}
+
+func (uncertainErrandPromptTestError) Error() string                     { return "parent prompt admission is uncertain" }
+func (uncertainErrandPromptTestError) ErrandParentPromptUncertain() bool { return true }
+
+type acceptedErrandPromptTestError struct{}
+
+func (acceptedErrandPromptTestError) Error() string                { return "accepted parent prompt decision failed" }
+func (acceptedErrandPromptTestError) DetachedResumeAccepted() bool { return true }
+
+func TestErrandParentPromptErrorRetainsAcceptedOrUncertainEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		err      error
+		messages int
+	}{
+		{"refused", errors.New("not dispatched"), 0},
+		{"accepted", acceptedErrandPromptTestError{}, 1},
+		{"uncertain", uncertainErrandPromptTestError{}, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, repo := newTestTaskService(t)
+			_, task, parent := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+			child := &models.TaskSession{ID: "admission-child", TaskID: task.ID, Role: models.SessionRoleErrand,
+				ParentSessionID: parent.ID, State: models.TaskSessionStateWaitingForInput}
+			require.NoError(t, repo.CreateTaskSession(t.Context(), child))
+			h, orch := newMessageTaskHandler(t, svc, repo)
+			orch.promptErrFirst = test.err
+			metadata := map[string]interface{}{}
+			ctx := h.withErrandParentPrompt(t.Context(), task.ID, parent.ID, metadata)
+			_, err := h.promptPreparedTaskMessage(ctx, task.ID, child, "next", metadata, nil)
+			require.Error(t, err)
+			messages, err := svc.ListMessages(t.Context(), child.ID)
+			require.NoError(t, err)
+			require.Len(t, messages, test.messages, "accepted or unknown dispatch must keep its transcript evidence")
+		})
+	}
 }
 
-func (r *recordingErrandPromptRecorder) OnErrandParentPromptAdmitted(_ context.Context, errandSessionID, senderSessionID string) error {
-	r.calls = append(r.calls, [2]string{errandSessionID, senderSessionID})
-	return nil
-}
-
-func TestRecordErrandParentPromptTrustsOnlySenderSessionOfSenderTask(t *testing.T) {
+func TestErrandParentQueueIsNotProviderAdmission(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	h, _ := newMessageTaskHandler(t, svc, repo)
-	recorder := &recordingErrandPromptRecorder{}
-	h.SetErrandParentPromptRecorder(recorder)
-	ctx := context.Background()
-
-	h.recordErrandParentPrompt(ctx, target.ID, primary.ID, "errand-session")
-	assert.Equal(t, [][2]string{{"errand-session", primary.ID}}, recorder.calls)
-
-	h.recordErrandParentPrompt(ctx, "some-other-task", primary.ID, "errand-session")
-	h.recordErrandParentPrompt(ctx, target.ID, "unknown-session", "errand-session")
-	h.recordErrandParentPrompt(ctx, target.ID, "", "errand-session")
-	assert.Len(t, recorder.calls, 1, "a sender session not owned by the sender task must not be trusted")
-}
-
-func TestRecordErrandParentPromptWithoutRecorderIsNoOp(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	h, _ := newMessageTaskHandler(t, svc, repo)
-	assert.NotPanics(t, func() {
-		h.recordErrandParentPrompt(context.Background(), "task", "session", "errand-session")
+	_, task, parent := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	child := &models.TaskSession{ID: "admission-child", TaskID: task.ID, Role: models.SessionRoleErrand,
+		ParentSessionID: parent.ID, State: models.TaskSessionStateRunning}
+	require.NoError(t, repo.CreateTaskSession(t.Context(), child))
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
+		"task_id": task.ID, "session_id": child.ID, "prompt": "next",
+		"sender_task_id": task.ID, "sender_session_id": parent.ID,
 	})
+	response, err := h.handleMessageTask(t.Context(), msg)
+	require.NoError(t, err)
+	var view map[string]interface{}
+	require.NoError(t, json.Unmarshal(response.Payload, &view))
+	require.Equal(t, "queued", view["status"])
+	status := orch.queue.GetStatus(t.Context(), child.ID)
+	require.Len(t, status.Entries, 1)
+	require.Equal(t, parent.ID, status.Entries[0].Metadata["errand_parent_sender_session_id"], "retain verified sender for later dispatch")
+}
+
+func TestErrandParentPromptTrustsOnlySenderSessionOfSenderTask(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, task, parent := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	h, _ := newMessageTaskHandler(t, svc, repo)
+	for _, test := range []struct {
+		task, sender string
+		trusted      bool
+	}{
+		{task.ID, parent.ID, true}, {"other-task", parent.ID, false},
+		{task.ID, "unknown", false}, {task.ID, "", false},
+	} {
+		metadata := map[string]interface{}{errands.ParentPromptSenderMetadataKey: "forged"}
+		ctx := h.withErrandParentPrompt(context.Background(), test.task, test.sender, metadata)
+		origin := errands.ParentPromptOriginFromContext(ctx)
+		if test.trusted {
+			require.Equal(t, parent.ID, origin.SenderSessionID)
+			require.NotEmpty(t, origin.SubmissionID)
+			require.Equal(t, parent.ID, metadata[errands.ParentPromptSenderMetadataKey])
+		} else {
+			require.Empty(t, origin)
+			require.NotContains(t, metadata, errands.ParentPromptSenderMetadataKey)
+		}
+	}
 }

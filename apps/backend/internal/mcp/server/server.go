@@ -120,6 +120,8 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
+	awaitAbortStore            AwaitAbortStore
+	awaitAbortPending          map[string]models.ErrandAwaitIdentity
 	backend                    BackendClient
 	sessionID                  string
 	taskID                     string

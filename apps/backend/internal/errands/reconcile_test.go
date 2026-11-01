@@ -2,7 +2,10 @@ package errands
 
 import (
 	"context"
+	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -10,12 +13,51 @@ import (
 // reconcileTurns reports a fixed latest turn for startup reconciliation.
 type reconcileTurns struct {
 	fakeTurns
-	turnID string
-	view   TurnView
+	turnID        string
+	view          TurnView
+	latestStarted chan struct{}
+	latestRelease chan struct{}
 }
 
 func (r *reconcileTurns) LatestTurn(context.Context, string) (string, TurnView, error) {
+	if r.latestStarted != nil {
+		r.latestStarted <- struct{}{}
+		<-r.latestRelease
+	}
 	return r.turnID, r.view, nil
+}
+
+type reconcileFailureConflictStore struct {
+	Store
+	attempted chan struct{}
+	release   chan struct{}
+	cancelled chan struct{}
+	once      sync.Once
+}
+
+func (s *reconcileFailureConflictStore) UpdateErrand(ctx context.Context, row *models.Errand) error {
+	if row.Lifecycle == models.ErrandLifecycleCancelled {
+		err := s.Store.UpdateErrand(ctx, row)
+		if err == nil {
+			select {
+			case s.cancelled <- struct{}{}:
+			default:
+			}
+		}
+		return err
+	}
+	if row.ResultKind == models.ErrandResultFailure && row.ResultText == failureNotice {
+		blocked := false
+		s.once.Do(func() {
+			blocked = true
+			s.attempted <- struct{}{}
+			<-s.release
+		})
+		if blocked {
+			return models.ErrErrandVersionConflict
+		}
+	}
+	return s.Store.UpdateErrand(ctx, row)
 }
 
 // fakeReceipts reports which delivery tokens reached a parent message.
@@ -91,6 +133,105 @@ func TestReconcileInterruptsAbandonedParentTurn(t *testing.T) {
 	if row.ResultKind != models.ErrandResultInterrupted || row.ResultText != interruptedNotice ||
 		row.LastOutcome != models.ErrandOutcomeFailed || row.AwaitingResult {
 		t.Fatalf("row = kind %q outcome %q awaiting %v, want an interrupted failure", row.ResultKind, row.LastOutcome, row.AwaitingResult)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.5, AC-TASKS-ERRANDS-007.1
+func TestReconcileStaleSettlementDoesNotOverwriteCancellation(t *testing.T) {
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	h.store.setSessionState(errand.ID, models.TaskSessionStateWaitingForInput)
+	reader := &reconcileTurns{
+		fakeTurns:     fakeTurns{views: map[string]TurnView{}},
+		turnID:        errand.FirstTurnID,
+		view:          TurnView{EarliestUserSender: testParent},
+		latestStarted: make(chan struct{}, 1),
+		latestRelease: make(chan struct{}),
+	}
+	h.service.SetTurnReader(reader)
+
+	reconciled := make(chan error, 1)
+	go func() { reconciled <- h.service.Reconcile(t.Context()) }()
+	select {
+	case <-reader.latestStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reconciliation did not reach the latest-turn barrier")
+	}
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(reader.latestRelease) }) })
+	if _, err := h.service.Cancel(t.Context(), cancelRequest(errand, models.ErrandCancelSourceUser)); err != nil {
+		t.Fatalf("cancel before stale reconciliation write: %v", err)
+	}
+	cancelled, err := h.store.GetErrand(t.Context(), errand.ID)
+	if err != nil {
+		t.Fatalf("read cancelled row: %v", err)
+	}
+	release.Do(func() { close(reader.latestRelease) })
+	select {
+	case err := <-reconciled:
+		if err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Reconcile did not return")
+	}
+	after, err := h.store.GetErrand(t.Context(), errand.ID)
+	if err != nil {
+		t.Fatalf("read row after reconciliation: %v", err)
+	}
+	if !reflect.DeepEqual(after, expectedAfterTeardownReceipt(cancelled, after)) {
+		t.Fatalf("stale interrupted settlement changed cancelled row:\nbefore: %+v\nafter:  %+v", cancelled, after)
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-003.5, AC-TASKS-ERRANDS-007.1
+func TestReconcileStaleLaunchFailureDoesNotOverwriteCancellation(t *testing.T) {
+	h := newHarness(t)
+	errand := h.mustStart("audit").Errand
+	h.store.setSessionState(errand.ID, models.TaskSessionStateFailed)
+	store := &reconcileFailureConflictStore{
+		Store: h.store, attempted: make(chan struct{}, 1), release: make(chan struct{}),
+		cancelled: make(chan struct{}, 1),
+	}
+	h.service.store = store
+	reconciled := make(chan error, 1)
+	go func() { reconciled <- h.service.Reconcile(t.Context()) }()
+	select {
+	case <-store.attempted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reconciliation did not reach the failure write barrier")
+	}
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(store.release) }) })
+	cancelledBy := make(chan error, 1)
+	go func() { cancelledBy <- cancelForSettlementRace(t.Context(), h, errand, "user") }()
+	select {
+	case <-store.cancelled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancellation did not commit before stale failure retry")
+	}
+	cancelled, err := h.store.GetErrand(t.Context(), errand.ID)
+	if err != nil {
+		t.Fatalf("read cancelled row: %v", err)
+	}
+	release.Do(func() { close(store.release) })
+	select {
+	case err := <-reconciled:
+		if err != nil {
+			t.Fatalf("Reconcile: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Reconcile did not return")
+	}
+	if err := <-cancelledBy; err != nil {
+		t.Fatalf("cancellation: %v", err)
+	}
+	after, err := h.store.GetErrand(t.Context(), errand.ID)
+	if err != nil {
+		t.Fatalf("read row after reconciliation: %v", err)
+	}
+	if !reflect.DeepEqual(after, expectedAfterTeardownReceipt(cancelled, after)) {
+		t.Fatalf("stale launch failure changed cancelled row:\nbefore: %+v\nafter:  %+v", cancelled, after)
 	}
 }
 

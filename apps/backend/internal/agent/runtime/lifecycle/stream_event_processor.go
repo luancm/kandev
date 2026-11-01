@@ -218,7 +218,13 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	prepared preparedAgentEvent,
 	startupGeneration uint64,
 ) error {
+	if prepared.durableEvent != nil && prepared.event.ErrandAwaitReceipt != nil {
+		sm.refreshErrandAwait(ctx, prepared.durableEvent.SessionID)
+	}
 	if prepared.duplicate {
+		if err := sm.classifyErrandAwaitTerminal(ctx, execution, delivery, prepared); err != nil {
+			return err
+		}
 		if !prepared.skipAcknowledgement {
 			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
 		}
@@ -229,6 +235,9 @@ func (sm *StreamManager) processPreparedAgentEvent(
 			ctx, prepared.durableEvent, delivery, prepared.deliveryEffect,
 		); err != nil {
 			return fmt.Errorf("project durable terminal agent event: %w", err)
+		}
+		if err := sm.classifyErrandAwaitTerminal(ctx, execution, delivery, prepared); err != nil {
+			return err
 		}
 		if !prepared.skipAcknowledgement {
 			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)

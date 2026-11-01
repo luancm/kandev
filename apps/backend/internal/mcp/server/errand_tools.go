@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"go.uber.org/zap"
 )
 
 // errandAwaitKeepAliveInterval paces progress notifications while an await is
@@ -157,9 +157,9 @@ func (s *Server) awaitErrandsHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
-		// The token names this call's claim on the errand results. Releasing it
-		// on an abandoned call lets a later await deliver them.
+		// This token remains fixed across claim, offer and error cleanup.
 		token := uuid.NewString()
+		ctx, captureErr := s.captureAwait(ctx, token)
 		payload := s.errandSenderPayload()
 		payload[errandIDsArg] = ids
 		payload[errandModeArg] = mode
@@ -171,14 +171,21 @@ func (s *Server) awaitErrandsHandler() server.ToolHandlerFunc {
 		go emitKeepAlivePings(ctx, stop, errandAwaitKeepAliveInterval,
 			toolProgressKeepAlive(ctx, req, "await_errands_kandev", "Waiting for errands in Kandev"))
 
-		result, err := s.errandBackendCall(ctx, ws.ActionMCPAwaitErrands, payload)
-		if ctx.Err() != nil {
-			s.releaseErrandAwait(token)
+		var result map[string]interface{}
+		err := captureErr
+		if err == nil {
+			result, err = s.errandBackendCall(ctx, ws.ActionMCPAwaitErrands, payload)
 		}
+		var body []byte
+		if err == nil {
+			body, err = json.MarshalIndent(result, "", "  ")
+		}
+		err = errors.Join(err, ctx.Err())
 		if err != nil {
+			err = errors.Join(err, s.abortErrandAwait(ctx, token))
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		return errandResultText(result), nil
+		return mcp.NewToolResultText(string(body)), nil
 	}
 }
 
@@ -211,19 +218,6 @@ func (s *Server) errandSenderPayload() map[string]interface{} {
 	return map[string]interface{}{
 		errandSenderSessionArg: s.sessionID,
 		errandSenderTaskArg:    s.taskID,
-	}
-}
-
-// releaseErrandAwait tells the backend an await was abandoned. It runs on a
-// fresh context because the call's own context has already ended.
-func (s *Server) releaseErrandAwait(token string) {
-	ctx, cancel := context.WithTimeout(context.Background(), errandAwaitReleaseTimeout)
-	defer cancel()
-	payload := s.errandSenderPayload()
-	payload[errandAwaitTokenArg] = token
-	var ignored map[string]interface{}
-	if err := s.backend.RequestPayload(ctx, ws.ActionMCPAwaitErrandsRelease, payload, &ignored); err != nil {
-		s.logger.Warn("failed to release abandoned errand await", zap.Error(err))
 	}
 }
 

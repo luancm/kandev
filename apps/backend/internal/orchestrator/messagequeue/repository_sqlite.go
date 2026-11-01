@@ -38,6 +38,7 @@ type sqliteRepository struct {
 	taskSessionsTaskIDPresent   bool
 	queuedMessagesTaskIDPresent bool
 	taskStepTransitionsPresent  bool
+	errandsSchemaPresent        bool
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
@@ -76,6 +77,10 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 	}
 	r.taskSessionsTablePresent = present
 	if present {
+		r.errandsSchemaPresent, err = internaldb.ColumnExists(writer, "task_sessions", "role")
+		if err != nil {
+			return nil, err
+		}
 		r.taskSessionsTaskIDPresent, err = internaldb.ColumnExists(writer, "task_sessions", "task_id")
 		if err != nil {
 			return nil, fmt.Errorf("messagequeue: resolve task session task id column: %w", err)
@@ -240,7 +245,7 @@ func (r *sqliteRepository) guardActiveTaskTx(ctx context.Context, tx *sqlx.Tx, t
 	if affected == 0 {
 		return ErrTaskInactive
 	}
-	return nil
+	return internaldb.LockErrandDelivery(ctx, tx, r.db.DriverName(), taskID)
 }
 
 // validateWorkflowEntryTx checks the launch-time entry after the task row has
@@ -2750,6 +2755,9 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 			return nil, fmt.Errorf("resolve task before queue take: %w", err)
 		}
 	}
+	if err := r.guardErrandSettlementTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
@@ -3219,6 +3227,9 @@ func (r *sqliteRepository) reserveHead(
 				return nil, true, err
 			}
 		}
+	}
+	if err := r.guardErrandSettlementTx(ctx, tx, sessionID); err != nil {
+		return nil, true, err
 	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, true, err
@@ -3918,6 +3929,9 @@ func (r *sqliteRepository) takeByID(
 			return nil, err
 		}
 	}
+	if err := r.guardErrandSettlementTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
@@ -4045,6 +4059,9 @@ func (r *sqliteRepository) claimSendNow(ctx context.Context, identity *QueueSess
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
+		return nil, err
+	}
+	if err := r.guardErrandSettlementTx(ctx, tx, sessionID); err != nil {
 		return nil, err
 	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {

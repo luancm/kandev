@@ -254,6 +254,15 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
 	r.migrateTaskSessionErrandColumns()
+	if err := r.migrateErrandResultRevisions(ctx); err != nil {
+		return err
+	}
+	if err := r.migrateErrandDelivery(); err != nil {
+		return err
+	}
+	if err := r.migrateErrandTeardownIntent(); err != nil {
+		return err
+	}
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repository_secret_bindings.table", `
 		CREATE TABLE IF NOT EXISTS repository_secret_bindings (

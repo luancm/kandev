@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -19,7 +20,7 @@ const errandColumns = `id, task_id, parent_session_id, title, objective, agent_p
 	first_turn_id, submission_id, lifecycle, cancel_source, last_outcome, awaiting_result,
 	result_text, result_truncated, result_turn_id, result_kind, result_state,
 	delivered_route, delivery_token, delivered_at, latest_settled_turn_id,
-	version, created_at, updated_at, settled_at`
+	version, created_at, updated_at, settled_at, result_revision, parent_admission_generation, teardown_intent`
 
 // liveErrandPredicate selects the errands whose projected status is queued,
 // running, or needs_attention: queued rows, and launched rows whose session
@@ -42,12 +43,25 @@ func (r *Repository) CreateErrand(ctx context.Context, errand *models.Errand) er
 	if err := errand.Validate(); err != nil {
 		return err
 	}
+	if errand.TeardownIntent != nil {
+		return fmt.Errorf("%w: teardown intent must be committed after errand creation", models.ErrInvalidErrand)
+	}
+	if errand.ParentAdmissionGeneration != 0 {
+		return models.ErrInvalidErrand
+	}
 	mcpServerIDs, err := encodeErrandMCPSnapshot(errand)
+	if err != nil {
+		return err
+	}
+	teardownIntent, err := encodeErrandTeardownIntent(errand)
 	if err != nil {
 		return err
 	}
 	row := *errand
 	row.Version = 1
+	if row.ResultText != "" || row.ResultKind != "" {
+		row.ResultRevision = uuid.NewString()
+	}
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = r.nowUTC()
 	}
@@ -55,13 +69,16 @@ func (r *Repository) CreateErrand(ctx context.Context, errand *models.Errand) er
 		row.UpdatedAt = row.CreatedAt
 	}
 	row.CreatedAt, row.UpdatedAt = row.CreatedAt.UTC(), row.UpdatedAt.UTC()
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO task_session_errands (`+errandColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		row.ID, row.TaskID, row.ParentSessionID, row.Title, row.Objective, row.AgentProfileID, mcpServerIDs,
-		row.FirstTurnID, row.SubmissionID, string(row.Lifecycle), string(row.CancelSource), string(row.LastOutcome),
-		row.AwaitingResult, row.ResultText, row.ResultTruncated, row.ResultTurnID, string(row.ResultKind),
-		string(row.ResultState), string(row.DeliveredRoute), row.DeliveryToken, utcTimeArg(row.DeliveredAt),
-		row.LatestSettledTurnID, row.Version, row.CreatedAt, row.UpdatedAt, utcTimeArg(row.SettledAt))
+	err = r.withErrandTask(ctx, row.TaskID, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO task_session_errands (`+errandColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+			row.ID, row.TaskID, row.ParentSessionID, row.Title, row.Objective, row.AgentProfileID, mcpServerIDs,
+			row.FirstTurnID, row.SubmissionID, string(row.Lifecycle), string(row.CancelSource), string(row.LastOutcome),
+			row.AwaitingResult, row.ResultText, row.ResultTruncated, row.ResultTurnID, string(row.ResultKind),
+			string(row.ResultState), string(row.DeliveredRoute), row.DeliveryToken, utcTimeArg(row.DeliveredAt),
+			row.LatestSettledTurnID, row.Version, row.CreatedAt, row.UpdatedAt, utcTimeArg(row.SettledAt), row.ResultRevision, row.ParentAdmissionGeneration, teardownIntent)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("insert errand %s: %w", row.ID, err)
 	}
@@ -71,8 +88,8 @@ func (r *Repository) CreateErrand(ctx context.Context, errand *models.Errand) er
 
 // GetErrand returns one errand row or models.ErrErrandNotFound.
 func (r *Repository) GetErrand(ctx context.Context, id string) (*models.Errand, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE id = ?`), id)
-	errand, err := scanErrand(row)
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT `+errandColumns+`, `+errandAwaitProjection+` FROM task_session_errands WHERE id = ?`), id)
+	errand, err := scanProjectedErrand(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", models.ErrErrandNotFound, id)
 	}
@@ -152,38 +169,170 @@ func (r *Repository) UpdateErrand(ctx context.Context, errand *models.Errand) er
 	if err := errand.Validate(); err != nil {
 		return err
 	}
-	updatedAt := r.nowUTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE task_session_errands SET
+	taskID, err := r.errandTaskID(ctx, errand.ID)
+	if err != nil {
+		return err
+	}
+	var updated *models.Errand
+	err = r.withErrandTask(ctx, taskID, func(tx *sqlx.Tx) error {
+		current, err := currentErrandForUpdate(ctx, tx, errand)
+		if err != nil {
+			return err
+		}
+		if err := validateErrandTeardownUpdate(current, errand); err != nil {
+			return err
+		}
+		revision := errandUpdateRevision(current, errand)
+		if current.ResultState == models.ErrandResultDelivered && errand.ResultState == models.ErrandResultPending && revision == current.ResultRevision {
+			updated, err = legacyErrandRelease(ctx, tx, current, r.nowUTC())
+			return err
+		}
+		row := *errand
+		preserveErrandIdentity(&row, current)
+		row.ResultRevision, row.UpdatedAt = revision, r.nowUTC()
+		if err := writeErrandUpdate(ctx, tx, &row); err != nil {
+			return err
+		}
+		if err := readWrittenErrandDeliveryState(ctx, tx, &row); err != nil {
+			return err
+		}
+		row.Version++
+		updated = &row
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	*errand = *updated
+	return nil
+}
+
+// TransitionErrandTeardownIntent settles one pending intent without reloading
+// or replacing any other mutable errand state. Callers re-read after conflicts.
+func (r *Repository) TransitionErrandTeardownIntent(
+	ctx context.Context,
+	errandID string,
+	expectedIntentID string,
+	expectedVersion int64,
+	state models.ErrandTeardownIntentState,
+) (*models.Errand, error) {
+	if errandID == "" || expectedIntentID == "" || expectedVersion < 1 ||
+		(state != models.ErrandTeardownIntentCompleted && state != models.ErrandTeardownIntentSuperseded) {
+		return nil, models.ErrInvalidErrand
+	}
+	taskID, err := r.errandTaskID(ctx, errandID)
+	if err != nil {
+		return nil, err
+	}
+	var updated *models.Errand
+	err = r.withErrandTask(ctx, taskID, func(tx *sqlx.Tx) error {
+		var transitionErr error
+		updated, transitionErr = r.transitionErrandTeardownIntent(ctx, tx, errandID, expectedIntentID, expectedVersion, state)
+		return transitionErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (r *Repository) transitionErrandTeardownIntent(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	errandID string,
+	expectedIntentID string,
+	expectedVersion int64,
+	state models.ErrandTeardownIntentState,
+) (*models.Errand, error) {
+	current, err := scanErrand(tx.QueryRowContext(ctx, tx.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE id = ?`), errandID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, models.ErrErrandNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if current.Version != expectedVersion || current.TeardownIntent == nil ||
+		current.TeardownIntent.ID != expectedIntentID || current.TeardownIntent.State != models.ErrandTeardownIntentPending {
+		return nil, models.ErrErrandVersionConflict
+	}
+	row := *current
+	intent := *current.TeardownIntent
+	intent.State = state
+	row.TeardownIntent = &intent
+	row.UpdatedAt = r.nowUTC()
+	if err := row.Validate(); err != nil {
+		return nil, err
+	}
+	if err := writeErrandUpdate(ctx, tx, &row); err != nil {
+		return nil, err
+	}
+	if err := readWrittenErrandDeliveryState(ctx, tx, &row); err != nil {
+		return nil, err
+	}
+	row.Version++
+	return &row, nil
+}
+
+func validateErrandTeardownUpdate(current, next *models.Errand) error {
+	before, after := current.TeardownIntent, next.TeardownIntent
+	if before == nil {
+		if after == nil || after.State == models.ErrandTeardownIntentPending {
+			return nil
+		}
+		return models.ErrInvalidErrand
+	}
+	if after == nil || before.ID != after.ID {
+		return models.ErrErrandVersionConflict
+	}
+	if before.Version != after.Version || !before.RequestedAt.Equal(after.RequestedAt) || before.Target != after.Target {
+		return models.ErrInvalidErrand
+	}
+	if before.State != after.State {
+		return models.ErrErrandVersionConflict
+	}
+	return nil
+}
+
+func writeErrandUpdate(ctx context.Context, tx *sqlx.Tx, errand *models.Errand) error {
+	teardownIntent, err := encodeErrandTeardownIntent(errand)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_errands SET
 			lifecycle = ?, cancel_source = ?, last_outcome = ?, awaiting_result = ?,
 			result_text = ?, result_truncated = ?, result_turn_id = ?, result_kind = ?, result_state = ?,
 			delivered_route = ?, delivery_token = ?, delivered_at = ?, latest_settled_turn_id = ?,
-			settled_at = ?, updated_at = ?, version = version + 1
+			settled_at = ?, updated_at = ?, result_revision = ?, teardown_intent = ?, version = version + 1
 		WHERE id = ? AND version = ?`),
 		string(errand.Lifecycle), string(errand.CancelSource), string(errand.LastOutcome), errand.AwaitingResult,
 		errand.ResultText, errand.ResultTruncated, errand.ResultTurnID, string(errand.ResultKind),
 		string(errand.ResultState), string(errand.DeliveredRoute), errand.DeliveryToken, utcTimeArg(errand.DeliveredAt),
-		errand.LatestSettledTurnID, utcTimeArg(errand.SettledAt), updatedAt, errand.ID, errand.Version)
+		errand.LatestSettledTurnID, utcTimeArg(errand.SettledAt), errand.UpdatedAt, errand.ResultRevision, teardownIntent, errand.ID, errand.Version)
 	if err != nil {
 		return fmt.Errorf("update errand %s: %w", errand.ID, err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("update errand %s: %w", errand.ID, err)
+		return err
 	}
-	if rows == 0 {
-		return r.classifyErrandUpdateMiss(ctx, errand.ID)
+	if rows != 1 {
+		return models.ErrErrandVersionConflict
 	}
-	errand.Version++
-	errand.UpdatedAt = updatedAt
 	return nil
 }
 
 // DeleteErrand removes an errand row. Deleting a missing row is not an error.
 func (r *Repository) DeleteErrand(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_errands WHERE id = ?`), id); err != nil {
-		return fmt.Errorf("delete errand %s: %w", id, err)
+	taskID, err := r.errandTaskID(ctx, id)
+	if errors.Is(err, models.ErrErrandNotFound) {
+		return nil
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	return r.withErrandTask(ctx, taskID, func(tx *sqlx.Tx) error {
+		return deleteErrandForSessionTx(ctx, tx, id)
+	})
 }
 
 func deleteErrandForSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
@@ -193,27 +342,15 @@ func deleteErrandForSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID string
 	return nil
 }
 
-func (r *Repository) classifyErrandUpdateMiss(ctx context.Context, id string) error {
-	var exists bool
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM task_session_errands WHERE id = ?)`), id).Scan(&exists)
-	if err != nil {
-		return fmt.Errorf("check errand %s: %w", id, err)
-	}
-	if !exists {
-		return fmt.Errorf("%w: %s", models.ErrErrandNotFound, id)
-	}
-	return fmt.Errorf("%w: %s", models.ErrErrandVersionConflict, id)
-}
-
 func (r *Repository) listErrands(ctx context.Context, condition string, args ...interface{}) ([]*models.Errand, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE `+condition), args...)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`SELECT `+errandColumns+`, `+errandAwaitProjection+` FROM task_session_errands WHERE `+condition), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list errands: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	errands := []*models.Errand{}
 	for rows.Next() {
-		errand, err := scanErrand(rows)
+		errand, err := scanProjectedErrand(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan errand: %w", err)
 		}
@@ -225,18 +362,22 @@ func (r *Repository) listErrands(ctx context.Context, condition string, args ...
 	return errands, nil
 }
 
-func scanErrand(row errandRowScanner) (*models.Errand, error) {
+func scanErrand(row errandRowScanner, delivery ...*models.ErrandDeliveryState) (*models.Errand, error) {
 	var errand models.Errand
-	var mcpServerIDs string
+	var mcpServerIDs, teardownIntent string
 	var deliveredAt, settledAt sql.NullTime
-	if err := row.Scan(
+	fields := []any{
 		&errand.ID, &errand.TaskID, &errand.ParentSessionID, &errand.Title, &errand.Objective,
 		&errand.AgentProfileID, &mcpServerIDs, &errand.FirstTurnID, &errand.SubmissionID,
 		&errand.Lifecycle, &errand.CancelSource, &errand.LastOutcome, &errand.AwaitingResult,
 		&errand.ResultText, &errand.ResultTruncated, &errand.ResultTurnID, &errand.ResultKind, &errand.ResultState,
 		&errand.DeliveredRoute, &errand.DeliveryToken, &deliveredAt, &errand.LatestSettledTurnID,
-		&errand.Version, &errand.CreatedAt, &errand.UpdatedAt, &settledAt,
-	); err != nil {
+		&errand.Version, &errand.CreatedAt, &errand.UpdatedAt, &settledAt, &errand.ResultRevision, &errand.ParentAdmissionGeneration, &teardownIntent,
+	}
+	for _, state := range delivery {
+		fields = append(fields, state)
+	}
+	if err := row.Scan(fields...); err != nil {
 		return nil, err
 	}
 	if err := decodeErrandMCPSnapshot(mcpServerIDs, &errand); err != nil {
@@ -248,7 +389,40 @@ func scanErrand(row errandRowScanner) (*models.Errand, error) {
 	errand.CreatedAt, errand.UpdatedAt = errand.CreatedAt.UTC(), errand.UpdatedAt.UTC()
 	errand.DeliveredAt = utcTimeFromNull(deliveredAt)
 	errand.SettledAt = utcTimeFromNull(settledAt)
+	if err := decodeErrandTeardownIntent(teardownIntent, &errand); err != nil {
+		return nil, fmt.Errorf("decode errand %s teardown intent: %w", errand.ID, err)
+	}
 	return &errand, nil
+}
+
+func encodeErrandTeardownIntent(errand *models.Errand) (string, error) {
+	if errand.TeardownIntent == nil {
+		return "", nil
+	}
+	if err := errand.TeardownIntent.ValidateFor(errand); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(errand.TeardownIntent)
+	if err != nil {
+		return "", fmt.Errorf("encode errand teardown intent: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func decodeErrandTeardownIntent(encoded string, errand *models.Errand) error {
+	if encoded == "" {
+		return nil
+	}
+	var intent models.ErrandTeardownIntent
+	if err := json.Unmarshal([]byte(encoded), &intent); err != nil {
+		return err
+	}
+	intent.RequestedAt = intent.RequestedAt.UTC()
+	if err := intent.ValidateFor(errand); err != nil {
+		return err
+	}
+	errand.TeardownIntent = &intent
+	return nil
 }
 
 func encodeErrandMCPSnapshot(row *models.Errand) (string, error) {
@@ -298,4 +472,45 @@ func utcTimeFromNull(value sql.NullTime) *time.Time {
 	}
 	at := value.Time.UTC()
 	return &at
+}
+
+func currentErrandForUpdate(ctx context.Context, tx *sqlx.Tx, errand *models.Errand) (*models.Errand, error) {
+	current, err := scanErrand(tx.QueryRowContext(ctx, tx.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE id = ?`), errand.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, models.ErrErrandNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if current.Version != errand.Version {
+		return nil, models.ErrErrandVersionConflict
+	}
+	if current.ParentAdmissionGeneration != errand.ParentAdmissionGeneration {
+		return nil, models.ErrInvalidErrand
+	}
+	return current, nil
+}
+
+// This locator is immutable; result and admission reads follow the task guard.
+func (r *Repository) errandTaskID(ctx context.Context, id string) (string, error) {
+	var taskID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT task_id FROM task_session_errands WHERE id = ?`), id).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", models.ErrErrandNotFound
+	}
+	return taskID, err
+}
+
+func preserveErrandIdentity(row, current *models.Errand) {
+	row.TaskID, row.ParentSessionID = current.TaskID, current.ParentSessionID
+	row.Title, row.Objective, row.AgentProfileID = current.Title, current.Objective, current.AgentProfileID
+	row.MCPServerIDs, row.MCPExcludedServerIDs = current.MCPServerIDs, current.MCPExcludedServerIDs
+	row.FirstTurnID, row.SubmissionID, row.CreatedAt = current.FirstTurnID, current.SubmissionID, current.CreatedAt
+}
+
+func errandUpdateRevision(current, errand *models.Errand) string {
+	if current.ResultText != errand.ResultText || current.ResultKind != errand.ResultKind || current.ResultTurnID != errand.ResultTurnID || current.ResultTruncated != errand.ResultTruncated {
+		return uuid.NewString()
+	}
+	return current.ResultRevision
 }

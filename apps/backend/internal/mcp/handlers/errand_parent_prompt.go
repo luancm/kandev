@@ -2,35 +2,35 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
-	"go.uber.org/zap"
+	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ErrandParentPromptRecorder records a prompt admitted into a session that may
-// be an errand. The orchestrator implements it and forwards to the errands
-// service, which ignores senders that are not the errand's parent.
-type ErrandParentPromptRecorder interface {
-	OnErrandParentPromptAdmitted(ctx context.Context, errandSessionID, senderSessionID string) error
+// withErrandParentPrompt carries verified provenance to provider admission.
+// Enqueueing the message never decides whether an old result was superseded.
+func (h *Handlers) withErrandParentPrompt(ctx context.Context, senderTaskID, senderSessionID string, metadata map[string]interface{}) context.Context {
+	origin := errands.ParentPromptOrigin{}
+	delete(metadata, errands.ParentPromptSenderMetadataKey)
+	if sender := h.verifiedSession(ctx, senderTaskID, senderSessionID); sender != nil {
+		origin = errands.ParentPromptOrigin{SenderSessionID: sender.ID, SubmissionID: "peer:" + uuid.NewString()}
+		if metadata != nil {
+			metadata[errands.ParentPromptSenderMetadataKey] = sender.ID
+		}
+	}
+	return errands.WithParentPromptOrigin(ctx, origin)
 }
 
-// SetErrandParentPromptRecorder wires the errand parent-prompt hook.
-func (h *Handlers) SetErrandParentPromptRecorder(recorder ErrandParentPromptRecorder) {
-	h.errandPrompts = recorder
-}
-
-// recordErrandParentPrompt reports an admitted message to its target session.
-// The sender is trusted only when the sender session belongs to the sender
-// task named by the caller; the payload's session ID alone is never enough.
-func (h *Handlers) recordErrandParentPrompt(ctx context.Context, senderTaskID, senderSessionID, targetSessionID string) {
-	if h.errandPrompts == nil || h.taskSvc == nil || senderSessionID == "" || targetSessionID == "" {
-		return
+func retainErrandParentPrompt(ctx context.Context, session *models.TaskSession, err error) bool {
+	if !models.IsErrandSession(session) || errands.ParentPromptOriginFromContext(ctx).SenderSessionID != session.ParentSessionID {
+		return false
 	}
-	sender, err := h.taskSvc.GetTaskSession(ctx, senderSessionID)
-	if err != nil || sender == nil || sender.TaskID != senderTaskID {
-		return
+	var accepted interface{ DetachedResumeAccepted() bool }
+	if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
+		return true
 	}
-	if err := h.errandPrompts.OnErrandParentPromptAdmitted(ctx, targetSessionID, sender.ID); err != nil {
-		h.logger.Warn("failed to record errand parent prompt",
-			zap.String("errand_session_id", targetSessionID), zap.Error(err))
-	}
+	var uncertain interface{ ErrandParentPromptUncertain() bool }
+	return errors.As(err, &uncertain) && uncertain.ErrandParentPromptUncertain()
 }

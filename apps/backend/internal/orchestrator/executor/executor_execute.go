@@ -1586,6 +1586,8 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	// Task metadata cannot grant session launch provenance.
+	delete(metadata, models.SessionMetaKeyErrandLaunchAuthority)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
 	)
@@ -1649,7 +1651,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	// metadata for repo-less tasks where the user picked a starting folder.
 	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
-	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+	identity, reserved, err := models.ReadReservedLaunchIdentity(ctx)
+	if err != nil {
+		return "", err
+	}
+	if reserved {
 		if identity.TaskID != task.ID {
 			return "", errors.New("reserved launch belongs to another task")
 		}
@@ -1676,9 +1682,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID
 	}
-	if applyErrandSessionIdentity(ctx, session) {
+	if isErrand, err := applyErrandSessionIdentity(ctx, session); err != nil {
+		return "", err
+	} else if isErrand {
 		isPrimarySession = false
 	}
+	metadata = session.Metadata
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session
@@ -2570,10 +2579,11 @@ func (e *Executor) handleLaunchFailure(
 	safeErr, changed := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
-	if changed && !e.sessionIsErrand(failCtx, sessionID) {
-		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
+	if changed {
+		if updateErr := e.writeTaskFailedForRuntime(failCtx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
 	}

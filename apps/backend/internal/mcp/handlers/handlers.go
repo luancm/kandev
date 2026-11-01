@@ -306,7 +306,6 @@ type Handlers struct {
 	sessionCanceller       SessionCanceller
 	inputPauser            ClarificationInputPauser
 	sessionCeilingReleaser SessionCeilingReleaser
-	errandPrompts          ErrandParentPromptRecorder
 	errands                ErrandMCPService
 	errandsEnabled         bool
 	messageCreator         MessageCreator
@@ -2993,6 +2992,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
+	dispatchCtx = h.withErrandParentPrompt(dispatchCtx, req.SenderTaskID, req.SenderSessionID, senderMeta)
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
 	if err != nil {
 		if parentReply != nil {
@@ -3009,7 +3009,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	h.recordErrandParentPrompt(ctx, req.SenderTaskID, req.SenderSessionID, result.sessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,
@@ -3954,7 +3953,9 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 	if err != nil {
 		// The start admission owns cleanup for any turn it created. The handler
 		// removes only its message so it cannot abandon another launch's turn.
-		h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
+		if !retainErrandParentPrompt(ctx, session, err) {
+			h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
+		}
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			releasePeerMessageStartAdmission(admission)
 			return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
@@ -4023,7 +4024,9 @@ func (h *Handlers) promptPreparedTaskMessage(
 	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
 	status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	if err != nil {
-		h.deleteRecordedUserMessage(ctx, recorded)
+		if !retainErrandParentPrompt(ctx, session, err) {
+			h.deleteRecordedUserMessage(ctx, recorded)
+		}
 		return taskMessageDispatchResult{}, err
 	}
 	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil

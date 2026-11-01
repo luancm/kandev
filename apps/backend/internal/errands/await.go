@@ -21,9 +21,12 @@ const (
 	awaitModeAny    = "any"
 )
 
+var errAwaitSnapshotNotReady = errors.New("errand await snapshot is no longer ready")
+
 // AwaitRequest is one in-turn join. Token identifies the claim so a later
 // release can return it. MaxWaitSeconds is 0 to 600.
 type AwaitRequest struct {
+	Owner           *models.ErrandAwaitIdentity
 	ParentSessionID string
 	ErrandIDs       []string
 	Mode            string
@@ -43,6 +46,7 @@ type AwaitErrand struct {
 // AwaitResult is the await response. Ended means the parent's turn cancelled
 // the wait: statuses are present and nothing was claimed.
 type AwaitResult struct {
+	Delivery   models.ErrandAwaitDelivery
 	DurationMS int64
 	EndReason  string
 	Token      string
@@ -52,7 +56,7 @@ type AwaitResult struct {
 
 // Await waits until the named errands satisfy mode, the deadline passes, or
 // the parent turn ends the wait. A cancelled request context claims nothing.
-func (s *Service) Await(ctx context.Context, req AwaitRequest) (AwaitResult, error) {
+func (s *Service) Await(ctx context.Context, req AwaitRequest) (result AwaitResult, returnErr error) {
 	if !s.featureEnabled() {
 		return AwaitResult{}, newError(ReasonFeatureDisabled, "errands are disabled", nil)
 	}
@@ -61,6 +65,31 @@ func (s *Service) Await(ctx context.Context, req AwaitRequest) (AwaitResult, err
 	}
 	if req.Token == "" {
 		req.Token = uuid.NewString()
+	}
+	bound := req.Owner == nil
+	defer func() {
+		result.Token = req.Token
+		if returnErr == nil || !bound {
+			return
+		}
+		abortCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		var abortErr error
+		if req.Owner != nil {
+			abortErr = s.AbortOwnedAwait(abortCtx, *req.Owner)
+		} else {
+			abortErr = s.AbortAwait(abortCtx, req.ParentSessionID, req.Token)
+		}
+		returnErr = errors.Join(returnErr, abortErr)
+	}()
+	if req.Owner != nil {
+		if req.Owner.Token != req.Token || req.Owner.ParentSessionID != req.ParentSessionID {
+			return AwaitResult{}, models.ErrInvalidErrand
+		}
+		if err := s.store.BeginErrandAwait(ctx, *req.Owner); err != nil {
+			return AwaitResult{}, err
+		}
+		bound = true
 	}
 	rows, err := s.loadAwaitErrands(ctx, req)
 	if err != nil {
@@ -71,7 +100,7 @@ func (s *Service) Await(ctx context.Context, req AwaitRequest) (AwaitResult, err
 	defer s.awaits.remove(waiter)
 	deadline := time.NewTimer(time.Duration(req.MaxWaitSeconds) * time.Second)
 	defer deadline.Stop()
-	result, err := s.awaitLoop(ctx, req, rows, waiter, deadline)
+	result, err = s.awaitLoop(ctx, req, rows, waiter, deadline)
 	if err == nil {
 		result.DurationMS = time.Since(started).Milliseconds()
 	}
@@ -80,7 +109,29 @@ func (s *Service) Await(ctx context.Context, req AwaitRequest) (AwaitResult, err
 
 // ReleaseAwait returns results still delivered under token to pending.
 func (s *Service) ReleaseAwait(ctx context.Context, token string) error {
-	return s.releaseClaim(ctx, token)
+	return s.releaseClaim(ctx, token, models.ErrandDeliveryAwait)
+}
+
+// AbortAwait records a parent-scoped abort even before a delayed result claim.
+// The caller has irrevocably selected an error response rather than success.
+func (s *Service) AbortAwait(ctx context.Context, parentSessionID, token string) error {
+	parent, err := s.store.GetTaskSession(ctx, parentSessionID)
+	if err != nil {
+		return err
+	}
+	if parent == nil || models.IsErrandSession(parent) {
+		return models.ErrInvalidErrand
+	}
+	released, err := s.store.AbortAwait(ctx, parent.TaskID, parent.ID, token)
+	if err != nil {
+		return fmt.Errorf("abort errand await: %w", err)
+	}
+	for _, row := range released {
+		s.publish(ctx, row)
+	}
+	s.wakeAwaits(parent.ID)
+	s.deliverPending(ctx, parent.ID)
+	return nil
 }
 
 // EndParentAwaits ends every in-flight await of a parent. Each returns
@@ -105,7 +156,10 @@ func (s *Service) awaitLoop(
 			return AwaitResult{}, err
 		}
 		if ready || req.MaxWaitSeconds == 0 {
-			return s.finishAwait(ctx, req, rows, !ready, false)
+			result, err := s.finishAwait(ctx, req, rows, !ready, false)
+			if !errors.Is(err, errAwaitSnapshotNotReady) {
+				return result, err
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -149,59 +203,91 @@ func (s *Service) awaitReady(ctx context.Context, req AwaitRequest, seeded []*mo
 }
 
 func (s *Service) finishAwait(
-	ctx context.Context, req AwaitRequest, seeded []*models.Errand, timedOut, ended bool,
+	ctx context.Context, req AwaitRequest, _ []*models.Errand, timedOut, ended bool,
 ) (AwaitResult, error) {
-	rows, err := s.reloadAwait(ctx, req, seeded)
+	for attempt := 0; attempt < claimSnapshotAttempts; attempt++ {
+		result, err := s.finishAwaitSnapshot(ctx, req, timedOut, ended)
+		if !errors.Is(err, models.ErrErrandVersionConflict) {
+			return result, err
+		}
+	}
+	return AwaitResult{Token: req.Token}, fmt.Errorf("await snapshot retry exhausted: %w", models.ErrErrandVersionConflict)
+}
+
+func (s *Service) finishAwaitSnapshot(ctx context.Context, req AwaitRequest, timedOut, ended bool) (AwaitResult, error) {
+	rows, inventory, err := s.awaitSnapshot(ctx, req)
 	if err != nil {
 		return AwaitResult{}, err
-	}
-	if !ended {
-		if err := s.claimAwait(ctx, req, rows); err != nil {
-			return AwaitResult{}, err
-		}
-		rows, err = s.reloadAwait(ctx, req, seeded)
-		if err != nil {
-			return AwaitResult{}, err
-		}
 	}
 	items, err := s.awaitItems(ctx, req.Token, rows, timedOut, ended)
 	if err != nil {
 		return AwaitResult{}, err
 	}
-	reason := "all_ready"
-	if req.Mode == awaitModeAny {
-		reason = "any_ready"
+	if !timedOut && !ended && !awaitSnapshotReady(req.Mode, rows, items) {
+		if req.MaxWaitSeconds > 0 {
+			return AwaitResult{}, errAwaitSnapshotNotReady
+		}
+		timedOut = true
+		for i := range items {
+			if !errandSettled(models.ErrandStatus(items[i].Status)) {
+				items[i].Status = awaitPending
+			}
+		}
 	}
-	if timedOut {
-		reason = "timeout"
+	delivery := models.ErrandAwaitDelivery{Version: 1, Token: req.Token, Items: make([]models.ErrandAwaitDeliveryItem, 0, 5)}
+	if !ended {
+		claimed, err := s.claimAwait(ctx, req, rows, inventory)
+		if err != nil {
+			return AwaitResult{}, err
+		}
+		if err := ctx.Err(); err != nil {
+			return AwaitResult{}, err
+		}
+		for i, row := range rows {
+			if snapshot := claimed[row.ID]; snapshot != nil {
+				fillAwaitResult(&items[i], snapshot, req.Token)
+				delivery.Items = append(delivery.Items, models.ErrandAwaitDeliveryItem{ErrandID: snapshot.ID, ResultRevision: snapshot.ResultRevision})
+			}
+		}
 	}
-	if ended {
-		reason = "parent_ended"
-	}
-	return AwaitResult{Token: req.Token, Errands: items, Ended: ended, EndReason: reason}, nil
+
+	return AwaitResult{Delivery: delivery, Token: req.Token, Errands: items, Ended: ended, EndReason: awaitEndReason(req.Mode, timedOut, ended)}, nil
 }
 
-func (s *Service) claimAwait(ctx context.Context, req AwaitRequest, rows []*models.Errand) error {
-	unlock := s.parentLocks.lock(req.ParentSessionID)
-	defer unlock()
-	now := s.clock.Now()
-	for _, row := range rows {
-		if row.ResultState != models.ErrandResultPending {
-			continue
+func awaitEndReason(mode string, timedOut, ended bool) string {
+	switch {
+	case ended:
+		return "parent_ended"
+	case timedOut:
+		return "timeout"
+	case mode == awaitModeAny:
+		return "any_ready"
+	default:
+		return "all_ready"
+	}
+}
+
+func awaitSnapshotReady(mode string, rows []*models.Errand, items []AwaitErrand) bool {
+	settled, pending := 0, 0
+	for i, row := range rows {
+		if errandSettled(models.ErrandStatus(items[i].Status)) {
+			settled++
 		}
-		updated, changed, err := s.update(ctx, row.ID, func(e *models.Errand) bool {
-			return claimResult(e, models.ErrandDeliveryAwait, req.Token, now)
-		})
-		if err != nil {
-			return fmt.Errorf("claim awaited errand result: %w", err)
-		}
-		if changed {
-			countDelivery(models.ErrandDeliveryAwait)
-			s.logger.Info("errand.delivered", s.errandFields(updated, "route", string(models.ErrandDeliveryAwait))...)
-			s.publish(ctx, updated)
+		if row.ResultState == models.ErrandResultPending {
+			pending++
 		}
 	}
-	return nil
+	return settled == len(rows) || (mode == awaitModeAny && pending > 0)
+}
+
+func (s *Service) claimAwait(ctx context.Context, req AwaitRequest, rows []*models.Errand, inventory []models.ErrandClaimCandidate) (map[string]*models.Errand, error) {
+	unlock := s.parentLocks.lock(req.ParentSessionID)
+	defer unlock()
+	included := make([]composedErrand, 0, len(rows))
+	for _, row := range rows {
+		included = append(included, composedErrand{errand: row})
+	}
+	return s.claimPending(ctx, included, models.ErrandDeliveryAwait, req.Token, inventory)
 }
 
 func (s *Service) awaitItems(
@@ -217,7 +303,7 @@ func (s *Service) awaitItems(
 		if timedOut && !ended && !errandSettled(status) {
 			item.Status = awaitPending
 		}
-		if !ended {
+		if !ended && row.DeliveryToken != token {
 			fillAwaitResult(&item, row, token)
 		}
 		items = append(items, item)
@@ -234,10 +320,6 @@ func fillAwaitResult(item *AwaitErrand, row *models.Errand, token string) {
 		}
 		item.DeliveredVia = string(row.DeliveredRoute)
 		return
-	}
-	if row.ResultState == models.ErrandResultPending {
-		item.Result = row.ResultText
-		item.Truncated = row.ResultTruncated
 	}
 }
 
@@ -306,4 +388,24 @@ func errandSettled(status models.ErrandStatus) bool {
 	return slices.Contains([]models.ErrandStatus{
 		models.ErrandStatusDone, models.ErrandStatusFailed, models.ErrandStatusCancelled,
 	}, status)
+}
+
+func (s *Service) awaitSnapshot(ctx context.Context, req AwaitRequest) ([]*models.Errand, []models.ErrandClaimCandidate, error) {
+	inventory, err := s.store.ListErrandsByParent(ctx, req.ParentSessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	byID := make(map[string]*models.Errand, len(inventory))
+	for _, row := range inventory {
+		byID[row.ID] = row
+	}
+	rows := make([]*models.Errand, 0, len(req.ErrandIDs))
+	for _, id := range req.ErrandIDs {
+		row := byID[id]
+		if row == nil {
+			return nil, nil, notFound()
+		}
+		rows = append(rows, row)
+	}
+	return rows, models.ErrandInventory(inventory), nil
 }

@@ -14,7 +14,9 @@ import (
 type ErrandMCPService interface {
 	Start(ctx context.Context, req errands.StartRequest) (*errands.StartResult, error)
 	Await(ctx context.Context, req errands.AwaitRequest) (errands.AwaitResult, error)
-	ReleaseAwait(ctx context.Context, token string) error
+	OfferAwait(context.Context, models.ErrandAwaitIdentity, models.ErrandAwaitDelivery) error
+	AbortOwnedAwait(context.Context, models.ErrandAwaitIdentity) error
+	AbortAwait(ctx context.Context, parentSessionID, token string) error
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	ParentOutstanding(ctx context.Context, parentSessionID string) (bool, error)
 	List(ctx context.Context, taskID string) ([]errands.Snapshot, error)
@@ -70,10 +72,11 @@ type awaitErrandView struct {
 }
 
 type awaitErrandsResponse struct {
-	DurationMS int64             `json:"duration_ms"`
-	EndReason  string            `json:"end_reason,omitempty"`
-	Errands    []awaitErrandView `json:"errands"`
-	Ended      bool              `json:"ended,omitempty"`
+	Delivery   models.ErrandAwaitDelivery `json:"await_delivery"`
+	DurationMS int64                      `json:"duration_ms"`
+	EndReason  string                     `json:"end_reason,omitempty"`
+	Errands    []awaitErrandView          `json:"errands"`
+	Ended      bool                       `json:"ended,omitempty"`
 }
 
 // handleStartErrand starts an errand for a verified parent session. The
@@ -132,7 +135,12 @@ func (h *Handlers) handleAwaitErrands(ctx context.Context, msg *ws.Message) (*ws
 	if parent == nil || models.IsErrandSession(parent) {
 		return errandRefusal(msg, errands.ReasonNotPermitted, "await_errands_kandev needs a parent session"), nil
 	}
+	owner, err := awaitCallerIdentity(ctx, parent, req.AwaitToken, false)
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
 	result, err := h.errands.Await(ctx, errands.AwaitRequest{
+		Owner:           &owner,
 		ParentSessionID: parent.ID,
 		ErrandIDs:       req.ErrandIDs,
 		Mode:            req.Mode,
@@ -142,7 +150,7 @@ func (h *Handlers) handleAwaitErrands(ctx context.Context, msg *ws.Message) (*ws
 	if err != nil {
 		return errandServiceError(msg, err), nil
 	}
-	return ws.NewResponse(msg.ID, msg.Action, awaitErrandsView(result))
+	return h.offerAwaitResponse(ctx, msg, owner, result)
 }
 
 func awaitErrandsView(result errands.AwaitResult) awaitErrandsResponse {
@@ -156,7 +164,7 @@ func awaitErrandsView(result errands.AwaitResult) awaitErrandsResponse {
 			DeliveredVia: item.DeliveredVia,
 		})
 	}
-	return awaitErrandsResponse{Errands: views, Ended: result.Ended, DurationMS: result.DurationMS, EndReason: result.EndReason}
+	return awaitErrandsResponse{Delivery: result.Delivery, Errands: views, Ended: result.Ended, DurationMS: result.DurationMS, EndReason: result.EndReason}
 }
 
 // handleAwaitErrandsRelease returns the claim of an abandoned await so its
@@ -166,14 +174,18 @@ func (h *Handlers) handleAwaitErrandsRelease(ctx context.Context, msg *ws.Messag
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if refusal := h.errandsDisabled(msg); refusal != nil {
-		return refusal, nil
+	if h.errands == nil {
+		return errandRefusal(msg, errands.ReasonNotPermitted, "errand service is unavailable"), nil
 	}
 	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
 	if parent == nil || models.IsErrandSession(parent) {
 		return errandRefusal(msg, errands.ReasonNotPermitted, "only a parent session can release an await"), nil
 	}
-	if err := h.errands.ReleaseAwait(ctx, req.AwaitToken); err != nil {
+	owner, err := awaitCallerIdentity(ctx, parent, req.AwaitToken, true)
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	if err := h.errands.AbortOwnedAwait(ctx, owner); err != nil {
 		return errandServiceError(msg, err), nil
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"released": true})

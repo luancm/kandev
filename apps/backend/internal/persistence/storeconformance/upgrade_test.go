@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	testconformance "github.com/kandev/kandev/internal/testutil/storeconformance"
 )
@@ -177,6 +178,9 @@ func TestPreviousStableUpgrade(t *testing.T) {
 			}
 			if err := runCurrentInitialization(database); err != nil {
 				t.Fatalf("current initialization: %v", err)
+			}
+			if exists, err := db.ColumnExistsContext(t.Context(), database.DB, "task_session_errands", "teardown_intent"); err != nil || !exists {
+				t.Fatalf("upgraded task_session_errands.teardown_intent exists = %v, err = %v", exists, err)
 			}
 			fixture.OwnerRows = append(fixture.OwnerRows, fixture.PostUpgradeOwnerRows...)
 			if err := checkSentinels(database, fixture); err != nil {

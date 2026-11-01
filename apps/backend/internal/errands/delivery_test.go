@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -225,8 +227,13 @@ func TestCancelledErrandTurnIgnoresSuccessorAndWrongInitialSubmission(t *testing
 // @covers AC-TASKS-ERRANDS-003.4
 func TestLaterParentTurnSupersedesAnUndeliveredResult(t *testing.T) {
 	h, id := settleFirstTurn(t, "first answer")
-	if err := h.service.OnParentPromptAdmitted(context.Background(), id, testParent); err != nil {
-		t.Fatalf("OnParentPromptAdmitted: %v", err)
+	a := models.ErrandParentAdmission{TaskID: testTask, ParentSessionID: testParent, ErrandID: id,
+		SenderSessionID: testParent, TurnID: "successor-turn", SubmissionID: "successor-submission"}
+	if _, err := h.service.ReserveParentAdmission(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.service.DecideParentAdmission(context.Background(), a, models.ErrandAdmissionAccepted); err != nil {
+		t.Fatal(err)
 	}
 	row, _ := h.store.GetErrand(context.Background(), id)
 	if row.ResultState != models.ErrandResultSuperseded {
@@ -300,6 +307,321 @@ func TestStatusBlockClaimsResultsAndReleaseReturnsThem(t *testing.T) {
 	row, _ = h.store.GetErrand(ctx, id)
 	if row.ResultState != models.ErrandResultPending {
 		t.Fatalf("after release result = %s, want pending", row.ResultState)
+	}
+}
+
+type pausingListStore struct {
+	Store
+	mu     sync.Mutex
+	calls  int
+	listed chan struct{}
+	resume chan struct{}
+}
+
+func (s *pausingListStore) ListErrands(ctx context.Context) ([]*models.Errand, error) {
+	rows, err := s.Store.ListErrands(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.calls++
+	pause := s.calls == 1
+	s.mu.Unlock()
+	if pause {
+		close(s.listed)
+		<-s.resume
+	}
+	return rows, nil
+}
+
+type replaceClaimOnConflictStore struct {
+	Store
+	once             sync.Once
+	replacementToken string
+	replacementRoute models.ErrandDeliveryRoute
+	replacementAt    time.Time
+}
+
+func (s *replaceClaimOnConflictStore) ListErrandResultClaims(ctx context.Context, taskID, parentID, token string) ([]models.ErrandResultClaim, error) {
+	claims, err := s.Store.ListErrandResultClaims(ctx, taskID, parentID, token)
+	if err != nil || len(claims) == 0 {
+		return claims, err
+	}
+	var replaceErr error
+	s.once.Do(func() {
+		current, err := s.GetErrand(ctx, claims[0].ErrandID)
+		if err != nil {
+			replaceErr = err
+			return
+		}
+		current.ResultState = models.ErrandResultDelivered
+		current.DeliveryToken = s.replacementToken
+		current.DeliveredRoute = s.replacementRoute
+		current.DeliveredAt = &s.replacementAt
+		replaceErr = s.UpdateErrand(ctx, current)
+		if replaceErr != nil {
+			return
+		}
+		memory := s.Store.(*memoryStore)
+		memory.mu.Lock()
+		defer memory.mu.Unlock()
+		memory.claims[current.DeliveryToken] = []models.ErrandResultClaim{{ErrandID: current.ID, ResultRevision: current.ResultRevision,
+			ParentAdmissionGeneration: current.ParentAdmissionGeneration, Token: current.DeliveryToken, Route: current.DeliveredRoute}}
+	})
+	return claims, replaceErr
+}
+
+func releaseDelivery(h *harness, route models.ErrandDeliveryRoute, token string) error {
+	if route == models.ErrandDeliveryAwait {
+		return h.service.ReleaseAwait(context.Background(), token)
+	}
+	return h.service.ReleaseTurnClaim(context.Background(), token)
+}
+
+func assertClaimRetained(t *testing.T, got, want *models.Errand) {
+	t.Helper()
+	if got.ResultState != want.ResultState || got.DeliveryToken != want.DeliveryToken ||
+		got.DeliveredRoute != want.DeliveredRoute || got.ResultText != want.ResultText ||
+		got.ResultKind != want.ResultKind || got.ResultTurnID != want.ResultTurnID ||
+		got.Version != want.Version || !sameDeliveryTime(got.DeliveredAt, want.DeliveredAt) {
+		t.Fatalf("replacement claim changed: got state=%q token=%q route=%q result=%q version=%d delivered_at=%v; want state=%q token=%q route=%q result=%q version=%d delivered_at=%v",
+			got.ResultState, got.DeliveryToken, got.DeliveredRoute, got.ResultText, got.Version, got.DeliveredAt,
+			want.ResultState, want.DeliveryToken, want.DeliveredRoute, want.ResultText, want.Version, want.DeliveredAt)
+	}
+}
+
+func sameDeliveryTime(got, want *time.Time) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return got.Equal(*want)
+}
+
+func oppositeDeliveryRoute(route models.ErrandDeliveryRoute) models.ErrandDeliveryRoute {
+	if route == models.ErrandDeliveryAwait {
+		return models.ErrandDeliveryTurnContext
+	}
+	return models.ErrandDeliveryAwait
+}
+
+// @covers AC-TASKS-ERRANDS-004.4
+func TestReleaseClaimDoesNotReleaseReplacementToken(t *testing.T) {
+	for _, route := range []models.ErrandDeliveryRoute{models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext} {
+		t.Run(string(route), func(t *testing.T) {
+			h, id := settleFirstTurn(t, "the answer")
+			ctx := context.Background()
+			var tokenA string
+			if route == models.ErrandDeliveryAwait {
+				tokenA = "token-a"
+			}
+			tokenA = claimDeliveryForErrand(t, h, id, route, tokenA)
+
+			store := &pausingListStore{
+				Store: h.store, listed: make(chan struct{}), resume: make(chan struct{}),
+			}
+			h.service.store = store
+			resumeOnce := sync.Once{}
+			resume := func() { resumeOnce.Do(func() { close(store.resume) }) }
+			defer resume()
+			releaseDone := make(chan error, 1)
+			go func() { releaseDone <- releaseDelivery(h, route, tokenA) }()
+			select {
+			case <-store.listed:
+			case <-time.After(5 * time.Second):
+				t.Fatal("release A did not pause after reading its claim")
+			}
+
+			if err := releaseDelivery(h, route, tokenA); err != nil {
+				t.Fatalf("release A: %v", err)
+			}
+			releasedA, err := h.store.GetErrand(ctx, id)
+			if err != nil {
+				t.Fatalf("GetErrand after releasing A: %v", err)
+			}
+			if releasedA.ResultState != models.ErrandResultPending || releasedA.DeliveryToken != "" {
+				t.Fatalf("release A left state=%q token=%q, want pending without a token", releasedA.ResultState, releasedA.DeliveryToken)
+			}
+
+			waiter := h.service.awaits.register(testParent, "observe-release")
+			defer h.service.awaits.remove(waiter)
+			tokenB := "token-b"
+			if route == models.ErrandDeliveryTurnContext {
+				tokenB = ""
+			}
+			tokenB = claimDeliveryForErrand(t, h, id, route, tokenB)
+			before, err := h.store.GetErrand(ctx, id)
+			if err != nil {
+				t.Fatalf("GetErrand after claiming B: %v", err)
+			}
+			beforeDeliveries := len(h.deliverer.delivered())
+			beforeEvents := len(h.publisher.statuses())
+
+			resume()
+			select {
+			case err := <-releaseDone:
+				if err != nil {
+					t.Fatalf("stale release A: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("stale release A did not finish after the barrier opened")
+			}
+			after, err := h.store.GetErrand(ctx, id)
+			if err != nil {
+				t.Fatalf("GetErrand after stale release A: %v", err)
+			}
+			assertClaimRetained(t, after, before)
+			select {
+			case <-waiter.wake:
+				t.Fatal("stale release A woke parent waiters")
+			default:
+			}
+			if got := len(h.deliverer.delivered()); got != beforeDeliveries {
+				t.Fatalf("stale release A queued %d new deliveries, want none", got-beforeDeliveries)
+			}
+			if got := len(h.publisher.statuses()); got != beforeEvents {
+				t.Fatalf("stale release A published %d new events, want none", got-beforeEvents)
+			}
+
+			if err := releaseDelivery(h, route, tokenB); err != nil {
+				t.Fatalf("release B positive control: %v", err)
+			}
+			releasedB, err := h.store.GetErrand(ctx, id)
+			if err != nil {
+				t.Fatalf("GetErrand after releasing B: %v", err)
+			}
+			if releasedB.ResultState != models.ErrandResultPending || releasedB.DeliveryToken != "" {
+				t.Fatalf("release B left state=%q token=%q, want pending without a token", releasedB.ResultState, releasedB.DeliveryToken)
+			}
+			select {
+			case <-waiter.wake:
+			default:
+				t.Fatal("matching release B must wake parent waiters")
+			}
+			if got := len(h.publisher.statuses()); got != beforeEvents+1 {
+				t.Fatalf("matching release B published %d new events, want one", got-beforeEvents)
+			}
+			if got := len(h.deliverer.delivered()); got != beforeDeliveries+1 {
+				t.Fatalf("matching release B queued %d new deliveries, want one", got-beforeDeliveries)
+			}
+		})
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-004.4
+func TestReleaseClaimChecksRouteAuthority(t *testing.T) {
+	for _, claimRoute := range []models.ErrandDeliveryRoute{models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext, models.ErrandDeliveryNotification} {
+		t.Run(string(claimRoute), func(t *testing.T) {
+			h, id := settleFirstTurn(t, "the answer")
+			token := "token-a"
+			if claimRoute != models.ErrandDeliveryAwait {
+				token = ""
+			}
+			token = claimDeliveryForErrand(t, h, id, claimRoute, token)
+			wrongReleaseRoute := oppositeDeliveryRoute(claimRoute)
+			if err := releaseDelivery(h, wrongReleaseRoute, token); err != nil {
+				t.Fatalf("wrong-route release: %v", err)
+			}
+			row, err := h.store.GetErrand(context.Background(), id)
+			if err != nil {
+				t.Fatalf("GetErrand: %v", err)
+			}
+			if row.ResultState != models.ErrandResultDelivered || row.DeliveryToken != token || row.DeliveredRoute != claimRoute {
+				t.Fatalf("wrong-route release changed claim: state=%q token=%q route=%q", row.ResultState, row.DeliveryToken, row.DeliveredRoute)
+			}
+			if err := releaseDelivery(h, claimRoute, token); err != nil {
+				t.Fatalf("matching-route release positive control: %v", err)
+			}
+			row, err = h.store.GetErrand(context.Background(), id)
+			if err != nil {
+				t.Fatalf("GetErrand after positive control: %v", err)
+			}
+			if row.ResultState != models.ErrandResultPending || row.DeliveryToken != "" {
+				t.Fatalf("matching-route release left state=%q token=%q", row.ResultState, row.DeliveryToken)
+			}
+		})
+	}
+}
+
+// @covers AC-TASKS-ERRANDS-004.4
+func TestReleaseClaimRechecksExactIdentityAtStorageBoundary(t *testing.T) {
+	for _, route := range []models.ErrandDeliveryRoute{models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext} {
+		for _, replacement := range []string{"token-and-route", "route-only"} {
+			t.Run(string(route)+"/"+replacement, func(t *testing.T) {
+				h, id := settleFirstTurn(t, "the answer")
+				tokenA := "token-a"
+				if route == models.ErrandDeliveryTurnContext {
+					tokenA = ""
+				}
+				tokenA = claimDeliveryForErrand(t, h, id, route, tokenA)
+				replacementToken := "token-b"
+				if replacement == "route-only" {
+					replacementToken = tokenA
+				}
+				replacementRoute := oppositeDeliveryRoute(route)
+				replacementAt := time.Date(2026, time.October, 30, 9, 0, 0, 0, time.UTC)
+				before, err := h.store.GetErrand(context.Background(), id)
+				if err != nil {
+					t.Fatalf("GetErrand before CAS conflict: %v", err)
+				}
+				h.service.store = &replaceClaimOnConflictStore{
+					Store: h.store, replacementToken: replacementToken, replacementRoute: replacementRoute,
+					replacementAt: replacementAt,
+				}
+				waiter := h.service.awaits.register(testParent, "observe-cas-conflict")
+				defer h.service.awaits.remove(waiter)
+				if err := releaseDelivery(h, route, tokenA); err != nil {
+					t.Fatalf("release A: %v", err)
+				}
+				row, err := h.store.GetErrand(context.Background(), id)
+				if err != nil {
+					t.Fatalf("GetErrand after CAS conflict: %v", err)
+				}
+				if row.ResultState != models.ErrandResultDelivered || row.DeliveryToken != replacementToken ||
+					row.DeliveredRoute != replacementRoute || row.DeliveredAt == nil || !row.DeliveredAt.Equal(replacementAt) || row.Version != before.Version+1 {
+					t.Fatalf("CAS retry changed replacement claim: state=%q token=%q route=%q delivered_at=%v version=%d",
+						row.ResultState, row.DeliveryToken, row.DeliveredRoute, row.DeliveredAt, row.Version)
+				}
+				select {
+				case <-waiter.wake:
+					t.Fatal("stale release woke parent waiters")
+				default:
+				}
+				if err := releaseDelivery(h, replacementRoute, row.DeliveryToken); err != nil {
+					t.Fatalf("replacement release positive control: %v", err)
+				}
+				row, err = h.store.GetErrand(context.Background(), id)
+				if err != nil {
+					t.Fatalf("GetErrand after replacement release: %v", err)
+				}
+				if row.ResultState != models.ErrandResultPending || row.DeliveryToken != "" {
+					t.Fatalf("replacement release left state=%q token=%q", row.ResultState, row.DeliveryToken)
+				}
+			})
+		}
+	}
+}
+
+func claimDeliveryForErrand(t *testing.T, h *harness, errandID string, route models.ErrandDeliveryRoute, token string) string {
+	t.Helper()
+	ctx := context.Background()
+	switch route {
+	case models.ErrandDeliveryAwait:
+		result, err := h.service.Await(ctx, AwaitRequest{
+			ParentSessionID: testParent, ErrandIDs: []string{errandID}, Mode: awaitModeAll, Token: token,
+		})
+		if err != nil {
+			t.Fatalf("Await: %v", err)
+		}
+		return result.Token
+	case models.ErrandDeliveryTurnContext, models.ErrandDeliveryNotification:
+		composition, err := h.service.ComposeParentTurn(ctx, testParent, route)
+		if err != nil {
+			t.Fatalf("ComposeParentTurn: %v", err)
+		}
+		return composition.Token
+	default:
+		t.Fatalf("unsupported delivery route %q", route)
+		return ""
 	}
 }
 

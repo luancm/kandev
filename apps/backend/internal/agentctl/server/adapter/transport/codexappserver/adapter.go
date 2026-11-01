@@ -514,7 +514,7 @@ func (a *Adapter) handleNotification(_ context.Context, method string, raw json.
 	case "item/started":
 		a.emitItem(params, rootThreadID, threadID, parentToolCallID, turnID, false)
 	case "item/completed":
-		a.emitItem(params, rootThreadID, threadID, parentToolCallID, turnID, true)
+		a.emitItem(params, rootThreadID, stringField(params, "threadId"), parentToolCallID, turnID, true)
 	case "turn/completed":
 		a.handleTurnCompleted(params, threadID, rootThreadID, turnID, isRootThread)
 	case protocol.NotificationTokenUsage:
@@ -590,6 +590,9 @@ func (a *Adapter) emitItem(params map[string]any, rootThreadID, sourceThreadID, 
 	}
 	itemType := stringField(item, "type")
 	switch itemType {
+	case "mcpToolCall":
+		a.emitMCPItem(item, rootThreadID, sourceThreadID, parentToolCallID, turnID, completed)
+		return
 	case "collabAgentToolCall":
 		a.emitCollabToolCall(item, rootThreadID, turnID, completed)
 		return

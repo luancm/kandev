@@ -86,8 +86,11 @@ func (sm *StreamManager) replayRecoveredDelivery(
 		return nil
 	}
 	descriptor := execution.DeliveryDescriptor
-	if descriptor == nil || descriptor.Stream == nil || descriptor.Stream.HighWater == 0 {
+	if descriptor == nil {
 		return nil
+	}
+	if descriptor.Stream == nil || descriptor.Stream.HighWater == 0 {
+		return sm.finishErrandAwaitRecovery(ctx, execution, ownerCurrent)
 	}
 	streamID := execution.DeliveryStreamID
 	if streamID == "" || descriptor.Stream.StreamID != streamID {
@@ -123,7 +126,7 @@ func (sm *StreamManager) replayRecoveredDelivery(
 		after = next
 		execution.DeliveryReplayCursor = after
 	}
-	return nil
+	return sm.finishErrandAwaitRecovery(ctx, execution, ownerCurrent)
 }
 
 func (sm *StreamManager) replayRecoveredDeliveryPage(

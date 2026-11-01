@@ -1,6 +1,11 @@
 package sqlite
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+)
 
 // task_session_errands has no foreign key to task_sessions: a queued errand
 // reserves its session ID before the session row exists. Rows leave with
@@ -65,4 +70,38 @@ func (r *Repository) migrateTaskSessionErrandColumns() {
 	_ = r.migrate.Apply("task_sessions.parent_session_id", `ALTER TABLE task_sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("idx_task_sessions_parent_session_id",
 		`CREATE INDEX IF NOT EXISTS idx_task_sessions_parent_session_id ON task_sessions(parent_session_id)`)
+}
+
+// migrateErrandResultRevisions preserves an assigned identity across schema replay.
+func (r *Repository) migrateErrandResultRevisions(ctx context.Context) error {
+	if err := r.migrate.Apply("task_session_errands.result_revision", `ALTER TABLE task_session_errands ADD COLUMN result_revision TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	return r.backfillErrandResultRevisions(ctx)
+}
+
+func (r *Repository) migrateErrandTeardownIntent() error {
+	return r.migrate.Apply("task_session_errands.teardown_intent", `ALTER TABLE task_session_errands
+		ADD COLUMN teardown_intent TEXT NOT NULL DEFAULT ''`)
+}
+
+func (r *Repository) backfillErrandResultRevisions(ctx context.Context) error {
+	var rows []struct {
+		ID     string
+		TaskID string `db:"task_id"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, `SELECT id, task_id FROM task_session_errands
+		WHERE result_revision = '' AND (result_text <> '' OR result_kind <> '') ORDER BY task_id, id`); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		revision := uuid.NewString()
+		if err := r.withErrandTask(ctx, row.TaskID, func(tx *sqlx.Tx) error {
+			_, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_errands SET result_revision = ? WHERE id = ? AND result_revision = ''`), revision, row.ID)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

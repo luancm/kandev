@@ -1,11 +1,12 @@
 package service
 
 import (
+	"strings"
+	"time"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"strings"
-	"time"
 )
 
 func (s *Service) rebuildInput(
@@ -21,6 +22,7 @@ func (s *Service) rebuildInput(
 	launchQueue *statussummary.LaunchQueueSummary,
 	completionGate *statussummary.CompletionGateSummary,
 	completionGateObserved bool,
+	errands errandsSummaryObservation,
 	lastActivityAt time.Time,
 	activityObserved bool,
 	sessionsObserved bool,
@@ -40,7 +42,11 @@ func (s *Service) rebuildInput(
 		LaunchQueue:            cloneLaunchQueueForService(launchQueue),
 		CompletionGate:         cloneCompletionGateForService(completionGate),
 		CompletionGateObserved: completionGateObserved,
+		ErrandsObserved:        errands.observed,
 		Now:                    now,
+	}
+	if errands.summary != nil {
+		input.Errands = *errands.summary
 	}
 	if activityObserved && !lastActivityAt.IsZero() {
 		activityCopy := lastActivityAt.UTC()

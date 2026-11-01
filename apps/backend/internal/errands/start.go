@@ -33,8 +33,8 @@ type StartResult struct {
 
 // Start creates an errand and launches its session. It returns without
 // waiting for the errand's first turn. A ceiling refusal leaves the errand
-// queued; a synchronous launch failure that created no session removes the
-// errand and returns the launch error unchanged for the caller to classify.
+// queued. Only a positively proved pre-admission rejection may remove or
+// fail the reservation; uncertain inspection/dispatch errors retain it.
 func (s *Service) Start(ctx context.Context, req StartRequest) (*StartResult, error) {
 	req.TaskID = strings.TrimSpace(req.TaskID)
 	req.ParentSessionID = strings.TrimSpace(req.ParentSessionID)
@@ -162,26 +162,68 @@ type launchOutcome struct {
 }
 
 // launchQueued launches one queued errand and records the result. With
-// removeOnFailure a launch failure that created no session deletes the row and
-// returns the launch error; otherwise the errand becomes failed.
+// removeOnFailure a proved rejection that created no session deletes the row.
+// Other errors retain the reservation without a synthetic failed result.
 func (s *Service) launchQueued(ctx context.Context, errand *models.Errand, removeOnFailure bool) (launchOutcome, error) {
 	launchCtx := models.WithReservedLaunchIdentity(ctx, models.ReservedLaunchIdentity{
 		TaskID: errand.TaskID, SessionID: errand.ID, TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID,
 	})
-	err := s.launcher.LaunchErrand(launchCtx, LaunchRequest{
+	result, err := s.launcher.LaunchErrand(launchCtx, LaunchRequest{
 		ErrandID: errand.ID, TaskID: errand.TaskID, ParentSessionID: errand.ParentSessionID,
 		Title: errand.Title, Objective: errand.Objective, AgentProfileID: errand.AgentProfileID,
 		TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID, MCPServerIDs: errand.MCPServerIDs,
 		MCPExcludedServerIDs: errand.MCPExcludedServerIDs,
 	})
-	switch {
-	case err == nil:
-		return s.recordLaunched(ctx, errand)
-	case errors.Is(err, ErrCeilingRefused):
-		return s.recordQueued(ctx, errand)
-	default:
+	if outcome, ended, ownerErr := s.resolveLaunchOwner(ctx, errand); ended {
+		return outcome, ownerErr
+	}
+	current, readErr := s.store.GetErrand(ctx, errand.ID)
+	if readErr != nil {
+		return launchOutcome{}, errors.Join(err, readErr)
+	}
+	if current.Lifecycle == models.ErrandLifecycleCancelled {
+		return s.recordLaunched(ctx, current)
+	}
+	var rejected *ErrLaunchRejected
+	if errors.As(err, &rejected) {
 		return s.recordLaunchFailure(ctx, errand, err, removeOnFailure)
 	}
+	if err != nil {
+		return launchOutcome{}, err
+	}
+	switch result.Disposition {
+	case LaunchAdmitted, LaunchSettled:
+		if result.SessionID != errand.ID || result.TurnID != errand.FirstTurnID || result.SubmissionID != errand.SubmissionID {
+			return launchOutcome{}, fmt.Errorf("errand launch returned a different reserved identity")
+		}
+		return s.recordLaunched(ctx, errand)
+	case LaunchQueued:
+		return s.recordQueued(ctx, errand)
+	default:
+		return launchOutcome{}, fmt.Errorf("errand launch is blocked without verified admission")
+	}
+}
+
+// A final launch guard can refuse after the queue's ownership read. Classify
+// that owner before failure bookkeeping can create or dispatch a result.
+// Registered runtimes use the same exact cancellation target as other stops.
+func (s *Service) resolveLaunchOwner(ctx context.Context, row *models.Errand) (launchOutcome, bool, error) {
+	live, err := s.checkLaunchOwner(ctx, row)
+	if err != nil {
+		return launchOutcome{}, true, err
+	}
+	if live {
+		return launchOutcome{}, false, nil
+	}
+	cancelled, _, err := s.cancelRow(ctx, row.ID, models.ErrandCancelSourceCascade)
+	if err != nil {
+		return launchOutcome{}, true, err
+	}
+	if err := s.discardPending(ctx, row.ID); err != nil {
+		return launchOutcome{}, true, err
+	}
+	status, err := s.Project(ctx, cancelled)
+	return launchOutcome{snapshot: Snapshot{Errand: cancelled, Status: status}}, true, err
 }
 
 func (s *Service) recordQueued(ctx context.Context, errand *models.Errand) (launchOutcome, error) {
@@ -210,9 +252,15 @@ func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (la
 		return launchOutcome{}, fmt.Errorf("record launched errand: %w", err)
 	}
 	if row.Lifecycle == models.ErrandLifecycleCancelled {
-		// A cancel won while the launch ran; stop the session it created. A
-		// failure is logged by stopRuntime and a repeated cancel retries it.
-		_ = s.stopRuntime(ctx, row)
+		// A cancel won while launch ran. Recover only its recorded target.
+		if err := s.retryTeardown(ctx, row); err != nil {
+			return launchOutcome{}, err
+		}
+	}
+	if changed {
+		countStarted(StartOutcomeStarted)
+		s.logger.Info("errand.started", s.errandFields(row, "outcome", string(StartOutcomeStarted))...)
+		s.logger.Info("errand.admitted", s.errandFields(row)...)
 	}
 	status, err := s.Project(ctx, row)
 	if err != nil {
@@ -220,9 +268,6 @@ func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (la
 	}
 	if changed {
 		s.events.PublishErrandUpdated(ctx, row, status)
-		countStarted(StartOutcomeStarted)
-		s.logger.Info("errand.started", s.errandFields(row, "outcome", string(StartOutcomeStarted))...)
-		s.logger.Info("errand.admitted", s.errandFields(row)...)
 	}
 	return launchOutcome{snapshot: Snapshot{Errand: row, Status: status}}, nil
 }
@@ -232,6 +277,16 @@ func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (la
 func (s *Service) recordLaunchFailure(
 	ctx context.Context, errand *models.Errand, launchErr error, removeOnFailure bool,
 ) (launchOutcome, error) {
+	current, err := s.store.GetErrand(ctx, errand.ID)
+	if err != nil {
+		return launchOutcome{}, errors.Join(launchErr, err)
+	}
+	if current.Lifecycle == models.ErrandLifecycleCancelled {
+		if err := s.retryTeardown(ctx, current); err != nil {
+			return launchOutcome{}, errors.Join(launchErr, err)
+		}
+		return launchOutcome{snapshot: Snapshot{Errand: current, Status: models.ErrandStatusCancelled}}, nil
+	}
 	session, err := s.store.GetTaskSession(ctx, errand.ID)
 	if err != nil && !isMissingSession(err) {
 		return launchOutcome{}, errors.Join(launchErr, fmt.Errorf("inspect failed errand launch: %w", err))

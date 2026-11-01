@@ -14,6 +14,16 @@ import (
 // Store is the errand persistence plus the read-only session lookups that
 // status projection needs. *sqlite.Repository satisfies it.
 type Store interface {
+	BeginErrandAwait(context.Context, models.ErrandAwaitIdentity) error
+	OfferErrandAwait(context.Context, models.ErrandAwaitIdentity, []models.ErrandAwaitDeliveryItem) error
+	AbortErrandAwait(context.Context, models.ErrandAwaitIdentity) ([]*models.Errand, error)
+	ReserveErrandParentAdmission(context.Context, models.ErrandParentAdmission) (models.ErrandAdmissionReservation, error)
+	DecideErrandParentAdmission(context.Context, models.ErrandParentAdmission, models.ErrandAdmissionState) error
+	ListUnresolvedErrandParentAdmissions(context.Context, string) ([]models.ErrandParentAdmission, error)
+	ReleaseErrandResultClaims(context.Context, string, string, []models.ErrandResultClaim) ([]*models.Errand, error)
+	ListErrandResultClaims(context.Context, string, string, string) ([]models.ErrandResultClaim, error)
+	AbortAwait(context.Context, string, string, string) ([]*models.Errand, error)
+	ClaimResults(ctx context.Context, taskID, parentID string, route models.ErrandDeliveryRoute, token string, candidates []models.ErrandClaimCandidate, at time.Time, inventory []models.ErrandClaimCandidate) ([]*models.Errand, error)
 	CreateErrand(ctx context.Context, errand *models.Errand) error
 	GetErrand(ctx context.Context, id string) (*models.Errand, error)
 	ListErrandsByTask(ctx context.Context, taskID string) ([]*models.Errand, error)
@@ -23,6 +33,7 @@ type Store interface {
 	CountLiveErrandsByTask(ctx context.Context, taskID string) (int, error)
 	DeleteErrand(ctx context.Context, id string) error
 	UpdateErrand(ctx context.Context, errand *models.Errand) error
+	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 }
@@ -44,17 +55,76 @@ type LaunchRequest struct {
 	MCPExcludedServerIDs []string
 }
 
-// Launcher starts an errand session on the task's shared workspace. It returns
-// ErrCeilingRefused when the session ceiling refused the start, in which case
-// it created nothing. The context carries models.ReservedLaunchIdentity.
+type LaunchDisposition string
+
+const (
+	LaunchQueued   LaunchDisposition = "queued"
+	LaunchAdmitted LaunchDisposition = "admitted"
+	LaunchSettled  LaunchDisposition = "settled"
+	LaunchBlocked  LaunchDisposition = "blocked"
+)
+
+// LaunchResult binds the decision to verified reserved identities. Admitted
+// includes uncertain dispatch and never authorizes another prompt.
+type LaunchResult struct {
+	Disposition  LaunchDisposition
+	SessionID    string
+	TurnID       string
+	SubmissionID string
+}
+
+// ErrLaunchRejected certifies a positively proved failure before admission.
+// Inspection errors and unconfirmed dispatch must never use this type.
+type ErrLaunchRejected struct{ Err error }
+
+func (e *ErrLaunchRejected) Error() string { return "errand launch rejected: " + e.Err.Error() }
+func (e *ErrLaunchRejected) Unwrap() error { return e.Err }
+
+// Launcher inspects or launches the same reservation under admission ownership.
+// Queued is a definite capacity refusal before effects. Blocked plus an error
+// retains unknown evidence without manufacturing a failure result.
 type Launcher interface {
-	LaunchErrand(ctx context.Context, request LaunchRequest) error
+	LaunchErrand(ctx context.Context, request LaunchRequest) (LaunchResult, error)
 }
 
 // SessionStopper stops the runtime of an errand session. It must succeed for
 // a session whose runtime is already gone.
 type SessionStopper interface {
 	StopErrandSession(ctx context.Context, sessionID, reason string) error
+}
+
+// The private teardown seam shares the storage model's immutable identity.
+type ErrandTeardownTarget = models.ErrandTeardownTarget
+type ErrandTeardownIntent = models.ErrandTeardownIntent
+
+type cancellationTargetFenceKey struct{}
+
+// WithCancellationTargetFence keeps a deletion handoff bound to the target
+// captured before releasing admission. Only a trusted lifecycle caller sets it.
+func WithCancellationTargetFence(ctx context.Context, target ErrandTeardownTarget) context.Context {
+	return context.WithValue(ctx, cancellationTargetFenceKey{}, target)
+}
+
+type TeardownOutcome string
+
+const (
+	TeardownCompleted  TeardownOutcome = "completed"
+	TeardownSuperseded TeardownOutcome = "superseded"
+)
+
+// ErrandTeardown serializes target capture and cancellation with prompt
+// admission. commit performs only the durable cancellation/intent CAS. Callers
+// publish and wake awaiters after this method releases admission ownership.
+// A nil error certifies a durable terminal receipt, never a scheduled stop.
+type ErrandTeardown interface {
+	CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(ErrandTeardownTarget) error) error
+	RetryErrandTeardown(ctx context.Context, intent ErrandTeardownIntent) (TeardownOutcome, error)
+}
+
+// TeardownIntentStore is an additive capability until lifecycle callers migrate.
+type TeardownIntentStore interface {
+	GetErrand(context.Context, string) (*models.Errand, error)
+	TransitionErrandTeardownIntent(context.Context, string, string, int64, models.ErrandTeardownIntentState) (*models.Errand, error)
 }
 
 // ParentDeliverer admits errand notifications onto a parent's queue. It is

@@ -37,6 +37,8 @@ type MCPPrincipalScoper func(ctx context.Context, taskID, sessionID string) (con
 // payload session_id would let it name another user's session and inherit
 // their identity — turning the scoping fix into a privilege escalation.
 type taskScopedMCPHandler struct {
+	parentIncarnationID       string
+	harnessGeneration         int64
 	inner                     agentctl.MCPHandler
 	scope                     MCPIdentityScoper
 	principal                 MCPPrincipalScoper
@@ -51,6 +53,8 @@ type taskScopedMCPHandler struct {
 }
 
 type currentMCPHandler struct {
+	parentIncarnationID       string
+	harnessGeneration         int64
 	streamManager             *StreamManager
 	executionID               string
 	taskID                    string
@@ -70,6 +74,8 @@ func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.
 		return inner.Dispatch(ctx, msg)
 	}
 	return (&taskScopedMCPHandler{
+		parentIncarnationID:       h.parentIncarnationID,
+		harnessGeneration:         h.harnessGeneration,
 		inner:                     inner,
 		scope:                     scope,
 		principal:                 principal,
@@ -89,6 +95,8 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 		ctx = mcporigin.WithTrustedInternalCall(ctx)
 	}
 	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
+		ParentIncarnationID:       h.parentIncarnationID,
+		HarnessGeneration:         h.harnessGeneration,
 		ExecutionID:               h.executionID,
 		TaskID:                    h.taskID,
 		SessionID:                 h.sessionID,
@@ -98,6 +106,9 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 		CoordinatorToolPolicy:         h.coordinatorToolPolicy,
 		CoordinatorToolPolicyRequired: h.coordinatorPolicyRequired,
 	})
+	if invocation, ok := mcporigin.AwaitInvocationFromMessage(msg); ok {
+		ctx = mcporigin.WithAwaitInvocation(ctx, invocation)
+	}
 	scoped := ctx
 	if h.scope != nil {
 		var err error
@@ -154,6 +165,8 @@ func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHa
 		}
 	}
 	return &currentMCPHandler{
+		parentIncarnationID:       execution.DeliveryIncarnationID,
+		harnessGeneration:         int64(execution.DeliveryHarnessGeneration),
 		streamManager:             sm,
 		executionID:               execution.ID,
 		taskID:                    execution.TaskID,

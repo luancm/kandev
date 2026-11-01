@@ -66,6 +66,7 @@ type StreamManager struct {
 	deliverySubmissionSettler      func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
 	deliveryMu                     sync.RWMutex
 	delivery                       AgentDeliveryRepository
+	errandAwaitRefresh             func(context.Context, string)
 	ackMu                          sync.Mutex
 	ackWorkers                     map[string]*durableDeliveryAckWorker
 	ackStopped                     bool
@@ -633,7 +634,7 @@ func (sm *StreamManager) prepareAgentEvent(
 		if err := acknowledgeDurableAgentEvent(ctx, event, client); err != nil {
 			return preparedAgentEvent{}, fmt.Errorf("acknowledge duplicate durable event: %w", err)
 		}
-		return preparedAgentEvent{event: event, duplicate: true}, nil
+		return preparedAgentEvent{event: event, durableEvent: durableEvent, duplicate: true}, nil
 	}
 	return preparedAgentEvent{
 		event:          event,

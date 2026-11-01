@@ -52,9 +52,9 @@ func TestSettleErrandTurnForwardsOutcomeAndIgnoresMissingIdentity(t *testing.T) 
 	controller := &settlingErrandController{}
 	svc.SetErrandController(controller)
 
-	svc.settleErrandTurn(context.Background(), "errand-1", "turn-1", models.ErrandOutcomeFailed, "boom")
-	svc.settleErrandTurn(context.Background(), "", "turn-1", models.ErrandOutcomeDone, "")
-	svc.settleErrandTurn(context.Background(), "errand-1", "", models.ErrandOutcomeDone, "")
+	require.NoError(t, svc.settleErrandTurn(context.Background(), "errand-1", "turn-1", models.ErrandOutcomeFailed, "boom"))
+	require.NoError(t, svc.settleErrandTurn(context.Background(), "", "turn-1", models.ErrandOutcomeDone, ""))
+	require.NoError(t, svc.settleErrandTurn(context.Background(), "errand-1", "", models.ErrandOutcomeDone, ""))
 
 	require.Equal(t, []errands.TurnSettlement{{
 		SessionID: "errand-1", TurnID: "turn-1", Outcome: models.ErrandOutcomeFailed, FailureSummary: "boom",
@@ -67,17 +67,23 @@ func TestSettleParentTurnReportsOutstandingAndPassesCause(t *testing.T) {
 	controller := &settlingErrandController{outstanding: true}
 	svc.SetErrandController(controller)
 
-	require.True(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone))
-	require.False(t, svc.settleParentTurn(context.Background(), "", errands.SettleCauseTurnDone))
+	outstanding, err := svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.True(t, outstanding)
+	outstanding, err = svc.settleParentTurn(context.Background(), "", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.False(t, outstanding)
 	require.Equal(t, []errands.SettleCause{errands.SettleCauseTurnDone}, controller.causes)
 }
 
-func TestSettleParentTurnFailureIsNotOutstanding(t *testing.T) {
+func TestParentSettlementReadFailureDefersWorkflow(t *testing.T) {
 	svc := &Service{logger: testLogger()}
 	controller := &settlingErrandController{outstanding: true, settleErr: errors.New("store down")}
 	svc.SetErrandController(controller)
 
-	require.False(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseUserCancel))
+	outstanding, err := svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseUserCancel)
+	require.True(t, outstanding)
+	require.ErrorIs(t, err, controller.settleErr, "preserve the original read error for fail-closed callers")
 	require.Equal(t, []errands.SettleCause{errands.SettleCauseUserCancel}, controller.causes)
 }
 
@@ -86,12 +92,16 @@ func TestSettlementHooksIgnoreControllerWithoutSettlementMethods(t *testing.T) {
 	svc.SetErrandController(&recordingErrandController{})
 
 	require.NotPanics(t, func() {
-		svc.settleErrandTurn(context.Background(), "errand-1", "turn-1", models.ErrandOutcomeDone, "")
+		require.NoError(t, svc.settleErrandTurn(context.Background(), "errand-1", "turn-1", models.ErrandOutcomeDone, ""))
 	})
-	require.False(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone))
+	outstanding, err := svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.False(t, outstanding)
 
 	svc.SetErrandController(nil)
-	require.False(t, svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone))
+	outstanding, err = svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
+	require.NoError(t, err)
+	require.False(t, outstanding)
 }
 
 func TestCancelAgentSettlesOnlyTheObservedErrandTurn(t *testing.T) {

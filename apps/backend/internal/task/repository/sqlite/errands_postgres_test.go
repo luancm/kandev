@@ -38,6 +38,32 @@ func TestPostgresErrandRowRoundTripsWithVersionGuard(t *testing.T) {
 	exerciseErrandRoundTrip(t, newPostgresErrandRepo(t))
 }
 
+func TestPostgresErrandTeardownIntentRoundTrips(t *testing.T) {
+	repo := newPostgresErrandRepo(t)
+	row := persistErrandTeardownIntent(t, repo, "postgres-roundtrip")
+	got, err := repo.GetErrand(t.Context(), row.ID)
+	if err != nil {
+		t.Fatalf("GetErrand: %v", err)
+	}
+	assertErrandFields(t, got, row)
+}
+
+func TestPostgresErrandTeardownIntentMigrationReplays(t *testing.T) {
+	exerciseErrandTeardownIntentMigration(t, newPostgresErrandRepo(t))
+}
+
+func TestPostgresErrandTeardownIntentMalformedJSONAndExplicitEmpty(t *testing.T) {
+	exerciseErrandTeardownIntentMalformedJSONAndExplicitEmpty(t, newPostgresErrandRepo(t))
+}
+
+func TestPostgresErrandCancellationAndStopIntentCommitTogether(t *testing.T) {
+	exerciseErrandCancellationAndStopIntentCommitTogether(t, newPostgresErrandRepo(t))
+}
+
+func TestPostgresErrandTeardownIntentCASDoesNotOverwriteSuccessor(t *testing.T) {
+	exerciseErrandTeardownIntentCASDoesNotOverwriteSuccessor(t, newPostgresErrandRepo(t))
+}
+
 func TestPostgresErrandConcurrentUpdateHasOneWinner(t *testing.T) {
 	exerciseErrandConcurrentUpdate(t, newPostgresErrandRepo(t))
 }

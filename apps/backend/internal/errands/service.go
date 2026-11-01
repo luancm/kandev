@@ -14,7 +14,8 @@ import (
 
 // Dependencies are the collaborators of a Service. Store, Launcher,
 // SessionStopper, ProfileResolver, MCPSelections, and EventPublisher are
-// required; Deliverer and Clock are optional.
+// required; SessionStopper must also implement ErrandTeardown. Deliverer and
+// Clock are optional.
 type Dependencies struct {
 	Store     Store
 	Launcher  Launcher
@@ -39,11 +40,13 @@ type Service struct {
 	clock     Clock
 	logger    *logger.Logger
 
-	taskLocks   taskLockSet
-	parentLocks taskLockSet
-	launching   launchGuard
-	cascades    cascadeWorker
-	awaits      awaitRegistry
+	taskLocks      taskLockSet
+	parentLocks    taskLockSet
+	launching      launchGuard
+	cascades       cascadeWorker
+	awaits         awaitRegistry
+	teardownMu     sync.Mutex
+	teardownCursor string
 
 	turns    TurnReader
 	receipts DeliveryLog
@@ -72,6 +75,9 @@ func New(deps Dependencies) (*Service, error) {
 		return nil, errors.New("errands: MCP selection reader is required")
 	case deps.Events == nil:
 		return nil, errors.New("errands: event publisher is required")
+	}
+	if _, ok := deps.Stopper.(ErrandTeardown); !ok {
+		return nil, errors.New("errands: identity-aware teardown capability is required")
 	}
 	if deps.Clock == nil {
 		deps.Clock = systemClock{}
@@ -151,6 +157,14 @@ func (s *Service) Project(ctx context.Context, errand *models.Errand) (models.Er
 // publish emits errand.updated for a durable change. The status is projected
 // from current state; a projection failure is logged and publishes nothing.
 func (s *Service) publish(ctx context.Context, errand *models.Errand) {
+	if errand.DeliveredRoute == models.ErrandDeliveryAwait || errand.DeliveryState != "" {
+		current, err := s.store.GetErrand(ctx, errand.ID)
+		if err != nil {
+			s.logger.Warn("errand await projection unavailable; errand.updated not published", zap.String("errand_id", errand.ID), zap.Error(err))
+			return
+		}
+		errand = current
+	}
 	status, err := s.Project(ctx, errand)
 	if err != nil {
 		s.logger.Warn("errand status projection failed; errand.updated not published",
