@@ -272,10 +272,25 @@ describe("await_errands_kandev card", () => {
     expect(card.textContent).toContain("Wait condition met");
     expect(card.textContent).not.toContain("Result returned");
     expect(card.textContent).not.toContain("SECRET");
-    fireEvent.click(within(card).getByRole("button", { expanded: false }));
+    const disclosure = within(card).getByTestId("errand-await-disclosure");
+    expect(disclosure).toBe(within(card).getByRole("button", { expanded: false }));
+    disclosure.focus();
+    fireEvent.click(disclosure);
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    const details = document.getElementById(disclosure.getAttribute("aria-controls")!);
+    expect(details?.contains(within(card).getByTestId("errand-await-result"))).toBe(true);
+    expect(document.activeElement).toBe(disclosure);
     expect(card.textContent).toContain("At the end of this wait");
     expect(card.textContent).toContain("Result returned");
     expect(card.textContent).toContain("SECRET");
+    fireEvent.click(disclosure);
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(disclosure);
+    expect(card.textContent).toContain("Waited 12s for 1 errand");
+    expect(card.textContent).toContain("Wait condition met");
+    expect(within(card).queryByTestId("errand-await-result")).toBeNull();
+    expect(within(card).queryByTestId(`errand-await-row-${ERRAND_ID}`)).toBeNull();
+    fireEvent.click(disclosure);
     fireEvent.click(within(card).getByRole("button", { name: /Open errand/ }));
     expect(mocks.openSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: ERRAND_ID }),

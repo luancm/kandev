@@ -476,3 +476,7 @@ Active sole writer: Task19 errand `49a0f0c3-8d75-47f7-98a3-f78e59e99089` on the 
 ### Task19 race correction accepted
 
 Task19 is done again: the deferred equal-timestamp delivery-state regressions reproduced three behavioral failures, then the final six-file suite passed all 63 tests after the row-specific fence. Scoped lint, formatting and whitespace checks passed. Existing task/request ownership remains intact; unrelated rows still accept their list updates. The five Task14 files are unchanged. Totals return to 24 done, 1 in progress and 4 pending. Handoff and exact receipts: `/tmp/errands-task19-race-handoff.md`. Commit this correction before granting the next consolidation packet.
+
+### Historical WAIT disclosure consolidation accepted
+
+Historical WAIT reuses the existing `ErrandHistoryDisclosure`, retaining its duration/reason summary, recorded rows, test IDs, spacing and interactions. Three frontend files changed; production code decreased by ten lines. The same 59 focused tests passed before and after reuse; scoped ESLint, Prettier and whitespace checks passed. Existing keyboard/phone browser coverage was preserved but not rerun because interaction and responsive rules are unchanged. Receipt: `/tmp/errands-wait-disclosure-handoff.md`. This closes the shared-disclosure finding; obsolete selector branches and backend duplication remain open. All five Task14 files are unchanged.

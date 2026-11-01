@@ -9,13 +9,17 @@ import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
 /** Historical events stay quiet until the reader asks for their recorded details. */
 export function ErrandHistoryDisclosure({
   testId,
+  triggerTestId = `${testId}-disclosure`,
   errandId,
   summary,
+  contentClassName = "space-y-2 px-2.5 py-2",
   children,
 }: {
   testId: string;
+  triggerTestId?: string;
   errandId?: string | null;
   summary: ReactNode;
+  contentClassName?: string;
   children: ReactNode;
 }) {
   return (
@@ -25,7 +29,7 @@ export function ErrandHistoryDisclosure({
       className="w-full min-w-0 text-xs"
     >
       <CollapsibleTrigger
-        data-testid={`${testId}-disclosure`}
+        data-testid={triggerTestId}
         className={cn(
           "group flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-muted-foreground hover:bg-muted/30",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
@@ -40,7 +44,7 @@ export function ErrandHistoryDisclosure({
         <span className="min-w-0 break-words [overflow-wrap:anywhere]">{summary}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mx-2 space-y-2 border-t border-border/40 px-2.5 py-2">{children}</div>
+        <div className={cn("mx-2 border-t border-border/40", contentClassName)}>{children}</div>
       </CollapsibleContent>
     </Collapsible>
   );

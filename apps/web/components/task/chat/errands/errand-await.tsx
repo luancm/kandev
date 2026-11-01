@@ -1,12 +1,12 @@
 "use client";
 
-import { IconChevronRight, IconClockHour4, IconHourglassHigh } from "@tabler/icons-react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { IconClockHour4, IconHourglassHigh } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { GridSpinner } from "@/components/grid-spinner";
 import { formatPromptDuration } from "@/lib/turn-duration";
 import { cn } from "@/lib/utils";
 import { shortId } from "../messages/kandev/parse";
+import { ErrandHistoryDisclosure } from "./errand-history-disclosure";
 import { ERRAND_TOUCH_TARGET, ErrandOpenButton } from "./errand-open-button";
 import {
   awaitErrandStatus,
@@ -163,20 +163,11 @@ function AwaitHistory({ view, taskId }: { view: AwaitErrandsView; taskId: string
           h: t("task:durationUnitHours"),
         });
   return (
-    <Collapsible data-testid="errand-await-card" className="w-full min-w-0 text-xs">
-      <CollapsibleTrigger
-        data-testid="errand-await-disclosure"
-        className={cn(
-          "group flex w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-muted-foreground hover:bg-muted/30",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-          ERRAND_TOUCH_TARGET,
-        )}
-      >
-        <IconChevronRight
-          aria-hidden
-          className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 group-data-[state=open]:rotate-90"
-        />
-        <IconClockHour4 aria-hidden className="h-3.5 w-3.5 shrink-0" />
+    <ErrandHistoryDisclosure
+      testId="errand-await-card"
+      triggerTestId="errand-await-disclosure"
+      contentClassName="pt-2"
+      summary={
         <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 [overflow-wrap:anywhere]">
           <span>
             {t(duration === null ? "chat:errandAwaitDone" : "chat:errandAwaitElapsed", {
@@ -191,16 +182,11 @@ function AwaitHistory({ view, taskId }: { view: AwaitErrandsView; taskId: string
             </>
           )}
         </span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="mx-2 border-t border-border/40 pt-2">
-          <p className="px-2.5 text-[11px] text-muted-foreground">
-            {t("chat:errandAwaitSnapshot")}
-          </p>
-          <AwaitErrandList view={view} taskId={taskId} inFlight={false} />
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+      }
+    >
+      <p className="px-2.5 text-[11px] text-muted-foreground">{t("chat:errandAwaitSnapshot")}</p>
+      <AwaitErrandList view={view} taskId={taskId} inFlight={false} />
+    </ErrandHistoryDisclosure>
   );
 }
 
