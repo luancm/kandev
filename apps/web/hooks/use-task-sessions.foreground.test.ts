@@ -117,7 +117,7 @@ describe("useTaskSessions foreground refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0, contextWindow: 0 } },
     );
   });
 
@@ -149,7 +149,7 @@ describe("useTaskSessions foreground refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0, contextWindow: 0 } },
     );
   });
 
@@ -207,7 +207,7 @@ describe("useTaskSessions disconnected foreground refresh", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0, contextWindow: 0 } },
     );
   });
 });

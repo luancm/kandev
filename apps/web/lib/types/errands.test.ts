@@ -4,6 +4,7 @@ import {
   isLiveErrand,
   parseErrandStatus,
   type Errand,
+  type ErrandDeliveryState,
   type ErrandStatus,
 } from "./errands";
 
@@ -76,6 +77,13 @@ describe("Errand", () => {
     };
 
     expect(errand.can_send_result).toBe(true);
+  });
+
+  it.each(["received", "uncertain"] as const)("accepts the current delivery state %s", (state) => {
+    const deliveryState: ErrandDeliveryState = state;
+    const errand: Pick<Errand, "delivery_state"> = { delivery_state: deliveryState };
+
+    expect(errand.delivery_state).toBe(state);
   });
 });
 

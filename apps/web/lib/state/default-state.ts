@@ -24,6 +24,7 @@ import {
   defaultInboxHistoryState,
   defaultErrandsState,
 } from "./slices";
+import { mergeErrandsHydrationState } from "./slices/errands/errands-slice";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { HydrationState } from "./store";
@@ -490,6 +491,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       },
     },
     workspaceContextGeneration: mergeWorkspaceContextGeneration(initialState),
+    errands: mergeErrandsHydrationState(initialState.errands),
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },

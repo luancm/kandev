@@ -1,4 +1,5 @@
 {
+  "errandBackToParent": "[ßåçķ ţø påŕëñţ]",
   "workspaceSourcePlacementUnchanged": "Ŵōŕķĩńĝ ďĩŕēćţōŕŷ, àĝēńţ śēśśĩōń, àńď ŕũńńĩńĝ ƥŕōćēśśēś śţàŷ ũńćĥàńĝēď.",
   "repositorySetsSaveDuplicateRows_one": "{{count}} àďďĩţĩōńàĺ ŕōŵ ĩś ńōţ ĩńćĺũďēď. Ōńĺŷ ţĥē ƒĩŕśţ ŕōŵ ƒōŕ ēàćĥ ŕēƥōśĩţōŕŷ ĩś śàvēď, ĩńćĺũďĩńĝ ĩţś ƀàśē ćĥōĩćē.",
   "repositorySetsSaveDuplicateRows_other": "{{count}} àďďĩţĩōńàĺ ŕōŵś àŕē ńōţ ĩńćĺũďēď. Ōńĺŷ ţĥē ƒĩŕśţ ŕōŵ ƒōŕ ēàćĥ ŕēƥōśĩţōŕŷ ĩś śàvēď, ĩńćĺũďĩńĝ ĩţś ƀàśē ćĥōĩćē.",
@@ -666,6 +667,7 @@
   "errandObjectiveMore": "Ḿōŕē",
   "errandParentFallback": "Ƥàŕēńţ śēśśĩōń",
   "errandProfileWithModel": "{{name}} · {{model}}",
+  "errandResultDeliveryUncertain": "Ŕēśūĺţ ďēĺĩvęŕŷ ūńçēŕţåĩń",
   "errandResultSent": "Ŕēśũĺţ śēńţ ţō ţĥē ƥàŕēńţ śēśśĩōń",
   "errandsChipAttentionAria": "{{label}}, ńēēďś àţţēńţĩōń",
   "errandsChipIdle_one": "{{count}} ēŕŕàńď",
@@ -676,7 +678,7 @@
   "errandSendResultFailed": "Ćōũĺď ńōţ śēńď ţĥē ŕēśũĺţ ţō ţĥē ƥàŕēńţ śēśśĩōń",
   "errandsOfSession": "Ēŕŕàńďś ōƒ {{parent}}",
   "errandsPanelClose": "Ćĺōśē ēŕŕàńďś",
-  "errandsPanelDescription": "Ēŕŕàńďś śţàŕţēď ĩń ţĥĩś ţàśķ, ĝŕōũƥēď ƀŷ ţĥē śēśśĩōń ţĥàţ śţàŕţēď ţĥēḿ.",
+  "errandsPanelDescription": "[Đëļëgåţëđ ŵøŕķ ƒŕøm ţĥîš çøñvëŕšåţîøñ.]",
   "errandsPanelLoading": "Ĺōàďĩńĝ ēŕŕàńďś",
   "errandsPanelTitle": "Ēŕŕàńďś",
   "errandsPanelTotal_one": "{{count}} ţōţàĺ",

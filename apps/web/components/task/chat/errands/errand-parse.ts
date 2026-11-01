@@ -64,11 +64,25 @@ export type AwaitErrandRow = {
   errandId: string;
   /** Settled or live status the await reported; null while unknown or pending. */
   status: ErrandStatus | null;
-  /** The await timed out before this errand settled. */
+  /** The errand had not settled when this await returned. */
   pending: boolean;
   /** This await carried the errand's result text to the parent. */
   resultReceived: boolean;
+  /** Recorded result text, shown only in expanded historical details. */
+  resultText: string | null;
 };
+
+export type AwaitErrandStatus = ErrandStatus | "pending";
+
+/** Only an in-flight await follows live status; completed rows are recorded evidence. */
+export function awaitErrandStatus(
+  row: AwaitErrandRow,
+  liveStatus: ErrandStatus | undefined,
+  inFlight: boolean,
+): AwaitErrandStatus | null {
+  if (inFlight) return liveStatus ?? row.status ?? "running";
+  return row.status ?? (row.pending ? "pending" : null);
+}
 
 export type AwaitEndReason = "all_ready" | "any_ready" | "timeout" | "parent_ended";
 
@@ -100,6 +114,7 @@ function awaitResultRows(result: unknown): Map<string, AwaitErrandRow> {
       status: parseErrandStatus(rawStatus),
       pending: rawStatus === "pending",
       resultReceived: typeof pickString(entry, "result") === "string",
+      resultText: pickString(entry, "result")?.slice(0, 16 * 1024) ?? null,
     });
   }
   return rows;
@@ -122,12 +137,16 @@ export function parseAwaitErrands(
   const reported = awaitResultRows(result);
   const ids = requestedErrandIds(args);
   for (const id of reported.keys()) if (!ids.includes(id)) ids.push(id);
-  const rows = ids
-    .slice(0, MAX_LISTED_ERRANDS)
-    .map(
-      (errandId) =>
-        reported.get(errandId) ?? { errandId, status: null, pending: false, resultReceived: false },
-    );
+  const rows = ids.slice(0, MAX_LISTED_ERRANDS).map(
+    (errandId) =>
+      reported.get(errandId) ?? {
+        errandId,
+        status: null,
+        pending: false,
+        resultReceived: false,
+        resultText: null,
+      },
+  );
   return {
     durationMs:
       typeof duration === "number" && Number.isFinite(duration) && duration >= 0 ? duration : null,

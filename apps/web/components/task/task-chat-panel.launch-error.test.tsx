@@ -29,6 +29,8 @@ const priorTranscriptMessage = {
 
 const appStoreState = {
   features: { errands: false },
+  taskSessionsByTask: { itemsByTaskId: {} },
+  errands: { byTaskId: {} },
   connection: { status: "connected" },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },

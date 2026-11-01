@@ -130,7 +130,7 @@ export const defaultUIState: UISliceState = {
   },
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
-  connection: { status: "disconnected", error: null, issueSeverity: "none" },
+  connection: { status: "disconnected", error: null, issueSeverity: "none", generation: 0 },
   mobileKanban: {
     activeStepIdByWorkflowId: {},
     isMenuOpen: false,
@@ -460,6 +460,10 @@ export const createUISlice: SliceCreator<UISlice> = (set, get) => ({
     }),
   setConnectionStatus: (status, error) =>
     set((draft) => {
+      const previous = draft.connection.status;
+      if (previous !== status && (previous === "connected" || status === "connected")) {
+        draft.connection.generation = (draft.connection.generation ?? 0) + 1;
+      }
       draft.connection.status = status;
       draft.connection.error = error ?? null;
     }),

@@ -108,7 +108,9 @@ function readSession(sessionId: string): unknown[] {
 function wrapper({ children }: { children: React.ReactNode }) {
   return (
     <StateProvider
-      initialState={{ connection: { status: "connected", error: null, issueSeverity: "none" } }}
+      initialState={{
+        connection: { generation: 0, status: "connected", error: null, issueSeverity: "none" },
+      }}
     >
       {children}
     </StateProvider>

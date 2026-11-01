@@ -6,7 +6,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
-import { TaskChatPanel, type PendingMessageScrollTarget } from "../task-chat-panel";
+import { TaskConversationChat, type PendingMessageScrollTarget } from "../task-chat-panel";
+import { TaskConversationPanel } from "../task-conversation-view";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
@@ -153,29 +154,39 @@ function MobileChatPanelContent({
     <div className="flex-1 min-h-0 flex flex-col">
       <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
       <WipQueueStatus taskId={activeTaskId} />
-      <MobileSessionPickerRow taskId={activeTaskId} sessionId={effectiveSessionId} />
       {isPassthroughMode ? (
-        <div className="flex-1 min-h-0">
-          <PassthroughToolbar
-            key={effectiveSessionId}
-            sessionId={effectiveSessionId}
-            taskId={activeTaskId}
-          />
-        </div>
+        <>
+          <MobileSessionPickerRow taskId={activeTaskId} sessionId={effectiveSessionId} />
+          <div className="flex-1 min-h-0">
+            <PassthroughToolbar
+              key={effectiveSessionId}
+              sessionId={effectiveSessionId}
+              taskId={activeTaskId}
+            />
+          </div>
+        </>
       ) : (
-        <TaskChatPanel
-          sessionId={effectiveSessionId}
-          taskId={effectiveSessionId ? activeTaskId : null}
-          statusTaskId={activeTaskId}
-          onOpenFile={onOpenFile}
-          onOpenHistoricalDiff={onOpenHistoricalDiff}
-          pendingScrollTarget={scrollTarget}
-          isVisible={isVisible}
-          detailActive={isVisible}
-          onPendingScrollConsumed={onScrollTargetConsumed}
-          hideLaunchQueueStatus
-          hideWipQueueStatus
-        />
+        <TaskConversationPanel taskId={activeTaskId} sessionId={effectiveSessionId}>
+          {(sessionId, inactive) => (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <MobileSessionPickerRow taskId={activeTaskId} sessionId={sessionId} />
+              <TaskConversationChat
+                sessionId={sessionId}
+                inactive={inactive}
+                taskId={sessionId ? activeTaskId : null}
+                statusTaskId={activeTaskId}
+                onOpenFile={onOpenFile}
+                onOpenHistoricalDiff={onOpenHistoricalDiff}
+                pendingScrollTarget={scrollTarget}
+                isVisible={isVisible}
+                detailActive={isVisible}
+                onPendingScrollConsumed={onScrollTargetConsumed}
+                hideLaunchQueueStatus
+                hideWipQueueStatus
+              />
+            </div>
+          )}
+        </TaskConversationPanel>
       )}
     </div>
   );

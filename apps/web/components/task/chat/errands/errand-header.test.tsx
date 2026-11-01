@@ -125,10 +125,12 @@ describe("ErrandHeader visibility", () => {
     expect(screen.queryByTestId(HEADER)).toBeNull();
   });
 
-  it("renders nothing while the errands flag is off", () => {
+  it("retains parent navigation while the errands flag is off", () => {
     setState({ enabled: false });
     renderHeader();
-    expect(screen.queryByTestId(HEADER)).toBeNull();
+    expect(screen.getByTestId(HEADER)).toBeTruthy();
+    expect(screen.getByTestId("errand-back-to-parent").textContent).toContain("Back to parent");
+    expect(screen.queryByTestId(STOP)).toBeNull();
   });
 });
 
@@ -241,6 +243,8 @@ describe("ErrandHeader phone", () => {
     const trigger = within(header).getByRole("button", { name: "Errand actions" });
     expect(trigger.className).toContain("h-11");
     fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0, ctrlKey: false });
+    expect(screen.queryByRole("menuitem", { name: "Set as Primary" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /Handoff/ })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Stop" }));
     expect(mocks.cancelErrand).toHaveBeenCalledWith(ERRAND_ID);
     expect(screen.queryByRole("menuitem", { name: "Send result to parent" })).toBeNull();
@@ -314,4 +318,12 @@ describe("ErrandStatusAnnouncer", () => {
     renderAnnouncer(PARENT_ID);
     expect(screen.queryByRole("status")).toBeNull();
   });
+});
+
+it("keeps orphan transcript identity but disables navigation to a missing parent", () => {
+  const sessions = mocks.state.taskSessions as { items: Record<string, unknown> };
+  delete sessions.items[PARENT_ID];
+  renderHeader();
+  expect(screen.getByTestId(HEADER)).toBeTruthy();
+  expect((screen.getByTestId("errand-back-to-parent") as HTMLButtonElement).disabled).toBe(true);
 });

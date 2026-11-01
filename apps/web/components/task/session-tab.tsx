@@ -74,21 +74,28 @@ function useSessionTabState(sessionId: string | undefined) {
   const sessionNumber = useAppStore((state) => {
     if (!sessionId) return null;
     const activeTaskId = state.tasks.activeTaskId;
-    const sessions = activeTaskId ? state.taskSessionsByTask.itemsByTaskId[activeTaskId] : null;
+    if (!activeTaskId) return null;
+    const sessions = state.taskSessionsByTask.itemsByTaskId[activeTaskId];
     if (!sessions) return null;
     // Sort chronologically (oldest first) so indexes are stable regardless of
     // which session is primary or the backend's default DESC ordering.
-    const sorted = [...sessions].sort(
-      (a: { started_at: string }, b: { started_at: string }) =>
-        new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-    );
+    const sorted = sessions
+      .filter((session) => !isErrandSession(state, activeTaskId, session))
+      .sort(
+        (a: { started_at: string }, b: { started_at: string }) =>
+          new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+      );
     const idx = sorted.findIndex((s: { id: string }) => s.id === sessionId);
     return idx >= 0 ? idx + 1 : null;
   });
   const sessionCount = useAppStore((state) => {
     const activeTaskId = state.tasks.activeTaskId;
     if (!activeTaskId) return 0;
-    return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
+    return (
+      state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.filter(
+        (session) => !isErrandSession(state, activeTaskId, session),
+      ).length ?? 0
+    );
   });
   const isErrand = useAppStore((state) => {
     if (!sessionId) return false;

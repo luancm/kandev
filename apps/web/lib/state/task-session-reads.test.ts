@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
-import type { AppState } from "@/lib/state/store";
+import { createAppStore, type AppState } from "@/lib/state/store";
 import { getTaskSessionReads } from "./task-session-reads";
 
 const TASK_ID = "task-1";
@@ -22,6 +22,39 @@ function storeFor(userId: string): StoreApi<AppState> {
       }) as unknown as AppState,
   } as StoreApi<AppState>;
 }
+
+describe("task session connection generation", () => {
+  it("retires a pending read when the connection generation changes before a hook renders", async () => {
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const owner = getTaskSessionReads(store);
+    const release = owner.retain(TASK_ID);
+    const oldResponse = deferred<{ sessions: never[]; total: number }>();
+    const pending = owner.read(TASK_ID, () => oldResponse.promise);
+    const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+
+    store.getState().setConnectionStatus("disconnected");
+    store.getState().setConnectionStatus("connected");
+    oldResponse.resolve({ sessions: [], total: 0 });
+
+    await rejected;
+    expect(owner.isCurrent(TASK_ID)).toBe(false);
+    release();
+  });
+
+  it("creates a store-scoped owner for each connection generation", () => {
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const originalOwner = getTaskSessionReads(store);
+
+    store.getState().setConnectionStatus("disconnected");
+    store.getState().setConnectionStatus("connected");
+
+    const reconnectedOwner = getTaskSessionReads(store);
+    expect(reconnectedOwner).not.toBe(originalOwner);
+    expect(getTaskSessionReads(store)).toBe(reconnectedOwner);
+  });
+});
 
 describe("task session read owner", () => {
   it("shares one request and one trailing refresh across consumers", async () => {

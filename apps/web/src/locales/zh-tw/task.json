@@ -1,4 +1,5 @@
 {
+  "errandBackToParent": "返回父工作階段",
   "workspaceSourcePlacementUnchanged": "工作目錄、代理工作階段和正在執行的處理程序保持不變。",
   "repositorySetsSaveDuplicateRows_one": "不包含另外 {{count}} 行。每個儲存庫只儲存第一行及其基準分支選擇。",
   "repositorySetsSaveDuplicateRows_other": "不包含另外 {{count}} 行。每個儲存庫只儲存第一行及其基準分支選擇。",
@@ -619,6 +620,7 @@
   "errandObjectiveMore": "展開",
   "errandParentFallback": "父工作階段",
   "errandProfileWithModel": "{{name}} · {{model}}",
+  "errandResultDeliveryUncertain": "結果送達狀態不確定",
   "errandResultSent": "結果已傳送到父工作階段",
   "errandsChipAttentionAria": "{{label}}，需要關注",
   "errandsChipIdle_one": "{{count}} 個委託",
@@ -629,7 +631,7 @@
   "errandSendResultFailed": "無法將結果傳送到父工作階段",
   "errandsOfSession": "{{parent}} 的委託",
   "errandsPanelClose": "關閉委託",
-  "errandsPanelDescription": "此任務中啟動的委託，按啟動它們的工作階段分組。",
+  "errandsPanelDescription": "此對話委派的工作。",
   "errandsPanelLoading": "正在載入委託",
   "errandsPanelTitle": "委託",
   "errandsPanelTotal_one": "共 {{count}} 個",

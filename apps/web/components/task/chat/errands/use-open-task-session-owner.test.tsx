@@ -1,7 +1,10 @@
 import { renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { expect, it, vi } from "vitest";
-import { TaskSessionNavigationContext } from "./task-session-navigation-context";
+import {
+  TaskSessionNavigationContext,
+  useScopedTaskSessionNavigation,
+} from "./task-session-navigation-context";
 import { useOpenTaskSession } from "./use-open-task-session";
 const mocks = vi.hoisted(() => ({ setActive: vi.fn(), addPanel: vi.fn() }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -34,4 +37,22 @@ it("uses the embedded conversation owner for Open and Back", () => {
   expect(open).toHaveBeenNthCalledWith(2, { taskId: "task", sessionId: "parent", title: "Main" });
   expect(mocks.addPanel).not.toHaveBeenCalled();
   expect(mocks.setActive).not.toHaveBeenCalled();
+});
+
+it("keeps a scoped selector inert for foreign tasks and absent controlled callbacks", () => {
+  const selected = vi.fn();
+  const { result, rerender } = renderHook(
+    ({ taskId, callback }) => useScopedTaskSessionNavigation(taskId, callback),
+    {
+      initialProps: { taskId: "task-a", callback: selected as ((id: string) => void) | undefined },
+    },
+  );
+  result.current({ taskId: "task-b", sessionId: "child", title: "Audit" });
+  expect(selected).not.toHaveBeenCalled();
+  result.current({ taskId: "task-a", sessionId: "child", title: "Audit" });
+  expect(selected).toHaveBeenCalledExactlyOnceWith("child");
+  rerender({ taskId: "task-b", callback: undefined });
+  result.current({ taskId: "task-a", sessionId: "child", title: "Audit" });
+  result.current({ taskId: "task-b", sessionId: "parent", title: "Main" });
+  expect(selected).toHaveBeenCalledTimes(1);
 });

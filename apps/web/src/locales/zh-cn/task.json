@@ -1,4 +1,5 @@
 {
+  "errandBackToParent": "返回父会话",
   "workspaceSourcePlacementUnchanged": "工作目录、代理会话和正在运行的进程保持不变。",
   "repositorySetsSaveDuplicateRows_one": "不包含另外 {{count}} 行。每个仓库只保存第一行及其基准分支选择。",
   "repositorySetsSaveDuplicateRows_other": "不包含另外 {{count}} 行。每个仓库只保存第一行及其基准分支选择。",
@@ -619,6 +620,7 @@
   "errandObjectiveMore": "展开",
   "errandParentFallback": "父会话",
   "errandProfileWithModel": "{{name}} · {{model}}",
+  "errandResultDeliveryUncertain": "结果送达状态不确定",
   "errandResultSent": "结果已发送到父会话",
   "errandsChipAttentionAria": "{{label}}，需要关注",
   "errandsChipIdle_one": "{{count}} 个委托",
@@ -629,7 +631,7 @@
   "errandSendResultFailed": "无法将结果发送到父会话",
   "errandsOfSession": "{{parent}} 的委托",
   "errandsPanelClose": "关闭委托",
-  "errandsPanelDescription": "此任务中启动的委托，按启动它们的会话分组。",
+  "errandsPanelDescription": "此对话委派的工作。",
   "errandsPanelLoading": "正在加载委托",
   "errandsPanelTitle": "委托",
   "errandsPanelTotal_one": "共 {{count}} 个",

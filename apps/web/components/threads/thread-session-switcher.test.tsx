@@ -255,66 +255,50 @@ describe("ThreadSessionSwitcher — phone picker", () => {
 });
 
 // @covers AC-TASKS-ERRANDS-010.5 AC-TASKS-ERRANDS-011.1
-it("nests errands under their parent and selects the child on phones", () => {
-  responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobile());
-  storeMocks.useAppStore.mockImplementation((selector) =>
-    selector({
-      agentProfiles: { items: AGENT_PROFILES },
-      features: { errands: true },
-      errands: { byTaskId: { "task-1": { child: { title: "API audit", status: "running" } } } },
-    }),
-  );
-  const onSelect = vi.fn();
-  render(
-    <ThreadSessionSwitcher
-      sessions={[
-        session("child", "Child", { role: "errand", parent_session_id: sessionId(SESSION_A) }),
-        session(SESSION_B, "Other"),
-        session(SESSION_A, "Parent", { is_primary: true, state: "WAITING_FOR_INPUT" }),
-      ]}
-      selectedSessionId={SESSION_A}
-      onSelect={onSelect}
-    />,
-  );
-  fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
-  const rows = screen.getAllByTestId(/^thread-session-row-/);
-  const parentIndex = rows.findIndex(
-    (row) => row.getAttribute("data-testid") === `thread-session-row-${SESSION_A}`,
-  );
-  expect(rows[parentIndex + 1]).toBeDefined();
-  expect(rows[parentIndex + 1].getAttribute("data-testid")).toBe("thread-session-row-child");
-  expect(rows[parentIndex + 1].getAttribute("data-parent-session-id")).toBe(SESSION_A);
-  expect(rows[parentIndex + 1].textContent).toContain("API audit");
-  fireEvent.click(rows[parentIndex + 1]);
-  expect(onSelect).toHaveBeenCalledWith("child");
-});
+it.each([false, true])(
+  "omits errands from phone normal conversations with errands=%s",
+  (enabled) => {
+    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobile());
+    storeMocks.useAppStore.mockImplementation((selector) =>
+      selector({
+        agentProfiles: { items: AGENT_PROFILES },
+        features: { errands: enabled },
+        errands: { byTaskId: {} },
+      }),
+    );
+    const onSelect = vi.fn();
+    render(
+      <ThreadSessionSwitcher
+        sessions={[
+          session("child", "Child", { role: "errand", parent_session_id: sessionId(SESSION_A) }),
+          session(SESSION_B, "Other"),
+          session(SESSION_A, "Parent", { is_primary: true }),
+        ]}
+        selectedSessionId={SESSION_A}
+        onSelect={onSelect}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
+    expect(screen.queryByTestId("thread-session-row-child")).toBeNull();
+    expect(screen.getAllByTestId(/^thread-session-row-/)).toHaveLength(2);
+    fireEvent.click(screen.getByTestId(`thread-session-row-${SESSION_B}`));
+    expect(onSelect).toHaveBeenCalledWith(SESSION_B);
+  },
+);
 
-it("keeps desktop errand choices grouped and leaves primary ownership unchanged", () => {
-  storeMocks.useAppStore.mockImplementation((selector) =>
-    selector({
-      agentProfiles: { items: AGENT_PROFILES },
-      features: { errands: true },
-      errands: { byTaskId: { "task-1": { child: { title: "API audit", status: "done" } } } },
-    }),
-  );
-  const onSelect = vi.fn();
+it("keeps desktop normal conversation tabs without a retained child tab", () => {
   render(
     <ThreadSessionSwitcher
       sessions={[
         session("child", "Child", { role: "errand", parent_session_id: sessionId(SESSION_A) }),
         session(SESSION_A, "Parent", { is_primary: true }),
+        session(SESSION_B, "Other"),
       ]}
       selectedSessionId={SESSION_A}
-      onSelect={onSelect}
+      onSelect={vi.fn()}
     />,
   );
-  fireEvent.pointerDown(screen.getByTestId(PICKER_TRIGGER), {
-    button: 0,
-    ctrlKey: false,
-    pointerType: "mouse",
-  });
-  const child = screen.getByTestId("thread-session-row-child");
-  expect(child.getAttribute("data-parent-session-id")).toBe(SESSION_A);
-  fireEvent.click(child);
-  expect(onSelect).toHaveBeenCalledWith("child");
+  expect(screen.queryByTestId("thread-session-tab-child")).toBeNull();
+  expect(screen.getByTestId(`thread-session-tab-${SESSION_A}`)).toBeTruthy();
+  expect(screen.getByTestId(`thread-session-tab-${SESSION_B}`)).toBeTruthy();
 });

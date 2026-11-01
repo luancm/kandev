@@ -1,17 +1,33 @@
 import type { StateCreator } from "zustand";
+import { stateReadScopeIdentity } from "../../shared-resource-reads";
 import type { AppState } from "../../app-state-types";
 import type { Errand } from "@/lib/types/errands";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
-import type { ErrandsSlice, ErrandsSliceState } from "./types";
+import type { ErrandsListObservation, ErrandsSlice, ErrandsSliceState } from "./types";
 
 export const defaultErrandsState: ErrandsSliceState = {
   errands: {
     byTaskId: {},
     loadedByTaskId: {},
+    loadedConnectionGenerationByTaskId: {},
+    loadedReadScopeByTaskId: {},
+    resetEpochByTaskId: {},
     liveRevisionByTaskId: {},
     removedSessionIdsByTaskId: {},
   },
 };
+
+export function mergeErrandsHydrationState(
+  initialErrands: ErrandsSliceState["errands"] | undefined,
+): ErrandsSliceState["errands"] {
+  return {
+    ...defaultErrandsState.errands,
+    ...initialErrands,
+    loadedConnectionGenerationByTaskId: {},
+    loadedReadScopeByTaskId: {},
+    resetEpochByTaskId: {},
+  };
+}
 
 type ImmerSet = Parameters<StateCreator<AppState, [["zustand/immer", never]], [], ErrandsSlice>>[0];
 
@@ -21,6 +37,20 @@ function isOlderErrand(incoming: Errand, existing: Errand | undefined): boolean 
   const incomingAt = parseStrictRfc3339Timestamp(incoming.updated_at);
   const existingAt = parseStrictRfc3339Timestamp(existing.updated_at);
   return incomingAt !== null && existingAt !== null && incomingAt < existingAt;
+}
+
+function observationIsCurrent(
+  state: AppState,
+  taskId: string,
+  observation: ErrandsListObservation,
+): boolean {
+  return (
+    state.features.errands &&
+    state.connection.status === "connected" &&
+    (state.connection.generation ?? 0) === observation.connectionGeneration &&
+    stateReadScopeIdentity(state) === observation.readScopeIdentity &&
+    (state.errands.resetEpochByTaskId?.[taskId] ?? 0) === observation.taskResetEpoch
+  );
 }
 
 export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
@@ -37,8 +67,9 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
         (draft.errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
     }),
 
-  setTaskErrands: (taskId, errands, requestRevision) =>
+  setTaskErrands: (taskId, errands, requestRevision, observation) =>
     set((draft) => {
+      if (observation && !observationIsCurrent(draft, taskId, observation)) return;
       const current = (draft.errands.byTaskId[taskId] ??= {});
       const removedSessionIds = draft.errands.removedSessionIdsByTaskId[taskId] ?? {};
       const listed = errands.filter(
@@ -56,10 +87,19 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
         if (!isOlderErrand(errand, current[errand.errand_id])) current[errand.errand_id] = errand;
       }
       draft.errands.loadedByTaskId[taskId] = true;
+      if (observation) {
+        (draft.errands.loadedConnectionGenerationByTaskId ??= {})[taskId] =
+          observation.connectionGeneration;
+        (draft.errands.loadedReadScopeByTaskId ??= {})[taskId] = observation.readScopeIdentity;
+      }
     }),
 
   removeTaskErrands: (taskId) =>
     set((draft) => {
+      (draft.errands.resetEpochByTaskId ??= {})[taskId] =
+        (draft.errands.resetEpochByTaskId?.[taskId] ?? 0) + 1;
+      delete draft.errands.loadedConnectionGenerationByTaskId?.[taskId];
+      delete draft.errands.loadedReadScopeByTaskId?.[taskId];
       delete draft.errands.byTaskId[taskId];
       delete draft.errands.loadedByTaskId[taskId];
       delete draft.errands.liveRevisionByTaskId[taskId];

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseContextWindowEntry } from "./context-window";
+import {
+  normalizeContextCompactionCount,
+  parseContextWindowEntry,
+  readContextWindowMetadata,
+  readContextWindowMetadataFromAliases,
+  updateContextWindowMetadata,
+} from "./context-window";
 
 describe("parseContextWindowEntry", () => {
   it.each(["acp", "api"] as const)("retains the %s source", (source) => {
@@ -74,5 +80,71 @@ describe("parseContextWindowEntry", () => {
 
   it("rejects non-object metadata", () => {
     expect(parseContextWindowEntry(null)).toBeNull();
+  });
+});
+
+describe("context-window metadata ownership", () => {
+  it("distinguishes omitted context from an explicit null using own properties", () => {
+    expect(readContextWindowMetadata({ unrelated: true })).toEqual({ present: false });
+    expect(readContextWindowMetadata({ context_window: null })).toEqual({
+      present: true,
+      contextWindow: null,
+      compactionCount: undefined,
+    });
+    expect(readContextWindowMetadata(Object.create({ context_window: null }))).toEqual({
+      present: false,
+    });
+  });
+
+  it("prefers a present metadata context and falls back to session_metadata", () => {
+    expect(
+      readContextWindowMetadataFromAliases(
+        { context_window: null },
+        { context_window: { size: 128_000 } },
+      ),
+    ).toEqual({ present: true, contextWindow: null, compactionCount: undefined });
+    expect(
+      readContextWindowMetadataFromAliases(
+        { unrelated: true },
+        { context_window: { size: 128_000 }, context_compaction_count: 3 },
+      ),
+    ).toEqual({
+      present: true,
+      contextWindow: { size: 128_000 },
+      compactionCount: 3,
+    });
+  });
+
+  it("keeps metadata explicit on clear and writes the parsed compaction count on set", () => {
+    expect(
+      updateContextWindowMetadata(
+        { plan_mode: true, context_window: { size: 128_000 }, context_compaction_count: 2 },
+        null,
+      ),
+    ).toEqual({ plan_mode: true, context_window: null, context_compaction_count: 2 });
+    expect(
+      updateContextWindowMetadata(
+        { plan_mode: true },
+        {
+          size: 128_000,
+          used: 64_000,
+          remaining: 64_000,
+          efficiency: 50,
+          compactionCount: 3.8,
+          source: "acp",
+        },
+      ),
+    ).toEqual({
+      plan_mode: true,
+      context_window: {
+        size: 128_000,
+        used: 64_000,
+        remaining: 64_000,
+        efficiency: 50,
+        source: "acp",
+      },
+      context_compaction_count: 3,
+    });
+    expect(normalizeContextCompactionCount(Number.POSITIVE_INFINITY)).toBe(0);
   });
 });

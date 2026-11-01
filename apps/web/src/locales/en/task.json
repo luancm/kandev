@@ -1,4 +1,5 @@
 {
+  "errandBackToParent": "Back to parent",
   "workspaceSourcePlacementUnchanged": "Working directory, agent session, and running processes stay unchanged.",
   "repositorySetsSaveDuplicateRows_one": "{{count}} additional row is not included. Only the first row for each repository is saved, including its base choice.",
   "repositorySetsSaveDuplicateRows_other": "{{count}} additional rows are not included. Only the first row for each repository is saved, including its base choice.",
@@ -666,6 +667,7 @@
   "errandObjectiveMore": "More",
   "errandParentFallback": "Parent session",
   "errandProfileWithModel": "{{name}} · {{model}}",
+  "errandResultDeliveryUncertain": "Result delivery uncertain",
   "errandResultSent": "Result sent to the parent session",
   "errandsChipAttentionAria": "{{label}}, needs attention",
   "errandsChipIdle_one": "{{count}} errand",
@@ -676,7 +678,7 @@
   "errandSendResultFailed": "Could not send the result to the parent session",
   "errandsOfSession": "Errands of {{parent}}",
   "errandsPanelClose": "Close errands",
-  "errandsPanelDescription": "Errands started in this task, grouped by the session that started them.",
+  "errandsPanelDescription": "Delegated work from this conversation.",
   "errandsPanelLoading": "Loading errands",
   "errandsPanelTitle": "Errands",
   "errandsPanelTotal_one": "{{count}} total",

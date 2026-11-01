@@ -183,7 +183,7 @@ function WorkChips({
   return (
     <>
       <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
-      <ErrandsChip taskId={taskId} />
+      <ErrandsChip taskId={taskId} sessionId={sessionId} />
     </>
   );
 }

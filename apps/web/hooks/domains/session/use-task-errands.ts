@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { listErrands } from "@/lib/api/domains/errand-api";
@@ -7,10 +7,18 @@ import {
   selectLiveErrandCount,
   selectTaskErrands,
 } from "@/lib/state/slices/errands/selectors";
+import { stateReadScopeIdentity, storeReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import type { ErrandsListObservation } from "@/lib/state/slices/errands/types";
 import type { Errand } from "@/lib/types/errands";
 
 type AppStore = ReturnType<typeof useAppStoreApi>;
-const loadsByStore = new WeakMap<AppStore, Map<string, Promise<void>>>();
+type LoadAttempt = Readonly<
+  ErrandsListObservation & {
+    promise: Promise<void>;
+    requestRevision: number;
+  }
+>;
+const loadsByStore = new WeakMap<AppStore, Map<string, LoadAttempt>>();
 
 function storeLoads(store: AppStore) {
   let loads = loadsByStore.get(store);
@@ -22,22 +30,49 @@ function storeLoads(store: AppStore) {
 }
 
 /** Applies `errand.list` for a task, sharing one in-flight request across consumers. */
-function loadTaskErrands(store: AppStore, taskId: string, force: boolean): Promise<void> {
+function loadTaskErrands(store: AppStore, taskId: string): Promise<void> {
   const state = store.getState();
-  if (!force && state.errands.loadedByTaskId[taskId]) return Promise.resolve();
+  const connectionGeneration = state.connection.generation ?? 0;
+  const readScopeIdentity = storeReadScopeIdentity(store);
+  const taskResetEpoch = state.errands.resetEpochByTaskId?.[taskId] ?? 0;
+  if (
+    state.errands.loadedByTaskId[taskId] &&
+    state.errands.loadedConnectionGenerationByTaskId?.[taskId] === connectionGeneration &&
+    state.errands.loadedReadScopeByTaskId?.[taskId] === readScopeIdentity
+  )
+    return Promise.resolve();
   const loads = storeLoads(store);
   const current = loads.get(taskId);
-  if (current) return current;
+  if (
+    current &&
+    current.connectionGeneration === connectionGeneration &&
+    current.readScopeIdentity === readScopeIdentity &&
+    current.taskResetEpoch === taskResetEpoch
+  ) {
+    return current.promise;
+  }
 
   const requestRevision = state.errands.liveRevisionByTaskId[taskId] ?? 0;
-  const request = listErrands(taskId)
-    .then((errands) => store.getState().setTaskErrands(taskId, errands, requestRevision))
-    .catch(() => {
-      // Live errand.updated events still populate the store; the next connect retries.
+  const promise = listErrands(taskId)
+    .then((errands) => {
+      if (loads.get(taskId) !== attempt) return;
+      store.getState().setTaskErrands(taskId, errands, attempt.requestRevision, attempt);
     })
-    .finally(() => loads.delete(taskId));
-  loads.set(taskId, request);
-  return request;
+    .catch(() => {
+      // Keep cached rows; the next mount or connection retries the failed snapshot.
+    })
+    .finally(() => {
+      if (loads.get(taskId) === attempt) loads.delete(taskId);
+    });
+  const attempt: LoadAttempt = {
+    connectionGeneration,
+    readScopeIdentity,
+    taskResetEpoch,
+    requestRevision,
+    promise,
+  };
+  loads.set(taskId, attempt);
+  return attempt.promise;
 }
 
 export type TaskErrands = {
@@ -67,14 +102,13 @@ export function useTaskErrands(taskId: string | null | undefined): TaskErrands {
     scopedTaskId ? Boolean(state.errands.loadedByTaskId[scopedTaskId]) : false,
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const previousConnection = useRef(connectionStatus);
+  const connectionGeneration = useAppStore((state) => state.connection.generation ?? 0);
+  const readScopeIdentity = useAppStore(stateReadScopeIdentity);
 
   useEffect(() => {
-    const previous = previousConnection.current;
-    previousConnection.current = connectionStatus;
     if (!scopedTaskId || connectionStatus !== "connected") return;
-    void loadTaskErrands(store, scopedTaskId, previous !== "connected");
-  }, [connectionStatus, store, scopedTaskId]);
+    void loadTaskErrands(store, scopedTaskId);
+  }, [connectionStatus, connectionGeneration, readScopeIdentity, store, scopedTaskId]);
 
   return useMemo(
     () => ({ errands, errandsByParent, liveCount, isLoaded }),

@@ -81,6 +81,7 @@ function makeAutoSessionAppStore(
   return {
     getState: () => ({
       tasks: { activeTaskId: taskId },
+      errands: { byTaskId: {} },
       taskSessionsByTask: { itemsByTaskId, loadedByTaskId },
     }),
   };

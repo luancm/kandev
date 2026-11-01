@@ -35,7 +35,7 @@ export function renderSessionRead<T, P>(
     wrapper: ({ children }) => (
       <StateProvider
         initialState={{
-          connection: { status: "connected", error: null, issueSeverity: "none" },
+          connection: { generation: 0, status: "connected", error: null, issueSeverity: "none" },
         }}
       >
         <Initialize>{children}</Initialize>

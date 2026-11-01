@@ -53,6 +53,8 @@ const state = {
   kanban: { workflowId: null, tasks: [], steps: [] },
   workflows: { items: [] },
   taskSessions: { items: { [SESSION]: { name: null, agent_profile_id: null } } },
+  taskSessionsByTask: { itemsByTaskId: {} },
+  errands: { byTaskId: {} },
   agentProfiles: { items: [] },
   userSettings: {
     showAnchoredPromptBar: true,

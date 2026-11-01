@@ -14,6 +14,9 @@ export type ErrandStatus =
 /** Delivery state of an errand's current result to its parent session. */
 export type ErrandResultState = "none" | "pending" | "delivered" | "superseded" | "discarded";
 
+/** Current parent receipt observation for an errand's delivered await result. */
+export type ErrandDeliveryState = "received" | "uncertain";
+
 /** Browser projection of one errand, mirroring the backend `ErrandDTO`. */
 export type Errand = {
   /** Equals the errand's session ID; a queued errand has no session row yet. */
@@ -28,6 +31,8 @@ export type Errand = {
   /** At most the first 280 characters of the current result; full text stays with the parent. */
   result_preview: string;
   result_truncated: boolean;
+  /** Omitted when no current delivered-await receipt observation is available. */
+  delivery_state?: ErrandDeliveryState;
   created_at: string;
   updated_at: string;
   settled_at: string | null;

@@ -11,6 +11,10 @@ const CHIP = "errands-chip";
 const STOP_ALL = "errands-stop-all";
 const POPOVER = "errands-popover";
 const OPEN_E1 = "Open errand Errand e1";
+const ROW_E1 = "errands-panel-row-e1";
+const ROW_E2 = "errands-panel-row-e2";
+const DRAWER = "errands-drawer-content";
+const DELIVERY_UNCERTAIN = "Result delivery uncertain";
 
 const mocks = vi.hoisted(() => {
   const listeners = new Set<() => void>();
@@ -182,12 +186,14 @@ describe("ErrandsChip popover", () => {
 
     const popover = await screen.findByTestId(POPOVER);
     expect(within(popover).getByText("3 total")).toBeTruthy();
+    expect(within(popover).queryByTestId(ROW_E2)).toBeNull();
+    fireEvent.click(within(popover).getByTestId("errands-completed-toggle"));
     const groups = within(popover).getAllByTestId("errands-panel-group");
     expect(groups).toHaveLength(2);
     expect(within(groups[0]).getByRole("heading", { name: "Main" })).toBeTruthy();
     expect(within(groups[0]).getAllByRole("listitem")).toHaveLength(2);
     expect(within(groups[1]).getByRole("heading", { name: "Reviewer" })).toBeTruthy();
-    const row = within(popover).getByTestId("errands-panel-row-e1");
+    const row = within(popover).getByTestId(ROW_E1);
     expect(row.textContent).toContain("Errand e1");
     expect(row.textContent).toContain("Running");
     expect(row.textContent).toContain("2m");
@@ -265,6 +271,29 @@ describe("ErrandsChip popover", () => {
   });
 });
 
+describe("Errand delivery uncertainty", () => {
+  it("shows the warning only when a current desktop row explicitly reports it", async () => {
+    mocks.errands = [
+      errand("e1", { delivery_state: "uncertain" }),
+      errand("e2", { status: "done", delivery_state: "received" }),
+      errand("e3", { status: "done" }),
+    ];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+
+    const popover = await screen.findByTestId(POPOVER);
+    fireEvent.click(within(popover).getByTestId("errands-completed-toggle"));
+
+    expect(within(popover).getByTestId("errand-delivery-uncertain").textContent).toBe(
+      DELIVERY_UNCERTAIN,
+    );
+    expect(within(popover).getByTestId(ROW_E2).textContent).not.toContain(DELIVERY_UNCERTAIN);
+    expect(within(popover).getByTestId("errands-panel-row-e3").textContent).not.toContain(
+      DELIVERY_UNCERTAIN,
+    );
+  });
+});
+
 describe("ErrandsChip drawer", () => {
   beforeEach(() => {
     mocks.isMobile = true;
@@ -275,7 +304,7 @@ describe("ErrandsChip drawer", () => {
     render(<ErrandsChip taskId={TASK_ID} />);
     openChip();
 
-    const drawer = await screen.findByTestId("errands-drawer-content");
+    const drawer = await screen.findByTestId(DRAWER);
     expect(screen.queryByTestId(POPOVER)).toBeNull();
     expect(within(drawer).getByRole("heading", { name: "Errands" })).toBeTruthy();
     const row = within(drawer).getByRole("button", { name: "Open errand Errand e1, Running" });
@@ -284,10 +313,24 @@ describe("ErrandsChip drawer", () => {
     expect(within(drawer).getByTestId("errands-panel-list").className).toContain("overflow-y-auto");
   });
 
+  it("describes delivery uncertainty on the single phone Open target", async () => {
+    mocks.errands = [errand("e1", { delivery_state: "uncertain" })];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+
+    const drawer = await screen.findByTestId(DRAWER);
+    const row = within(drawer).getByTestId(ROW_E1);
+    const warning = within(row).getByTestId("errand-delivery-uncertain");
+
+    expect(warning.textContent).toBe(DELIVERY_UNCERTAIN);
+    expect(row.getAttribute("aria-describedby")).toContain(warning.id);
+    expect(row.className).toContain("min-h-11");
+  });
+
   it("opens the tapped errand and closes the drawer", async () => {
     render(<ErrandsChip taskId={TASK_ID} />);
     openChip();
-    const drawer = await screen.findByTestId("errands-drawer-content");
+    const drawer = await screen.findByTestId(DRAWER);
 
     fireEvent.click(within(drawer).getByRole("button", { name: "Open errand Errand e1, Running" }));
 
@@ -306,7 +349,21 @@ describe("ErrandsChip drawer", () => {
     mocks.errands = [errand("e1", { status: "done" })];
     render(<ErrandsChip taskId={TASK_ID} />);
     openChip();
-    await screen.findByTestId("errands-drawer-content");
+    await screen.findByTestId(DRAWER);
     expect(screen.queryByTestId(STOP_ALL)).toBeNull();
   });
+});
+
+it("shows only the rendered parent's errands when switching conversations", async () => {
+  mocks.errands = [errand("e1"), errand("e2", { parent_session_id: SECOND })];
+  const { rerender } = render(<ErrandsChip taskId={TASK_ID} sessionId={MAIN} />);
+  openChip();
+  let panel = await screen.findByTestId(POPOVER);
+  expect(within(panel).getByTestId(ROW_E1)).toBeTruthy();
+  expect(within(panel).queryByTestId(ROW_E2)).toBeNull();
+  rerender(<ErrandsChip taskId={TASK_ID} sessionId={SECOND} />);
+  openChip();
+  panel = await screen.findByTestId(POPOVER);
+  expect(within(panel).getByTestId(ROW_E2)).toBeTruthy();
+  expect(within(panel).queryByTestId(ROW_E1)).toBeNull();
 });

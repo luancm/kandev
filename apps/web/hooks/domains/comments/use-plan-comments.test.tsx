@@ -161,9 +161,7 @@ describe("usePlanComments loading", () => {
       { wrapper },
     );
     act(() => {
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
 
     await waitFor(() => expect(result.current.comments.comments).toHaveLength(1));
@@ -177,9 +175,7 @@ describe("usePlanComments loading", () => {
     const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
     act(() => {
       result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
 
     await waitFor(() => expect(result.current.first.comments).toHaveLength(1));
@@ -206,9 +202,7 @@ describe("usePlanComments loading", () => {
     act(() => {
       result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
       result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot());
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
 
     await waitFor(() => expect(api.getTaskPlanComments).toHaveBeenCalledWith(TASK_ID));
@@ -225,15 +219,11 @@ describe("usePlanComments loading", () => {
     );
     act(() => {
       result.current.store.getState().setTaskPlan(TASK_ID, null);
-      result.current.store.setState({
-        connection: { status: "disconnected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("disconnected");
     });
 
     act(() => {
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
 
     await waitFor(() => expect(result.current.comments.comments).toHaveLength(1));
@@ -260,15 +250,11 @@ describe("usePlanComments loading", () => {
     act(() => {
       result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
       result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot());
-      result.current.store.setState({
-        connection: { status: "disconnected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("disconnected");
     });
 
     act(() => {
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
 
     await waitFor(() =>

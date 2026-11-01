@@ -2,7 +2,10 @@ import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  parseContextWindowEntry,
+  readContextWindowMetadata,
+} from "@/lib/state/slices/session-runtime/context-window";
 
 export function useSessionContextWindow(
   sessionId: string | null,
@@ -30,6 +33,9 @@ export function useSessionContextWindow(
   const timestamp = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.timestamp : undefined,
   );
+  const contextWindowEpoch = useAppStore((state) =>
+    sessionId ? (state.taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0) : 0,
+  );
 
   // Memoize the combined object
   const contextWindow = useMemo(() => {
@@ -45,30 +51,19 @@ export function useSessionContextWindow(
     };
   }, [size, used, remaining, efficiency, compactionCount, source, timestamp]);
 
-  const session = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId] : undefined,
+  const sessionMetadata = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.metadata : undefined,
   );
-  const setContextWindow = useAppStore((state) => state.setContextWindow);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Populate context window from session metadata if not already in store
-  useEffect(() => {
-    if (!sessionId || contextWindow) return;
-
-    // Try to extract context_window from session metadata
-    const metadata = session?.metadata;
-    if (!metadata || typeof metadata !== "object") return;
-
-    const storedContextWindow = (metadata as Record<string, unknown>).context_window;
-    const entry = parseContextWindowEntry(
-      storedContextWindow,
-      undefined,
-      (metadata as Record<string, unknown>).context_compaction_count,
+  const metadataContextWindow = useMemo(() => {
+    const metadata = readContextWindowMetadata(sessionMetadata);
+    if (!metadata.present) return undefined;
+    return (
+      parseContextWindowEntry(metadata.contextWindow, undefined, metadata.compactionCount) ??
+      undefined
     );
-    if (!entry) return;
-
-    setContextWindow(sessionId, entry);
-  }, [sessionId, contextWindow, session?.metadata, setContextWindow]);
+  }, [sessionMetadata]);
 
   // Subscribe to session updates via WebSocket
   useEffect(() => {
@@ -85,5 +80,5 @@ export function useSessionContextWindow(
     }
   }, [detailActive, sessionId, connectionStatus]);
 
-  return contextWindow;
+  return contextWindow ?? (contextWindowEpoch === 0 ? metadataContextWindow : undefined);
 }

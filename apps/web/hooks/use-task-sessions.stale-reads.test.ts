@@ -1,11 +1,14 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { StoreApi } from "zustand";
+import { createAppStore, type AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/ids";
 
 const apiMock = vi.hoisted(() => ({
   listTaskSessions: vi.fn(),
 }));
+const storeProviderRef = vi.hoisted(() => ({ current: null as unknown }));
 
 type MockTaskSessionsState = {
   taskSessions: {
@@ -18,7 +21,7 @@ type MockTaskSessionsState = {
     loadedByTaskId: Record<string, boolean>;
     errorByTaskId: Record<string, string | null>;
   };
-  connection: { status: string };
+  connection: { status: string; generation?: number };
   auth: {
     mode: string;
     authenticated: boolean;
@@ -32,12 +35,17 @@ type MockTaskSessionsState = {
 
 let mockState: MockTaskSessionsState;
 
-vi.mock("@/components/state-provider", () => {
+vi.mock("@/components/state-provider", async () => {
+  const { useStore } = await import("zustand");
   const getState = () => mockState;
   const storeApi = { getState };
+  const currentStore = () => storeProviderRef.current as StoreApi<MockTaskSessionsState> | null;
   return {
-    useAppStore: (selector: (state: MockTaskSessionsState) => unknown) => selector(mockState),
-    useAppStoreApi: () => storeApi,
+    useAppStore: (selector: (state: MockTaskSessionsState) => unknown) => {
+      const store = currentStore();
+      return store ? useStore(store, selector) : selector(mockState);
+    },
+    useAppStoreApi: () => currentStore() ?? storeApi,
   };
 });
 
@@ -74,7 +82,7 @@ function resetMockState() {
       loadedByTaskId: {},
       errorByTaskId: {},
     },
-    connection: { status: "connected" },
+    connection: { status: "connected", generation: 0 },
     auth: { mode: "optional", authenticated: false, user: null },
     workspaceContextGeneration: 0,
     setTaskSessionsForTask: vi.fn(),
@@ -102,6 +110,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  storeProviderRef.current = null;
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
@@ -266,6 +275,155 @@ describe("useTaskSessions retained and successor consumers", () => {
       [session("retained")],
       {},
     );
+    second.unmount();
+  });
+});
+
+function contextSession(id: string, used: number | null, updatedAt: string): TaskSession {
+  return {
+    ...session(id, "WAITING_FOR_INPUT"),
+    updated_at: updatedAt,
+    metadata: {
+      context_window:
+        used === null
+          ? null
+          : {
+              size: 100_000,
+              used,
+              remaining: 100_000 - used,
+              efficiency: (used / 100_000) * 100,
+              source: "acp",
+            },
+    },
+  };
+}
+
+function createReadOwnerStore(): StoreApi<AppState> {
+  const store = createAppStore();
+  storeProviderRef.current = store as unknown as StoreApi<MockTaskSessionsState>;
+  store.getState().setConnectionStatus("connected");
+  store
+    .getState()
+    .setTaskSessionsForTask(
+      TASK_ID,
+      [contextSession("child-1", 68_000, "2026-06-27T00:00:00Z")],
+      {},
+    );
+  return store;
+}
+
+describe("useTaskSessions connection-generation ownership", () => {
+  it("refreshes a batched reconnect and fences the old list after the replacement settles", async () => {
+    const store = createReadOwnerStore();
+    const oldResponse = deferred<{ sessions: TaskSession[] }>();
+    const newResponse = deferred<{ sessions: TaskSession[] }>();
+    const replacementResponse = deferred<{ sessions: TaskSession[] }>();
+    apiMock.listTaskSessions
+      .mockReturnValueOnce(oldResponse.promise)
+      .mockReturnValueOnce(newResponse.promise)
+      .mockReturnValueOnce(replacementResponse.promise);
+    const { result, unmount } = renderHook(() => useTaskSessions(TASK_ID));
+
+    let oldLoad!: Promise<void>;
+    act(() => {
+      oldLoad = result.current.loadSessions(true);
+    });
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+
+    const generationBeforeReconnect = store.getState().connection.generation;
+    act(() => {
+      store.getState().setConnectionStatus("disconnected");
+      store.getState().setConnectionStatus("connected");
+    });
+
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
+    expect(store.getState().connection.generation).toBe(generationBeforeReconnect + 2);
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
+
+    const fresh = contextSession("child-1", 82_000, "2026-06-27T00:01:00Z");
+    await act(async () => {
+      newResponse.resolve({ sessions: [fresh] });
+    });
+    await waitFor(() =>
+      expect(store.getState().contextWindow.bySessionId[fresh.id]?.used).toBe(82_000),
+    );
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(false);
+
+    let replacementLoad!: Promise<void>;
+    act(() => {
+      replacementLoad = result.current.loadSessions(true);
+    });
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(3));
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
+
+    await act(async () => {
+      oldResponse.resolve({
+        sessions: [contextSession("child-1", null, "2026-06-27T00:00:30Z")],
+      });
+      await oldLoad;
+    });
+    expect(store.getState().taskSessions.items["child-1"]?.metadata?.context_window).toMatchObject({
+      used: 82_000,
+    });
+    expect(store.getState().contextWindow.bySessionId["child-1"]?.used).toBe(82_000);
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
+
+    await act(async () => {
+      replacementResponse.resolve({ sessions: [fresh] });
+      await replacementLoad;
+    });
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(false);
+    unmount();
+  });
+
+  it("accepts a pending same-session response after an unrelated state rerender", async () => {
+    const store = createReadOwnerStore();
+    const response = deferred<{ sessions: TaskSession[] }>();
+    apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    const { result, unmount } = renderHook(() => useTaskSessions(TASK_ID));
+
+    let load!: Promise<void>;
+    act(() => {
+      load = result.current.loadSessions(true);
+    });
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    act(() => store.getState().setRightPanelActiveTab("child-1", "files"));
+
+    await act(async () => {
+      response.resolve({
+        sessions: [contextSession("child-1", 82_000, "2026-06-27T00:01:00Z")],
+      });
+      await load;
+    });
+
+    expect(store.getState().contextWindow.bySessionId["child-1"]?.used).toBe(82_000);
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(false);
+    unmount();
+  });
+
+  it("keeps a shared read live when its initiating hook releases one consumer", async () => {
+    const store = createReadOwnerStore();
+    const response = deferred<{ sessions: TaskSession[] }>();
+    apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    const first = renderHook(() => useTaskSessions(TASK_ID));
+    const second = renderHook(() => useTaskSessions(TASK_ID));
+
+    let load!: Promise<void>;
+    act(() => {
+      load = first.result.current.loadSessions(true);
+    });
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    await act(async () => {
+      response.resolve({
+        sessions: [contextSession("child-1", 82_000, "2026-06-27T00:01:00Z")],
+      });
+      await load;
+    });
+
+    expect(store.getState().contextWindow.bySessionId["child-1"]?.used).toBe(82_000);
+    expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(false);
     second.unmount();
   });
 });

@@ -11,7 +11,10 @@ const START_TOOL = "mcp__kandev__start_errand_kandev";
 const AWAIT_TOOL = "kandev/await_errands_kandev";
 const CANCEL_TOOL = "mcp__kandev__cancel_errand_kandev";
 const START_CARD = "errand-start-card";
+const AWAIT_CARD = "errand-await-card";
 const STATUS_ATTR = "data-errand-status";
+const CHANGED_TITLE = "API audit v2";
+const SPINNER_SELECTOR = ".spinner-grid";
 
 const mocks = vi.hoisted(() => ({
   isMobile: false,
@@ -100,6 +103,8 @@ describe("start_errand_kandev card", () => {
     renderTool(startCall());
 
     const card = screen.getByTestId(START_CARD);
+    expect(card.textContent).not.toContain("API audit");
+    fireEvent.click(within(card).getByRole("button", { expanded: false }));
     expect(card.textContent).toContain("API audit");
     expect(within(card).getByTestId("errand-profile").textContent).toBe("Deep review·gpt-5.6");
     expect(within(card).getByTestId("errand-start-status").getAttribute(STATUS_ATTR)).toBe(
@@ -113,15 +118,16 @@ describe("start_errand_kandev card", () => {
     });
   });
 
-  it("follows the live errand row instead of the start snapshot", () => {
-    mocks.errands = { [ERRAND_ID]: errand({ status: "needs_attention", title: "API audit v2" }) };
+  it("keeps the completed start snapshot historical despite a changed live child", () => {
+    mocks.errands = { [ERRAND_ID]: errand({ status: "done", title: CHANGED_TITLE }) };
     renderTool(startCall());
-
     const card = screen.getByTestId(START_CARD);
-    expect(card.textContent).toContain("API audit v2");
-    expect(within(card).getByTestId("errand-start-status").getAttribute(STATUS_ATTR)).toBe(
-      "needs_attention",
-    );
+    expect(card.textContent).not.toContain("API audit");
+    fireEvent.click(within(card).getByRole("button", { expanded: false }));
+    expect(card.textContent).toContain("API audit");
+    expect(card.textContent).not.toContain(CHANGED_TITLE);
+    expect(card.textContent).toContain("Was running");
+    expect(card.querySelector(SPINNER_SELECTOR)).toBeNull();
   });
 
   it("reveals the objective on demand", () => {
@@ -166,19 +172,18 @@ describe("start_errand_kandev card", () => {
     mocks.errands = { [ERRAND_ID]: errand({ status: "queued" }) };
     renderTool(startCall());
 
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
     const open = screen.getByRole("button", { name: "Open errand API audit" }) as HTMLButtonElement;
     expect(open.disabled).toBe(true);
   });
 
-  it("makes the whole card the Open target on phones", () => {
+  it("expands historical start details before opening on phones", () => {
     mocks.isMobile = true;
     renderTool(startCall());
-
     const card = screen.getByTestId(START_CARD);
-    expect(card.tagName).toBe("BUTTON");
-    expect(card.className).toContain("min-h-11");
-    expect(card.getAttribute("aria-label")).toBe("Open errand API audit, Running");
-    fireEvent.click(card);
+    expect(card.textContent).not.toContain("API audit");
+    fireEvent.click(within(card).getByRole("button", { expanded: false }));
+    fireEvent.click(within(card).getByRole("button", { name: "Open errand API audit" }));
     expect(mocks.openSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: ERRAND_ID }),
     );
@@ -188,6 +193,38 @@ describe("start_errand_kandev card", () => {
     renderTool(startCall());
 
     expect(screen.queryAllByRole("status")).toHaveLength(0);
+  });
+});
+
+describe("await_errands_kandev recorded statuses", () => {
+  // @covers AC-TASKS-ERRAND-AWAIT-DURATION-001.4
+  it.each([
+    ["pending", "Not finished"],
+    ["running", "Was running"],
+    ["queued", "Was queued"],
+    ["needs_attention", "Needed attention"],
+    ["done", "Done"],
+    ["failed", "Failed"],
+    ["cancelled", "Cancelled"],
+  ])("keeps a completed %s snapshot static when the live child has finished", (status, label) => {
+    mocks.errands = { [ERRAND_ID]: errand({ status: "done" }) };
+    renderTool(
+      kandevToolCall({
+        toolName: AWAIT_TOOL,
+        input: { errand_ids: [ERRAND_ID] },
+        resultJson: {
+          duration_ms: 30000,
+          end_reason: "timeout",
+          errands: [{ errand_id: ERRAND_ID, status }],
+        },
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    const row = screen.getByTestId(`errand-await-row-${ERRAND_ID}`);
+    expect(row.textContent).toContain(label);
+    expect(row.querySelector(SPINNER_SELECTOR)).toBeNull();
+    expect(row.querySelector(`[${STATUS_ATTR}]`)?.getAttribute(STATUS_ATTR)).toBe(status);
   });
 });
 
@@ -204,7 +241,7 @@ describe("await_errands_kandev card", () => {
       }),
     );
 
-    const card = screen.getByTestId("errand-await-card");
+    const card = screen.getByTestId(AWAIT_CARD);
     expect(card.textContent).toContain("Waiting for 2 errands");
     const first = screen.getByTestId(`errand-await-row-${ERRAND_ID}`);
     expect(first.textContent).toContain("Schema review");
@@ -215,7 +252,8 @@ describe("await_errands_kandev card", () => {
     expect(second.querySelector(`[${STATUS_ATTR}]`)?.getAttribute(STATUS_ATTR)).toBe("running");
   });
 
-  it("summarizes a finished await from its result without rendering result text", () => {
+  it("keeps returned await text hidden until historical details are expanded", () => {
+    mocks.errands = { [ERRAND_ID]: errand({ status: "done" }) };
     renderTool(
       kandevToolCall({
         toolName: AWAIT_TOOL,
@@ -228,12 +266,16 @@ describe("await_errands_kandev card", () => {
       }),
     );
 
-    const card = screen.getByTestId("errand-await-card");
-    expect(card.textContent).toContain("Waited for 1 errand");
-    expect(card.textContent).toContain("12s");
+    const card = screen.getByTestId(AWAIT_CARD);
+    expect(card.textContent).not.toContain("API audit");
+    expect(card.textContent).toContain("Waited 12s for 1 errand");
     expect(card.textContent).toContain("Wait condition met");
-    expect(card.textContent).toContain("Result returned");
+    expect(card.textContent).not.toContain("Result returned");
     expect(card.textContent).not.toContain("SECRET");
+    fireEvent.click(within(card).getByRole("button", { expanded: false }));
+    expect(card.textContent).toContain("At the end of this wait");
+    expect(card.textContent).toContain("Result returned");
+    expect(card.textContent).toContain("SECRET");
     fireEvent.click(within(card).getByRole("button", { name: /Open errand/ }));
     expect(mocks.openSession).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: ERRAND_ID }),
@@ -249,9 +291,63 @@ describe("await_errands_kandev card", () => {
       }),
     );
 
-    expect(screen.getByTestId("errand-await-card").textContent).toContain(
-      "Waiting for any of 2 errands",
+    expect(screen.getByTestId(AWAIT_CARD).textContent).toContain("Waiting for any of 2 errands");
+  });
+});
+
+describe("await_errands_kandev compatibility", () => {
+  it.each([
+    [{}, "Waited for 1 errand"],
+    [{ duration_ms: 0 }, "Waited 0s for 1 errand"],
+    [{ duration_ms: -10, end_reason: "other" }, "Waited for 1 errand"],
+  ])("keeps legacy and zero-duration completed waits readable: %j", (fields, label) => {
+    renderTool(
+      kandevToolCall({
+        toolName: AWAIT_TOOL,
+        input: { errand_ids: [ERRAND_ID] },
+        resultJson: fields,
+      }),
     );
+    const card = screen.getByTestId(AWAIT_CARD);
+    expect(card.textContent).toBe(label);
+    fireEvent.click(within(card).getByRole("button", { expanded: false }));
+    expect(card.textContent).toContain("At the end of this wait");
+    expect(card.querySelector(SPINNER_SELECTOR)).toBeNull();
+    expect(card.querySelector(`[${STATUS_ATTR}]`)).toBeNull();
+  });
+
+  it("preserves a recorded wait when live status changes after expansion", () => {
+    const message = kandevToolCall({
+      toolName: AWAIT_TOOL,
+      input: { errand_ids: [ERRAND_ID] },
+      resultJson: { errands: [{ errand_id: ERRAND_ID, status: "pending" }] },
+    });
+    mocks.errands = { [ERRAND_ID]: errand() };
+    const { rerender } = renderTool(message);
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    const row = screen.getByTestId(`errand-await-row-${ERRAND_ID}`);
+    expect(row.textContent).toContain("Not finished");
+
+    mocks.errands = { [ERRAND_ID]: errand({ status: "done" }) };
+    rerender(<KandevToolMessage comment={{ ...message }} sessionId={PARENT_ID} />);
+    expect(row.textContent).toContain("Not finished");
+    expect(row.querySelector(SPINNER_SELECTOR)).toBeNull();
+    expect(row.textContent).not.toContain("Done");
+  });
+
+  it("preserves failed awaits as error rows instead of completed disclosures", () => {
+    renderTool(
+      kandevToolCall({
+        toolName: AWAIT_TOOL,
+        input: { errand_ids: [ERRAND_ID] },
+        output: "errand_not_found",
+        status: "error",
+      }),
+    );
+    expect(screen.queryByTestId(AWAIT_CARD)).toBeNull();
+    const row = screen.getByTestId("errand-tool-row");
+    fireEvent.click(within(row).getByText("Kandev: Await Errands"));
+    expect(row.textContent).toContain("errand_not_found");
   });
 });
 

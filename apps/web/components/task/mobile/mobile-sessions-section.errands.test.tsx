@@ -48,6 +48,9 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       features: { dynamicAgentRouting: false, errands: mocks.errandsEnabled },
+      taskSessions: {
+        items: Object.fromEntries(mocks.sessions.map((session) => [session.id, session])),
+      },
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: PROFILES },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
@@ -163,82 +166,20 @@ describe("MobileSessionsPicker errands", () => {
     mocks.errands = [errandRow()];
   });
 
-  it("nests an errand under the session that started it with its title and status", () => {
+  it("lists and numbers only normal conversations while errands stay in the parent panel", () => {
     openPicker();
-
-    const group = screen.getByTestId(`mobile-errand-group-${SESSION_A}`);
-    expect(group.getAttribute("role")).toBe("group");
-    expect(group.getAttribute("aria-label")).toBe("Errands of Alpha");
-    const row = within(group).getByTestId(ERRAND_ROW);
-    expect(row.textContent).toContain("API audit");
-    expect(row.textContent).toContain("Running");
-    expect(row.className).toContain("min-h-11");
-    const rows = screen.getAllByTestId(/^mobile-(session-row|errand-group)-/);
-    expect(rows.map((node) => node.getAttribute("data-testid"))).toEqual([
-      "mobile-session-row-session-a",
-      `mobile-errand-group-${SESSION_A}`,
-      SESSION_B_ROW,
-    ]);
-  });
-
-  it("counts and numbers only the top-level sessions", () => {
-    openPicker();
-
+    expect(screen.queryByTestId(ERRAND_ROW)).toBeNull();
+    expect(screen.queryByTestId(`mobile-session-row-${ERRAND_ID}`)).toBeNull();
     expect(screen.getByText("2 sessions")).toBeTruthy();
     expect(within(screen.getByTestId(SESSION_B_ROW)).getByText("2")).toBeTruthy();
-    expect(within(screen.getByTestId(ERRAND_ROW)).queryByText("3")).toBeNull();
+    fireEvent.click(screen.getByTestId(SESSION_B_ROW));
+    expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith(TASK_ID, "session-b");
   });
 
-  it("offers no per-row menu on an errand", () => {
-    openPicker();
-    expect(
-      within(screen.getByTestId(ERRAND_ROW)).queryByRole("button", { name: SESSION_ACTIONS_LABEL }),
-    ).toBeNull();
-  });
-
-  it("opens the tapped errand as the active session without making it primary", () => {
-    openPicker();
-
-    fireEvent.click(screen.getByTestId(ERRAND_ROW));
-
-    expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith(TASK_ID, ERRAND_ID);
-  });
-
-  it("marks the open errand as current", () => {
+  it("keeps the parent identity in the session picker while the child is displayed", () => {
     mocks.activeSessionId = ERRAND_ID;
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={ERRAND_ID} fullWidth />);
-    fireEvent.click(screen.getByTestId(PILL_TESTID));
-    expect(screen.getByTestId(ERRAND_ROW).getAttribute("aria-current")).toBe("true");
-  });
-
-  it("follows the errand row's parent over the session row's", () => {
-    mocks.errands = [errandRow({ parent_session_id: "session-b" })];
-    openPicker();
-    expect(screen.queryByTestId(`mobile-errand-group-${SESSION_A}`)).toBeNull();
-    expect(screen.getByTestId("mobile-errand-group-session-b")).toBeTruthy();
-  });
-
-  it("keeps an errand whose parent is not listed at the top level", () => {
-    mocks.sessions = [
-      session(SESSION_A, "profile-a", START_TIME),
-      errandSession({ parent_session_id: "session-gone" as TaskSession["parent_session_id"] }),
-    ];
-    mocks.errands = [errandRow({ parent_session_id: "session-gone" })];
-    openPicker();
-    expect(screen.getByTestId(ERRAND_ROW)).toBeTruthy();
-    expect(screen.queryByRole("group")).toBeNull();
-  });
-
-  it("falls back to the session state while the errand row is unknown", () => {
-    mocks.errands = [];
-    openPicker();
-    expect(screen.getByTestId(ERRAND_ROW).textContent).toContain("Beta");
-  });
-
-  it("shows a settled errand with its done status", () => {
-    mocks.errands = [errandRow({ status: "done", settled_at: THIRD_TIME })];
-    openPicker();
-    expect(screen.getByTestId(ERRAND_ROW).textContent).toContain("Done");
+    expect(screen.getByTestId(PILL_TESTID).textContent).toContain("Alpha");
   });
 
   it("hides the sessions of the errand from the pill count", () => {
@@ -261,12 +202,9 @@ describe("MobileSessionsPicker errand sessions with the errands flag off", () =>
     return screen.findByRole("menu");
   }
 
-  it("lists the errand as an ordinary row that omits Set as Primary", async () => {
-    const menu = await openMenu(`mobile-session-row-${ERRAND_ID}`);
-    expect(screen.queryByTestId(ERRAND_ROW)).toBeNull();
-    expect(within(menu).queryByRole("menuitem", { name: "Set as Primary" })).toBeNull();
-    expect(within(menu).queryByTestId("session-handoff-submenu")).toBeNull();
-    expect(within(menu).getByRole("menuitem", { name: "Restart session" })).toBeTruthy();
+  it("keeps retained errands out of normal rows while the flag is off", () => {
+    openPicker();
+    expect(screen.queryByTestId(`mobile-session-row-${ERRAND_ID}`)).toBeNull();
   });
 
   it("keeps Set as Primary on an ordinary session", async () => {

@@ -28,6 +28,12 @@ import {
   updatePromptMessage,
 } from "./prompt-message-actions";
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import { readContextWindowMetadata } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  hydrationEpochChanged,
+  resolveTaskSessionContextSnapshot,
+  synchronizeAcceptedContextWindow,
+} from "./hydration-epochs";
 import { mergeTaskSession, mergeWorkspaceRecoveryProjection } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
@@ -148,14 +154,19 @@ function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
 
-function hydrationEpochChanged(current: number, request: number | undefined): boolean {
-  if (request === undefined) return current > 0;
-  return current > request;
-}
-
 type SessionSnapshotEpochs = {
-  current: { activity: number; readCursor: number; workspaceRecovery?: number };
-  request?: { activity: number; readCursor: number; workspaceRecovery?: number };
+  current: {
+    activity: number;
+    readCursor: number;
+    contextWindow?: number;
+    workspaceRecovery?: number;
+  };
+  request?: {
+    activity: number;
+    readCursor: number;
+    contextWindow?: number;
+    workspaceRecovery?: number;
+  };
 };
 
 /** Normalize and merge a complete session record without erasing a newer live activity event. */
@@ -165,8 +176,14 @@ function mergeTaskSessionSnapshot(
   epochs: SessionSnapshotEpochs,
 ): TaskSession {
   const snapshot = normalizeTaskSessionSnapshot(incoming);
-  if (!existing) return snapshot;
-  return mergeSessionSnapshotWithLiveEpochs(existing, snapshot, epochs);
+  const contextSafeSnapshot = resolveTaskSessionContextSnapshot(
+    existing,
+    snapshot,
+    epochs.current.contextWindow ?? 0,
+    epochs.request,
+  );
+  if (!existing) return contextSafeSnapshot;
+  return mergeSessionSnapshotWithLiveEpochs(existing, contextSafeSnapshot, epochs);
 }
 
 function normalizeTaskSessionSnapshot(incoming: TaskSession): TaskSession {
@@ -227,9 +244,17 @@ function mergeTaskSessionActionSnapshot(
   currentEpoch: TaskSessionHydrationEpoch,
   requestEpoch?: TaskSessionHydrationEpoch,
 ): TaskSession {
-  if (!existing) return incoming;
-  if (!requestEpoch) return mergeTaskSession(existing, incoming);
-  return mergeTaskSessionSnapshot(existing, incoming, {
+  const contextSafeSnapshot = resolveTaskSessionContextSnapshot(
+    existing,
+    incoming,
+    currentEpoch.contextWindow ?? 0,
+    requestEpoch,
+  );
+  if (!existing) return contextSafeSnapshot;
+  if (!requestEpoch) {
+    return mergeTaskSession(existing, contextSafeSnapshot);
+  }
+  return mergeTaskSessionSnapshot(existing, contextSafeSnapshot, {
     current: currentEpoch,
     request: requestEpoch,
   });
@@ -334,6 +359,7 @@ export const defaultSessionState: SessionSliceState = {
     items: {},
     activityEpochBySession: {},
     readCursorEpochBySession: {},
+    contextWindowEpochBySession: {},
     workspaceRecoveryEpochBySession: {},
     workspaceRecoveryByEnvironment: {},
   },
@@ -895,6 +921,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       if (draft.taskSessions.readCursorEpochBySession) {
         delete draft.taskSessions.readCursorEpochBySession[sessionId];
       }
+      if (draft.taskSessions.contextWindowEpochBySession) {
+        delete draft.taskSessions.contextWindowEpochBySession[sessionId];
+      }
       if (draft.taskSessions.workspaceRecoveryEpochBySession) {
         delete draft.taskSessions.workspaceRecoveryEpochBySession[sessionId];
       }
@@ -987,6 +1016,37 @@ function promoteAgentctlReadyFromSessionSnapshot(
   };
 }
 
+function explicitContextWindowSnapshots(
+  sessions: readonly TaskSession[],
+): Map<string, TaskSession> {
+  const snapshots = new Map<string, TaskSession>();
+  for (const session of sessions) {
+    if (readContextWindowMetadata(session.metadata).present) snapshots.set(session.id, session);
+  }
+  return snapshots;
+}
+
+function advanceLiveContextWindowEpoch(
+  taskSessions: Draft<SessionSliceState["taskSessions"]>,
+  session: Pick<TaskSession, "id" | "metadata">,
+): void {
+  if (!readContextWindowMetadata(session.metadata).present) return;
+  const epochs = (taskSessions.contextWindowEpochBySession ??= {});
+  epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+}
+
+function synchronizeSessionContextSnapshot(
+  draft: Draft<SessionSliceState>,
+  incoming: TaskSession,
+  accepted: TaskSession,
+): void {
+  synchronizeAcceptedContextWindow(
+    draft as unknown as Parameters<typeof synchronizeAcceptedContextWindow>[0],
+    incoming,
+    accepted,
+  );
+}
+
 /** Build actions that reconcile complete session snapshots with partial live events. */
 function buildTaskSessionReconciliationActions(set: ImmerSet) {
   return {
@@ -996,6 +1056,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
       hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
+        const explicitContextWindowSessions = explicitContextWindowSnapshots(sessions);
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
           const requestEpoch = hydrationEpochsAtRequestStart[session.id];
@@ -1004,6 +1065,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
             current: {
               activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
               readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+              contextWindow: draft.taskSessions.contextWindowEpochBySession?.[session.id] ?? 0,
               workspaceRecovery:
                 draft.taskSessions.workspaceRecoveryEpochBySession?.[session.id] ?? 0,
             },
@@ -1025,6 +1087,8 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
         (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = null;
         for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
+          const incoming = explicitContextWindowSessions.get(session.id);
+          if (incoming) synchronizeSessionContextSnapshot(draft, incoming, session);
           promoteAgentctlReadyFromSessionSnapshot(draft, session);
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
@@ -1040,6 +1104,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
       session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
     ) =>
       set((draft) => {
+        advanceLiveContextWindowEpoch(draft.taskSessions, session);
         if (Object.prototype.hasOwnProperty.call(session, "foreground_activity")) {
           const epochs = (draft.taskSessions.activityEpochBySession ??= {});
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
@@ -1074,6 +1139,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
         } else {
           draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
         }
+        synchronizeSessionContextSnapshot(draft, session, merged);
         syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
         reconcileActiveTurnForIdleSession(draft, merged);
       }),
@@ -1097,6 +1163,7 @@ function buildTaskSessionActions(set: ImmerSet) {
           {
             activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
             readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+            contextWindow: draft.taskSessions.contextWindowEpochBySession?.[session.id] ?? 0,
             workspaceRecovery:
               draft.taskSessions.workspaceRecoveryEpochBySession?.[session.id] ?? 0,
           },
@@ -1117,6 +1184,7 @@ function buildTaskSessionActions(set: ImmerSet) {
           const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
           if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
         }
+        synchronizeSessionContextSnapshot(draft, session, mergedSession);
         syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
         reconcileActiveTurnForIdleSession(draft, mergedSession);
       }),

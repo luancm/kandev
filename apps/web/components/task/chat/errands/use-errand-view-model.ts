@@ -37,20 +37,24 @@ export function useErrandViewModel(
   const errand = useAppStore((state) =>
     enabled && taskId && sessionId ? selectErrandBySessionId(state, taskId, sessionId) : undefined,
   );
-  const parentSessionId = errand?.parent_session_id || session?.parent_session_id || null;
+  const recordedParentId = errand?.parent_session_id || session?.parent_session_id || null;
+  const parentSessionId = useAppStore((state) => {
+    const parent = recordedParentId ? state.taskSessions.items[recordedParentId] : null;
+    return parent?.task_id === taskId && parent.role !== "errand" ? recordedParentId : null;
+  });
   const parentTitle = useAppStore((state) =>
     parentSessionId ? selectSessionTabTitle(state, parentSessionId) : null,
   );
   const isErrand = session?.role === "errand" || Boolean(errand);
   return useMemo(() => {
-    if (!enabled || !sessionId || !taskId || !isErrand) return null;
+    if (!sessionId || !taskId || !isErrand) return null;
     return {
       sessionId,
       taskId,
       errand: errand ?? null,
       parentSessionId,
       parentTitle: parentTitle || t("task:errandParentFallback"),
-      title: errand?.title || t("task:errandUntitled"),
+      title: errand?.title || session?.name || t("task:errandUntitled"),
       objective: errand?.objective || null,
       workspacePath: getSessionWorkspacePath(session) ?? null,
       branch: session?.worktree_branch || null,

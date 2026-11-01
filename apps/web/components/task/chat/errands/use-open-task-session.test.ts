@@ -9,6 +9,17 @@ const mocks = vi.hoisted(() => ({
   markIntent: vi.fn(),
   setActiveSession: vi.fn(),
   setPrimary: vi.fn(),
+  taskSessions: {
+    items: {
+      "errand-1": {
+        id: "errand-1",
+        task_id: "task-1",
+        role: "errand",
+        parent_session_id: "parent-1",
+      },
+      "parent-1": { id: "parent-1", task_id: "task-1" },
+    },
+  },
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -28,7 +39,13 @@ vi.mock("../../session-tab-activation-intent", () => ({
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
-    getState: () => ({ setActiveSession: mocks.setActiveSession, setPrimary: mocks.setPrimary }),
+    getState: () => ({
+      setActiveSession: mocks.setActiveSession,
+      setPrimary: mocks.setPrimary,
+      taskSessions: mocks.taskSessions,
+      taskSessionsByTask: { itemsByTaskId: { "task-1": Object.values(mocks.taskSessions.items) } },
+      errands: { byTaskId: {} },
+    }),
   }),
 }));
 
@@ -43,23 +60,16 @@ beforeEach(() => {
 });
 
 describe("useOpenTaskSession", () => {
-  it("adds or focuses the session panel on the desktop workbench", () => {
+  it("opens a child conversation in its parent surface without adding a child tab", () => {
     const { result } = renderHook(() => useOpenTaskSession());
-
     result.current(TARGET);
-
-    expect(mocks.markIntent).toHaveBeenCalledWith("errand-1");
-    expect(mocks.clearHiddenSessionPanel).toHaveBeenCalledWith(mocks.api, "errand-1");
-    expect(mocks.addSessionPanel).toHaveBeenCalledWith(
-      mocks.api,
-      "center",
+    expect(mocks.setActiveSession).toHaveBeenCalledWith("task-1", "errand-1");
+    expect(mocks.addSessionPanel).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
       "errand-1",
-      "API audit",
+      expect.anything(),
     );
-    expect(mocks.markIntent.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.addSessionPanel.mock.invocationCallOrder[0],
-    );
-    expect(mocks.setActiveSession).not.toHaveBeenCalled();
     expect(mocks.setPrimary).not.toHaveBeenCalled();
   });
 
@@ -82,4 +92,26 @@ describe("useOpenTaskSession", () => {
     expect(mocks.setActiveSession).toHaveBeenCalledWith("task-1", "errand-1");
     expect(mocks.addSessionPanel).not.toHaveBeenCalled();
   });
+});
+
+it("preserves the selected child URL for reload without changing task route options", () => {
+  window.history.replaceState(
+    { guard: "retained" },
+    "",
+    "/t/task-1?sessionId=parent-1&layout=wide#turn",
+  );
+  const { result } = renderHook(() => useOpenTaskSession());
+  result.current(TARGET);
+  expect(new URL(window.location.href).searchParams.get("sessionId")).toBe("errand-1");
+  expect(new URL(window.location.href).searchParams.get("layout")).toBe("wide");
+  expect(window.location.hash).toBe("#turn");
+  expect(window.history.state).toEqual({ guard: "retained" });
+  window.history.replaceState({}, "", "/");
+});
+
+it("selects the parent once when returning from a child on phone", () => {
+  mocks.usesDesktopWorkbench = false;
+  const { result } = renderHook(() => useOpenTaskSession());
+  result.current({ taskId: "task-1", sessionId: "parent-1", title: "Main" });
+  expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith("task-1", "parent-1");
 });

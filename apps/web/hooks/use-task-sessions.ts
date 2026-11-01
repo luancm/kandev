@@ -107,7 +107,8 @@ function useTaskSessionState(taskId: string | null) {
     taskId ? (state.taskSessionsByTask.errorByTaskId?.[taskId] ?? null) : null,
   );
   const connectionStatus = useAppStore((state) => state.connection.status);
-  return { sessions, isLoading, isLoaded, error, connectionStatus };
+  const connectionGeneration = useAppStore((state) => state.connection.generation ?? 0);
+  return { sessions, isLoading, isLoaded, error, connectionStatus, connectionGeneration };
 }
 
 function useTaskSessionReadOwnership({
@@ -158,16 +159,17 @@ function useTaskSessionReadOwnership({
 function useTaskSessionReconnect(
   taskId: string | null,
   connectionStatus: string,
+  connectionGeneration: number,
   loadSessions: (force?: boolean) => Promise<void>,
 ) {
-  const previousConnectionStatusRef = useRef(connectionStatus);
+  const previousConnectionGenerationRef = useRef(connectionGeneration);
   useEffect(() => {
-    const previous = previousConnectionStatusRef.current;
-    previousConnectionStatusRef.current = connectionStatus;
+    const previous = previousConnectionGenerationRef.current;
+    previousConnectionGenerationRef.current = connectionGeneration;
     if (!taskId) return;
-    if (connectionStatus !== "connected" || previous === "connected") return;
+    if (connectionStatus !== "connected" || previous === connectionGeneration) return;
     void loadSessions(true);
-  }, [connectionStatus, loadSessions, taskId]);
+  }, [connectionGeneration, connectionStatus, loadSessions, taskId]);
 }
 
 function observeStoredMembership(
@@ -244,7 +246,8 @@ export function useTaskSessions(taskId: string | null) {
   useAppStore(stateReadScopeIdentity);
   const getStoreState = store.getState;
   const reads = getTaskSessionReads(store);
-  const { sessions, isLoading, isLoaded, error, connectionStatus } = useTaskSessionState(taskId);
+  const { sessions, isLoading, isLoaded, error, connectionStatus, connectionGeneration } =
+    useTaskSessionState(taskId);
   const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
   const setTaskSessionsError = useAppStore((state) => state.setTaskSessionsError);
   const setTaskSessionsLoading = useAppStore((state) => state.setTaskSessionsLoading);
@@ -329,7 +332,7 @@ export function useTaskSessions(taskId: string | null) {
     pendingForcedReloadWaitersRef,
   });
 
-  useTaskSessionReconnect(taskId, connectionStatus, loadSessions);
+  useTaskSessionReconnect(taskId, connectionStatus, connectionGeneration, loadSessions);
 
   useForegroundRefresh(
     () => {

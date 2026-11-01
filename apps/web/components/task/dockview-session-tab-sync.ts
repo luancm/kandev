@@ -1,3 +1,8 @@
+import { isTaskDetailPath } from "@/lib/links";
+import {
+  conversationTabSessionId,
+  replaceTaskConversationUrl,
+} from "@/lib/task-conversation-navigation";
 import type { DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -13,10 +18,13 @@ import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
-function restoreActiveSessionPanel(
-  api: DockviewReadyEvent["api"],
-  activeSessionId: string | null,
-): void {
+function restoreActiveSessionPanel(api: DockviewReadyEvent["api"], state: AppState): void {
+  const taskId = state.tasks.activeTaskId;
+  const activeSessionId = conversationTabSessionId(
+    state.tasks.activeSessionId,
+    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
+    taskId ? state.errands.byTaskId[taskId] : undefined,
+  );
   if (!activeSessionId) return;
   if (hiddenSessionIdsFor(api).has(activeSessionId)) return;
   api.getPanel(`session:${activeSessionId}`)?.api.setActive();
@@ -55,6 +63,14 @@ function adoptVisibleSuccessorForHiddenActiveSession(
   }
 }
 
+function hasExplicitTaskConversation(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    isTaskDetailPath(window.location.pathname, taskId) &&
+    Boolean(new URLSearchParams(window.location.search).get("sessionId"))
+  );
+}
+
 function adoptRestoredSessionTabSelection(
   api: DockviewReadyEvent["api"],
   appStore: StoreApi<AppState>,
@@ -62,7 +78,7 @@ function adoptRestoredSessionTabSelection(
   const state = appStore.getState();
   const activeTaskId = state.tasks.activeTaskId;
   const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
-  if (!activeTaskId || !currentEnvironmentId) return;
+  if (!activeTaskId || !currentEnvironmentId || hasExplicitTaskConversation(activeTaskId)) return;
 
   const currentSessionIds = new Set<string>(
     (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),
@@ -79,6 +95,14 @@ function adoptRestoredSessionTabSelection(
   if (selectedSessionIds.length !== 1) return;
 
   const sessionId = selectedSessionIds[0];
+  const selectedHostId = conversationTabSessionId(
+    state.tasks.activeSessionId,
+    state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [],
+    state.errands.byTaskId[activeTaskId],
+  );
+  // An explicit child route owns selection; a saved peer tab cannot replace it.
+  if (selectedHostId !== state.tasks.activeSessionId) return;
+  if (sessionId === selectedHostId) return;
   if (sessionId === state.tasks.activeSessionId) return;
   state.setActiveSessionAuto(activeTaskId, sessionId);
 }
@@ -128,7 +152,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
           activeTaskId: state.tasks.activeTaskId,
         });
       }
-      if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
+      if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state);
       return;
     }
     if (state.tasks.activeSessionId && hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)) {
@@ -142,7 +166,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
           activeSessionId: state.tasks.activeSessionId,
         });
       }
-      restoreActiveSessionPanel(api, state.tasks.activeSessionId);
+      restoreActiveSessionPanel(api, state);
       return;
     }
     if (isDebug()) {
@@ -153,6 +177,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     }
     clearHiddenSessionPanel(api, target.sessionId);
     state.setActiveSession(target.taskId, target.sessionId);
+    replaceTaskConversationUrl(target.taskId, target.sessionId);
   });
   const hiddenPanelDisposable = onDidHideSessionPanel(api, () => {
     queueMicrotask(() => {

@@ -86,7 +86,7 @@ export function makeSharedEnvironmentHandoffApi(): {
   };
 }
 
-export type ErrandTabSession = { id: string; role?: "errand" };
+export type ErrandTabSession = { id: string; role?: "errand"; parent_session_id?: string };
 
 /**
  * App-store stand-in for the automatic tab effect on one loaded task, with

@@ -10,7 +10,7 @@ import {
 } from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { isErrandSession } from "@/lib/state/slices/errands/selectors";
+import { isErrandConversation, conversationTabSessionId } from "@/lib/task-conversation-navigation";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { TaskSession } from "@/lib/types/http";
@@ -383,22 +383,27 @@ function ensureSiblingPanels(
 
 /**
  * Sessions that may gain a tab or selection automatically. While the errands
- * flag is on, an errand opens only on request; existing errand tabs are kept.
+ * flag is off, role identity still keeps retained errands out of regular tabs.
  */
 function resolveAutoTabSessionIds(
   state: AppState,
   taskId: string | null,
   sessions: TaskSession[],
 ): string[] {
-  const eligible =
-    taskId && state.features?.errands
-      ? sessions.filter((session) => !isErrandSession(state, taskId, session))
-      : sessions;
-  return eligible.map((session) => session.id);
+  return sessions
+    .filter(
+      (session) =>
+        !isErrandConversation(session, taskId ? state.errands.byTaskId[taskId] : undefined),
+    )
+    .map((session) => session.id);
 }
 
 /** Resolve the current session ID list from the store for the active task. */
-function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): {
+function resolveCurrentSessionIds(
+  appStore: ReturnType<typeof useAppStoreApi>,
+  selectedId: string | null,
+): {
+  hostSessionId: string | null;
   tid: string | null;
   currentSessionIds: string[];
   autoTabSessionIds: string[];
@@ -408,6 +413,11 @@ function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): 
   const tid = state.tasks.activeTaskId;
   const currentSessions = tid ? (state.taskSessionsByTask.itemsByTaskId[tid] ?? []) : [];
   return {
+    hostSessionId: conversationTabSessionId(
+      selectedId,
+      currentSessions,
+      tid ? state.errands.byTaskId[tid] : undefined,
+    ),
     tid: tid ?? null,
     currentSessionIds: currentSessions.map((session) => session.id),
     autoTabSessionIds: resolveAutoTabSessionIds(state, tid ?? null, currentSessions),
@@ -550,6 +560,15 @@ function workflowFocusRequestIdForSession(
   return request?.taskId === taskId && request.sessionId === sessionId ? request.requestId : null;
 }
 
+function ensureOrphanConversationPanel(
+  api: DockviewApi,
+  selectedId: string | null,
+  currentSessionIds: string[],
+) {
+  if (!selectedId || !currentSessionIds.includes(selectedId) || api.getPanel("chat")) return;
+  api.addPanel({ id: "chat", component: "chat", title: t("common:agent") });
+}
+
 /**
  * Core effect body for useAutoSessionTab — extracted to reduce complexity of
  * the hook itself.
@@ -562,8 +581,10 @@ export function runAutoSessionTabEffect(
   const api = useDockviewStore.getState().api;
   if (!api) return;
 
-  const { tid, currentSessionIds, autoTabSessionIds, sessionListLoaded } =
-    resolveCurrentSessionIds(appStore);
+  const selectedId = effectiveSessionId;
+  const { tid, currentSessionIds, autoTabSessionIds, sessionListLoaded, hostSessionId } =
+    resolveCurrentSessionIds(appStore, selectedId);
+  effectiveSessionId = hostSessionId;
 
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
@@ -574,10 +595,11 @@ export function runAutoSessionTabEffect(
     return;
   }
 
-  reconcileLoadedSessionPanels(api, refs, currentSessionIds, effectiveSessionId, sessionListLoaded);
+  reconcileLoadedSessionPanels(api, refs, autoTabSessionIds, effectiveSessionId, sessionListLoaded);
   pruneHiddenSessionIds(api, appStore.getState);
 
   if (!effectiveSessionId) {
+    ensureOrphanConversationPanel(api, selectedId, currentSessionIds);
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
@@ -701,7 +723,12 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!tid) return EMPTY_SESSION_IDS_KEY;
     const list = s.taskSessionsByTask.itemsByTaskId[tid];
     if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
-    return list.map((ss) => ss.id).join(",");
+    return list
+      .map(
+        (ss) =>
+          `${ss.id}:${ss.role ?? ""}:${ss.parent_session_id ?? ""}:${Boolean(s.errands.byTaskId[tid]?.[ss.id])}`,
+      )
+      .join(",");
   });
   const sessionListLoaded = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;

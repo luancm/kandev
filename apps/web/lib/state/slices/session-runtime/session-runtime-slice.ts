@@ -1,6 +1,13 @@
 import type { SliceCreator } from "@/lib/state/slice-creator";
 
-import type { SessionRuntimeSlice, SessionRuntimeSliceState, SessionPollMode } from "./types";
+import type {
+  ContextWindowEntry,
+  SessionRuntimeSlice,
+  SessionRuntimeSliceState,
+  SessionPollMode,
+} from "./types";
+import type { TaskSession } from "@/lib/types/http";
+import { updateContextWindowMetadata } from "./context-window";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
 import {
@@ -37,6 +44,65 @@ function appendTerminalChunk(output: string[], data: string) {
     total -= output[0].length;
     output.shift();
   }
+}
+
+type ContextWindowSessionState = {
+  taskSessions?: {
+    items: Record<string, TaskSession>;
+    contextWindowEpochBySession?: Record<string, number>;
+  };
+  taskSessionsByTask?: { itemsByTaskId: Record<string, TaskSession[]> };
+};
+
+type ContextWindowSessionTarget = {
+  canonical?: TaskSession;
+  session?: TaskSession;
+  taskList?: TaskSession[];
+};
+
+function findSessionContextTarget(
+  state: ContextWindowSessionState,
+  sessionId: string,
+): ContextWindowSessionTarget {
+  const canonical = state.taskSessions?.items[sessionId];
+  if (canonical) {
+    return {
+      canonical,
+      session: canonical,
+      taskList: state.taskSessionsByTask?.itemsByTaskId[canonical.task_id],
+    };
+  }
+
+  for (const items of Object.values(state.taskSessionsByTask?.itemsByTaskId ?? {})) {
+    const session = items.find((candidate) => candidate.id === sessionId);
+    if (session) return { session, taskList: items };
+  }
+  return {};
+}
+
+function updateSessionContextMetadata(
+  state: ContextWindowSessionState,
+  sessionId: string,
+  entry: ContextWindowEntry | null,
+): void {
+  const target = findSessionContextTarget(state, sessionId);
+  const { canonical, session, taskList } = target;
+  if (!session) return;
+
+  session.metadata = updateContextWindowMetadata(session.metadata, entry);
+  if (!canonical && state.taskSessions?.items) {
+    state.taskSessions.items[sessionId] = session;
+  }
+  if (taskList) {
+    const index = taskList.findIndex((candidate) => candidate.id === sessionId);
+    if (index >= 0) taskList[index] = session;
+  }
+}
+
+function incrementContextWindowEpoch(state: ContextWindowSessionState, sessionId: string): void {
+  if (!state.taskSessions) return;
+  const epochs = (state.taskSessions.contextWindowEpochBySession ??= {});
+  epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
 }
 
 /** Per-session runtime maps (keyed directly by sessionId). */
@@ -400,11 +466,17 @@ function buildContextWindowActions(set: ImmerSet) {
       contextWindow: Parameters<SessionRuntimeSlice["setContextWindow"]>[1],
     ) =>
       set((draft) => {
+        const sessionState = draft as unknown as ContextWindowSessionState;
+        incrementContextWindowEpoch(sessionState, sessionId);
         draft.contextWindow.bySessionId[sessionId] = contextWindow;
+        updateSessionContextMetadata(sessionState, sessionId, contextWindow);
       }),
     clearContextWindow: (sessionId: string) =>
       set((draft) => {
+        const sessionState = draft as unknown as ContextWindowSessionState;
+        incrementContextWindowEpoch(sessionState, sessionId);
         delete draft.contextWindow.bySessionId[sessionId];
+        updateSessionContextMetadata(sessionState, sessionId, null);
       }),
   };
 }

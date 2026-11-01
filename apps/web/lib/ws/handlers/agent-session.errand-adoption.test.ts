@@ -108,22 +108,25 @@ describe("errand sessions are never auto-adopted while the errands flag is on", 
     expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 
-  it("keeps an opened errand selected when it reaches a terminal state", () => {
-    const errand = { id: ERRAND_ID, task_id: TASK_ID, state: "RUNNING", role: "errand" };
-    const peer = { id: "s-peer", task_id: TASK_ID, state: "RUNNING", started_at: "" };
-    const store = makeStore({
-      errandsEnabled: true,
-      activeSessionId: ERRAND_ID,
-      sessions: [peer, errand],
-    });
+  it.each([true, false])(
+    "keeps an opened errand selected on terminal events with errands=%s",
+    (enabled) => {
+      const errand = { id: ERRAND_ID, task_id: TASK_ID, state: "RUNNING", role: "errand" };
+      const peer = { id: "s-peer", task_id: TASK_ID, state: "RUNNING", started_at: "" };
+      const store = makeStore({
+        errandsEnabled: enabled,
+        activeSessionId: ERRAND_ID,
+        sessions: [peer, errand],
+      });
 
-    sendStateChanged(store, { session_id: ERRAND_ID, new_state: "CANCELLED", role: "errand" });
+      sendStateChanged(store, { session_id: ERRAND_ID, new_state: "CANCELLED", role: "errand" });
 
-    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
-  });
+      expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+    },
+  );
 
-  it("still adopts an ordinary new session", () => {
-    const store = makeStore({ errandsEnabled: true });
+  it.each([true, false])("still adopts an ordinary new session with errands=%s", (enabled) => {
+    const store = makeStore({ errandsEnabled: enabled });
 
     sendStateChanged(store, { session_id: "s-new", new_state: "STARTING" });
 
@@ -131,16 +134,16 @@ describe("errand sessions are never auto-adopted while the errands flag is on", 
   });
 });
 
-describe("errand sessions keep ordinary adoption while the errands flag is off", () => {
-  it("adopts a new errand session like any session", () => {
+describe("retained errands keep explicit navigation while the errands flag is off", () => {
+  it("does not adopt a new retained errand session", () => {
     const store = makeStore({ errandsEnabled: false });
 
     sendStateChanged(store, { session_id: ERRAND_ID, new_state: "STARTING", role: "errand" });
 
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith(TASK_ID, ERRAND_ID);
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 
-  it("hands off to a running errand like any session", () => {
+  it("never hands off to a retained errand", () => {
     const old = { id: "s-old", task_id: TASK_ID, state: "RUNNING", started_at: "" };
     const errand = { id: ERRAND_ID, task_id: TASK_ID, state: "RUNNING", role: "errand" };
     const store = makeStore({
@@ -151,7 +154,7 @@ describe("errand sessions keep ordinary adoption while the errands flag is off",
 
     sendStateChanged(store, { session_id: old.id, new_state: "COMPLETED" });
 
-    expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith(TASK_ID, ERRAND_ID);
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 });
 
@@ -169,8 +172,8 @@ describe("pickReplacementSessionId", () => {
     expect(pickReplacementSessionId(store.getState(), TASK_ID)).toBeNull();
   });
 
-  it("considers errands while the flag is off", () => {
+  it("skips retained errands while the flag is off", () => {
     const store = makeStore({ errandsEnabled: false, sessions: [ordinary, errand] });
-    expect(pickReplacementSessionId(store.getState(), TASK_ID)).toBe(ERRAND_ID);
+    expect(pickReplacementSessionId(store.getState(), TASK_ID)).toBe("s-ordinary");
   });
 });

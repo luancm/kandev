@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback } from "react";
 import {
   TaskSessionNavigationContext,
-  type OpenTaskSessionTarget,
+  useScopedTaskSessionNavigation,
 } from "@/components/task/chat/errands/task-session-navigation-context";
 import { TaskChatPanel } from "@/components/task/task-chat-panel";
 
@@ -30,12 +29,7 @@ export function ThreadConversation({
   sessionId: string;
   onSelectSession: (sessionId: string) => void;
 }) {
-  const openSession = useCallback(
-    (target: OpenTaskSessionTarget) => {
-      if (target.taskId === taskId) onSelectSession(target.sessionId);
-    },
-    [taskId, onSelectSession],
-  );
+  const openSession = useScopedTaskSessionNavigation(taskId, onSelectSession);
   return (
     <TaskSessionNavigationContext.Provider value={openSession}>
       <TaskChatPanel

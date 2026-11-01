@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   ERRAND_PREVIEW_MAX_CHARS,
+  awaitErrandStatus,
   parseAwaitErrands,
   parseCancelErrand,
   parseErrandDelivery,
   parseStartErrand,
 } from "./errand-parse";
+import type { ErrandStatus } from "@/lib/types/errands";
 
 const ERRAND_ID = "errand-1";
 
@@ -109,9 +111,21 @@ describe("parseAwaitErrands", () => {
 
     expect(view.mode).toBe("any");
     expect(view.rows).toEqual([
-      { errandId: "e-1", status: "done", pending: false, resultReceived: true },
-      { errandId: "e-2", status: null, pending: true, resultReceived: false },
-      { errandId: "e-3", status: "failed", pending: false, resultReceived: false },
+      {
+        errandId: "e-1",
+        status: "done",
+        pending: false,
+        resultReceived: true,
+        resultText: "All good",
+      },
+      { errandId: "e-2", status: null, pending: true, resultReceived: false, resultText: null },
+      {
+        errandId: "e-3",
+        status: "failed",
+        pending: false,
+        resultReceived: false,
+        resultText: null,
+      },
     ]);
     expect(view.errorText).toBeNull();
   });
@@ -121,7 +135,7 @@ describe("parseAwaitErrands", () => {
 
     expect(view.mode).toBe("all");
     expect(view.rows).toEqual([
-      { errandId: "e-1", status: null, pending: false, resultReceived: false },
+      { errandId: "e-1", status: null, pending: false, resultReceived: false, resultText: null },
     ]);
   });
 
@@ -130,6 +144,43 @@ describe("parseAwaitErrands", () => {
 
     expect(view.errorText).toBe("errand_not_found");
     expect(view.rows.map((row) => row.errandId)).toEqual(["e-1"]);
+  });
+});
+
+describe("awaitErrandStatus", () => {
+  // @covers AC-TASKS-ERRAND-AWAIT-DURATION-001.4
+  it.each(["pending", "running", "queued", "needs_attention", "done", "failed", "cancelled"])(
+    "preserves a recorded %s outcome independently of later live state",
+    (status) => {
+      const { rows } = parseAwaitErrands(
+        { errand_ids: [ERRAND_ID] },
+        { errands: [{ errand_id: ERRAND_ID, status }] },
+        "complete",
+      );
+      const snapshot = structuredClone(rows[0]);
+      for (const live of ["running", "done", "cancelled"] as ErrandStatus[]) {
+        expect(awaitErrandStatus(rows[0], live, false)).toBe(status);
+      }
+      expect(rows[0]).toEqual(snapshot);
+    },
+  );
+
+  it("keeps omitted or unknown historical status unknown, even with a live child", () => {
+    for (const status of [undefined, "unknown"]) {
+      const { rows } = parseAwaitErrands(
+        { errand_ids: [ERRAND_ID] },
+        { errands: [{ errand_id: ERRAND_ID, status }] },
+        "complete",
+      );
+      expect(awaitErrandStatus(rows[0], "done", false)).toBeNull();
+    }
+  });
+
+  it("still follows live status while an await is in flight", () => {
+    const { rows } = parseAwaitErrands({ errand_ids: [ERRAND_ID] }, null, "running");
+    expect(awaitErrandStatus(rows[0], undefined, true)).toBe("running");
+    expect(awaitErrandStatus(rows[0], "needs_attention", true)).toBe("needs_attention");
+    expect(awaitErrandStatus(rows[0], "done", true)).toBe("done");
   });
 });
 
@@ -200,4 +251,24 @@ describe("parseErrandDelivery", () => {
 
     expect(item.preview).toBe("\u{1F600}".repeat(ERRAND_PREVIEW_MAX_CHARS));
   });
+});
+
+it("retains returned await text for historical disclosure without turning invalid values into results", () => {
+  const view = parseAwaitErrands(
+    { errand_ids: ["e-1", "e-2"] },
+    {
+      duration_ms: 0,
+      end_reason: "all_ready",
+      errands: [
+        { errand_id: "e-1", status: "done", result: "Saved outcome <b>as text</b>" },
+        { errand_id: "e-2", status: "done", result: { text: "untrusted shape" } },
+      ],
+    },
+    "complete",
+  );
+  expect(view.rows[0]).toMatchObject({
+    resultReceived: true,
+    resultText: "Saved outcome <b>as text</b>",
+  });
+  expect(view.rows[1]).toMatchObject({ resultReceived: false, resultText: null });
 });

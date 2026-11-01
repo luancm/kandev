@@ -31,6 +31,7 @@ type ErrandsPanelRowProps = {
 type ErrandsPanelRowPresentationProps = Omit<ErrandsPanelRowProps, "drawer"> & {
   contextUsage: ContextWindowUsage | undefined;
   contextDescriptionId: string;
+  deliveryUncertaintyDescriptionId: string;
   contextSize: number;
   contextUsed: number;
 };
@@ -48,6 +49,7 @@ function RowSummary({
   title,
   contextUsage,
   contextDescriptionId,
+  deliveryUncertaintyDescriptionId,
   contextSize,
   contextUsed,
 }: {
@@ -56,6 +58,7 @@ function RowSummary({
   title: string;
   contextUsage: ContextWindowUsage | undefined;
   contextDescriptionId: string;
+  deliveryUncertaintyDescriptionId: string;
   contextSize: number;
   contextUsed: number;
 }) {
@@ -109,6 +112,15 @@ function RowSummary({
           )}
         </span>
       )}
+      {errand.delivery_state === "uncertain" && (
+        <span
+          id={deliveryUncertaintyDescriptionId}
+          data-testid="errand-delivery-uncertain"
+          className="text-[11px] leading-4 text-amber-700 dark:text-amber-300"
+        >
+          {t("task:errandResultDeliveryUncertain")}
+        </span>
+      )}
     </span>
   );
 }
@@ -122,6 +134,7 @@ function DrawerRow({
   onOpened,
   contextUsage,
   contextDescriptionId,
+  deliveryUncertaintyDescriptionId,
   contextSize,
   contextUsed,
 }: ErrandsPanelRowPresentationProps) {
@@ -129,13 +142,16 @@ function DrawerRow({
   const openSession = useOpenTaskSession();
   const title = errand.title || t("task:errandUntitled");
   const status = t(errandStatusLabelKey(errand.status));
+  const descriptions: string[] = [];
+  if (contextUsage) descriptions.push(contextDescriptionId);
+  if (errand.delivery_state === "uncertain") descriptions.push(deliveryUncertaintyDescriptionId);
   return (
     <li>
       <button
         type="button"
         disabled={errand.status === "queued"}
         aria-label={t("chat:errandOpenWithStatusAria", { title, status })}
-        aria-describedby={contextUsage ? contextDescriptionId : undefined}
+        aria-describedby={descriptions.join(" ") || undefined}
         data-testid={`errands-panel-row-${errand.errand_id}`}
         onClick={() => {
           openSession({ taskId, sessionId: errand.errand_id, title });
@@ -152,6 +168,7 @@ function DrawerRow({
           title={title}
           contextUsage={contextUsage}
           contextDescriptionId={contextDescriptionId}
+          deliveryUncertaintyDescriptionId={deliveryUncertaintyDescriptionId}
           contextSize={contextSize}
           contextUsed={contextUsed}
         />
@@ -170,6 +187,7 @@ function PopoverRow({
   onOpened,
   contextUsage,
   contextDescriptionId,
+  deliveryUncertaintyDescriptionId,
   contextSize,
   contextUsed,
 }: ErrandsPanelRowPresentationProps) {
@@ -186,6 +204,7 @@ function PopoverRow({
         title={title}
         contextUsage={contextUsage}
         contextDescriptionId={contextDescriptionId}
+        deliveryUncertaintyDescriptionId={deliveryUncertaintyDescriptionId}
         contextSize={contextSize}
         contextUsed={contextUsed}
       />
@@ -205,10 +224,12 @@ export function ErrandsPanelRow({ drawer, ...rest }: ErrandsPanelRowProps) {
   const contextWindow = useSessionContextWindow(rest.errand.errand_id, false);
   const contextUsage = deriveContextWindowUsage(contextWindow);
   const contextDescriptionId = useId();
+  const deliveryUncertaintyDescriptionId = useId();
   const presentationProps = {
     ...rest,
     contextUsage,
     contextDescriptionId,
+    deliveryUncertaintyDescriptionId,
     contextSize: contextWindow?.size ?? 0,
     contextUsed: contextWindow?.used ?? 0,
   };

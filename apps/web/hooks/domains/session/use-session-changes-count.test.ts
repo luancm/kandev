@@ -24,8 +24,8 @@ function renderCount(sessionId: string | null) {
         ...store.getState().sessionCommits,
         byEnvironmentId: initial.commitsByEnvironmentId ?? {},
       },
-      connection: { status: "disconnected", error: null, issueSeverity: "none" },
     });
+    store.getState().setConnectionStatus("disconnected");
   });
 }
 function commit(sha: string): SessionCommit {

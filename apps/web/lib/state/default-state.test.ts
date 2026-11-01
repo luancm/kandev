@@ -36,6 +36,26 @@ describe("turn hydration state", () => {
   });
 });
 
+describe("errands hydration state", () => {
+  it("keeps runtime snapshot ownership metadata out of hydrated state", () => {
+    const state = mergeInitialState({
+      errands: {
+        byTaskId: { "task-1": {} },
+        loadedByTaskId: { "task-1": true },
+        loadedConnectionGenerationByTaskId: { "task-1": 4 },
+        loadedReadScopeByTaskId: { "task-1": "stale-scope" },
+        resetEpochByTaskId: { "task-1": 12 },
+      },
+    } as unknown as HydrationState);
+
+    expect(state.errands.byTaskId).toEqual({ "task-1": {} });
+    expect(state.errands.loadedByTaskId).toEqual({ "task-1": true });
+    expect(state.errands.loadedConnectionGenerationByTaskId).toEqual({});
+    expect(state.errands.loadedReadScopeByTaskId).toEqual({});
+    expect(state.errands.resetEpochByTaskId).toEqual({});
+  });
+});
+
 describe("prompt hydration authority (AC-UI-PINNED-PROMPT-AVAILABILITY-001.6)", () => {
   it("hydrates only rows and metadata, not observed or deleted prompt identities", () => {
     const state = mergeInitialState({

@@ -1,4 +1,5 @@
 {
+  "errandBackToParent": "親セッションに戻る",
   "workspaceSourcePlacementUnchanged": "作業ディレクトリ、エージェントセッション、実行中のプロセスは変わりません。",
   "addRepositoriesOrFolders": "リポジトリまたはフォルダを追加",
   "initialWorkspaceLayoutInfo": "後でエージェントの作業ディレクトリを移動せずに兄弟リポジトリを追加できるよう、リポジトリの上位から開始します。このレイアウトでは、一部のエージェントがリポジトリの指示やスキルを異なる方法で検出する場合があります。",
@@ -666,6 +667,7 @@
   "errandObjectiveMore": "もっと見る",
   "errandParentFallback": "親セッション",
   "errandProfileWithModel": "{{name}} · {{model}}",
+  "errandResultDeliveryUncertain": "結果の受け渡し状況が不明です",
   "errandResultSent": "結果を親セッションに送信しました",
   "errandsChipAttentionAria": "{{label}}、対応が必要です",
   "errandsChipIdle_one": "{{count}} 件の依頼",
@@ -676,7 +678,7 @@
   "errandSendResultFailed": "結果を親セッションに送信できませんでした",
   "errandsOfSession": "{{parent}} の依頼",
   "errandsPanelClose": "依頼を閉じる",
-  "errandsPanelDescription": "このタスクで開始された依頼を、開始したセッションごとにまとめています。",
+  "errandsPanelDescription": "この会話から委任した作業です。",
   "errandsPanelLoading": "依頼を読み込み中",
   "errandsPanelTitle": "依頼",
   "errandsPanelTotal_one": "合計 {{count}} 件",

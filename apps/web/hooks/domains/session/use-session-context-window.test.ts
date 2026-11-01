@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   setContextWindow: vi.fn(),
   state: {
     contextWindow: { bySessionId: {} },
-    taskSessions: { items: {} },
+    taskSessions: { items: {}, contextWindowEpochBySession: {} as Record<string, number> },
     connection: { status: "connected" },
     setContextWindow: vi.fn(),
   },
@@ -31,6 +31,7 @@ afterEach(() => {
   mocks.subscribeSession.mockClear();
   mocks.state.contextWindow.bySessionId = {};
   mocks.state.taskSessions.items = {};
+  mocks.state.taskSessions.contextWindowEpochBySession = {};
   mocks.state.setContextWindow.mockReset();
 });
 
@@ -60,7 +61,7 @@ describe("useSessionContextWindow detail demand", () => {
     expect(mocks.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("restores, tracks, and clears shared context without a child detail subscription", () => {
+  it("reads retained and cached context without writing or subscribing while inactive", () => {
     const contextBySession = mocks.state.contextWindow.bySessionId as Record<string, unknown>;
     const sessions = mocks.state.taskSessions.items as Record<
       string,
@@ -81,10 +82,8 @@ describe("useSessionContextWindow detail demand", () => {
     });
 
     const { result, rerender } = renderHook(() => useSessionContextWindow("session-1", false));
-    expect(mocks.state.setContextWindow).toHaveBeenCalledWith(
-      "session-1",
-      expect.objectContaining({ size: 200_000, used: 56_047, compactionCount: 2 }),
-    );
+    expect(result.current).toMatchObject({ size: 200_000, used: 56_047, compactionCount: 2 });
+    expect(mocks.state.setContextWindow).not.toHaveBeenCalled();
     expect(mocks.subscribeSession).not.toHaveBeenCalled();
 
     rerender();
@@ -104,7 +103,33 @@ describe("useSessionContextWindow detail demand", () => {
     delete contextBySession["session-1"];
     rerender();
     expect(result.current).toBeUndefined();
-    expect(mocks.state.setContextWindow).toHaveBeenCalledTimes(1);
+    expect(mocks.state.setContextWindow).not.toHaveBeenCalled();
+    expect(mocks.subscribeSession).not.toHaveBeenCalled();
+  });
+
+  it("does not restore retained metadata after a live invalidation removed the cache", () => {
+    const sessions = mocks.state.taskSessions.items as Record<
+      string,
+      { metadata?: Record<string, unknown> }
+    >;
+    sessions["session-1"] = {
+      metadata: {
+        context_window: {
+          size: 200_000,
+          used: 56_047,
+          remaining: 143_953,
+          efficiency: 28,
+          source: "acp",
+        },
+        context_compaction_count: 2,
+      },
+    };
+    mocks.state.taskSessions.contextWindowEpochBySession = { "session-1": 1 };
+
+    const { result } = renderHook(() => useSessionContextWindow("session-1", false));
+
+    expect(result.current).toBeUndefined();
+    expect(mocks.state.setContextWindow).not.toHaveBeenCalled();
     expect(mocks.subscribeSession).not.toHaveBeenCalled();
   });
 });

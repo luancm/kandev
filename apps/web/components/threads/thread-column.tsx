@@ -354,7 +354,7 @@ function ThreadColumnBody({
       )}
       {isDetailActive && sessionListReady && selectedSession && (
         <ThreadConversation
-          key={selectedSession.id}
+          key={taskId}
           taskId={taskId}
           sessionId={selectedSession.id}
           onSelectSession={onSelectSession}

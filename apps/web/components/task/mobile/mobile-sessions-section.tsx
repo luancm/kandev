@@ -1,16 +1,13 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlus, IconStar } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 
+import { replaceTaskConversationUrl } from "@/lib/task-conversation-navigation";
 import { AgentLogo } from "@/components/agent-logo";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
-import { useTaskErrands } from "@/hooks/domains/session/use-task-errands";
-import { ErrandStatusLabel } from "../chat/errands/errand-status";
-import type { Errand } from "@/lib/types/errands";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
@@ -26,8 +23,6 @@ import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { SessionActionsMenu } from "./session-actions-menu";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
-import { MobileErrandSessionRow } from "./mobile-errand-session-row";
-import { nestSessionRows } from "./mobile-session-nesting";
 
 type SessionRow = {
   id: string;
@@ -62,32 +57,35 @@ function buildSessionRows(
   agentProfiles: AgentProfileOption[],
   primarySessionId: string | null | undefined,
   repositoryLabelsById: ReadonlyMap<string, string>,
-  errandsEnabled: boolean,
 ): SessionRow[] {
   const sorted = [...sessions].sort(
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
   );
   let ordinal = 0;
-  return sorted.map((s) => {
-    const isErrand = s.role === "errand";
-    const nested = errandsEnabled && isErrand;
-    const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
-    return {
-      id: s.id,
-      agentName: profile?.agent_name ?? null,
-      agentLabel: sessionAgentLabel(s, profile),
-      repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
-      state: (s.state as TaskSessionState | undefined) ?? null,
-      foregroundActivity: s.foreground_activity ?? null,
-      parkedOnBackgroundWork: !!s.parked_on_background_work,
-      isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
-      isErrand,
-      nested,
-      parentSessionId: s.parent_session_id ?? null,
-      index: nested ? 0 : ++ordinal,
-      startedAt: s.started_at,
-    };
-  });
+  return sorted
+    .filter((session) => session.role !== "errand")
+    .map((s) => {
+      const isErrand = s.role === "errand";
+      const nested = false;
+      const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
+      return {
+        id: s.id,
+        agentName: profile?.agent_name ?? null,
+        agentLabel: sessionAgentLabel(s, profile),
+        repositoryLabel: s.repository_id
+          ? (repositoryLabelsById.get(s.repository_id) ?? null)
+          : null,
+        state: (s.state as TaskSessionState | undefined) ?? null,
+        foregroundActivity: s.foreground_activity ?? null,
+        parkedOnBackgroundWork: !!s.parked_on_background_work,
+        isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
+        isErrand,
+        nested,
+        parentSessionId: s.parent_session_id ?? null,
+        index: nested ? 0 : ++ordinal,
+        startedAt: s.started_at,
+      };
+    });
 }
 
 // The mobile sessions section reads the per-session substate through the same
@@ -322,7 +320,6 @@ function useSessionRows(taskId: string | null) {
   // `t`, so the language has to reach the memo below for that label to follow a
   // runtime locale switch.
   const { i18n } = useTranslation();
-  const errandsEnabled = useFeature("errands");
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const primarySessionId = useAppStore((s) => {
@@ -345,31 +342,11 @@ function useSessionRows(taskId: string | null) {
     return labels;
   }, [repositoriesByWorkspace, sessions]);
   const rows = useMemo(
-    () =>
-      buildSessionRows(
-        sessions,
-        agentProfiles,
-        primarySessionId,
-        repositoryLabelsById,
-        errandsEnabled,
-      ),
+    () => buildSessionRows(sessions, agentProfiles, primarySessionId, repositoryLabelsById),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
-    [
-      sessions,
-      agentProfiles,
-      primarySessionId,
-      repositoryLabelsById,
-      errandsEnabled,
-      i18n.language,
-    ],
+    [sessions, agentProfiles, primarySessionId, repositoryLabelsById, i18n.language],
   );
-  return { rows, isLoading, primarySessionId };
-}
-
-/** Errand sessions of a task by session ID; empty while the errands flag is off. */
-function useErrandsBySessionId(taskId: string | null): ReadonlyMap<string, Errand> {
-  const { errands } = useTaskErrands(taskId);
-  return useMemo(() => new Map(errands.map((errand) => [errand.errand_id, errand])), [errands]);
+  return { rows, sessions, isLoading, primarySessionId };
 }
 
 function SessionRowsTree({
@@ -389,70 +366,18 @@ function SessionRowsTree({
   onCancelDelete: () => void;
   onSelect: (sessionId: string) => void;
 }) {
-  const { t } = useTranslation();
-  const errandsById = useErrandsBySessionId(taskId);
-  const groups = useMemo(
-    () =>
-      nestSessionRows(
-        rows.map((row) => {
-          const parent = errandsById.get(row.id)?.parent_session_id;
-          return parent ? { ...row, parentSessionId: parent } : row;
-        }),
-      ),
-    [rows, errandsById],
-  );
-  const topLevelCount = rows.filter((row) => !row.nested).length;
-  const renderErrand = (row: SessionRow) => {
-    const errand = errandsById.get(row.id);
-    return (
-      <MobileErrandSessionRow
-        key={row.id}
-        sessionId={row.id}
-        title={errand?.title || row.agentLabel}
-        isActive={row.id === activeSessionId}
-        onSelect={onSelect}
-        status={
-          errand ? (
-            <ErrandStatusLabel status={errand.status} />
-          ) : (
-            <StateBadge
-              sessionId={row.id}
-              state={row.state}
-              foregroundActivity={row.foregroundActivity}
-              parkedOnBackgroundWork={row.parkedOnBackgroundWork}
-            />
-          )
-        }
-      />
-    );
-  };
-  return groups.map(({ row, children }) => (
-    <Fragment key={row.id}>
-      {row.nested ? (
-        renderErrand(row)
-      ) : (
-        <SessionRowItem
-          row={row}
-          taskId={taskId}
-          isActive={row.id === activeSessionId}
-          totalSessions={topLevelCount}
-          isConfirming={row.id === confirmDeleteSessionId}
-          onAskDelete={() => onAskDelete(row.id)}
-          onCancelDelete={onCancelDelete}
-          onSelect={onSelect}
-        />
-      )}
-      {children.length > 0 && (
-        <div
-          role="group"
-          aria-label={t("task:errandsOfSession", { parent: row.agentLabel })}
-          data-testid={`mobile-errand-group-${row.id}`}
-          className="ml-4 flex flex-col gap-0.5 border-l border-border/60 pl-2"
-        >
-          {children.map(renderErrand)}
-        </div>
-      )}
-    </Fragment>
+  return rows.map((row) => (
+    <SessionRowItem
+      key={row.id}
+      row={row}
+      taskId={taskId}
+      isActive={row.id === activeSessionId}
+      totalSessions={rows.length}
+      isConfirming={row.id === confirmDeleteSessionId}
+      onAskDelete={() => onAskDelete(row.id)}
+      onCancelDelete={onCancelDelete}
+      onSelect={onSelect}
+    />
   ));
 }
 
@@ -482,6 +407,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
       if (!taskId) return;
       setConfirmDeleteSessionId(null);
       setActiveSession(taskId, sessionId);
+      replaceTaskConversationUrl(taskId, sessionId);
       onClose();
     },
     [taskId, setActiveSession, onClose],
@@ -552,9 +478,10 @@ function useActiveSessionPillLabel(
 } {
   const { t } = useTranslation();
   const storedActiveSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const { rows } = useSessionRows(taskId);
+  const { rows, sessions } = useSessionRows(taskId);
   const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
-  const activeRow = rows.find((r) => r.id === effectiveSessionId);
+  const parentId = sessions.find((session) => session.id === effectiveSessionId)?.parent_session_id;
+  const activeRow = rows.find((r) => r.id === (parentId ?? effectiveSessionId));
   const total = rows.filter((r) => !r.nested).length;
   const idx = activeRow?.index;
   let count: string | undefined;
@@ -566,7 +493,7 @@ function useActiveSessionPillLabel(
     label: repositoryLabel ? `${agentLabel} · ${repositoryLabel}` : agentLabel,
     count,
     agentName: activeRow?.agentName ?? null,
-    effectiveSessionId,
+    effectiveSessionId: parentId || effectiveSessionId,
     ariaLabel: repositoryLabel
       ? t("task:activeSessionRepositoryTapToSwitch", { agentLabel, repositoryLabel })
       : t("task:activeSessionTapToSwitch", { agentLabel }),

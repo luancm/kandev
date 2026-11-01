@@ -11,6 +11,8 @@ import { IconShieldQuestion } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Drawer, DrawerContent, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { useAppStore } from "@/components/state-provider";
+import { isLiveErrand } from "@/lib/types/errands";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskErrands } from "@/hooks/domains/session/use-task-errands";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -76,11 +78,21 @@ const ErrandsTrigger = forwardRef<HTMLButtonElement, ErrandsTriggerProps>(functi
   );
 });
 
-type ErrandsChipBodyProps = { taskId: string };
+type ErrandsChipBodyProps = { taskId: string; sessionId?: string | null };
 
-function ErrandsChipBody({ taskId }: ErrandsChipBodyProps) {
+function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
   const { t } = useTranslation();
-  const { errands, errandsByParent, liveCount, isLoaded } = useTaskErrands(taskId);
+  const {
+    errands: allErrands,
+    errandsByParent,
+    liveCount: taskLiveCount,
+    isLoaded,
+  } = useTaskErrands(taskId);
+  const parentId = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.parent_session_id || sessionId : null,
+  );
+  const errands = parentId ? (errandsByParent[parentId] ?? []) : allErrands;
+  const liveCount = errands.filter(isLiveErrand).length;
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const usesDrawer = !isFinePointer || isMobile;
   const [open, setOpen] = useState(false);
@@ -111,7 +123,7 @@ function ErrandsChipBody({ taskId }: ErrandsChipBodyProps) {
       taskId={taskId}
       errands={errands}
       errandsByParent={errandsByParent}
-      liveCount={liveCount}
+      liveCount={taskLiveCount}
       isLoaded={isLoaded}
       drawer={usesDrawer}
       onClose={() => setOpen(false)}
@@ -153,8 +165,14 @@ function ErrandsChipBody({ taskId }: ErrandsChipBodyProps) {
  * unless the `errands` flag is on and the task has errands; its panel opens
  * as a popover with a fine pointer and as a bottom drawer otherwise.
  */
-export function ErrandsChip({ taskId }: { taskId: string | null }) {
+export function ErrandsChip({
+  taskId,
+  sessionId,
+}: {
+  taskId: string | null;
+  sessionId?: string | null;
+}) {
   const enabled = useFeature("errands");
   if (!enabled || !taskId) return null;
-  return <ErrandsChipBody taskId={taskId} />;
+  return <ErrandsChipBody key={sessionId} taskId={taskId} sessionId={sessionId} />;
 }

@@ -104,6 +104,36 @@ function verifyDesktopStatusBarSurface() {
   expect(document.documentElement.getAttribute(STATUS_BAR_VISIBLE_ATTRIBUTE)).toBe("true");
 }
 
+function closesConnectionOnlyDrawerWhenWarningRecovers() {
+  responsiveState.breakpoint = "mobile";
+  appStatusBarEnabled = false;
+  renderSurface(
+    {
+      connection: {
+        generation: 0,
+        status: "reconnecting",
+        error: null,
+        issueSeverity: "unstable",
+      },
+    },
+    <>
+      <AppStatusDrawerTrigger />
+      <ConnectionIssueControls />
+    </>,
+  );
+
+  fireEvent.click(screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID));
+  expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
+
+  fireEvent.click(screen.getByTestId("recover-connection"));
+
+  expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
+
+  fireEvent.click(screen.getByTestId("restore-connection-issue"));
+
+  expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
+}
+
 describe("AppStatusSurfaceProvider", () => {
   beforeEach(() => {
     responsiveState.breakpoint = "desktop";
@@ -169,7 +199,7 @@ describe("AppStatusSurfaceProvider", () => {
     responsiveState.breakpoint = "mobile";
     appStatusBarEnabled = false;
     renderSurface({
-      connection: { status: "reconnecting", error: null, issueSeverity: "unstable" },
+      connection: { generation: 0, status: "reconnecting", error: null, issueSeverity: "unstable" },
     });
 
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).getAttribute("data-connection-only")).toBe(
@@ -196,7 +226,7 @@ describe("AppStatusSurfaceProvider", () => {
     responsiveState.breakpoint = "tablet";
     appStatusBarEnabled = false;
     renderSurface({
-      connection: { status: "reconnecting", error: null, issueSeverity: "unstable" },
+      connection: { generation: 0, status: "reconnecting", error: null, issueSeverity: "unstable" },
     });
 
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).getAttribute("data-connection-only")).toBe(
@@ -207,26 +237,8 @@ describe("AppStatusSurfaceProvider", () => {
     expect(trigger.className).not.toContain("md:hidden");
   });
 
-  it("closes a connection-only drawer when the warning recovers", () => {
-    responsiveState.breakpoint = "mobile";
-    appStatusBarEnabled = false;
-    renderSurface(
-      { connection: { status: "reconnecting", error: null, issueSeverity: "unstable" } },
-      <>
-        <AppStatusDrawerTrigger />
-        <ConnectionIssueControls />
-      </>,
-    );
-
-    fireEvent.click(screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID));
-    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
-
-    fireEvent.click(screen.getByTestId("recover-connection"));
-
-    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
-
-    fireEvent.click(screen.getByTestId("restore-connection-issue"));
-
-    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
-  });
+  it(
+    "closes a connection-only drawer when the warning recovers",
+    closesConnectionOnlyDrawerWhenWarningRecovers,
+  );
 });

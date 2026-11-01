@@ -1,5 +1,7 @@
 "use client";
 
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { IconChevronRight } from "@tabler/icons-react";
 import { useId } from "react";
 import { IconLoader2, IconPlayerStop, IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -122,29 +124,52 @@ function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
         drawer ? "min-h-0 flex-1 px-4 pb-3" : "max-h-64",
       )}
     >
-      {(
-        [
-          ["active", t("github:active")],
-          ["finished", t("automations:completed")],
-        ] as const
-      ).map(
-        ([section, label]) =>
-          ordered[section].length > 0 && (
-            <section key={section} aria-label={label} className="flex flex-col gap-2">
-              <h2 className="text-xs font-semibold text-muted-foreground">{label}</h2>
-              {ordered[section].map(({ parentId, errands: group }) => (
-                <ErrandsParentGroup
-                  key={parentId}
-                  parentSessionId={parentId}
-                  errands={group}
-                  taskId={taskId}
-                  nowMs={nowMs}
-                  drawer={drawer}
-                  onClose={onClose}
-                />
-              ))}
-            </section>
-          ),
+      {ordered.active.length > 0 && (
+        <section aria-label={t("github:active")} className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold text-muted-foreground">{t("github:active")}</h2>
+          {ordered.active.map(({ parentId, errands: group }) => (
+            <ErrandsParentGroup
+              key={parentId}
+              parentSessionId={parentId}
+              errands={group}
+              taskId={taskId}
+              nowMs={nowMs}
+              drawer={drawer}
+              onClose={onClose}
+            />
+          ))}
+        </section>
+      )}
+      {ordered.finished.length > 0 && (
+        <Collapsible data-testid="errands-completed-history" className="min-w-0">
+          <CollapsibleTrigger
+            data-testid="errands-completed-toggle"
+            className={cn(
+              "group flex w-full cursor-pointer items-center gap-2 rounded py-1.5 text-left text-xs text-muted-foreground hover:bg-muted/30",
+              ERRAND_TOUCH_TARGET,
+            )}
+          >
+            <IconChevronRight
+              aria-hidden
+              className="h-3.5 w-3.5 shrink-0 group-data-[state=open]:rotate-90"
+            />
+            {t("automations:completed")} (
+            {ordered.finished.reduce((total, group) => total + group.errands.length, 0)})
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2 pt-2">
+            {ordered.finished.map(({ parentId, errands: group }) => (
+              <ErrandsParentGroup
+                key={parentId}
+                parentSessionId={parentId}
+                errands={group}
+                taskId={taskId}
+                nowMs={nowMs}
+                drawer={drawer}
+                onClose={onClose}
+              />
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
       )}
       {!isLoaded && (
         <p

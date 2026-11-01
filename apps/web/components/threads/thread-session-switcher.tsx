@@ -1,5 +1,6 @@
 "use client";
 
+import { conversationTabSessionId } from "@/lib/task-conversation-navigation";
 import {
   IconAlertCircle,
   IconCheck,
@@ -12,13 +13,6 @@ import {
 } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { Errand } from "@/lib/types/errands";
 import { ErrandStatusLabel } from "@/components/task/chat/errands/errand-status";
@@ -77,16 +71,7 @@ export function buildThreadSessionViews(
 ): ThreadSessionView[] {
   const profilesById = Object.fromEntries(agentProfiles.map((profile) => [profile.id, profile]));
   const sorted = sortSessions(sessions);
-  const nested = (session: TaskSession) =>
-    errands !== undefined &&
-    session.role === "errand" &&
-    sessions.some((parent) => parent.id === session.parent_session_id);
-  const ordered = sorted
-    .filter((session) => !nested(session))
-    .flatMap((parent) => [
-      parent,
-      ...sorted.filter((child) => nested(child) && child.parent_session_id === parent.id),
-    ]);
+  const ordered = sorted.filter((session) => session.role !== "errand" && !errands?.[session.id]);
   return ordered.map((session, index) => {
     const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : undefined;
     const snapshotAgentName = session.agent_profile_snapshot?.agent_id;
@@ -96,7 +81,7 @@ export function buildThreadSessionViews(
         (errands !== undefined && session.role === "errand"
           ? errands[session.id]?.title || session.name
           : null) || sessionLabel(session, profilesById, index + 1, fallbackLabel),
-      parentSessionId: nested(session) ? session.parent_session_id : undefined,
+      parentSessionId: undefined,
       errand: errands?.[session.id],
       agentName:
         profile?.agent_name ??
@@ -345,6 +330,7 @@ export function ThreadSessionSwitcher({
     enabled ? (errands ?? {}) : undefined,
   );
   if (views.length <= 1) return null;
+  const selectedConversationId = conversationTabSessionId(selectedSessionId, sessions, errands);
 
   return isMobile ? (
     <div
@@ -353,69 +339,17 @@ export function ThreadSessionSwitcher({
     >
       <MobileSessionPicker
         views={views}
-        selectedSessionId={selectedSessionId}
+        selectedSessionId={selectedConversationId}
         onSelect={onSelect}
       />
     </div>
   ) : (
     <div className="min-w-0 max-w-[52%] shrink" data-testid="thread-session-switcher">
-      {views.some((view) => view.parentSessionId) ? (
-        <DesktopGroupedSessionPicker
-          views={views}
-          selectedSessionId={selectedSessionId}
-          onSelect={onSelect}
-        />
-      ) : (
-        <DesktopSessionTabs
-          views={views}
-          selectedSessionId={selectedSessionId}
-          onSelect={onSelect}
-        />
-      )}
+      <DesktopSessionTabs
+        views={views}
+        selectedSessionId={selectedConversationId}
+        onSelect={onSelect}
+      />
     </div>
-  );
-}
-
-function DesktopGroupedSessionPicker({
-  views,
-  selectedSessionId,
-  onSelect,
-}: {
-  views: ThreadSessionView[];
-  selectedSessionId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const { t } = useTranslation();
-  const selected = views.find((view) => view.session.id === selectedSessionId) ?? views[0];
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="min-w-0 max-w-full"
-          aria-label={t(SELECT_SESSION_KEY)}
-          data-testid="thread-session-picker-trigger"
-        >
-          <span className="truncate">{selected?.label}</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-80 max-w-[min(24rem,90vw)] overflow-y-auto">
-        {views.map((view) => (
-          <DropdownMenuItem
-            key={view.session.id}
-            onSelect={() => onSelect(view.session.id)}
-            data-testid={`thread-session-row-${view.session.id}`}
-            data-parent-session-id={view.parentSessionId}
-            className={view.parentSessionId ? "pl-7" : undefined}
-          >
-            <ThreadSessionTabIndicator view={view} />
-            <span className="min-w-0 flex-1 truncate">{view.label}</span>
-            {view.errand && <ErrandStatusLabel status={view.errand.status} />}
-            {view.session.id === selectedSessionId && <IconCheck aria-hidden className="h-4 w-4" />}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }

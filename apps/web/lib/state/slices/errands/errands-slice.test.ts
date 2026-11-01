@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createAppStore } from "@/lib/state/store";
+import type { Errand } from "@/lib/types/errands";
 import { ERRAND_TASK_ID, makeErrand } from "./errands.test-helpers";
 
 const OLDER = "2026-10-26T10:00:00Z";
 const NEWER = "2026-10-26T10:00:05.250Z";
+
+function withDeliveryState(errand: Errand, deliveryState: "received" | "uncertain"): Errand {
+  return { ...errand, delivery_state: deliveryState };
+}
 
 function taskErrands(store: ReturnType<typeof createAppStore>, taskId = ERRAND_TASK_ID) {
   return store.getState().errands.byTaskId[taskId] ?? {};
@@ -15,6 +20,9 @@ describe("errands slice", () => {
     expect(store.getState().errands).toEqual({
       byTaskId: {},
       loadedByTaskId: {},
+      loadedConnectionGenerationByTaskId: {},
+      loadedReadScopeByTaskId: {},
+      resetEpochByTaskId: {},
       liveRevisionByTaskId: {},
       removedSessionIdsByTaskId: {},
     });
@@ -42,10 +50,27 @@ describe("upsertErrand", () => {
 
   it("ignores an update older than the stored errand", () => {
     const store = createAppStore();
-    store.getState().upsertErrand(makeErrand({ status: "done", updated_at: NEWER }));
+    store
+      .getState()
+      .upsertErrand(
+        withDeliveryState(makeErrand({ status: "done", updated_at: NEWER }), "uncertain"),
+      );
     store.getState().upsertErrand(makeErrand({ status: "running", updated_at: OLDER }));
 
     expect(taskErrands(store)["errand-1"].status).toBe("done");
+    expect(taskErrands(store)["errand-1"]).toHaveProperty("delivery_state", "uncertain");
+  });
+
+  it("applies equal-timestamp receipt updates and clears omitted state", () => {
+    const store = createAppStore();
+    store.getState().upsertErrand(withDeliveryState(makeErrand(), "uncertain"));
+    store.getState().upsertErrand(withDeliveryState(makeErrand(), "received"));
+
+    expect(taskErrands(store)["errand-1"]).toHaveProperty("delivery_state", "received");
+    expect(taskErrands(store)["errand-1"].updated_at).toBe(OLDER);
+
+    store.getState().upsertErrand(makeErrand());
+    expect(taskErrands(store)["errand-1"]).not.toHaveProperty("delivery_state");
   });
 
   it("accepts an update when a timestamp cannot be compared", () => {
@@ -97,7 +122,11 @@ describe("setTaskErrands", () => {
   it("never lets a listed row roll back a newer live update", () => {
     const store = createAppStore();
     const revision = store.getState().errands.liveRevisionByTaskId[ERRAND_TASK_ID] ?? 0;
-    store.getState().upsertErrand(makeErrand({ status: "done", updated_at: NEWER }));
+    store
+      .getState()
+      .upsertErrand(
+        withDeliveryState(makeErrand({ status: "done", updated_at: NEWER }), "uncertain"),
+      );
     store
       .getState()
       .setTaskErrands(
@@ -107,6 +136,22 @@ describe("setTaskErrands", () => {
       );
 
     expect(taskErrands(store)["errand-1"].status).toBe("done");
+    expect(taskErrands(store)["errand-1"]).toHaveProperty("delivery_state", "uncertain");
+  });
+
+  it("applies equal-timestamp list projections and clears omitted state", () => {
+    const store = createAppStore();
+    store.getState().upsertErrand(withDeliveryState(makeErrand(), "uncertain"));
+    const revision = store.getState().errands.liveRevisionByTaskId[ERRAND_TASK_ID] ?? 0;
+    store
+      .getState()
+      .setTaskErrands(ERRAND_TASK_ID, [withDeliveryState(makeErrand(), "received")], revision);
+
+    expect(taskErrands(store)["errand-1"]).toHaveProperty("delivery_state", "received");
+
+    const nextRevision = store.getState().errands.liveRevisionByTaskId[ERRAND_TASK_ID] ?? 0;
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [makeErrand()], nextRevision);
+    expect(taskErrands(store)["errand-1"]).not.toHaveProperty("delivery_state");
   });
 
   it("ignores listed rows that belong to another task", () => {
@@ -131,5 +176,19 @@ describe("removeTaskErrands", () => {
     expect(errands.liveRevisionByTaskId[ERRAND_TASK_ID]).toBeUndefined();
     expect(errands.removedSessionIdsByTaskId[ERRAND_TASK_ID]).toBeUndefined();
     expect(Object.keys(taskErrands(store, "task-b"))).toEqual(["errand-1"]);
+  });
+});
+
+describe("errand list observations", () => {
+  it("preserves reset epochs and invalidates transport freshness on every removal", () => {
+    const store = createAppStore();
+    store.getState().removeTaskErrands(ERRAND_TASK_ID);
+    store.getState().removeTaskErrands(ERRAND_TASK_ID);
+    expect(store.getState().errands.resetEpochByTaskId[ERRAND_TASK_ID]).toBe(2);
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [makeErrand()], 0);
+    expect(
+      store.getState().errands.loadedConnectionGenerationByTaskId[ERRAND_TASK_ID],
+    ).toBeUndefined();
+    expect(store.getState().errands.loadedReadScopeByTaskId[ERRAND_TASK_ID]).toBeUndefined();
   });
 });

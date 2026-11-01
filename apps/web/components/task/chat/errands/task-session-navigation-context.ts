@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext } from "react";
+import { createContext, useCallback } from "react";
 
 export type OpenTaskSessionTarget = {
   taskId: string;
@@ -12,3 +12,16 @@ export type OpenTaskSessionTarget = {
 export const TaskSessionNavigationContext = createContext<
   ((target: OpenTaskSessionTarget) => void) | null
 >(null);
+
+/** Embedded selectors keep both Open and Back inside their current task. */
+export function useScopedTaskSessionNavigation(
+  taskId: string,
+  onSelect?: (sessionId: string) => void,
+) {
+  return useCallback(
+    (target: OpenTaskSessionTarget) => {
+      if (target.taskId === taskId) onSelect?.(target.sessionId);
+    },
+    [taskId, onSelect],
+  );
+}

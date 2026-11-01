@@ -127,10 +127,10 @@ describe("useAutoSessionTab errand sessions", () => {
     expect(api.getPanel(`session:${ERRAND_SESSION_ID}`)).toBeNull();
   });
 
-  it("adds the errand as an ordinary tab while the flag is off", () => {
+  it("keeps retained errands out of regular tabs with the flag off", () => {
     const api = renderWithErrandSession(false);
 
-    expect(api.getPanel(`session:${ERRAND_SESSION_ID}`)).not.toBeNull();
+    expect(api.getPanel(`session:${ERRAND_SESSION_ID}`)).toBeNull();
   });
 });
 
@@ -140,7 +140,7 @@ describe("runAutoSessionTabEffect errand sessions", () => {
   const OTHER = "session-other";
   const SESSIONS: ErrandTabSession[] = [
     { id: PARENT },
-    { id: ERRAND, role: "errand" },
+    { id: ERRAND, role: "errand", parent_session_id: PARENT },
     { id: OTHER },
   ];
 
@@ -172,7 +172,7 @@ describe("runAutoSessionTabEffect errand sessions", () => {
 
   it.each([
     { name: "adds no errand tab while the flag is on", enabled: true, run: {}, errandTab: false },
-    { name: "adds an errand tab while the flag is off", enabled: false, run: {}, errandTab: true },
+    { name: "adds no errand tab while the flag is off", enabled: false, run: {}, errandTab: false },
     {
       name: "skips an errand known from its row before its role arrives",
       enabled: true,
@@ -180,10 +180,10 @@ describe("runAutoSessionTabEffect errand sessions", () => {
       errandTab: false,
     },
     {
-      name: "keeps an errand tab that the user opened or a layout restored",
+      name: "removes legacy restored errand tabs without deleting the session",
       enabled: true,
       run: { openPanels: [ERRAND] },
-      errandTab: true,
+      errandTab: false,
     },
   ])("$name", ({ enabled, run, errandTab }) => {
     const { api } = runEffect(enabled, run);
@@ -193,9 +193,9 @@ describe("runAutoSessionTabEffect errand sessions", () => {
     expect(api.getPanel(`session:${ERRAND}`) !== null).toBe(errandTab);
   });
 
-  it("shows an errand's tab when it is the active session", () => {
+  it("hosts a directly selected child in its normal parent tab", () => {
     const { centerActivePanelId } = runEffect(true, { effectiveSessionId: ERRAND });
-    expect(centerActivePanelId()).toBe(`session:${ERRAND}`);
+    expect(centerActivePanelId()).toBe(`session:${PARENT}`);
   });
 
   it("never auto-selects an errand in place of a hidden active session", () => {

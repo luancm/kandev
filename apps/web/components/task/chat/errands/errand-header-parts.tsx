@@ -141,7 +141,7 @@ export function BackToParentButton({
       )}
     >
       <IconChevronLeft aria-hidden className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">{parentTitle}</span>
+      <span className="truncate">{t("task:errandBackToParent")}</span>
     </Button>
   );
 }

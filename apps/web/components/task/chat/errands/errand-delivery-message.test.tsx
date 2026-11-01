@@ -7,6 +7,7 @@ const openSession = vi.hoisted(() => vi.fn());
 const STATUS_BLOCK = "<kandev-system>Errand status: e-1 running</kandev-system>";
 const FINISHED_CARD = "errand-finished-card";
 const USER_BUBBLE = "user-bubble";
+const SCHEMA_TITLE = "Schema review";
 
 vi.mock("@/components/state-provider", () => ({ useAppStore: () => null }));
 vi.mock("./use-open-task-session", () => ({ useOpenTaskSession: () => openSession }));
@@ -35,7 +36,7 @@ function delivery(items: unknown[], route = "notification") {
 
 const SCHEMA_REVIEW = {
   errand_id: "e-1",
-  title: "Schema review",
+  title: SCHEMA_TITLE,
   status: "done",
   preview: "No breaking changes; two nullable columns added.",
 };
@@ -60,8 +61,11 @@ describe("Errand finished cards", () => {
     expect(screen.queryByTestId(USER_BUBBLE)).toBeNull();
     const cards = screen.getAllByTestId(FINISHED_CARD);
     expect(cards.map((card) => card.getAttribute("data-errand-id"))).toEqual(["e-1", "e-2"]);
-    expect(cards[0].textContent).toContain("Errand finished");
-    expect(cards[0].textContent).toContain("Schema review");
+    expect(cards[0].textContent).toContain("1 errand finished");
+    expect(cards[0].textContent).not.toContain(SCHEMA_TITLE);
+    for (const card of cards)
+      fireEvent.click(within(card).getByRole("button", { expanded: false }));
+    expect(cards[0].textContent).toContain(SCHEMA_TITLE);
     expect(within(cards[0]).getByTestId("errand-finished-preview").textContent).toBe(
       SCHEMA_REVIEW.preview,
     );
@@ -69,7 +73,6 @@ describe("Errand finished cards", () => {
       "Cancelled by you",
     );
     expect(within(cards[1]).queryByTestId("errand-finished-preview")).toBeNull();
-    expect(screen.getByRole("region", { name: "Errand finished: Schema review" })).toBe(cards[0]);
   });
 
   it("places the cards below the user's own text", () => {
@@ -92,11 +95,12 @@ describe("Errand finished cards", () => {
   it("opens the delivered errand from its card", () => {
     renderMessage(userMessage({ metadata: delivery([SCHEMA_REVIEW]) }));
 
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open errand Schema review" }));
     expect(openSession).toHaveBeenCalledWith({
       taskId: "task-1",
       sessionId: "e-1",
-      title: "Schema review",
+      title: SCHEMA_TITLE,
     });
   });
 
@@ -107,6 +111,7 @@ describe("Errand finished cards", () => {
       }),
     );
 
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
     const preview = screen.getByTestId("errand-finished-preview");
     expect(preview.querySelector("img")).toBeNull();
     expect(preview.textContent).toBe("<img src=x onerror=alert(1)>");

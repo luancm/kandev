@@ -71,6 +71,8 @@ import { JumpToLatestButton } from "./chat/jump-to-latest-button";
 import { ConversationUsageDisplay } from "./chat/conversation-usage-display";
 import { ErrandHeader } from "./chat/errands/errand-header";
 import { ErrandStatusAnnouncer } from "./chat/errands/errand-status-announcer";
+import { TaskConversationPanel } from "./task-conversation-view";
+import { useRetainedReaderPosition } from "./chat/use-retained-reader-position";
 
 const EMPTY_WINDOW_MESSAGES: Message[] = [];
 
@@ -1215,8 +1217,49 @@ function usePanelLaunchStatusSummary(statusTaskId: string | null, taskIdHint: st
   return { summaryTaskId, launchStatusSummary };
 }
 
+function useTranscriptExposure(panelId: string | null, isVisible: boolean, inactive: boolean) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const inactivePanelRef = useRef<HTMLDivElement>(null);
+  // Preview/Threads suppress read tracking while keeping visible transcript geometry.
+  // A retained parent is inactive for both geometry and panel shortcuts.
+  return {
+    panelRef,
+    searchContainerRef: inactive ? inactivePanelRef : panelRef,
+    transcriptIsVisible: !inactive && (panelId === null || isVisible),
+  };
+}
+
+export const TaskChatPanel = memo(function TaskChatPanel(props: TaskChatPanelProps) {
+  return (
+    <TaskConversationPanel
+      sessionId={props.sessionId ?? null}
+      taskId={props.taskId ?? props.statusTaskId ?? null}
+    >
+      {(sessionId, inactive) => (
+        <TaskConversationChat {...props} sessionId={sessionId} inactive={inactive} />
+      )}
+    </TaskConversationPanel>
+  );
+});
+
+/** Chat body for a conversation region whose host already retains its parent. */
+export const TaskConversationChat = memo(function TaskConversationChat({
+  inactive = false,
+  ...props
+}: TaskChatPanelProps & { inactive?: boolean }) {
+  return (
+    <TaskChatPanelContent
+      {...props}
+      inactive={inactive}
+      isVisible={!inactive && props.isVisible !== false}
+      detailActive={!inactive && props.detailActive !== false}
+      embedded={inactive || props.embedded}
+    />
+  );
+});
+
 // eslint-disable-next-line complexity, max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
-export const TaskChatPanel = memo(function TaskChatPanel({
+const TaskChatPanelContent = memo(function TaskChatPanelContent({
   onSend,
   sessionId = null,
   taskId: taskIdHint = null,
@@ -1230,13 +1273,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   embedded = false,
   isVisible = true,
   detailActive = true,
+  inactive = false,
   panelId = null,
   pendingScrollToMessageId = null,
   pendingScrollTarget,
   onPendingScrollConsumed,
   hideLaunchQueueStatus = false,
   hideWipQueueStatus = false,
-}: TaskChatPanelProps) {
+}: TaskChatPanelProps & { inactive?: boolean }) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
   const { summaryTaskId, launchStatusSummary } = usePanelLaunchStatusSummary(
@@ -1288,7 +1332,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   });
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
 
-  const panelRef = useRef<HTMLDivElement>(null);
+  const { panelRef, searchContainerRef, transcriptIsVisible } = useTranscriptExposure(
+    panelId,
+    isVisible,
+    inactive,
+  );
   const launchQueueStatusRef = useRef<HTMLDivElement>(null);
   const wipQueueStatusRef = useRef<HTMLDivElement>(null);
   const chatFooterRef = useRef<HTMLDivElement>(null);
@@ -1303,10 +1351,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     groupedItems,
     isInitialMessagesLoading,
   );
-  // Kanban previews intentionally pass `isVisible=false` so they do not
-  // advance the read cursor, but their transcript is rendered in a visible
-  // non-Dockview host. Keep read visibility separate from scroll geometry.
-  const transcriptIsVisible = panelId === null || isVisible;
   const dockviewTarget = useDockviewStore((state) => state.scrollTarget);
   const dockviewTargetMessageId = dockviewTarget?.messageId ?? null;
   const isDockviewJumpLoading = useScrollTargetConsumption({
@@ -1345,6 +1389,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const generation = useAppStore((state) =>
     resolvedSessionId ? (state.messagePrompts.generationBySession?.[resolvedSessionId] ?? 0) : 0,
   );
+  useRetainedReaderPosition({
+    panelRef,
+    sessionId: resolvedSessionId,
+    generation,
+    inactive,
+    hasTarget: hasHostTarget,
+    hasLocalTarget: localTarget !== null,
+    visible: transcriptIsVisible,
+  });
   useEffect(() => {
     if (
       hasHostTarget ||
@@ -1523,7 +1576,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
-    containerRef: panelRef,
+    containerRef: searchContainerRef,
     isOpen: search.isOpen,
     onOpen: search.open,
     onClose: search.close,
@@ -1544,7 +1597,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       session={session}
       messages={[...allMessages, ...footerActionMessages]}
       taskId={taskId}
-      enabled={!isArchived && !launchErrorOwned}
+      enabled={!inactive && !isArchived && !launchErrorOwned}
     >
       <PanelRoot
         ref={panelRef}
@@ -1568,7 +1621,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         <ErrandStatusAnnouncer
           taskId={taskId ?? summaryTaskId}
           sessionId={resolvedSessionId}
-          active={isVisible && detailActive}
+          active={transcriptIsVisible && detailActive}
         />
 
         <PanelBody

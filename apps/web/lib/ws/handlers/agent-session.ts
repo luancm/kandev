@@ -19,7 +19,11 @@ import type {
   TaskSessionAgentctlPayload,
 } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  normalizeContextCompactionCount,
+  readContextWindowMetadataFromAliases,
+  parseContextWindowEntry,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
@@ -195,15 +199,14 @@ export function shouldAdoptNewSession(
 }
 
 /**
- * While the errands flag is on, an errand becomes the active session only by
- * explicit user navigation, never by automatic adoption or hand-off.
+ * Errand role identity keeps selection explicit, including retained sessions
+ * after the feature is disabled.
  */
 function isAutoSelectionExcludedErrand(
   state: AppState,
   taskId: string,
   session: { id: string; role?: unknown },
 ): boolean {
-  if (!state.features?.errands) return false;
   if (session.role === "errand") return true;
   return Boolean(state.errands?.byTaskId?.[taskId]?.[session.id]);
 }
@@ -353,17 +356,42 @@ function carryDefinedFields(
 
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildSessionUpdate(payload: any): Record<string, unknown> {
+function buildSessionUpdate(payload: any): {
+  sessionUpdate: Record<string, unknown>;
+  contextWindow: ReturnType<typeof readContextWindowMetadataFromAliases>;
+} {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
+  const context = readContextWindowMetadataFromAliases(payload.metadata, payload.session_metadata);
+  if (context.present) {
+    let metadataBase: Record<string, unknown> = {};
+    if (
+      payload.session_metadata &&
+      typeof payload.session_metadata === "object" &&
+      !Array.isArray(payload.session_metadata)
+    ) {
+      metadataBase = payload.session_metadata;
+    } else if (
+      payload.metadata &&
+      typeof payload.metadata === "object" &&
+      !Array.isArray(payload.metadata)
+    ) {
+      metadataBase = payload.metadata;
+    }
+    update.metadata = {
+      ...metadataBase,
+      context_window: context.contextWindow,
+      context_compaction_count: normalizeContextCompactionCount(context.compactionCount),
+    };
+  }
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   carryDefinedFields(update, payload);
-  return update;
+  return { sessionUpdate: update, contextWindow: context };
 }
 
 /** Upsert the session in the per-task sessions list from a WS event.
@@ -377,10 +405,10 @@ function upsertTaskSessionList(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
   sessionUpdate: Record<string, unknown>,
-): void {
+): boolean {
   const newState = payload.new_state as TaskSessionState | undefined;
   const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing && !newState) return;
+  if (!existing && !newState) return false;
 
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
@@ -393,6 +421,7 @@ function upsertTaskSessionList(
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
+  return true;
 }
 
 // Fan out the office refetch trigger only when the session's state
@@ -410,27 +439,6 @@ function maybeFanOutOfficeRefetch(
   if (!setOfficeTrigger) return;
   setOfficeTrigger("dashboard");
   setOfficeTrigger("agents");
-}
-
-/** Extract context-window data or an explicit cache invalidation from a session event. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payload: any): void {
-  const metadataSources = [payload.metadata, payload.session_metadata];
-  const metadata = metadataSources.find(
-    (candidate) =>
-      candidate &&
-      typeof candidate === "object" &&
-      Object.prototype.hasOwnProperty.call(candidate, "context_window"),
-  ) as Record<string, unknown> | undefined;
-  if (!metadata) return;
-  const contextWindow = metadata.context_window;
-  const entry = parseContextWindowEntry(
-    contextWindow,
-    new Date().toISOString(),
-    metadata.context_compaction_count,
-  );
-  if (entry) store.getState().setContextWindow(sessionId, entry);
-  else store.getState().clearContextWindow(sessionId);
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */
@@ -983,7 +991,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const taskId = toTaskId(rawTaskId);
       const sessionId = toSessionId(rawSessionId);
 
-      const sessionUpdate = buildSessionUpdate(payload);
+      const { sessionUpdate, contextWindow } = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
       if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
@@ -1014,10 +1022,24 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState,
         updatedAt: payload.updated_at,
       });
-      upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      const sessionWasUpserted = upsertTaskSessionList(
+        store,
+        taskId,
+        sessionId,
+        payload,
+        sessionUpdate,
+      );
+      if (!sessionWasUpserted && contextWindow.present) {
+        const entry = parseContextWindowEntry(
+          contextWindow.contextWindow,
+          typeof payload.updated_at === "string" ? payload.updated_at : undefined,
+          contextWindow.compactionCount,
+        );
+        if (entry) store.getState().setContextWindow(sessionId, entry);
+        else store.getState().clearContextWindow(sessionId);
+      }
       store.getState().reconcileWorkflowSessionFocus?.(taskId);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
-      extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
       if (newState === "STARTING") {
         const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
