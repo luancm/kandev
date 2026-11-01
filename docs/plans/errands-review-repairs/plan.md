@@ -74,7 +74,7 @@ The small packets separate independently testable storage, pure classification, 
 | 16 | [Batch bounded errand summary observations](task-16-bounded-summary-aggregate.md) | 12 | None | done |
 | 17 | [Repair missing and stale errand summaries](task-17-authoritative-summary-repair.md) | 12 | 16 | done |
 | 18 | [Preserve role and parent in summary fallback](task-18-fallback-session-identity.md) | 20 | None | done |
-| 19 | [Refresh each task across connection generations](task-19-reconnect-freshness.md) | 13 | None | in_progress |
+| 19 | [Refresh each task across connection generations](task-19-reconnect-freshness.md) | 13 | None | done |
 | 20 | [Converge authoritative context and cache](task-20-context-snapshot-freshness.md) | 14 | 19 | done |
 | 21 | [Keep errand navigation inside its preview](task-21-preview-navigation.md) | 15 | None | done |
 | 22 | [Hide ownership actions for retained errands](task-22-preview-menu-isolation.md) | 16 | 21 | done |
@@ -466,3 +466,13 @@ The list-only context hydration watermark is an additional unconfirmed reachabil
 The checkpoint sequence is: repair contracts and evidence (50 documentation paths), backend recovery and summary projections (206 backend paths), and conversation/cache UI (110 frontend/locale paths). The 316 candidate application paths match the preserved Task13 completion snapshot; this proves the commits retain the previously tested bytes, not that the new review findings are resolved. Per-work-order splitting would reconstruct untested intermediate versions because the repairs share schema, interfaces and callers. Keep the five unfinished Task14 source/test paths outside these commits. Exact path inventories and prior check receipts are retained in `/tmp/errands-commit-boundaries.json`; commit hashes and hook outcomes belong in the live coordination plan after each checkpoint succeeds.
 
 The first backend-only hook attempt exposed an unsafe staged snapshot: pre-commit stashed the existing summary caller changes while retaining the untracked summary helpers, causing a missing `statusSummaryErrands` field. Recovery and summaries therefore travel in one backend checkpoint, with this manifest correction included. No production change or hook bypass was used to repair the split; the failed attempt is retained at `/tmp/errands-commit-02-core.log`.
+
+### Authorized consolidation continuation
+
+The user explicitly requested proceeding after the checkpoint and scope findings. First finish the reopened Task19 list/live race within its existing work order, verify and commit it independently. Then address the recorded obsolete UI/disclosure code and backend duplicate ownership paths in bounded, sequential changes, preserving their existing behavior and safety contracts. Do not combine these into another accumulated repair diff or start Task14B before the consolidation findings are resolved. The five unfinished Task14 files remain preserved and excluded from unrelated commits. One implementation errand and one heavy validation command may run at a time; retain the shared build lock and resource limits. No push, deployment, live-instance mutation or broader redesign is authorized.
+
+Active sole writer: Task19 errand `49a0f0c3-8d75-47f7-98a3-f78e59e99089` on the configured Sol profile. Progress: `/tmp/errands-task19-race-progress.md`; required final handoff: `/tmp/errands-task19-race-handoff.md`. It owns the existing Errands slice/request-boundary files and their tests only. The primary integrates its result and makes the focused commit before granting the next consolidation packet.
+
+### Task19 race correction accepted
+
+Task19 is done again: the deferred equal-timestamp delivery-state regressions reproduced three behavioral failures, then the final six-file suite passed all 63 tests after the row-specific fence. Scoped lint, formatting and whitespace checks passed. Existing task/request ownership remains intact; unrelated rows still accept their list updates. The five Task14 files are unchanged. Totals return to 24 done, 1 in progress and 4 pending. Handoff and exact receipts: `/tmp/errands-task19-race-handoff.md`. Commit this correction before granting the next consolidation packet.

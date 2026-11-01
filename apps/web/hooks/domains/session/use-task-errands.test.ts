@@ -334,6 +334,76 @@ describe("task errand admitted reads", () => {
   });
 });
 
+// @covers AC-TASKS-ERRANDS-010.4, AC-TASKS-ERRANDS-010.11
+describe("task errand delivery projection races", () => {
+  beforeEach(() => {
+    api.listErrands.mockReset();
+  });
+
+  it.each([
+    { listedState: "received", liveState: "uncertain" },
+    { listedState: "uncertain", liveState: "received" },
+    { listedState: "uncertain", liveState: undefined },
+  ] as const)(
+    "keeps live $liveState after an equal-timestamp $listedState list resolves",
+    async ({ listedState, liveState }) => {
+      const request = deferredList();
+      const listed = makeErrand({ status: "done", delivery_state: listedState });
+      const live = makeErrand({ status: "done", delivery_state: liveState });
+      api.listErrands.mockReturnValueOnce(request.promise);
+      const hook = renderHook(useSelectedTask, {
+        initialProps: TASK_ID as string | null,
+        wrapper: wrapperFor(true),
+      });
+      act(() => hook.result.current.store.getState().upsertErrand(listed));
+      connect(hook.result.current.store);
+      act(() => hook.result.current.store.getState().upsertErrand(live));
+      await act(async () => request.resolve([listed]));
+
+      expect(hook.result.current.value.errands).toEqual([live]);
+      expect(hook.result.current.value.isLoaded).toBe(true);
+      hook.rerender(null);
+      hook.rerender(TASK_ID);
+      expect(hook.result.current.value.errands).toEqual([live]);
+      expect(api.listErrands).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    { cachedState: "received", listedState: "uncertain" },
+    { cachedState: "uncertain", listedState: "received" },
+    { cachedState: "uncertain", listedState: undefined },
+  ] as const)(
+    "applies row B's equal-timestamp $listedState list update after a live event for row A",
+    async ({ cachedState, listedState }) => {
+      const request = deferredList();
+      const rowA = makeErrand({ status: "done", delivery_state: "received" });
+      const cachedB = makeErrand({
+        errand_id: "errand-b",
+        status: "done",
+        delivery_state: cachedState,
+      });
+      const listedB = { ...cachedB, delivery_state: listedState };
+      api.listErrands.mockReturnValueOnce(request.promise);
+      const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
+      act(() => {
+        result.current.store.getState().upsertErrand(rowA);
+        result.current.store.getState().upsertErrand(cachedB);
+      });
+      connect(result.current.store);
+      act(() =>
+        result.current.store.getState().upsertErrand({ ...rowA, delivery_state: "uncertain" }),
+      );
+      await act(async () => request.resolve([rowA, listedB]));
+
+      expect(result.current.first.errands.find((row) => row.errand_id === "errand-b")).toEqual(
+        listedB,
+      );
+      expect(result.current.second.errands).toBe(result.current.first.errands);
+    },
+  );
+});
+
 describe("task errand scope transitions", () => {
   beforeEach(() => {
     api.listErrands.mockReset();

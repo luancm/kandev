@@ -13,6 +13,7 @@ export const defaultErrandsState: ErrandsSliceState = {
     loadedReadScopeByTaskId: {},
     resetEpochByTaskId: {},
     liveRevisionByTaskId: {},
+    liveRevisionByErrandIdByTaskId: {},
     removedSessionIdsByTaskId: {},
   },
 };
@@ -26,6 +27,7 @@ export function mergeErrandsHydrationState(
     loadedConnectionGenerationByTaskId: {},
     loadedReadScopeByTaskId: {},
     resetEpochByTaskId: {},
+    liveRevisionByErrandIdByTaskId: {},
   };
 }
 
@@ -37,6 +39,20 @@ function isOlderErrand(incoming: Errand, existing: Errand | undefined): boolean 
   const incomingAt = parseStrictRfc3339Timestamp(incoming.updated_at);
   const existingAt = parseStrictRfc3339Timestamp(existing.updated_at);
   return incomingAt !== null && existingAt !== null && incomingAt < existingAt;
+}
+
+function isStaleListedErrand(
+  incoming: Errand,
+  existing: Errand | undefined,
+  requestRevision: number,
+  rowRevisions: Record<string, number> | undefined,
+): boolean {
+  if (!existing) return false;
+  const rowRevision = rowRevisions?.[incoming.errand_id] ?? 0;
+  return (
+    isOlderErrand(incoming, existing) ||
+    (rowRevision > requestRevision && !isOlderErrand(existing, incoming))
+  );
 }
 
 function observationIsCurrent(
@@ -63,8 +79,10 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
       const errands = (draft.errands.byTaskId[taskId] ??= {});
       if (isOlderErrand(errand, errands[errand.errand_id])) return;
       errands[errand.errand_id] = errand;
-      draft.errands.liveRevisionByTaskId[taskId] =
-        (draft.errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
+      const revision = (draft.errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
+      draft.errands.liveRevisionByTaskId[taskId] = revision;
+      const rowRevisions = ((draft.errands.liveRevisionByErrandIdByTaskId ??= {})[taskId] ??= {});
+      rowRevisions[errand.errand_id] = revision;
     }),
 
   setTaskErrands: (taskId, errands, requestRevision, observation) =>
@@ -83,8 +101,10 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
           if (!listedIds.has(errandId)) delete current[errandId];
         }
       }
+      const rowRevisions = draft.errands.liveRevisionByErrandIdByTaskId?.[taskId];
       for (const errand of listed) {
-        if (!isOlderErrand(errand, current[errand.errand_id])) current[errand.errand_id] = errand;
+        if (!isStaleListedErrand(errand, current[errand.errand_id], requestRevision, rowRevisions))
+          current[errand.errand_id] = errand;
       }
       draft.errands.loadedByTaskId[taskId] = true;
       if (observation) {
@@ -103,6 +123,7 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
       delete draft.errands.byTaskId[taskId];
       delete draft.errands.loadedByTaskId[taskId];
       delete draft.errands.liveRevisionByTaskId[taskId];
+      delete draft.errands.liveRevisionByErrandIdByTaskId?.[taskId];
       delete draft.errands.removedSessionIdsByTaskId[taskId];
     }),
 });

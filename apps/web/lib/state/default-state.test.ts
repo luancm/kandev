@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultState, mergeInitialState } from "./default-state";
-import type { HydrationState } from "./store";
+import { createAppStore, type HydrationState } from "./store";
+import { ERRAND_TASK_ID, makeErrand } from "./slices/errands/errands.test-helpers";
 
 describe("turn hydration state", () => {
   it("defaults and deep-merges loaded session markers", () => {
@@ -37,6 +38,21 @@ describe("turn hydration state", () => {
 });
 
 describe("errands hydration state", () => {
+  it("accepts list delivery updates without inheriting hydrated live-row ownership", () => {
+    const cached = makeErrand({ delivery_state: "uncertain" });
+    const store = createAppStore({
+      errands: {
+        ...defaultState.errands,
+        byTaskId: { [ERRAND_TASK_ID]: { [cached.errand_id]: cached } },
+        liveRevisionByErrandIdByTaskId: { [ERRAND_TASK_ID]: { [cached.errand_id]: 4 } },
+      },
+    });
+    const received = { ...cached, delivery_state: "received" as const };
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [received], 0);
+
+    expect(store.getState().errands.byTaskId[ERRAND_TASK_ID][cached.errand_id]).toEqual(received);
+  });
+
   it("keeps runtime snapshot ownership metadata out of hydrated state", () => {
     const state = mergeInitialState({
       errands: {

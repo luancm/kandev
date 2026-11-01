@@ -24,6 +24,7 @@ describe("errands slice", () => {
       loadedReadScopeByTaskId: {},
       resetEpochByTaskId: {},
       liveRevisionByTaskId: {},
+      liveRevisionByErrandIdByTaskId: {},
       removedSessionIdsByTaskId: {},
     });
   });
@@ -154,6 +155,29 @@ describe("setTaskErrands", () => {
     expect(taskErrands(store)["errand-1"]).not.toHaveProperty("delivery_state");
   });
 
+  it("accepts a strictly newer listed row even after a live observation during the request", () => {
+    const store = createAppStore();
+    store.getState().upsertErrand(withDeliveryState(makeErrand(), "uncertain"));
+    const listed = withDeliveryState(makeErrand({ updated_at: NEWER }), "received");
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [listed], 0);
+
+    expect(taskErrands(store)["errand-1"]).toEqual(listed);
+  });
+
+  it("fences live delivery observations when a legacy store omits row revisions", () => {
+    const store = createAppStore();
+    store.setState((state) => ({
+      errands: { ...state.errands, liveRevisionByErrandIdByTaskId: undefined },
+    }));
+    const live = withDeliveryState(makeErrand(), "received");
+    store.getState().upsertErrand(live);
+    store
+      .getState()
+      .setTaskErrands(ERRAND_TASK_ID, [withDeliveryState(makeErrand(), "uncertain")], 0);
+
+    expect(taskErrands(store)["errand-1"]).toEqual(live);
+  });
+
   it("ignores listed rows that belong to another task", () => {
     const store = createAppStore();
     store.getState().setTaskErrands(ERRAND_TASK_ID, [makeErrand({ task_id: "task-other" })], 0);
@@ -164,6 +188,19 @@ describe("setTaskErrands", () => {
 });
 
 describe("removeTaskErrands", () => {
+  it("discards old row ownership so a later list can update an equal-timestamp row", () => {
+    const store = createAppStore();
+    store.getState().upsertErrand(makeErrand());
+    store.getState().removeTaskErrands(ERRAND_TASK_ID);
+    store
+      .getState()
+      .setTaskErrands(ERRAND_TASK_ID, [withDeliveryState(makeErrand(), "uncertain")], 0);
+    const received = withDeliveryState(makeErrand(), "received");
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [received], 0);
+
+    expect(taskErrands(store)["errand-1"]).toEqual(received);
+  });
+
   it("drops the task's errands and load state, leaving other tasks", () => {
     const store = createAppStore();
     store.getState().upsertErrand(makeErrand());

@@ -1,7 +1,7 @@
 ---
 id: "19-reconnect-freshness"
 title: "Refresh each task across connection generations"
-status: in_progress
+status: done
 wave: 19
 depends_on: []
 plan: "plan.md"
@@ -104,3 +104,13 @@ No browser suite was rerun: this packet changes only store freshness and hydrati
 The user-requested scope review found a remaining stale-response race in the existing live/list merge contract. `setTaskErrands` uses a changed `liveRevisionByTaskId` to preserve removals, but still replaces an existing row when the incoming timestamp is equal. Await receipt/recovery projection updates `errand_await_attempt` without advancing the errand row's `updated_at`, so a delayed list can overwrite a later live `received` observation with `uncertain`, or hide a newly published warning, then stamp the cache fresh. The previous test receipt remains valid for its covered cases but does not establish this schedule.
 
 Task19 is reopened for a focused regression in the existing slice and `use-task-errands` tests: capture a list request, publish a delivery-state change with identical `updated_at`, then resolve the older response last. Cover warning introduction/removal and an unrelated row update. Preserve the newer live observation with per-row request/event ownership or an equally complete existing authority; do not use the unchanged errand timestamp as projection ordering. No new public API, UI layout or browser behavior is proposed. Run the existing Task19 focused command after correction. This checkpoint records the finding only; no additional production repair was made during the scope review.
+
+#### Reopened-race repair receipt (2026-11-01)
+
+The slice now records each accepted live row's existing task revision in one optional runtime-only map. An older list cannot replace a row observed live after the request unless its errand timestamp is strictly newer. Other rows still accept equal-timestamp delivery changes. Hydration clears the row map, task removal drops that task's row ownership, and legacy omitted maps initialize on the next accepted live event. The existing loader/request boundary is unchanged.
+
+Behavioral RED used deferred `listErrands` responses with the real StateProvider/store: three warning introduction/removal/omission assertions failed as expected, while all three independent-row controls passed. Command: `cd apps/web && pnpm exec vitest run hooks/domains/session/use-task-errands.test.ts -t 'task errand delivery projection races' --maxWorkers=1`; exit 1, `/tmp/errands-task19-race-red.log`.
+
+Final GREEN after the last production refactor: `cd apps/web && pnpm exec vitest run hooks/domains/session/use-task-errands.test.ts lib/state/slices/errands/errands-slice.test.ts lib/state/slices/ui/connection-generation.test.ts lib/ws/handlers/errands.test.ts lib/api/domains/errand-api.test.ts lib/state/default-state.test.ts --maxWorkers=1`; six files and 63 tests passed with no skips, exit 0, `/tmp/errands-task19-race-final-vitest-refactor.log`. Coverage also verifies strictly newer list timestamps, omitted legacy maps, reset ownership and hydration behavior. All heavy checks ran under `/tmp/kandev-errands-repair-build.lock`.
+
+Scoped ESLint with `--max-warnings 0` and Prettier check passed for all five changed TypeScript files: `/tmp/errands-task19-race-eslint-final.log` and `/tmp/errands-task19-race-prettier-check.log`. The initial ESLint complexity warning was resolved by extracting the row decision within the same slice before the final test run. No UI markup, public contract, backend or shared-manifest change belongs to this correction; no browser/build run was needed for this store-only normalization. Parent integration owns the Task19 status and commit. Progress and exact commands are in `/tmp/errands-task19-race-progress.md`; the final path/hash handoff is `/tmp/errands-task19-race-handoff.md`.

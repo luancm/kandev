@@ -17,6 +17,8 @@ export type ErrandsSliceState = {
     resetEpochByTaskId: Record<string, number>;
     /** Advances on every live upsert, so a list response can tell it raced live events. */
     liveRevisionByTaskId: Record<string, number>;
+    /** Last accepted live revision per row; runtime-only and absent in legacy state. */
+    liveRevisionByErrandIdByTaskId?: Record<string, Record<string, number>>;
     /** Removed session IDs block late list and live errand events from restoring a row. */
     removedSessionIdsByTaskId: Record<string, Record<string, true>>;
   };
@@ -27,8 +29,9 @@ export type ErrandsSliceActions = {
   upsertErrand: (errand: Errand) => void;
   /**
    * Applies an `errand.list` snapshot. `requestRevision` is the task's live
-   * revision when the request was sent: if live updates landed since, rows
-   * missing from the snapshot are kept rather than dropped.
+   * revision when the request was sent: live rows observed since are kept
+   * unless the list has a strictly newer timestamp. Missing rows are retained
+   * when live updates raced the request.
    */
   setTaskErrands: (
     taskId: string,
