@@ -108,50 +108,9 @@ relationship. The rationale and boundaries are in
   result. A cancellation requested by the parent or caused by a cascade shall
   produce no result.
 
-### REQ-TASKS-ERRANDS-004: Result delivery
+## Result delivery
 
-**Intent:** Deliver each result once, when the parent can use it.
-
-#### Acceptance criteria
-
-- **AC-TASKS-ERRANDS-004.1:** Superseded by criterion 004.9.
-- **AC-TASKS-ERRANDS-004.2:** An await call names errands and a mode. Mode
-  `all` shall return when every named errand is settled; mode `any` shall
-  return when at least one named errand has an undelivered result or all are
-  settled. The response shall report every named errand's status and include
-  the text of each undelivered result.
-- **AC-TASKS-ERRANDS-004.3:** An await call shall wait at most 600 seconds, or
-  a shorter `max_wait_seconds` from 0 to 600. When the wait ends first, the
-  response shall mark unsettled errands `pending`. The call shall send
-  periodic progress notifications while it waits.
-- **AC-TASKS-ERRANDS-004.4:** When an await call is abandoned before its
-  response reaches the parent, the results it claimed shall become deliverable
-  again.
-- **AC-TASKS-ERRANDS-004.5:** An await for an errand whose result was already
-  delivered shall report its status and delivery route without repeating the
-  text.
-- **AC-TASKS-ERRANDS-004.6:** Superseded by criteria 004.10 and 004.11.
-- **AC-TASKS-ERRANDS-004.7:** When the parent's queue is full, results shall
-  remain pending and be retried without loss.
-- **AC-TASKS-ERRANDS-004.8:** After a backend restart, undelivered results
-  shall still be delivered. An errand whose parent-initiated turn was
-  interrupted shall become `failed` and produce an interruption result.
-- **AC-TASKS-ERRANDS-004.9:** Each result shall be delivered at most once, by
-  the first of: an await call in progress that names its errand, the parent's
-  next turn, or a notification.
-- **AC-TASKS-ERRANDS-004.10:** When a parent turn starts with results
-  pending, whatever starts it, every pending result shall be attached to its
-  context with the errand status block instead of a separate message.
-- **AC-TASKS-ERRANDS-004.11:** When a result is pending, the parent is idle,
-  and no other entry waits in its queue, the system shall queue one
-  notification, and no second one while it waits. With Auto-run on, it shall
-  start the parent's next turn at once; with Auto-run off, it shall wait in
-  the queue. Its turn shall carry every result then pending. When another
-  parent turn takes those results first, the notification shall be removed
-  without starting a turn.
-- **AC-TASKS-ERRANDS-004.12:** A result that becomes pending while a parent
-  turn is running shall not enter that turn unless an await call in that turn
-  returns it.
+The [result delivery contract](errand-result-delivery.md) owns REQ-TASKS-ERRANDS-004 and its existing acceptance IDs.
 
 ### REQ-TASKS-ERRANDS-005: Workflow and ownership isolation
 
@@ -286,30 +245,21 @@ relationship. The rationale and boundaries are in
 #### Acceptance criteria
 
 - **AC-TASKS-ERRANDS-010.1:** Superseded by criterion 010.7.
-- **AC-TASKS-ERRANDS-010.2:** Errands shall not be added as session tabs
-  automatically. **Open** shall open or focus the errand's session view and
-  shall not change the primary session or selected workflow owner.
+- **AC-TASKS-ERRANDS-010.2:** Normal task conversations shall remain in regular session tabs. Errands shall be accessed through their parent session's Errands panel. **Open** shall temporarily show the child conversation with explicit **Back to parent**, without adding a regular session tab or changing the primary session or workflow owner. Direct child URLs, reload and restored legacy layouts shall preserve transcript access without restoring regular errand tabs.
 - **AC-TASKS-ERRANDS-010.3:** The errand view shall show the full session
   transcript and composer, plus a header with a link back to the parent,
   title, objective, profile, status, shared workspace path and branch,
   **Stop** while live, and **Send result to parent** when eligible.
-- **AC-TASKS-ERRANDS-010.4:** The chat status bar shall show an errands chip
-  only when the task has at least one errand. The chip shall open a panel
-  that groups live and completed errands by parent session with status and
-  **Open**, and shall remain available after all errands settle.
+- **AC-TASKS-ERRANDS-010.4:** The parent chat status bar shall show an errands chip when that parent has errands. Its panel shall show active work first and completed history in an initially collapsed disclosure, with status and **Open**. It shall remain available after all its errands settle. Switching normal conversations shall show only the selected parent's errands; a retained child shall remain directly viewable while the release toggle is off.
 - **AC-TASKS-ERRANDS-010.5:** Board cards, sidebar rows, and Threads rows
   shall show the live errand count and a waiting-on-errands status from the
   bounded task status summary, and shall show nothing when there are none.
-  The Threads session switcher shall nest errands under their parent.
+  The Threads session switcher shall list normal task conversations; errands shall open temporarily through their parent's panel within the same Threads conversation.
 - **AC-TASKS-ERRANDS-010.6:** All errand copy shall be localized in every
   shipped locale. Status changes shall be announced through one polite status
   region, and every errand control shall be keyboard operable with an
   accessible name.
-- **AC-TASKS-ERRANDS-010.7:** Parent transcripts shall render each start as a
-  compact entry (title, profile, live status, **Open**), await as a live-status
-  list, and each result as an **Errand finished** card (title, status, preview,
-  **Open**). Delivered cards shall keep their placement and result snapshots.
-  Results and status blocks shall not render as raw system text.
+- **AC-TASKS-ERRANDS-010.7:** Parent transcripts shall render START, completed WAIT and COMPLETION events as subtle, initially collapsed historical disclosures. Collapsed summaries shall show the event and count, with recorded duration/outcome when available, and omit repeated titles. Expansion shall expose titles, historical outcomes, objectives or returned results and **Open**. Completed events shall use static icons and historical wording, never live status substituted into saved events. In-flight waits may retain live activity. Delivered events shall keep their placement and result snapshots; status blocks shall not render as raw system text.
 - **AC-TASKS-ERRANDS-010.8:** The errands panel shall offer
   **Stop all errands** while any errand of the task is live.
 - **AC-TASKS-ERRANDS-010.9:** The parent's composer shall stay enabled while
@@ -327,9 +277,7 @@ relationship. The rationale and boundaries are in
 
 #### Acceptance criteria
 
-- **AC-TASKS-ERRANDS-011.1:** The phone Sessions drawer shall nest errands
-  under their parent with status. Tapping an errand shall open its view full
-  screen with a visible way back to the parent.
+- **AC-TASKS-ERRANDS-011.1:** The phone Sessions drawer shall list normal task conversations. The parent's Errands drawer shall open a child as a temporary full-screen conversation with explicit **Back to parent**, without adding it to the normal session selector. Direct child navigation and reload shall retain access to the full transcript.
 - **AC-TASKS-ERRANDS-011.2:** The errands chip shall open a bottom drawer with
   the grouped errand list. Rows and actions shall have touch targets of at
   least 44px, the list shall scroll inside the drawer, and the page shall not
@@ -361,9 +309,7 @@ relationship. The rationale and boundaries are in
   absent, errand actions shall fail with `feature_disabled`, the task-mode
   context shall be unchanged, no parent shall wait on errands, and no result
   shall be delivered.
-- **AC-TASKS-ERRANDS-012.3:** While the flag is off, existing errand sessions
-  shall remain viewable as ordinary session tabs and shall keep the isolation
-  of REQ-TASKS-ERRANDS-005.
+- **AC-TASKS-ERRANDS-012.3:** While the flag is off, existing errand transcripts shall remain directly viewable with their parent navigation and shall keep the isolation of REQ-TASKS-ERRANDS-005. Retained errands shall not reappear as normal conversation tabs or expose Primary/Handoff actions.
 
 ### REQ-TASKS-ERRANDS-013: Operational counters
 

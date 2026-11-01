@@ -18,6 +18,10 @@ system_design:
 
 # Task 17: Order errands in the pill
 
+The frontmatter dependency records shared-file source-edit order. The preceding
+source implementation is complete; its remaining media/browser evidence is an
+independent acceptance gate, owned by the [review repairs](../errands-review-repairs/plan.md).
+
 ## Scope
 
 Partition active and finished errands globally, then retain parent groups within each section. Sort newest created first in each group, and order groups by newest child. Use shared presentation logic for desktop and phone; do not alter store arrays or backend queue behavior. Likely files: errands-panel.tsx, related hooks/selectors, adjacent tests, existing desktop/mobile errands specs and locale catalogs.

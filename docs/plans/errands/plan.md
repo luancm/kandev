@@ -17,13 +17,34 @@ requirements:
   - REQ-TASKS-ERRANDS-012
   - REQ-TASKS-ERRANDS-013
   - REQ-TASKS-ERRANDS-CONTEXT-001
+  - REQ-TASKS-ERRAND-ORDER-001
+  - REQ-TASKS-ERRAND-AWAIT-DURATION-001
 system_design:
   - ../../specs/tasks/system-design/errands.md
   - ../../specs/tasks/system-design/errand-context-window.md
+  - ../../specs/tasks/system-design/errand-panel-order.md
+  - ../../specs/tasks/system-design/errand-await-duration.md
 legacy_specs: []
 ---
 
 # Implementation Plan: Errands
+
+## Review and repair checkpoint (2026-10-30)
+
+The reviewed baseline is `6400a265bb8a0a35fb702eced2aff1eeb81023d9`.
+The [review repair package](../errands-review-repairs/plan.md) owns nineteen
+correctness fixes plus fallback identity and documentation corrections. Its
+production changes and new regression tests remain pending. The user selected
+retaining uncertain await delivery without automatic replay; the linked ADR
+and result-delivery requirements record that choice. Historical receipts below
+prove the earlier implementation only.
+
+Tasks 15 and 18 are done. Task 16 still needs current dark desktop/phone media;
+Task 17 still needs mixed-parent browser transition evidence. Repair Tasks 24
+and 25 own those remaining checks after the code repairs. Task 18 depended on
+Task 17 for shared-file edit order, not completion of its browser acceptance.
+No PR, shipped-default promotion or live-instance change is part of this repair
+checkpoint. The earlier origin publication receipt is preserved below.
 
 ## Accepted UI refinement (2026-10-30)
 
@@ -105,7 +126,7 @@ verification are pending; this turn changes the design package only. Catalog,
 specification lint/tests, PR-documentation coverage preflight and scoped diff
 checks passed for the package.
 
-## Current delivery checkpoint (2026-10-29)
+## Historical delivery checkpoint (2026-10-29)
 
 Final acceptance checkpoint: merge `28e3cd57b8` includes upstream
 `b767ca83fd3792f2e0fbc66909dce32af3cf2dff`. The product fix and browser
@@ -441,6 +462,9 @@ is not acceptance of a newly found gap; the continuation owns those deltas.
 | 14 | [09](task-09-e2e-and-docs.md) | Desktop/phone E2E, operating guide and pilot evidence | 13, 08 | Both | 003, 004, 005, 006, 007, 008, 009, 010, 011, 012 |
 | 15 | [14](task-14-pill-owned-management.md) | Pill-owned management; compact transcript history (done) | 13, 09 | Frontend | 010, 011 |
 | 16 | [15](task-15-context-window.md) | Passive per-child context occupancy with bounded reload projection (done) | 14 | Task sessions + frontend | ERRANDS-CONTEXT-001 |
+| 17 | [16](task-16-context-token-readout.md) | Token counts implemented; current dark media pending (in_progress) | 15 | Frontend | ERRANDS-CONTEXT-001 |
+| 18 | [17](task-17-panel-order.md) | Active-first ordering implemented; mixed-parent browser evidence pending (in_progress) | 16 source edits | Frontend | ERRAND-ORDER-001 |
+| 19 | [18](task-18-await-duration.md) | Elapsed await duration and outcome (done) | 17 source edits | Both | ERRAND-AWAIT-DURATION-001 |
 
 Progress:
 
@@ -454,7 +478,10 @@ Progress:
 - [x] Task 09: deterministic browser journeys, docs and selected SQLite personal pilot accepted; broader support remains conditional.
 
 - [x] Task 14: removed duplicate transcript inventory; desktop/phone management, immutable history and scrolling verified.
-- [ ] Task 15: delegated to the sole implementation child; implementation and validation in progress.
+- [x] Task 15: context implementation and original validation accepted; the review repair package owns the later clear/cache defect.
+- [ ] Task 16: implementation accepted; fresh dark desktop/phone media pending in repair Task 25.
+- [ ] Task 17: implementation accepted; mixed-parent browser transition evidence pending in repair Task 24.
+- [x] Task 18: await duration, result and reload validation accepted.
 
 ## Continuation checkpoint (2026-10-27)
 
@@ -474,7 +501,7 @@ system design remain draft until implementation and their work-order checks
 pass. Findings below identify missing implementation of the existing
 contract; they do not redefine accidental behavior as intended behavior.
 
-### Inline chat summary (UI-11)
+### Historical inline chat summary (UI-11, superseded by Task 14)
 
 Historical preview retained for task 13. Task 14 supersedes this surface with
 pill-owned management and removes the duplicate transcript inventory.
@@ -671,7 +698,7 @@ profile-granted shell/REST authority remain the accepted v1 residual risks.
 | Await | Kept as an optional in-turn join; prompts recommend ending the turn and being notified. |
 | MCP servers | An errand inherits a snapshot of its parent's session-level MCP selections at start, on top of its own profile, task, and repository selections. Later parent changes do not propagate; the user can add servers from the errand's composer. Inherited servers never widen the Kandev tool surface. |
 | Transcript grouping | No grouped transcript block for consecutive start calls. Each start renders its own row card, and the await card lists the group. |
-| Desktop errand list | No Dockview Errands panel. Retain the chip popover and add the current-state inline card through 13. |
+| Desktop errand list | Chip-owned popover with Active/Completed parent groups and passive context readout. Task 14 removed Task 13's inline inventory; transcript cards remain historical. |
 | Continuation split | Keep foundations; 00 integrates upstream, 10 fixes snapshots/readback, 11 dispatch/acceptance, 12 lifecycle convergence, 07 row metadata, 13 inline summary, then 09 signoff. |
 
 ## Risks
@@ -712,7 +739,7 @@ listed contract and before a future upstream proposal.
 | Isolation | One workflow-detached predicate replacing every completion follow-up check in the orchestrator, plus errand exclusions from primary, title, routing, reuse, feeder, CI, and task-state paths | 02 |
 | Service | The `internal/errands` service: start, cap, profile resolution, reserved identity, MCP inheritance, ceiling-queued admission, status projection, results, status block, await, turn attachment and notifications, parent workflow deferral, cancellation including **Stop all errands**, reconciliation, and metrics | 04, 05 |
 | Agent surface | MCP tools `start_errand_kandev`, `await_errands_kandev`, `cancel_errand_kandev`, the `errand` MCP mode and catalog, backend guards, `list_task_sessions_kandev` fields, `errand.md`, and the flag-gated delegation policy and errand guidance in `kandev-context.md` | 06 |
-| UI, coverage, and docs | Desktop/phone session and inline UI, task indicators, i18n, scenarios, Playwright, public docs and guidance | 03, 07, 08, 13, 09 |
+| UI, coverage, and docs | Desktop/phone session and chip-owned management UI, task indicators, i18n, scenarios, Playwright, public docs and guidance | 03, 07, 08, 09, 14-18; review repairs |
 
 ### Out of scope
 
@@ -780,8 +807,9 @@ full-repository audit.
 
 ## E2E tests
 
-No Errands browser spec exists at the planning snapshot. Task 09 adds the
-following independently named scenarios in `tests/session/errands.spec.ts`
+Task 09 added the baseline browser scenarios below; current continuation
+acceptance belongs to Tasks 14-18 and the review repair package. Preserve the
+independently named scenarios in `tests/session/errands.spec.ts`
 (`chromium`) and `tests/session/mobile-errands.spec.ts` (`mobile-chrome`).
 Reuse real start-returned IDs and production-built assets. Do not inject a
 fictional metadata envelope to make finished-card assertions pass.
@@ -796,7 +824,7 @@ fictional metadata envelope to make finished-card assertions pass.
 | Cap, ceiling queue and queued Stop | Chromium | 008.1-008.3 | Sixth live start refused, queued identity has no runtime, authorized single cancellation before launch |
 | Board, sidebar, Threads and nested session selection | Both | 006.3, 010.5-010.6, 011.1 | Bounded counts/waiting, distinct native-subagent metadata, unchanged selection semantics |
 | Disable/restart with retained errand sessions | Both | 005.1-005.5, 012.1-012.3 | No tools/new delivery/waiting UI; ordinary retained tabs remain detached and viewable |
-| Inline summary and sibling chat widgets | Both | 010.10, 011.6 | Collapsed live counts, grouped expansion, Open/back and task-wide Stop-all, preserved start/result/diff/todo cards, reading position and active bottom-follow |
+| Chip-owned management and transcript history | Both | 010.11, 011.7 | Active/Completed parent groups, context counts/clear, Open/back and Stop all; immutable start/await/result history, reading position and bottom-follow; no inline inventory |
 | Phone navigation, drawer and actions geometry | Mobile-chrome | 010.6, 011.1-011.5 | Full-screen chat, visible actions/back, 44px hit targets, one scroll owner, safe-area clearance, no horizontal overflow |
 
 Retry/uncertain-admission and crash windows are deterministic backend tests
@@ -817,7 +845,7 @@ existing `@kandev/ui` primitives and tokens.
 | The parent composer stays enabled while errands run | UI-01, UI-10 |
 | The errand header; **Stop** and **Send result to parent** never appear together | UI-02, UI-07 |
 | A chip only when errands exist, showing the live count | UI-01, UI-10 |
-| An additive current-state inline card with semantic disclosure and independent actions | UI-11 |
+| Chip-owned management, with no duplicate current inventory in chat | UI-03, UI-08; UI-11 superseded |
 | Grouping by parent and **Stop all errands** | UI-03, UI-06, UI-08 |
 | Phone nesting, full screen errand view, visible actions menu, and bottom drawer | UI-06, UI-07, UI-08 |
 
@@ -833,7 +861,7 @@ existing `@kandev/ui` primitives and tokens.
 | UI-08 | Phone errands drawer from the chip | 011.2, 011.4 |
 | UI-09 | Desktop await card when the agent awaits inside its turn | 010.7, 004.2 |
 | UI-10 | Phone parent session while errands run | 011.5, 010.4 |
-| UI-11 | Inline current-Errands summary, desktop/phone collapsed and expanded | 010.10, 011.6 |
+| UI-11 | Historical inline inventory, removed by Task 14 | Superseded by 010.11, 011.7 |
 
 UI-01: Desktop parent session after starting three errands and ending its turn (AC-TASKS-ERRANDS-010.2, 010.4, 010.7, 010.9).
 

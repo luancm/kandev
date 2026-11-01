@@ -136,4 +136,3 @@ Hook receipt `/tmp/kandev-errands-merge-xfr6fjug/hook-receipt.json`: parent_sha 
 
 Release only current reliability `cff83e74-8dd3-40b7-87a5-14898f49e9d7` through existing Todo -> Work with one-time scoped instructions suppressing generic commit/Delivery authority. User-selected configured Lunaldinho profile `188db592-1c5e-45e4-bb53-d84e6997f191`, shared executor/worktree, branch feature/plan-errands-first-d-424, head 69c190e078. It owns 10 -> 11 -> 12 and exact work-order checks; no redelegation or commits/push/PR/live mutation. Verify its launch/model receipt and grant acknowledgment, then await stopped-writer results before any frontend release. Keep Coordinate open while sequential work still requires coordination; do not advance on dispatch acknowledgment alone.
 <!-- archived-plan-end -->
-

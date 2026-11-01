@@ -1,7 +1,7 @@
 ---
 id: "13-inline-chat-summary"
 title: "Reuse interactive chat cards for current errands"
-status: completed
+status: done
 wave: 13
 depends_on:
   - "07-task-summary-indicators"

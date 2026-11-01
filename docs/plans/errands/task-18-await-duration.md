@@ -19,6 +19,10 @@ system_design:
 
 # Task 18: Show how long the await took
 
+The frontmatter dependency records shared-file source-edit order. The preceding
+source implementation is complete; its remaining media/browser evidence is an
+independent acceptance gate, owned by the [review repairs](../errands-review-repairs/plan.md).
+
 ## Scope and acceptance
 
 Measure actual await duration in the backend and carry it through the existing result to the completed chat card, with localized accessible display on desktop and phone. Show the actual end reason (all ready, any ready, timeout or parent ended) and per-errand result-returned state only with evidence that this await returned it. Immediate zero, timeout and parent-ended successful waits are covered. Legacy/malformed results omit the label. Preserve existing list, error, navigation and delivery behavior. No polling or new control. Likely ownership: internal/errands/await.go and adjacent tests, internal/mcp/handlers/errands.go and tests, MCP server result propagation tests, errand-parse.ts and tests, errand-renderers.tsx and tests, relevant locale catalogs and existing desktop/phone E2E fixtures. Public tool documentation must describe the additive duration field.

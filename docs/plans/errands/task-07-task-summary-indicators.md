@@ -1,7 +1,7 @@
 ---
 id: "07-task-summary-indicators"
 title: "Show errand counts and waiting status on task rows"
-status: completed
+status: done
 wave: 12
 depends_on:
   - "03-frontend-data-layer"

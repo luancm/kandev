@@ -1,7 +1,7 @@
 ---
 id: "09-e2e-and-docs"
 title: "Add errand E2E scenarios, public docs, and harness notes"
-status: completed
+status: done
 wave: 14
 depends_on:
   - "13-inline-chat-summary"

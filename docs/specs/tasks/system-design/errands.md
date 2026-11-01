@@ -449,8 +449,9 @@ REST risk is in the ADR.
 - **Races.** Capture and delivery are version-guarded. The per-parent mutex
   orders await claims, turn composition, and notification admission; the
   per-task mutex orders cap checks and **Stop all errands**.
-- **Process loss.** Awaits end with the MCP connection; release
-  returns their claims.
+- **Process loss.** Proven-unexposed awaits release only after late effects are
+  fenced. Unknown reception remains retained without automatic replay under
+  [the await uncertainty decision](../../../decisions/2026-10-30-errand-await-delivery-uncertainty.md).
 - **Replay.** The block is part of the admitted prompt, so a replayed
   submission carries the same results under the same token.
 
@@ -476,54 +477,17 @@ session, errand, and parent IDs as fields only.
   `use-errand-actions.ts` owns mutations. Mounting multiple surfaces must
   retain one shared list request. Historical result cards use message
   snapshots, not today's rows.
-- **Tabs.** `runAutoSessionTabEffect`, `useAutoSessionTab`, and live session
-  adoption skip errands while enabled. Explicit Open focuses `session:<id>`
-  without changing primary ownership. Menus hide Primary/Handoff by role,
-  including while the feature is off.
-- **Transcript.** `messages/kandev/errand-renderers.tsx` registers separate
-  start rows and await lists. `message-renderer.tsx` renders one finished
-  card per `errand_delivery` item below visible user text. Strip system
-  framing; retain each historical message's identity and placement.
-- **Errand view.** `errand-header.tsx` shows parent/back, objective, profile,
-  status, workspace/branch, Stop while live or Send result when eligible.
-  The existing composer supports follow-up and MCP selection.
-- **Chip/panel.** `errands-chip.tsx` in `chat-status-bar.tsx` opens the
-  existing task-wide grouped popover/Drawer with Open and Stop-all actions.
-  `errands-panel.tsx` and `errands-panel-row.tsx` supply shared list content.
-  Include live and completed rows; retain the chip after all work settles.
-  Errand state never disables the parent's composer.
-- **Task rows.** Board/sidebar/Threads consume `statusSummary.errands`;
-  `thread-session-switcher.tsx` nests sessions beneath parents.
+- **Conversations and history.** [Errand conversation navigation](errand-conversation-navigation.md) owns parent-tab hosting, scoped preview/Threads selection, normal phone selectors, parent-owned panels, collapsed completed history and consistent historical disclosures. Role restrictions and direct child transcripts survive the release toggle. Normal conversations retain their tabs; opening an errand never transfers workflow ownership.
 - **Copy/accessibility.** Use existing locale namespaces and seven shipped
   locales, keyboard-operable actions and one polite status announcer per view.
 
 ### Current management and transcript history
 
-Implemented refinement, 2026-10-30 ([task 14](../../../plans/errands/task-14-pill-owned-management.md)): the chip and its
-existing grouped panel own current task-wide management. Remove the
-`ErrandsInlineSummary` mount from `TaskChatPanel` and its transcript-tail
-integration. Preserve message-list reconciliation, `detailActive`, exact diff
-anchors and the existing scroll owner. No new endpoint, polling or loader.
-
-`StartErrandRenderer` retains a compact entry per start with its title,
-profile, status and Open. Optional awaits retain their scoped lists.
-`errand_delivery` snapshots remain separate finished cards in the original
-message position; finishing a child never transforms its start entry into
-a result. The panel continues using shared state and action hooks for all
-parent groups, including completed children. Task-wide Stop all remains in
-the panel while any child is live.
+The parent chip and panel own live management; transcripts own historical events. This approved separation avoids retained errands competing with normal conversations as tabs. Existing direct links, session selection and transcripts remain intact; no deletion, runtime cleanup or backend ownership change follows from hiding tabs. [Task29](../../../plans/errands-review-repairs/task-29-conversation-navigation-and-history.md) owns implementation and evidence.
 
 ### Phone composition
 
-Sessions nest children; Open navigates to full-screen errand chat with visible
-Back and actions. The chip retains its grouped bottom Drawer, one internal
-scroll owner and fixed Stop-all footer. Reuse this shipped Errands drawer as
-the mobile exemplar, retaining its safe-area clearance and viewport bound.
-The chat contains compact start entries and delivered results, without a
-second inventory. Open and bulk controls have 44px phone/coarse-pointer
-targets, including narrow fine-pointer layouts; desktop stays compact.
-Preserve bottom-follow when enabled and reading position when scrolled up.
-Finished cards fit phone width and the parent composer remains enabled.
+Reuse the shipped Errands bottom Drawer and `mobile-picker-sheet.tsx`: normal conversations in Sessions, active errands followed by collapsed completed history in the parent's Errands drawer. Open navigates directly to full-screen child chat; explicit Back restores its parent. Preserve safe areas, one internal list scroller, fixed Stop-all footer, 44px touch targets, no document overflow and the parent's composer/reading position. Share session selection and panel filtering across viewports; mobile does not persist a substitute desktop layout.
 
 ## Release toggle
 
@@ -557,3 +521,7 @@ and `mobile-*` scenarios use mock-agent `e2e:mcp:kandev:` scripts.
 - [ADR-2026-08-02-single-owner-agent-task-titles](../../../decisions/2026-08-02-single-owner-agent-task-titles.md)
 - [ADR-2026-08-01-separate-task-summary-session-stream-traffic](../../../decisions/2026-08-01-separate-task-summary-session-stream-traffic.md)
 - [ADR-2026-10-22-entry-bound-delivery-turns](../../../decisions/2026-10-22-entry-bound-delivery-turns.md)
+
+## Recovery and conformance repairs
+
+The [recovery and delivery extension](errand-recovery-and-delivery.md) defines transactional claims, uncertain await outcomes, exact teardown, reserved-launch adoption, source-aware queue dispatch and authoritative UI recovery. Its [repair package](../../../plans/errands-review-repairs/plan.md) owns implementation and new regression evidence.
