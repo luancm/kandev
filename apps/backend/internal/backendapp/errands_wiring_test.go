@@ -23,7 +23,7 @@ import (
 var (
 	_ errands.Store                   = (*sqliterepo.Repository)(nil)
 	_ errands.Launcher                = (*orchestrator.ErrandAdapter)(nil)
-	_ errands.SessionStopper          = (*orchestrator.ErrandAdapter)(nil)
+	_ errands.ErrandTeardown          = (*orchestrator.ErrandAdapter)(nil)
 	_ errands.MCPSelections           = (*orchestrator.ErrandAdapter)(nil)
 	_ orchestrator.ErrandController   = (*errands.Service)(nil)
 	_ taskhandlers.ErrandService      = (*errands.Service)(nil)

@@ -259,7 +259,7 @@ func TestOrdinaryStartStillDefersAtTheCeiling(t *testing.T) {
 	require.True(t, deferred, "only errands are refused instead of deferred")
 }
 
-func TestErrandAdapterMapsCeilingRefusalAndStopsOnlyExistingSessions(t *testing.T) {
+func TestErrandAdapterMapsCeilingRefusal(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
 	adapter := NewErrandAdapter(f.svc)
@@ -271,9 +271,6 @@ func TestErrandAdapterMapsCeilingRefusalAndStopsOnlyExistingSessions(t *testing.
 	result, err := adapter.LaunchErrand(ctx, f.request())
 	require.NoError(t, err)
 	require.Equal(t, errands.LaunchQueued, result.Disposition)
-
-	require.NoError(t, adapter.StopErrandSession(ctx, "never-created", errands.StopReasonErrandCancelled),
-		"a queued errand has no session to stop")
 }
 
 type fakeMCPSelectionReader struct {
@@ -361,7 +358,7 @@ func TestErrandMCPInheritanceLeavesTheDefaultScopeWhenNothingRemainsEnabled(t *t
 func TestErrandAdapterTreatsAnAlreadyGoneRuntimeAsStopped(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
-	newErrandServiceOnRealStack(t, f)
+	service, _ := newErrandServiceOnRealStack(t, f)
 	_, err := f.svc.LaunchErrandSession(ctx, f.request())
 	require.NoError(t, err)
 	f.manager.captured.Lock()
@@ -370,5 +367,10 @@ func TestErrandAdapterTreatsAnAlreadyGoneRuntimeAsStopped(t *testing.T) {
 	f.manager.getExecutionIDForSessionFunc = func(_ context.Context, sessionID string) (string, error) {
 		return "", fmt.Errorf("%w: %s", agentruntime.ErrNoExecutionForSession, sessionID)
 	}
-	require.NoError(t, NewErrandAdapter(f.svc).StopErrandSession(ctx, "errand-1", errands.StopReasonErrandCancelled))
+	require.NoError(t, service.CancelOnSessionStop(ctx, "errand-1"))
+	row, err := f.repo.GetErrand(ctx, "errand-1")
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandLifecycleCancelled, row.Lifecycle)
+	require.NotNil(t, row.TeardownIntent)
+	require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
 }

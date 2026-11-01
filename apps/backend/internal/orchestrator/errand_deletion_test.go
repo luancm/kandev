@@ -110,8 +110,6 @@ type deletionNoticeStopper struct {
 	}
 }
 
-func (deletionNoticeStopper) StopErrandSession(context.Context, string, string) error { return nil }
-
 // This fixture owns no physical runtime and acknowledges the exact stored intent.
 func (s deletionNoticeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
 	target := errands.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID}

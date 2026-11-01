@@ -47,14 +47,10 @@ func (s *Service) cancelRow(ctx context.Context, id string, source models.Errand
 }
 
 func (s *Service) cancelCaptured(ctx context.Context, row *models.Errand, source models.ErrandCancelSource) (*models.Errand, bool, error) {
-	capability, ok := s.stopper.(ErrandTeardown)
-	if !ok {
-		return row, false, errors.New("errands: identity-aware teardown capability is required")
-	}
 	next := *row
 	changed := false
 	intentID, requestedAt := uuid.NewString(), s.clock.Now()
-	err := capability.CancelErrandWithTarget(ctx, row, func(target ErrandTeardownTarget) error {
+	err := s.stopper.CancelErrandWithTarget(ctx, row, func(target ErrandTeardownTarget) error {
 		if expected, ok := ctx.Value(cancellationTargetFenceKey{}).(ErrandTeardownTarget); ok && expected != target {
 			return models.ErrErrandVersionConflict
 		}
@@ -80,11 +76,7 @@ func (s *Service) retryTeardown(ctx context.Context, row *models.Errand) error {
 	if !pendingTeardown(row) {
 		return nil
 	}
-	capability, ok := s.stopper.(ErrandTeardown)
-	if !ok {
-		return errors.New("errands: identity-aware teardown capability is required")
-	}
-	outcome, err := capability.RetryErrandTeardown(ctx, *row.TeardownIntent)
+	outcome, err := s.stopper.RetryErrandTeardown(ctx, *row.TeardownIntent)
 	if err == nil && outcome != TeardownCompleted && outcome != TeardownSuperseded {
 		err = errors.New("errands: teardown returned no confirmed outcome")
 	}

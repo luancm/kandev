@@ -2,16 +2,13 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
-	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ErrandAdapter satisfies the errands service's launcher, session stopper, and
+// ErrandAdapter satisfies the errands service's launcher, teardown, and
 // MCP selection seams on top of the orchestrator.
 type ErrandAdapter struct {
 	svc *Service
@@ -19,7 +16,6 @@ type ErrandAdapter struct {
 
 var (
 	_ errands.Launcher       = (*ErrandAdapter)(nil)
-	_ errands.SessionStopper = (*ErrandAdapter)(nil)
 	_ errands.ErrandTeardown = (*ErrandAdapter)(nil)
 	_ errands.MCPSelections  = (*ErrandAdapter)(nil)
 )
@@ -33,23 +29,6 @@ func NewErrandAdapter(svc *Service) *ErrandAdapter {
 func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) (errands.LaunchResult, error) {
 	result, _, err := a.svc.launchErrand(ctx, request)
 	return result, err
-}
-
-// StopErrandSession stops an errand's runtime. A session that does not exist
-// yet, such as a cancelled queued errand, or whose runtime is already gone has
-// nothing to stop.
-func (a *ErrandAdapter) StopErrandSession(ctx context.Context, sessionID, reason string) error {
-	if _, err := a.svc.repo.GetTaskSession(ctx, sessionID); err != nil {
-		if errors.Is(err, models.ErrTaskSessionNotFound) {
-			return nil
-		}
-		return err
-	}
-	err := a.svc.StopSession(ctx, sessionID, reason, false)
-	if errors.Is(err, agentruntime.ErrNoExecutionForSession) {
-		return nil
-	}
-	return err
 }
 
 // SessionSnapshot returns the session-level MCP additions and exclusions for a

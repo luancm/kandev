@@ -13,13 +13,12 @@ import (
 )
 
 // Dependencies are the collaborators of a Service. Store, Launcher,
-// SessionStopper, ProfileResolver, MCPSelections, and EventPublisher are
-// required; SessionStopper must also implement ErrandTeardown. Deliverer and
-// Clock are optional.
+// ErrandTeardown, ProfileResolver, MCPSelections, and EventPublisher are
+// required. Deliverer and Clock are optional.
 type Dependencies struct {
 	Store     Store
 	Launcher  Launcher
-	Stopper   SessionStopper
+	Stopper   ErrandTeardown
 	Profiles  ProfileResolver
 	MCP       MCPSelections
 	Events    EventPublisher
@@ -32,7 +31,7 @@ type Dependencies struct {
 type Service struct {
 	store     Store
 	launcher  Launcher
-	stopper   SessionStopper
+	stopper   ErrandTeardown
 	profiles  ProfileResolver
 	mcp       MCPSelections
 	events    EventPublisher
@@ -75,9 +74,6 @@ func New(deps Dependencies) (*Service, error) {
 		return nil, errors.New("errands: MCP selection reader is required")
 	case deps.Events == nil:
 		return nil, errors.New("errands: event publisher is required")
-	}
-	if _, ok := deps.Stopper.(ErrandTeardown); !ok {
-		return nil, errors.New("errands: identity-aware teardown capability is required")
 	}
 	if deps.Clock == nil {
 		deps.Clock = systemClock{}

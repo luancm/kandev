@@ -303,7 +303,7 @@ type fakeStopper struct {
 	err       error
 }
 
-func (s *fakeStopper) StopErrandSession(ctx context.Context, sessionID, reason string) error {
+func (s *fakeStopper) stopRuntime(ctx context.Context, sessionID, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stopped = append(s.stopped, sessionID)

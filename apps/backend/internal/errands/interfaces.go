@@ -87,12 +87,6 @@ type Launcher interface {
 	LaunchErrand(ctx context.Context, request LaunchRequest) (LaunchResult, error)
 }
 
-// SessionStopper stops the runtime of an errand session. It must succeed for
-// a session whose runtime is already gone.
-type SessionStopper interface {
-	StopErrandSession(ctx context.Context, sessionID, reason string) error
-}
-
 // The private teardown seam shares the storage model's immutable identity.
 type ErrandTeardownTarget = models.ErrandTeardownTarget
 type ErrandTeardownIntent = models.ErrandTeardownIntent

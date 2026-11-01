@@ -47,7 +47,7 @@ func (s *fakeStopper) RetryErrandTeardown(ctx context.Context, intent ErrandTear
 		return TeardownCompleted, nil
 	}
 	if intent.Target.ExecutionID != "" {
-		if err := s.StopErrandSession(ctx, intent.Target.SessionID, StopReasonErrandCancelled); err != nil {
+		if err := s.stopRuntime(ctx, intent.Target.SessionID, StopReasonErrandCancelled); err != nil {
 			return "", err
 		}
 	}
@@ -75,13 +75,29 @@ type teardownProjectionFailureStore struct {
 	fault  error
 }
 
-type legacyOnlyStopper struct{ SessionStopper }
-
-func TestTeardownRequiresIdentityAwareProductionWiring(t *testing.T) {
+func TestTeardownRequiresDependencies(t *testing.T) {
 	h := newHarness(t)
-	_, err := New(Dependencies{Store: h.store, Launcher: h.launcher,
-		Stopper: legacyOnlyStopper{h.stopper}, Profiles: h.profiles, MCP: h.mcp, Events: h.publisher})
-	require.ErrorContains(t, err, "identity-aware")
+	for _, test := range []struct {
+		name    string
+		missing func(*Dependencies)
+		err     string
+	}{
+		{"store", func(d *Dependencies) { d.Store = nil }, "store is required"},
+		{"launcher", func(d *Dependencies) { d.Launcher = nil }, "launcher is required"},
+		{"stopper", func(d *Dependencies) { d.Stopper = nil }, "session stopper is required"},
+		{"profiles", func(d *Dependencies) { d.Profiles = nil }, "profile resolver is required"},
+		{"MCP", func(d *Dependencies) { d.MCP = nil }, "MCP selection reader is required"},
+		{"events", func(d *Dependencies) { d.Events = nil }, "event publisher is required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deps := Dependencies{Store: h.store, Launcher: h.launcher, Stopper: h.stopper,
+				Profiles: h.profiles, MCP: h.mcp, Events: h.publisher}
+			test.missing(&deps)
+			service, err := New(deps)
+			require.ErrorContains(t, err, test.err)
+			require.Nil(t, service)
+		})
+	}
 }
 
 func (s teardownProjectionFailureStore) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
