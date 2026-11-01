@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { Errand } from "@/lib/types/errands";
 import type { TaskSession } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
@@ -11,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   sessions: [] as TaskSession[],
   setActiveSession: vi.fn(),
   errandsEnabled: false,
-  errands: [] as Errand[],
 }));
 
 const PROFILES: AgentProfileOption[] = [
@@ -33,15 +31,6 @@ const PROFILES: AgentProfileOption[] = [
 
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: () => ({ sessions: mocks.sessions, isLoading: false, isLoaded: true }),
-}));
-
-vi.mock("@/hooks/domains/session/use-task-errands", () => ({
-  useTaskErrands: () => ({
-    errands: mocks.errandsEnabled ? mocks.errands : [],
-    errandsByParent: {},
-    liveCount: 0,
-    isLoaded: true,
-  }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -115,11 +104,9 @@ beforeEach(() => {
   mocks.sessions = [];
   mocks.setActiveSession.mockReset();
   mocks.errandsEnabled = false;
-  mocks.errands = [];
 });
 
 const ERRAND_ID = "session-errand";
-const ERRAND_ROW = `mobile-errand-row-${ERRAND_ID}`;
 const THIRD_TIME = "2026-01-01T00:02:00Z";
 
 function errandSession(overrides: Partial<TaskSession> = {}): TaskSession {
@@ -131,25 +118,6 @@ function errandSession(overrides: Partial<TaskSession> = {}): TaskSession {
   });
 }
 
-function errandRow(overrides: Partial<Errand> = {}): Errand {
-  return {
-    errand_id: ERRAND_ID,
-    task_id: TASK_ID,
-    parent_session_id: SESSION_A,
-    title: "API audit",
-    objective: "Audit the handlers",
-    agent_profile_id: "profile-b",
-    status: "running",
-    result_state: "none",
-    result_preview: "",
-    result_truncated: false,
-    created_at: THIRD_TIME,
-    updated_at: THIRD_TIME,
-    settled_at: null,
-    ...overrides,
-  };
-}
-
 function openPicker() {
   render(<MobileSessionsPicker taskId={TASK_ID} fullWidth />);
   fireEvent.click(screen.getByTestId(PILL_TESTID));
@@ -159,18 +127,22 @@ describe("MobileSessionsPicker errands", () => {
   beforeEach(() => {
     mocks.errandsEnabled = true;
     mocks.sessions = [
-      session(SESSION_A, "profile-a", START_TIME),
       session("session-b", "profile-b", SECOND_TIME),
-      errandSession(),
+      errandSession({ started_at: "2025-12-31T23:59:00Z" }),
+      session(SESSION_A, "profile-a", START_TIME),
     ];
-    mocks.errands = [errandRow()];
   });
 
   it("lists and numbers only normal conversations while errands stay in the parent panel", () => {
     openPicker();
-    expect(screen.queryByTestId(ERRAND_ROW)).toBeNull();
     expect(screen.queryByTestId(`mobile-session-row-${ERRAND_ID}`)).toBeNull();
+    expect(
+      screen.getAllByTestId(/^mobile-session-row-/).map((row) => row.getAttribute("data-testid")),
+    ).toEqual([`mobile-session-row-${SESSION_A}`, SESSION_B_ROW]);
     expect(screen.getByText("2 sessions")).toBeTruthy();
+    expect(
+      within(screen.getByTestId(`mobile-session-row-${SESSION_A}`)).getByText("1"),
+    ).toBeTruthy();
     expect(within(screen.getByTestId(SESSION_B_ROW)).getByText("2")).toBeTruthy();
     fireEvent.click(screen.getByTestId(SESSION_B_ROW));
     expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith(TASK_ID, "session-b");
@@ -180,6 +152,13 @@ describe("MobileSessionsPicker errands", () => {
     mocks.activeSessionId = ERRAND_ID;
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={ERRAND_ID} fullWidth />);
     expect(screen.getByTestId(PILL_TESTID).textContent).toContain("Alpha");
+    expect(screen.getByTestId(PILL_TESTID).textContent).toContain("1/2");
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const parent = screen.getByTestId(`mobile-session-row-${SESSION_A}`);
+    expect(parent.getAttribute("aria-current")).toBe("true");
+    expect(screen.getByTestId(SESSION_B_ROW).getAttribute("aria-current")).toBeNull();
+    fireEvent.click(parent);
+    expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith(TASK_ID, SESSION_A);
   });
 
   it("hides the sessions of the errand from the pill count", () => {

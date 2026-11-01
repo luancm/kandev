@@ -36,14 +36,7 @@ type SessionRow = {
    *  live (spec: docs/specs/disambiguate-waiting/spec.md). */
   parkedOnBackgroundWork: boolean;
   isPrimary: boolean;
-  /** The session's role is `errand`, independent of the errands flag. */
-  isErrand: boolean;
-  /** An errand shown nested under its parent (errands flag on). */
-  nested: boolean;
-  parentSessionId: string | null;
-  /** Position among the top-level sessions; 0 for a nested errand. */
   index: number;
-  startedAt: string;
 };
 
 /** User-supplied session name wins over the derived profile label, like the desktop tab title. */
@@ -61,12 +54,9 @@ function buildSessionRows(
   const sorted = [...sessions].sort(
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
   );
-  let ordinal = 0;
   return sorted
     .filter((session) => session.role !== "errand")
-    .map((s) => {
-      const isErrand = s.role === "errand";
-      const nested = false;
+    .map((s, index) => {
       const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
       return {
         id: s.id,
@@ -79,11 +69,7 @@ function buildSessionRows(
         foregroundActivity: s.foreground_activity ?? null,
         parkedOnBackgroundWork: !!s.parked_on_background_work,
         isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
-        isErrand,
-        nested,
-        parentSessionId: s.parent_session_id ?? null,
-        index: nested ? 0 : ++ordinal,
-        startedAt: s.started_at,
+        index: index + 1,
       };
     });
 }
@@ -209,7 +195,6 @@ function SessionRowTrailingActions({
           taskId={taskId}
           state={row.state}
           isPrimary={row.isPrimary}
-          isErrand={row.isErrand}
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
@@ -349,7 +334,7 @@ function useSessionRows(taskId: string | null) {
   return { rows, sessions, isLoading, primarySessionId };
 }
 
-function SessionRowsTree({
+function SessionRows({
   rows,
   taskId,
   activeSessionId,
@@ -425,7 +410,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
     <div className="flex flex-col gap-2 px-1">
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
-          {t("task:sessionCount", { count: rows.filter((row) => !row.nested).length })}
+          {t("task:sessionCount", { count: rows.length })}
         </span>
         <Button
           size="sm"
@@ -449,7 +434,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             {t("task:noSessionsYetLaunchOneTo")}
           </div>
         )}
-        <SessionRowsTree
+        <SessionRows
           rows={rows}
           taskId={taskId}
           activeSessionId={activeSessionId}
@@ -482,7 +467,7 @@ function useActiveSessionPillLabel(
   const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
   const parentId = sessions.find((session) => session.id === effectiveSessionId)?.parent_session_id;
   const activeRow = rows.find((r) => r.id === (parentId ?? effectiveSessionId));
-  const total = rows.filter((r) => !r.nested).length;
+  const total = rows.length;
   const idx = activeRow?.index;
   let count: string | undefined;
   if (total > 1 && idx) count = `${idx}/${total}`;

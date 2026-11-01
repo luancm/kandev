@@ -15,7 +15,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import type { Errand } from "@/lib/types/errands";
-import { ErrandStatusLabel } from "@/components/task/chat/errands/errand-status";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -33,8 +32,6 @@ export type ThreadSessionView = {
   label: string;
   agentName: string | null;
   isPrimary: boolean;
-  parentSessionId?: string;
-  errand?: Errand;
 };
 
 const SELECT_SESSION_KEY = "threads:selectSession";
@@ -77,12 +74,7 @@ export function buildThreadSessionViews(
     const snapshotAgentName = session.agent_profile_snapshot?.agent_id;
     return {
       session,
-      label:
-        (errands !== undefined && session.role === "errand"
-          ? errands[session.id]?.title || session.name
-          : null) || sessionLabel(session, profilesById, index + 1, fallbackLabel),
-      parentSessionId: undefined,
-      errand: errands?.[session.id],
+      label: sessionLabel(session, profilesById, index + 1, fallbackLabel),
       agentName:
         profile?.agent_name ??
         (typeof snapshotAgentName === "string" && snapshotAgentName ? snapshotAgentName : null),
@@ -281,15 +273,12 @@ function MobileSessionPicker({
                 type="button"
                 aria-current={isSelected ? "true" : undefined}
                 className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md border border-transparent px-3 py-2 text-left hover:bg-muted data-[selected=true]:border-primary/50 data-[selected=true]:bg-card"
-                data-parent-session-id={view.parentSessionId}
-                style={view.parentSessionId ? { paddingLeft: 28 } : undefined}
                 data-selected={isSelected ? "true" : undefined}
                 data-testid={`thread-session-row-${view.session.id}`}
                 onClick={() => handleSelect(view.session.id)}
               >
                 <ThreadSessionTabIndicator view={view} />
                 <span className="min-w-0 flex-1 truncate text-sm">{view.label}</span>
-                {view.errand && <ErrandStatusLabel status={view.errand.status} />}
                 {view.isPrimary && (
                   <span className="shrink-0 text-[10px] text-muted-foreground">
                     {t("threads:primarySession")}

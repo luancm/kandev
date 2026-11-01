@@ -480,3 +480,9 @@ Task19 is done again: the deferred equal-timestamp delivery-state regressions re
 ### Historical WAIT disclosure consolidation accepted
 
 Historical WAIT reuses the existing `ErrandHistoryDisclosure`, retaining its duration/reason summary, recorded rows, test IDs, spacing and interactions. Three frontend files changed; production code decreased by ten lines. The same 59 focused tests passed before and after reuse; scoped ESLint, Prettier and whitespace checks passed. Existing keyboard/phone browser coverage was preserved but not rerun because interaction and responsive rules are unchanged. Receipt: `/tmp/errands-wait-disclosure-handoff.md`. This closes the shared-disclosure finding; obsolete selector branches and backend duplication remain open. All five Task14 files are unchanged.
+
+### Obsolete selector nesting consolidation accepted
+
+Removed unreachable nested-errand branches from normal mobile/Threads selectors and deleted the uncalled errand row/nesting modules with their dedicated tests. Production code decreased by 100 lines. The strengthened pre-refactor suite passed 92 tests; final focused coverage passed 88 tests, with the four-test difference solely the removed orphan helper suite. Scoped lint, formatting and whitespace checks passed. Receipt: `/tmp/errands-selector-cleanup-handoff.md`.
+
+The adjacent unchanged `mobile-session-picker-row.test.tsx` flag-off case failed before and after the packet: it expects a persisted-role errand in the normal picker, while the current role-based wrapper hides it. This remains an explicit test/contract reconciliation item, not a passing check or a new selector regression. Browser specifications were preserved but not rerun because behavior and geometry are unchanged. All five Task14 files remain unchanged. Backend stop-interface and settlement/runtime-authority consolidation remain open.

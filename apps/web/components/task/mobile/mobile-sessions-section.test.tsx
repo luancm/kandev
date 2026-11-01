@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { repositoryId, type Repository, type TaskSession } from "@/lib/types/http";
-import type { Errand } from "@/lib/types/errands";
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
@@ -18,20 +17,10 @@ const mocks = vi.hoisted(() => ({
   restartSession: vi.fn(),
   isRestarting: false,
   errandsEnabled: false,
-  errands: [] as Errand[],
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: () => ({ sessions: mocks.sessions, isLoading: false, isLoaded: true }),
-}));
-
-vi.mock("@/hooks/domains/session/use-task-errands", () => ({
-  useTaskErrands: () => ({
-    errands: mocks.errandsEnabled ? mocks.errands : [],
-    errandsByParent: {},
-    liveCount: 0,
-    isLoaded: true,
-  }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -151,10 +140,22 @@ beforeEach(() => {
   mocks.restartSession.mockReset();
   mocks.isRestarting = false;
   mocks.errandsEnabled = false;
-  mocks.errands = [];
 });
 
 describe("MobileSessionsPicker selection", () => {
+  it.each(["Enter", " "])("selects the focused normal session with %s", (key) => {
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const picker = screen.getByRole("dialog", { name: "Sessions" });
+
+    const row = screen.getByTestId(SESSION_B_ROW);
+    row.focus();
+    fireEvent.keyDown(row, { key });
+
+    expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith(TASK_ID, "session-b");
+    expect(picker.dataset.state).toBe("closed");
+  });
+
   it("uses the effective layout session instead of a stale store session", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
