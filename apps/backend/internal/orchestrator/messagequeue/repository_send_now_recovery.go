@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func (r *sqliteRepository) persistSendNowClaimTx(
 	if claim.ClaimID == "" {
 		claim.ClaimID = uuid.NewString()
 	}
-	claimJSON, err := json.Marshal(claim)
+	claimJSON, err := marshalPersistedSendNowClaim(claim)
 	if err != nil {
 		return fmt.Errorf("marshal Send Now claim: %w", err)
 	}
@@ -169,7 +170,7 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 		return fmt.Errorf("read destination Send Now claim: %w", err)
 	}
 	var claim SendNowClaim
-	if err := json.Unmarshal([]byte(claimJSON), &claim); err != nil {
+	if err := unmarshalPersistedSendNowClaim([]byte(claimJSON), &claim); err != nil {
 		return fmt.Errorf("unmarshal source Send Now claim: %w", err)
 	}
 	claim.ClaimID = claimID
@@ -201,7 +202,7 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 		return err
 	}
 	claim.OperationGeneration = claim.SessionGeneration
-	claimJSONBytes, err := json.Marshal(&claim)
+	claimJSONBytes, err := marshalPersistedSendNowClaim(&claim)
 	if err != nil {
 		return fmt.Errorf("marshal transferred Send Now claim: %w", err)
 	}
@@ -235,7 +236,7 @@ func (r *sqliteRepository) ListPendingSendNowClaims(ctx context.Context) ([]Pend
 			return nil, fmt.Errorf("scan Send Now claim: %w", err)
 		}
 		var claim SendNowClaim
-		if err := json.Unmarshal([]byte(claimJSON), &claim); err != nil {
+		if err := unmarshalPersistedSendNowClaim([]byte(claimJSON), &claim); err != nil {
 			return nil, fmt.Errorf("unmarshal Send Now claim: %w", err)
 		}
 		claim.ClaimID = claimID
@@ -314,12 +315,27 @@ func (r *sqliteRepository) SetPendingSendNowClaimDelivery(
 		return ErrSendNowClaimChanged
 	}
 	var stored SendNowClaim
-	if err := json.Unmarshal([]byte(claimJSON), &stored); err != nil {
+	if err := unmarshalPersistedSendNowClaim([]byte(claimJSON), &stored); err != nil {
 		return fmt.Errorf("unmarshal Send Now claim delivery: %w", err)
 	}
 	stored.ClaimID = claim.ClaimID
+	if err := validateSendNowClaimEnrichment(&stored, claim); err != nil {
+		return err
+	}
+	if err := r.guardSendNowEnrichmentSources(ctx, tx, claim, sessionID); err != nil {
+		return err
+	}
+	stored.Dispatch = claim.Dispatch
+	for i := range stored.Sources {
+		if recorded, _ := claim.Sources[i].Metadata[metadataUserMessageRecorded].(bool); recorded {
+			if stored.Sources[i].Metadata == nil {
+				stored.Sources[i].Metadata = map[string]interface{}{}
+			}
+			stored.Sources[i].Metadata[metadataUserMessageRecorded] = true
+		}
+	}
 	stored.setDeliverySubmission(protocol, submissionID, payloadHash)
-	updatedJSON, err := json.Marshal(&stored)
+	updatedJSON, err := marshalPersistedSendNowClaim(&stored)
 	if err != nil {
 		return fmt.Errorf("marshal Send Now claim delivery: %w", err)
 	}
@@ -390,7 +406,7 @@ func pendingSendNowSessionsForTaskTx(
 			return nil, fmt.Errorf("scan task Send Now claim: %w", err)
 		}
 		var claim SendNowClaim
-		if err := json.Unmarshal([]byte(claimJSON), &claim); err != nil {
+		if err := unmarshalPersistedSendNowClaim([]byte(claimJSON), &claim); err != nil {
 			return nil, fmt.Errorf("unmarshal task Send Now claim: %w", err)
 		}
 		matches := claim.Dispatch.TaskID == taskID
@@ -405,4 +421,101 @@ func pendingSendNowSessionsForTaskTx(
 		return nil, fmt.Errorf("iterate task Send Now claims: %w", err)
 	}
 	return sessions, nil
+}
+
+// Dispatch enrichment cannot replace original restore authority or a successor claim.
+func validateSendNowClaimEnrichment(stored, updated *SendNowClaim) error {
+	if stored.Identity != updated.Identity || stored.OperationGeneration != updated.OperationGeneration ||
+		stored.SessionGeneration != updated.SessionGeneration || !reflect.DeepEqual(stored.SourceGenerations, updated.SourceGenerations) ||
+		stored.Dispatch.ID != updated.Dispatch.ID || stored.Dispatch.TaskID != updated.Dispatch.TaskID || stored.Dispatch.SessionID != updated.Dispatch.SessionID ||
+		len(stored.Sources) != len(updated.Sources) {
+		return ErrSendNowClaimChanged
+	}
+	for i := range stored.Sources {
+		before, after := stored.Sources[i], updated.Sources[i]
+		before.Metadata = copyMessageMetadata(before.Metadata, 0)
+		after.Metadata = copyMessageMetadata(after.Metadata, 0)
+		delete(before.Metadata, metadataUserMessageRecorded)
+		delete(after.Metadata, metadataUserMessageRecorded)
+		delete(before.Metadata, MetadataDeliveryAttempted)
+		delete(after.Metadata, MetadataDeliveryAttempted)
+		if !sameQueuedMessageContent(&before, &after) {
+			return ErrSendNowClaimChanged
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) guardSendNowEnrichmentSources(ctx context.Context, tx *sqlx.Tx, claim *SendNowClaim, sessionID string) error {
+	if claim.Identity.SessionIncarnationID != "" {
+		if err := r.validateSessionIdentityTx(ctx, tx, claim.Identity); err != nil {
+			return err
+		}
+	}
+	generation, err := r.getSendNowGenerationTx(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	if generation != claim.SessionGeneration || generation != claim.OperationGeneration {
+		return ErrSendNowClaimChanged
+	}
+	generations, err := lifecycleGenerationsForSourcesTx(ctx, tx, r.db, claim.Sources)
+	if err != nil {
+		return err
+	}
+	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			return ErrSendNowClaimChanged
+		}
+	}
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	return validateSQLiteSendNowAcknowledge(claim, sessionID, stored, generations)
+}
+
+// Reservation evidence belongs to private claim JSON, independently of the
+// original source metadata and the browser queue representation.
+type persistedSendNowClaim struct {
+	SendNowClaim
+	Reservations map[string]sendNowSourceReservation `json:"source_reservations,omitempty"`
+}
+
+type sendNowSourceReservation struct {
+	LifecycleID string    `json:"lifecycle_id"`
+	Token       string    `json:"token"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+func marshalPersistedSendNowClaim(claim *SendNowClaim) ([]byte, error) {
+	stored := persistedSendNowClaim{SendNowClaim: *claim, Reservations: map[string]sendNowSourceReservation{}}
+	for _, source := range claim.Sources {
+		if source.IsDurableDelivery() {
+			stored.Reservations[source.ID] = sendNowSourceReservation{LifecycleID: source.lifecycleReservationID, Token: source.reservationToken, ExpiresAt: source.reservationExpiresAt}
+		}
+	}
+	return json.Marshal(stored)
+}
+
+func unmarshalPersistedSendNowClaim(encoded []byte, claim *SendNowClaim) error {
+	var stored persistedSendNowClaim
+	if err := json.Unmarshal(encoded, &stored); err != nil {
+		return err
+	}
+	for i := range stored.Sources {
+		source := &stored.Sources[i]
+		if reservation, present := stored.Reservations[source.ID]; present {
+			source.lifecycleReservationID = reservation.LifecycleID
+			source.reservationToken = reservation.Token
+			source.reservationExpiresAt = reservation.ExpiresAt
+			delete(stored.Reservations, source.ID)
+		}
+	}
+	if len(stored.Reservations) != 0 {
+		return ErrSendNowClaimChanged
+	}
+	bindSendNowDeliveryReservations(stored.Sources, stored.Identity)
+	*claim = stored.SendNowClaim
+	return nil
 }

@@ -121,74 +121,40 @@ func TestErrandParentDelivererLeavesNotificationQueuedWhenAutoRunIsOff(t *testin
 }
 
 func TestSendNowClaimDetectsNotificationAmongFoldedSources(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task-send-now", "session-send-now", models.TaskSessionStateWaitingForInput)
-	seedExecutorRunning(t, repo, "session-send-now", "task-send-now", "exec-send-now")
-	manager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
-	svc.messageCreator = &mockMessageCreator{}
-	svc.SetErrandController(&fakeErrandComposer{composition: errands.Composition{
-		Token: "send-now-token",
-		Block: "Completed work result.",
-		Items: []errands.DeliveryItem{{ErrandID: "errand-1", Title: "Check", Status: models.ErrandStatusDone}},
-	}})
-	ordinary, err := svc.messageQueue.QueueMessageWithMetadata(
-		ctx, "session-send-now", "task-send-now", "Please review this.", "", messagequeue.QueuedByUser, false, nil, nil,
-	)
+	f := newSendNowErrandFixture(t)
+	f.queue(t, "Please review this.", messagequeue.QueuedByUser, nil)
+	f.result(t, "completed")
+	f.realComposer(t)
+	NewErrandParentDeliverer(f.svc).DeliverPending(t.Context(), "session-1")
+	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 	require.NoError(t, err)
-	notification, err := svc.messageQueue.QueueMessageWithMetadata(
-		ctx, "session-send-now", "task-send-now", "", "", messagequeue.QueuedByServer, false, nil,
-		map[string]interface{}{errandNotificationKey: true},
-	)
+	prompt := f.receivePrompt(t)
+	require.Contains(t, prompt, "Please review this.")
+	require.Contains(t, prompt, "full result completed")
+	row, err := f.repo.GetErrand(t.Context(), "completed")
 	require.NoError(t, err)
-	claim, err := svc.messageQueue.ClaimSendNow(
-		ctx, "session-send-now", []messagequeue.QueuedMessage{*ordinary, *notification},
-	)
+	require.Equal(t, models.ErrandDeliveryNotification, row.DeliveredRoute)
+	messages, err := f.repo.ListMessages(t.Context(), "session-1")
 	require.NoError(t, err)
-	reservation := svc.markQueuedDispatchInFlight("session-send-now", claim.Dispatch.ID)
-
-	svc.executeSendNowClaimWithContext(ctx, claim, reservation)
-
-	manager.mu.Lock()
-	prompts := append([]string(nil), manager.capturedPrompts...)
-	manager.mu.Unlock()
-	require.Len(t, prompts, 1)
-	require.Contains(t, prompts[0], "Please review this.")
-	require.Contains(t, prompts[0], "Completed work result.")
-	require.Len(t, svc.messageCreator.(*mockMessageCreator).userMessages, 1)
-	userMessage := svc.messageCreator.(*mockMessageCreator).userMessages[0]
-	require.Equal(t, "Please review this.", userMessage.content, "Send Now keeps the user's text as the visible message")
-	require.Equal(t, "send-now-token", userMessage.metadata[ErrandDeliveryTokenMetadataKey])
-	require.Empty(t, svc.messageQueue.GetStatus(ctx, "session-send-now").Entries)
+	require.Len(t, messages, 1)
+	require.Equal(t, "Please review this.", messages[0].Content)
+	require.Equal(t, row.DeliveryToken, messages[0].Metadata[ErrandDeliveryTokenMetadataKey])
+	require.Empty(t, f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries)
 }
 
 func TestSendNowConsumesNotificationWithoutStartingEmptyTurn(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task-empty-notification", "session-empty-notification", models.TaskSessionStateWaitingForInput)
-	seedExecutorRunning(t, repo, "session-empty-notification", "task-empty-notification", "exec-empty-notification")
-	manager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
-	svc.SetErrandController(&fakeErrandComposer{})
-	notification, err := svc.messageQueue.QueueMessageWithMetadata(
-		ctx, "session-empty-notification", "task-empty-notification", "", "", messagequeue.QueuedByServer, false, nil,
-		map[string]interface{}{errandNotificationKey: true},
-	)
+	f := newSendNowErrandFixture(t)
+	f.realComposer(t)
+	NewErrandParentDeliverer(f.svc).DeliverPending(t.Context(), "session-1")
+	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 	require.NoError(t, err)
-	claim, err := svc.messageQueue.ClaimSendNow(
-		ctx, "session-empty-notification", []messagequeue.QueuedMessage{*notification},
-	)
-	require.NoError(t, err)
-	reservation := svc.markQueuedDispatchInFlight("session-empty-notification", claim.Dispatch.ID)
-
-	svc.executeSendNowClaimWithContext(ctx, claim, reservation)
-
-	manager.mu.Lock()
-	prompts := append([]string(nil), manager.capturedPrompts...)
-	manager.mu.Unlock()
+	waitSendNowErrandWorkers(t, f.svc)
+	f.manager.mu.Lock()
+	prompts := append([]string(nil), f.manager.capturedPrompts...)
+	f.manager.mu.Unlock()
 	require.Empty(t, prompts)
-	require.Zero(t, svc.messageQueue.GetStatus(ctx, "session-empty-notification").Count)
+	require.Zero(t, f.svc.messageQueue.GetStatus(t.Context(), "session-1").Count)
+	turns, err := f.repo.ListTurnsBySession(t.Context(), "session-1")
+	require.NoError(t, err)
+	require.Empty(t, turns)
 }

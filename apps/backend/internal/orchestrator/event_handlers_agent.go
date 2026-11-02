@@ -1545,44 +1545,21 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 	preparedPromptContent *string,
 	sourceIDs ...string,
 ) error {
-	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
-	if alreadyRecorded {
-		if delivery, ok := queuedErrandDelivery(queuedMsg); ok {
-			messageID := ""
-			if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
-				messageID = transcriptID
-			} else {
-				if len(sourceIDs) == 0 {
-					sourceIDs = []string{queuedMsg.ID}
-				}
-				messageID = uuid.NewSHA1(
-					uuid.NameSpaceOID,
-					[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
-				).String()
-			}
-			_, submissionID, _ := queuedMsg.DeliverySubmission()
-			composition := errands.Composition{Token: delivery.Token, Items: delivery.Items}
-			return s.updateErrandDeliveryMessage(ctx, queuedMsg.SessionID, messageID, submissionID, delivery.Route, composition)
-		}
-		return nil
+	if snapshot, present, err := errands.DecodeSendNowDelivery(queuedMsg.Metadata); err != nil {
+		return err
+	} else if present {
+		sourceIDs = snapshot.SourceIDs
 	}
-	// Handler-originated comment sends commit the transcript and queue receipt
-	// in one transaction. The marker is only written by that boundary.
-	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
-		if delivery, ok := queuedErrandDelivery(queuedMsg); ok {
-			composition := errands.Composition{Token: delivery.Token, Items: delivery.Items}
-			_, submissionID, _ := queuedMsg.DeliverySubmission()
-			if err := s.updateErrandDeliveryMessage(
-				ctx, queuedMsg.SessionID, transcriptID, submissionID, delivery.Route, composition,
-			); err != nil {
-				return err
-			}
-		}
-		markQueuedUserMessageRecorded(queuedMsg)
-		return nil
+	if len(sourceIDs) == 0 {
+		sourceIDs = []string{queuedMsg.ID}
+	}
+	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string)
+	if alreadyRecorded || transcriptID != "" {
+		return s.updateRecordedQueuedErrandDelivery(ctx, queuedMsg, transcriptID, sourceIDs)
 	}
 	if s.messageCreator == nil {
-		if hasQueuedErrandDelivery(queuedMsg) {
+		if hasQueuedErrandDelivery(queuedMsg) || queuedMsg.Metadata[errands.SendNowDeliveryMetadataKey] != nil {
 			return errors.New("message creator is unavailable for errand delivery snapshot")
 		}
 		if queuedMsg.IsDurablePlanComment() {

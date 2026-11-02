@@ -32,7 +32,7 @@ func newAdmissionIntegrationFixture(t *testing.T, protocol string) *admissionInt
 	now := time.Now().UTC()
 	session := &models.TaskSession{ID: "admission-child", TaskID: f.taskID, Role: models.SessionRoleErrand,
 		ParentSessionID: f.parent, State: models.TaskSessionStateWaitingForInput,
-		AgentExecutionID: "admission-execution", StartedAt: now, UpdatedAt: now}
+		AgentProfileID: "errand-profile", AgentExecutionID: "admission-execution", StartedAt: now, UpdatedAt: now}
 	require.NoError(t, f.repo.CreateTaskSession(t.Context(), session))
 	require.NoError(t, f.repo.CreateTurn(t.Context(), &models.Turn{ID: "admission-turn", TaskID: f.taskID,
 		TaskSessionID: session.ID, StartedAt: now, CreatedAt: now, UpdatedAt: now}))
@@ -51,6 +51,8 @@ func newAdmissionIntegrationFixture(t *testing.T, protocol string) *admissionInt
 	}}
 	f.svc.agentManager = manager
 	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.messageCreator = &repositoryBackedMessageCreator{mockMessageCreator: &mockMessageCreator{}, repo: f.repo}
+	f.svc.SetTransientRetryMessageService(f.repo)
 	return &admissionIntegrationFixture{errandLaunchFixture: f, errands: service, session: session, row: row, manager: manager}
 }
 

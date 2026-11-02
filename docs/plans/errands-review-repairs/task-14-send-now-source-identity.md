@@ -1,7 +1,7 @@
 ---
 id: "14-send-now-source-identity"
 title: "Preserve Send Now sources and receipt identity"
-status: in_progress
+status: done
 wave: 14
 depends_on:
   - "04-await-outcome-recovery"
@@ -97,3 +97,17 @@ Continue sequentially in two bounded subpasses without changing this work order'
 - **14B, queue and transcript integration:** After 14A's receipt, complete the original algorithm and all named Send Now regressions. In addition to the original owned files, the primary grants narrowly coupled changes to `internal/orchestrator/errand_parent_deliverer.go` to stamp trusted server source provenance and `internal/orchestrator/event_handlers_agent.go` to preserve the complete structured metadata when updating an existing transcript row, with focused tests. These implement the existing contract; they do not authorize unrelated admission or event-handler changes. Retain every original source/generation and all delivery receipts in the guarded durable claim before dispatch, and verify CREATED/fallback, early/late transcript, refusal/restart/uncertainty, and successor fences.
 
 For 14A, run the focused `TestErrandTranscript` recovery cases and new `TestSendNowDelivery` codec cases with `go test -race -trimpath -p 1`, plus changed-file lint and formatting. Set `GOMAXPROCS=2` and hold the shared build lock for each heavy command. Save commands, exit status, logs, and any live handle in `/tmp/errands-task14-progress.md`; finish with a durable checkpoint rather than assuming an interrupted command passed. Keep Task14 `in_progress` after 14A. Only 14B plus the complete original acceptance commands can close it.
+
+### Task14B integration checkpoint and narrow ownership extension
+
+The first Task14B pass remains incomplete: 28 of 30 targeted orchestrator tests pass; final runtime-canonical prompt persistence and attachment-only empty text fail. Queue, reader and codec selectors, build, SQL guard and scoped lint pass, but do not establish Task14 acceptance. Evidence: `/tmp/errands-task14b-handoff.md`. CREATED/fallback with fresh callback context, nonzero producer generations and contradictory legacy metadata still need complete coverage. All implementation remains uncommitted.
+
+The primary extends ownership to `internal/orchestrator/agent_delivery_submission.go:prepareAgentDeliverySubmission` and its directly relevant tests for a narrow Send Now hook at the existing pre-dispatch admission boundary. Persist the actual runtime-canonical text through the captured exact claim, including when runtime callbacks use a fresh context; preserve legacy and durable protocols and all non-Send-Now admission behavior. Do not broaden this into an admission refactor.
+
+Ownership also includes `internal/errands/send_now_delivery.go` and its tests to accept an explicitly present empty `effective_prompt` for valid attachment-only ordinary input while still rejecting missing/null/wrong-type fields and retaining strict identities, receipts and provenance. This corrects an overly restrictive implementation of the existing ordinary-input parity requirement; never synthesize text. Preserve the accepted reader ambiguity policy. Complete the remaining original Task14 acceptance, including CREATED/fallback, nonzero producer identities and fail-closed contradictory legacy metadata, before marking done or committing accepted integration. Task15 remains separate.
+
+### Final acceptance
+
+Task14 is complete within the recorded SQLite and controlled-runtime backend scope. Final runtime-canonical prompt and attachments cross the existing common admission boundary; the exact durable claim and deterministic transcript are written before provider I/O. Explicit empty ordinary input is valid while missing/null prompt fields, empty server-only metadata and ambiguous legacy sources fail closed. CREATED/fallback fresh callback contexts, both protocols, nonzero producer generations, write-refusal restoration, accepted/uncertain retention and successor fences are exercised. Focused integration review found no issues.
+
+Final race selectors passed: 38 orchestrator tests, 86 queue tests, four recovery-reader tests, six codec tests and 28 adjacent admission tests (counts are per selector, not deduplicated). Eight queue PostgreSQL cases/subcases skipped without a DSN. Changed-package build, SQL guard, SQLite store conformance, scoped lint, gofmt and whitespace checks passed. No PostgreSQL server, browser or real provider was exercised. Exact commands, test-node counts, hashes and limits: `/tmp/errands-task14b-completion-handoff.md`. Task15 disabled-output behavior remains separate.

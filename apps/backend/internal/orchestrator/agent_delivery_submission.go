@@ -220,6 +220,9 @@ func (s *Service) prepareAgentDeliverySubmission(
 		zap.String("session_id", session.ID), zap.String("execution_id", executionID),
 		zap.String("submission_id", options.deliverySubmissionID), zap.String("protocol", protocol))
 
+	if options.deliveryClaimUpdater != nil {
+		ctx = context.WithValue(ctx, sendNowDeliveryPromptKey{}, agentDeliveryPromptPayload{Text: prompt, Attachments: attachments})
+	}
 	if protocol == messagequeue.DeliveryProtocolLegacy {
 		if err := persistDeliveryClaim(
 			ctx, options.deliveryClaimUpdater, protocol, options.deliverySubmissionID, "",

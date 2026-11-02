@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // errandNotificationKey marks a queue entry that carries no prompt of its own.
@@ -76,8 +77,21 @@ func (d *ErrandParentDeliverer) admit(
 	if err != nil {
 		return fmt.Errorf("resolve parent for errand delivery: %w", err)
 	}
+	stamped := make(map[string]interface{}, len(metadata)+1)
+	for key, value := range metadata {
+		stamped[key] = value
+	}
+	if content == "" {
+		stamped[errandSourceMetadataKey] = sendNowErrandSource{Provenance: errands.SendNowErrandProvenance, Kind: errands.SendNowSourceNotification}
+	} else if envelope, ok := decodeErrandDeliveryEnvelope(metadata[errandDeliveryKey]); ok && envelope.Token != "" {
+		stamp, stampErr := s.capturePreparedErrandSource(ctx, identity.TaskID, parentSessionID, content, metadata)
+		if stampErr != nil {
+			return stampErr
+		}
+		stamped[errandSourceMetadataKey] = stamp
+	}
 	_, err = s.messageQueue.QueueMessageWithMetadataForSession(
-		ctx, identity, content, "", messagequeue.QueuedByServer, false, nil, metadata,
+		ctx, identity, content, "", messagequeue.QueuedByServer, false, nil, stamped,
 	)
 	if err != nil {
 		return fmt.Errorf("queue errand notification: %w", err)
@@ -90,4 +104,36 @@ func (d *ErrandParentDeliverer) admit(
 		s.CheckQueueAdmissionReadiness(ctx, identity)
 	}
 	return nil
+}
+
+// capturePreparedErrandSource runs before deletion, while exact revision and
+// admission-generation authority is still available. The queue then owns it.
+func (s *Service) capturePreparedErrandSource(ctx context.Context, taskID, parentID, content string, metadata map[string]interface{}) (sendNowErrandSource, error) {
+	envelope, ok := decodeErrandDeliveryEnvelope(metadata[errandDeliveryKey])
+	if !ok || envelope.Token == "" || envelope.Route != models.ErrandDeliveryNotification || len(envelope.Items) == 0 || content == "" {
+		return sendNowErrandSource{}, errands.ErrInvalidSendNowDelivery
+	}
+	if scalar, present := metadata[ErrandDeliveryTokenMetadataKey]; present && scalar != envelope.Token {
+		return sendNowErrandSource{}, errands.ErrInvalidSendNowDelivery
+	}
+	reader, ok := s.repo.(interface {
+		GetErrand(context.Context, string) (*models.Errand, error)
+	})
+	if !ok {
+		return sendNowErrandSource{}, errors.New("prepared errand revision authority is unavailable")
+	}
+	receipt := &errands.SendNowDeliveryReceipt{Envelope: envelope}
+	for _, item := range envelope.Items {
+		row, err := reader.GetErrand(ctx, item.ErrandID)
+		if err != nil {
+			return sendNowErrandSource{}, fmt.Errorf("capture prepared errand revision: %w", err)
+		}
+		if row.TaskID != taskID || row.ParentSessionID != parentID || row.ResultRevision == "" || row.ResultState != models.ErrandResultPending {
+			return sendNowErrandSource{}, errands.ErrInvalidSendNowDelivery
+		}
+		receipt.Claims = append(receipt.Claims, models.ErrandResultClaim{ErrandID: row.ID, ResultRevision: row.ResultRevision,
+			ParentAdmissionGeneration: row.ParentAdmissionGeneration, Token: envelope.Token, Route: envelope.Route})
+	}
+	return sendNowErrandSource{Provenance: errands.SendNowErrandProvenance, Kind: errands.SendNowSourcePrepared,
+		PreparedBlock: content, Receipt: receipt}, nil
 }

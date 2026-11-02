@@ -19,39 +19,39 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 	for _, outcome := range []string{"accepted", "sql_failure", "shutdown_before_admission", "shutdown_after_admission"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx := t.Context()
-			repo := setupTestRepo(t)
-			seedTaskAndSessionWithStep(t, repo, "task", "session", "step")
-			seedExecutorRunning(t, repo, "session", "task", "execution")
-			steps := newMockStepGetter()
-			steps.steps["step"] = &wfmodels.WorkflowStep{ID: "step", WorkflowID: "workflow", Name: "Step"}
-			steps.workflowAgentProfileID = "profile"
-			tasks := newMockTaskRepo()
-			seedMockTaskState(tasks, "task", v1.TaskStateInProgress)
+			f := newSendNowErrandFixture(t)
+			repo, svc, queue := f.repo, f.svc, f.svc.messageQueue
+			session, err := repo.GetTaskSession(ctx, "session-1")
+			require.NoError(t, err)
+			session.State, session.AgentProfileID = models.TaskSessionStateCreated, "profile"
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+			f.manager.isAgentRunning = false
 			manager := &retentionInitialPromptManager{durableDeliveryTestAgentManager: &durableDeliveryTestAgentManager{
-				mockAgentManager: &mockAgentManager{repoForExecutionLookup: repo}, advertised: true,
+				mockAgentManager: f.manager, advertised: true,
 				capability: agentruntime.DurableDeliveryCapability{Version: journal.CurrentVersion, Durable: true},
 			}}
-			composer := &fakeErrandComposer{composition: errands.Composition{
-				Token: "send-now-token", Block: "Completed errand result.",
-			}}
+			steps := newMockStepGetter()
+			steps.steps["step-1"] = &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf1", Name: "Step"}
+			steps.workflowAgentProfileID = "profile"
+			tasks := newMockTaskRepo()
+			seedMockTaskState(tasks, "task-1", v1.TaskStateInProgress)
+			configured := createTestServiceWithScheduler(repo, steps, tasks, manager)
+			svc.agentManager, svc.executor, svc.scheduler = manager, configured.executor, configured.scheduler
+			svc.workflowStepGetter, svc.taskRepo = steps, tasks
+			f.realComposer(t)
+			live := f.result(t, "completed-result")
 			started := make(chan struct{}, 1)
 			manager.startAgentProcessFunc = func(context.Context, string) error { started <- struct{}{}; return nil }
-			svc := createTestServiceWithScheduler(repo, steps, tasks, manager)
-			svc.SetErrandController(composer)
-			svc.messageCreator = &mockMessageCreator{}
-			queue, queueDB := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
-			t.Cleanup(func() { require.NoError(t, queueDB.Close()) })
-			svc.messageQueue = queue
-			require.NoError(t, queue.SetAutoRun(ctx, "session", false))
-			source, err := queue.QueueMessage(ctx, "session", "task", "queued instruction", "", messagequeue.QueuedByUser, false, nil)
+			identity, err := svc.parentQueueIdentity(ctx, "session-1")
 			require.NoError(t, err)
-			claim, err := queue.ClaimSendNow(ctx, "session", []messagequeue.QueuedMessage{*source})
+			source := f.queue(t, "queued instruction", messagequeue.QueuedByUser, nil)
+			claim, err := queue.ClaimSendNowForSession(ctx, identity, []messagequeue.QueuedMessage{*source})
 			require.NoError(t, err)
 			_, submissionID, _ := claim.DeliverySubmission()
 			if outcome == "sql_failure" {
 				installRetentionInitialPromptFailure(t, repo, "SQLite", normalizeDeliverySubmissionID(submissionID))
 			}
-			reservation := svc.markQueuedDispatchInFlight("session", claim.Dispatch.ID)
+			reservation := svc.markQueuedDispatchInFlight("session-1", claim.Dispatch.ID)
 			workerCtx, cancel := context.WithCancel(ctx)
 			done := make(chan struct{})
 			t.Cleanup(func() {
@@ -68,15 +68,19 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("initial process did not start")
 			}
-			cached, ok := svc.lastTurnPrompt.Load("session")
+			cached, ok := svc.lastTurnPrompt.Load("session-1")
 			require.True(t, ok, "created-session transient retry must retain its prompt")
 			cachedPrompt := cached.(capturedPrompt)
-			require.Contains(t, cachedPrompt.text, "Completed errand result.")
+			require.Contains(t, cachedPrompt.text, live.ResultText)
 			require.True(t, cachedPrompt.promptAlreadyComposed)
 			require.True(t, cachedPrompt.skipErrandComposition)
 			pending, err := queue.ListPendingSendNowClaims(ctx)
 			require.NoError(t, err)
 			require.Len(t, pending, 1, "startup is not prompt acceptance")
+			snapshot, _, err := errands.DecodeSendNowDelivery(pending[0].Claim.Dispatch.Metadata)
+			require.NoError(t, err)
+			require.Len(t, snapshot.Receipts, 1)
+			token := snapshot.Receipts[0].Envelope.Token
 			select {
 			case <-done:
 				t.Fatal("claim worker finished before admission")
@@ -89,7 +93,7 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 				admit, accepted, failed := manager.initialPromptAdmissionCallback, manager.initialPromptDispatchCallback, manager.initialPromptFailureCallback
 				manager.mu.Unlock()
 				require.NotNil(t, admit)
-				err = admit(ctx, "prepared queued instruction", []v1.MessageAttachment{{Type: "resource", AttachmentID: "file", Name: "bundle-2.zip", MimeType: "application/zip", SizeBytes: 16, DeliveryMode: "prompt"}})
+				err = admit(context.Background(), "runtime prepared prefix\n"+cachedPrompt.text, []v1.MessageAttachment{{Type: "resource", AttachmentID: "file", Name: "bundle-2.zip", MimeType: "application/zip", SizeBytes: 16, DeliveryMode: "prompt"}})
 				switch outcome {
 				case "sql_failure":
 					require.Error(t, err)
@@ -107,46 +111,43 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("claim worker did not settle")
 			}
-			creator := svc.messageCreator.(*mockMessageCreator)
-			creator.mu.Lock()
-			userMessages := append([]mockUserMessage(nil), creator.userMessages...)
-			creator.mu.Unlock()
-			require.Len(t, userMessages, 1)
-			require.Equal(t, "queued instruction", userMessages[0].content)
-			require.Equal(t, "send-now-token", userMessages[0].metadata[ErrandDeliveryTokenMetadataKey])
+			messages, err := repo.ListMessages(ctx, "session-1")
+			require.NoError(t, err)
+			require.Len(t, messages, 1)
+			require.Equal(t, "queued instruction", messages[0].Content)
+			require.Equal(t, token, messages[0].Metadata[ErrandDeliveryTokenMetadataKey])
+			row, err := repo.GetErrand(ctx, live.ID)
+			require.NoError(t, err)
+			require.Equal(t, live.ResultRevision, row.ResultRevision)
 			if outcome == "accepted" || outcome == "shutdown_after_admission" {
-				require.Empty(t, composer.released, "accepted or uncertain provider admission retains the errand claim")
+				require.Equal(t, models.ErrandResultDelivered, row.ResultState, "accepted or uncertain provider admission retains ownership")
 			} else {
-				require.Equal(t, []string{"send-now-token"}, composer.released,
-					"refused provider admission releases the errand claim")
+				require.Equal(t, models.ErrandResultPending, row.ResultState, "definite refusal releases the exact live result")
 			}
 			pending, err = queue.ListPendingSendNowClaims(ctx)
 			require.NoError(t, err)
 			if outcome == "shutdown_after_admission" {
-				require.Len(t, pending, 1, "uncertainty must retain the original claim")
-				block, err := svc.GetOpenSessionRecoveryBlock(ctx, "session")
+				require.Len(t, pending, 1)
+				block, err := svc.GetOpenSessionRecoveryBlock(ctx, "session-1")
 				require.NoError(t, err)
 				require.Equal(t, "unknown_send_now_outcome", block.Reason)
-				manager.mu.Lock()
-				lateAdmission := manager.initialPromptAdmissionCallback
-				manager.mu.Unlock()
-				require.ErrorIs(t, lateAdmission(ctx, "late prompt", nil), context.Canceled)
-				submissions, err := repo.ListAgentDeliverySubmissions(ctx, "session")
-				require.NoError(t, err)
-				require.Len(t, submissions, 1, "stopped worker cannot admit a second initial prompt")
 			} else {
 				require.Empty(t, pending)
 			}
-			if outcome == "shutdown_before_admission" {
+			if outcome == "shutdown_before_admission" || outcome == "shutdown_after_admission" {
 				manager.mu.Lock()
-				lateAdmission := manager.initialPromptAdmissionCallback
+				late := manager.initialPromptAdmissionCallback
 				manager.mu.Unlock()
-				require.ErrorIs(t, lateAdmission(ctx, "late prompt", nil), context.Canceled)
-				submissions, err := repo.ListAgentDeliverySubmissions(ctx, "session")
+				require.ErrorIs(t, late(context.Background(), "late prompt", nil), context.Canceled)
+				submissions, err := repo.ListAgentDeliverySubmissions(ctx, "session-1")
 				require.NoError(t, err)
-				require.Empty(t, submissions)
+				if outcome == "shutdown_before_admission" {
+					require.Empty(t, submissions)
+				} else {
+					require.Len(t, submissions, 1, "stopped worker cannot admit another initial prompt")
+				}
 			}
-			status := queue.GetStatus(ctx, "session")
+			status := queue.GetStatus(ctx, "session-1")
 			if outcome == "sql_failure" || outcome == "shutdown_before_admission" {
 				require.Len(t, status.Entries, 1)
 				require.Equal(t, source.ID, status.Entries[0].ID)

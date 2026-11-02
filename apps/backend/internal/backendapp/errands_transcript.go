@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -63,26 +64,57 @@ func (t errandTranscript) HasDeliveryToken(ctx context.Context, parentSessionID,
 		return false, err
 	}
 	for _, message := range messages {
-		if message == nil || message.Metadata[orchestrator.ErrandDeliveryTokenMetadataKey] != token {
+		if message == nil {
 			continue
 		}
-		submissionID, _ := message.Metadata[orchestrator.ErrandDeliverySubmissionMetadataKey].(string)
-		if submissionID == "" {
-			return true, nil
-		}
-		submission, err := t.repo.GetAgentDeliverySubmission(ctx, submissionID)
-		if errors.Is(err, repository.ErrAgentDeliverySubmissionNotFound) {
-			return true, nil
-		}
+		matched, snapshot, err := errandTranscriptMessageToken(message, parentSessionID, token)
 		if err != nil {
 			return false, err
 		}
-		if submission == nil || (submission.State != models.DeliverySubmissionFailed &&
-			submission.State != models.DeliverySubmissionCancelled) {
-			return true, nil
+		if !matched {
+			continue
+		}
+		retained, err := t.deliveryRetained(ctx, message, snapshot)
+		if err != nil || retained {
+			return retained, err
 		}
 	}
 	return false, nil
+}
+
+func errandTranscriptMessageToken(message *models.Message, parentSessionID, token string) (bool, errands.SendNowDelivery, error) {
+	snapshot, present, err := errands.DecodeSendNowDelivery(message.Metadata)
+	if err != nil {
+		return false, errands.SendNowDelivery{}, err
+	}
+	if !present {
+		return message.Metadata[orchestrator.ErrandDeliveryTokenMetadataKey] == token, snapshot, nil
+	}
+	if snapshot.TaskID != message.TaskID || snapshot.SessionID != parentSessionID || snapshot.SessionID != message.TaskSessionID {
+		return false, errands.SendNowDelivery{}, fmt.Errorf("%w: transcript identity", errands.ErrInvalidSendNowDelivery)
+	}
+	return snapshot.HasToken(token), snapshot, nil
+}
+
+func (t errandTranscript) deliveryRetained(ctx context.Context, message *models.Message, snapshot errands.SendNowDelivery) (bool, error) {
+	submissionID, _ := message.Metadata[orchestrator.ErrandDeliverySubmissionMetadataKey].(string)
+	if submissionID == "" {
+		return true, nil
+	}
+	submission, err := t.repo.GetAgentDeliverySubmission(ctx, submissionID)
+	if errors.Is(err, repository.ErrAgentDeliverySubmissionNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if submission == nil {
+		return true, nil
+	}
+	if snapshot.SessionID != "" && (snapshot.SessionID != submission.SessionID || snapshot.SessionIncarnationID != submission.IncarnationID) {
+		return false, fmt.Errorf("%w: submission identity", errands.ErrInvalidSendNowDelivery)
+	}
+	return submission.State != models.DeliverySubmissionFailed && submission.State != models.DeliverySubmissionCancelled, nil
 }
 
 func (t errandTranscript) view(ctx context.Context, turn *models.Turn) (errands.TurnView, error) {

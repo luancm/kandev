@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -118,9 +119,31 @@ func (s *Service) prepareSendNowTranscript(
 	return nil
 }
 
-func markSendNowSourcesRecorded(claim *messagequeue.SendNowClaim) {
+func sendNowSourceIDs(claim *messagequeue.SendNowClaim) []string {
+	ids := make([]string, 0, len(claim.Sources))
 	for i := range claim.Sources {
-		markQueuedUserMessageRecorded(&claim.Sources[i])
+		ids = append(ids, claim.Sources[i].ID)
+	}
+	return ids
+}
+
+func markSendNowSourcesRecorded(claim *messagequeue.SendNowClaim) {
+	represented := map[string]bool{}
+	if snapshot, present, err := errands.DecodeSendNowDelivery(claim.Dispatch.Metadata); present && err == nil {
+		for _, id := range snapshot.SourceIDs {
+			represented[id] = true
+		}
+	} else if !present {
+		for i := range claim.Sources {
+			if sendNowSourceHasInput(&claim.Sources[i]) {
+				represented[claim.Sources[i].ID] = true
+			}
+		}
+	}
+	for i := range claim.Sources {
+		if represented[claim.Sources[i].ID] {
+			markQueuedUserMessageRecorded(&claim.Sources[i])
+		}
 	}
 }
 
@@ -135,15 +158,15 @@ func (s *Service) sendNowAfterClaim(
 			return errLifecyclePromptReservationSuperseded
 		}
 		if durablePlanComments {
-			if hasQueuedErrandDelivery(&claim.Dispatch) {
-				if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+			if hasQueuedErrandDelivery(&claim.Dispatch) || claim.Dispatch.Metadata[errands.SendNowDeliveryMetadataKey] != nil {
+				if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sendNowSourceIDs(claim)...); err != nil {
 					return fmt.Errorf("update Send Now errand delivery transcript: %w", err)
 				}
 			}
-			return nil
+			return s.persistSendNowErrandSnapshot(ctx, claim)
 		}
-		if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
-			if hasQueuedErrandDelivery(&claim.Dispatch) {
+		if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sendNowSourceIDs(claim)...); err != nil {
+			if hasQueuedErrandDelivery(&claim.Dispatch) || claim.Dispatch.Metadata[errands.SendNowDeliveryMetadataKey] != nil {
 				return fmt.Errorf("record Send Now errand delivery transcript: %w", err)
 			}
 			s.logger.Warn("failed to record send-now user message after prompt claim",
@@ -152,8 +175,18 @@ func (s *Service) sendNowAfterClaim(
 			markSendNowSourcesRecorded(claim)
 		}
 		s.processSendNowTurnStart(ctx, claim)
+		return s.persistSendNowErrandSnapshot(ctx, claim)
+	}
+}
+
+func (s *Service) persistSendNowErrandSnapshot(ctx context.Context, claim *messagequeue.SendNowClaim) error {
+	if _, present, err := errands.DecodeSendNowDelivery(claim.Dispatch.Metadata); err != nil {
+		return err
+	} else if !present {
 		return nil
 	}
+	protocol, submissionID, payloadHash := claim.DeliverySubmission()
+	return s.messageQueue.SetPendingSendNowClaimDelivery(ctx, claim, protocol, submissionID, payloadHash)
 }
 
 func (s *Service) sendNowDeliveryBoundary(

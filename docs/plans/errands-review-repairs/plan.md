@@ -69,7 +69,7 @@ The small packets separate independently testable storage, pure classification, 
 | 11 | [Reconstruct cancellation before admission](task-11-recover-lost-cascades.md) | 5 | 10 | done |
 | 12 | [Persist and classify reserved launch authority](task-12-reserved-launch-authority.md) | 7 | 06, 09 | done |
 | 13 | [Recover launch bookkeeping without replay](task-13-adopt-reserved-launches.md) | 7 | 08, 11, 12 | done |
-| 14 | [Preserve Send Now sources and receipt identity](task-14-send-now-source-identity.md) | 18 | 04, 08 | in_progress |
+| 14 | [Preserve Send Now sources and receipt identity](task-14-send-now-source-identity.md) | 18 | 04, 08 | done |
 | 15 | [Gate prepared results without losing user input](task-15-disabled-prepared-delivery.md) | 19 | 14 | pending |
 | 16 | [Batch bounded errand summary observations](task-16-bounded-summary-aggregate.md) | 12 | None | done |
 | 17 | [Repair missing and stale errand summaries](task-17-authoritative-summary-repair.md) | 12 | 16 | done |
@@ -514,3 +514,13 @@ All five Task14 hashes remain unchanged. Orchestrator validation isolated the kn
 The normal picker test now follows Task29/21/22: ordinary sessions remain selectable with either flag state, while persisted-role errands stay outside normal selectors even when disabled and absent from the transient cache. Production already conforms; only one existing test file changed. Baseline was 71 passing and one failing case; final focused component/hook coverage passed all 74 cases. Scoped ESLint, Prettier and whitespace checks passed. Evidence: `/tmp/errands-mobile-fixture-handoff.md`. Browser specifications were preserved but not rerun; no new browser acceptance is claimed. All five Task14 files remain hash-identical.
 
 This closes the last recorded fixture gap from consolidation. The older ADR consequence and view-model docstring still describe superseded flag-off presentation; reconcile that wording during final documentation/status reconciliation without reopening approved Task29 behavior. Resume Task14B against the saved Task14A codec/reader contract and complete the original Task14 acceptance before marking it done.
+
+### Task14B partial integration, acceptance still open
+
+The first Task14B pass implemented source-aware durable receipts, deterministic transcript identity, uncertainty retention and reservation recovery, but required acceptance remains RED: 28 of 30 orchestrator tests pass. The final runtime prompt and attachment-only empty text expose narrow integration gaps in the common admission function and codec; ownership is explicitly extended in Task14's work order to finish these existing requirements. CREATED/fallback, nonzero producer generations and legacy ambiguity coverage remain open. Evidence: `/tmp/errands-task14b-handoff.md`. No Task14 commit or completion is claimed. The next sequential errand finishes these boundaries against the saved implementation; no Task15 or broader refactor is authorized.
+
+### Task14 accepted
+
+Task14's complete source/receipt integration passes its original backend acceptance and adjacent common-admission controls. The final runtime prompt is persisted before provider I/O for established, CREATED and fallback paths under both protocols; attachment-only text and ambiguous legacy metadata now follow the approved contract. Source restoration, all-token recovery, reservations, uncertainty and exact successor fences remain covered. Focused review found no issues. All 18 source/test hashes match the final tested handoff.
+
+Race selectors passed with per-selector top-level counts 38 orchestrator, 86 queue, four reader, six codec and 28 admission tests. Eight optional PostgreSQL cases/subcases skipped without a DSN; no PostgreSQL or browser/provider certification is claimed. Build, SQL guard, SQLite conformance, scoped lint, formatting and whitespace checks passed. Evidence: `/tmp/errands-task14b-completion-handoff.md`. Totals are 25 done and four pending before Task15 starts. Commit this coherent integration before granting Task15 disabled prepared-delivery work.

@@ -57,6 +57,9 @@ func (s *Service) errandComposer() (errandTurnComposer, bool) {
 func (s *Service) composeErrandTurn(
 	ctx context.Context, sessionID, prompt string, options *promptTaskOptions,
 ) (string, string, error) {
+	if input, ok := ctx.Value(sendNowErrandInputKey{}).(*sendNowErrandInput); ok && options.queuedMessage == &input.claim.Dispatch {
+		return s.composeSendNowErrandTurn(ctx, input, prompt)
+	}
 	composer, ok := s.errandComposer()
 	if !ok || sessionID == "" {
 		return prompt, "", nil
@@ -326,9 +329,46 @@ func (s *Service) parentQueueIdentity(ctx context.Context, parentSessionID strin
 // isErrandNotificationEntry reports whether a queue entry is a notification
 // that carries no prompt of its own.
 func isErrandNotificationEntry(entry *messagequeue.QueuedMessage) bool {
-	if entry == nil {
+	if entry == nil || entry.QueuedBy != messagequeue.QueuedByServer {
 		return false
 	}
 	marked, _ := entry.Metadata[errandNotificationKey].(bool)
 	return marked
+}
+
+func (s *Service) updateQueuedErrandDeliveryMessage(ctx context.Context, entry *messagequeue.QueuedMessage, messageID string) error {
+	if s.transientRetryMessages == nil {
+		return errors.New("parent message service is unavailable")
+	}
+	messages, err := s.transientRetryMessages.ListMessages(ctx, entry.SessionID)
+	if err != nil {
+		return fmt.Errorf("list parent messages: %w", err)
+	}
+	for _, message := range messages {
+		if message == nil || message.ID != messageID || message.AuthorType != models.MessageAuthorUser {
+			continue
+		}
+		updated := *message
+		updated.Metadata = mergeMetadata(message.Metadata, metadataWithoutQueueOnlyKeys(entry.Metadata))
+		if err := s.transientRetryMessages.UpdateMessage(ctx, &updated); err != nil {
+			return fmt.Errorf("update parent delivery snapshot: %w", err)
+		}
+		return nil
+	}
+	return errors.New("parent user message was not found")
+}
+
+func (s *Service) updateRecordedQueuedErrandDelivery(ctx context.Context, entry *messagequeue.QueuedMessage, transcriptID string, sourceIDs []string) error {
+	if !hasQueuedErrandDelivery(entry) && entry.Metadata[errands.SendNowDeliveryMetadataKey] == nil {
+		markQueuedUserMessageRecorded(entry)
+		return nil
+	}
+	if transcriptID == "" {
+		transcriptID = queuedTranscriptMessageID(entry, sourceIDs)
+	}
+	if err := s.updateQueuedErrandDeliveryMessage(ctx, entry, transcriptID); err != nil {
+		return err
+	}
+	markQueuedUserMessageRecorded(entry)
+	return nil
 }
