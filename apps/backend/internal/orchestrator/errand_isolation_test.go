@@ -11,12 +11,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	repoerrors "github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
-	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -401,17 +401,21 @@ type parentSettlementFailureFixture struct {
 func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettlementFailureFixture {
 	t.Helper()
 	ctx := context.Background()
-	taskID, parentID := "settlement-task-"+suffix, "settlement-parent-"+suffix
+	launch := newErrandLaunchFixture(t)
+	repo, taskID, parentID := launch.repo, launch.taskID, launch.parent
 	submissionID := "settlement-submission-" + suffix
 	turnID := "turn-" + submissionID
-	repo := setupTestRepo(t)
-	seedSession(t, repo, taskID, parentID, "step1")
-	require.NoError(t, repo.SetSessionPrimary(ctx, parentID))
+	parent, err := repo.GetTaskSession(ctx, parentID)
+	require.NoError(t, err)
+	parent.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, parent))
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	task.State, task.WorkflowStepID = v1.TaskStateInProgress, "step1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
 	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
 		ID: turnID, TaskID: taskID, TaskSessionID: parentID, StartedAt: time.Now().UTC(),
 	}))
-	parent, err := repo.GetTaskSession(ctx, parentID)
-	require.NoError(t, err)
 	incarnationID := parent.QueueIncarnationID
 	if incarnationID == "" {
 		incarnationID = parent.ID
@@ -452,14 +456,27 @@ func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettl
 			step.UpdatedAt, step.UpdatedAt)
 		require.NoError(t, insertErr)
 	}
-	taskRepo := newMockTaskRepo()
+	taskRepo := launch.taskRepo
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
-	manager := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true,
-		currentPromptExecutionID: "exec-" + suffix}
+	manager := launch.manager.mockAgentManager
+	manager.repoForExecutionLookup, manager.isAgentRunning = repo, true
+	manager.currentPromptExecutionID = "execution-" + parentID
 	manager.currentPromptGeneration.Store(1)
 	manager.currentPromptActivityEpoch.Store(1)
+	launch.manager.runtimes[manager.currentPromptExecutionID] = &agentruntime.AgentExecution{
+		ID: manager.currentPromptExecutionID, TaskID: taskID, SessionID: parentID, DeliveryIncarnationID: incarnationID,
+	}
+	childActivity := manager.getPromptActivityForSessionFunc
+	manager.getPromptActivityForSessionFunc = func(sessionID string) (string, uint64, uint64, time.Time, error) {
+		if sessionID == parentID {
+			return manager.currentPromptExecutionID, manager.currentPromptGeneration.Load(), manager.currentPromptActivityEpoch.Load(), time.Time{}, nil
+		}
+		return childActivity(sessionID)
+	}
 	seedExecutorRunning(t, repo, parentID, taskID, manager.currentPromptExecutionID)
-	service := createTestServiceWithScheduler(repo, steps, taskRepo, &errandLaunchManager{mockAgentManager: manager})
+	service := createTestServiceWithScheduler(repo, steps, taskRepo, launch.manager)
+	service.SetTurnService(launch.svc.turnService)
+	launch.svc = service
 	onEnterDone := make(chan struct{}, 1)
 	service.onProcessOnEnterComplete = func() { onEnterDone <- struct{}{} }
 	t.Cleanup(func() {
@@ -473,11 +490,6 @@ func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettl
 		}
 	})
 	service.SetWorkflowStepGetter(steps)
-	service.SetTurnService(taskservice.NewService(taskservice.Repos{
-		Tasks: repo, TaskRepos: repo, Workspaces: repo, Workflows: repo, Messages: repo, Turns: repo,
-		Sessions: repo, Executors: repo, TaskEnvironments: repo,
-	}, nil, testLogger(), taskservice.RepositoryDiscoveryConfig{}))
-	service.executor.SetOnTaskRuntimeStateReconcile(service.reconcileTaskStateForRuntime)
 	store := &parentSettlementFaultStore{Store: repo}
 	adapter := NewErrandAdapter(service)
 	errService, err := errands.New(errands.Dependencies{
@@ -486,14 +498,26 @@ func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettl
 	})
 	require.NoError(t, err)
 	service.SetErrandController(errService)
+	errService.SetTurnReader(settlementTranscript{repo})
+	admitted := installLaunchAdoptionProvider(t, launch)
+	service.executor.SetOnTaskRuntimeStateReconcile(service.reconcileTaskStateForRuntime)
 	started, err := errService.Start(ctx, errands.StartRequest{
 		TaskID: taskID, ParentSessionID: parentID, Title: "read failure", Objective: "stay outstanding",
 	})
 	require.NoError(t, err)
+	select {
+	case admissionErr := <-admitted:
+		require.NoError(t, admissionErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("errand initial prompt admission did not finish")
+	}
+	assertOneErrandLaunch(t, launch)
 	errRow, err := repo.GetErrand(ctx, started.Errand.ID)
 	require.NoError(t, err)
 	require.True(t, errRow.AwaitingResult, "the production errand row must still owe its parent an outcome: %+v", errRow)
-	seedExecutorRunning(t, repo, started.Errand.ID, taskID, "mock-launch-"+started.Errand.ID)
+	executionID, err := launch.manager.GetExecutionIDForSession(ctx, started.Errand.ID)
+	require.NoError(t, err)
+	seedExecutorRunning(t, repo, started.Errand.ID, taskID, executionID)
 	return &parentSettlementFailureFixture{
 		repo: repo, service: service, taskRepo: taskRepo, agentManager: manager, errands: errService,
 		store: store, taskID: taskID, parentID: parentID, turnID: turnID, errandID: started.Errand.ID,

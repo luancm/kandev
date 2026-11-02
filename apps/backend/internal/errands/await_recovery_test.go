@@ -63,6 +63,7 @@ func serviceAwaitRecoveryFixture(t *testing.T, postgres bool) (*Service, *sqlite
 	event := &models.AgentDeliveryEvent{TaskID: testTask, SessionID: testParent, IncarnationID: parent.QueueIncarnationID, HarnessGeneration: 1, ExecutionID: "execution", OwnerGeneration: 1, ExpectedStreamID: "stream", StreamID: "stream", Sequence: 1, EventType: streams.EventTypeToolUpdate, Payload: body}
 	h := newHarness(t)
 	h.service.store, h.service.deliverer = r, nil
+	h.stopper.store = r
 	h.service.SetEnabled(func() bool { return false })
 	publication := &awaitProjectionBus{}
 	h.service.events = NewBusPublisher(publication, func(context.Context, string) (string, error) { return "claim-ws", nil }, logger.Default())
