@@ -1,7 +1,7 @@
 ---
 id: "16-context-token-readout"
 title: "Show used tokens and context capacity with fresh dark media"
-status: in_progress
+status: done
 wave: 17
 depends_on:
   - "15-context-window"
@@ -66,7 +66,13 @@ git diff --check
 Task15 complete. Localize new copy in every supported locale. Shared rows require sequential ownership. Capture uses an isolated current-task-revision demo, dark theme, synthetic metadata and real UI interaction. Existing capture relay failure must be resolved before claiming the parent-follow-up video. Do not reuse older images without visible context.
 
 
-## Results and remaining work
+## Historical implementation results
 
 Implementation is present. Focused formatter/ordering tests pass 6/6 and existing chip/widget/hook tests pass 34/34. Typecheck, exact-file lint and i18n checks passed. Desktop Errands suite passed 8/8 (`/tmp/kandev-run.e2e.H64y3Jis.log`); final phone suite passed 6/6 (`/tmp/kandev-run.e2e.YzSKukDM.log`), including context updates/reload/clear and await history. The initial phone viewport assertion assumed oldest-first order; scrolling to each target fixed that fixture assumption.
 Fresh dark images/video visibly showing seeded context and parent conversation during a running errand remain outstanding. This work order remains `in_progress`; existing older captures are not acceptance for the refined readout.
+
+## Final media acceptance (2026-11-02)
+
+The remaining media acceptance is complete through [repair Task25](../errands-review-repairs/task-25-current-dark-media.md). Fresh dark desktop and native-phone recordings from `065ebb42c735a9effb2b580b5a8de90a13d3bd31` show used/capacity counts and the occupancy bar, a real parent follow-up and response while the child remains running, child Open/Back, result delivery and retained completed history. Context telemetry is explicitly synthetic and agents are controlled mocks in isolated fixture data.
+
+The local player, MP4/WebM recordings, screenshots, seed evidence, source/build/harness hashes, media probes and full browser playback receipts are retained in `apps/web/e2e-artifacts/errands-demo-065ebb42c7/`; exact runs and cleanup evidence are linked by Task25. Both final rehearsals and both recording tests passed with zero retries/skips. Capture processes and ports were released and disposable runtime/source data removed. These artifacts supersede the outstanding-media statement above. No production asset publication or real-provider certification is claimed.

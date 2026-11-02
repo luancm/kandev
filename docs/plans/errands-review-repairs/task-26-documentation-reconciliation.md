@@ -1,7 +1,7 @@
 ---
 id: "26-documentation-reconciliation"
 title: "Reconcile manifests and final repair evidence"
-status: in_progress
+status: done
 wave: 26
 depends_on:
   - "25-current-dark-media"
@@ -93,8 +93,14 @@ The listed production and regression files are exclusive ownership for this pack
 Design checkpoint: manifest table/checklist, Tasks 07/09/13 status enum, Tasks 17/18 edit-order clarification, specification map and coordination-history EOF are corrected. Catalog/specification lint, full-range documentation coverage and whitespace checks passed as recorded in plan.md. The reconciliation checkpoint below supersedes this initial design-only status. Do not convert this documentation check into product validation.
 
 
-### Reconciliation checkpoint (2026-11-02)
+### Historical pre-demo reconciliation checkpoint (2026-11-02)
 
 Public coordination guidance and the agent-tool reference now distinguish known retryable failures from uncertain reception and describe await correlation metadata without calling it a receipt. Current design notes cover fallback identity, aggregate repair, request freshness, Preview/Threads ownership, active-surface announcements, passive context reconciliation, and flag-off retained-role restrictions. The old ordinary-tab ADR wording and view-model comment are reconciled. The missing conversation-navigation design reference in the repair manifest is added.
 
 Catalog/spec lint passed (422 decisions, 1,862 specifications), public-doc tests passed 63/63, and all 54 published pages validated. The full committed feature range plus current changes passes documentation coverage: 709 changed paths and 85 loaded reference documents, `/tmp/errands-task26-coverage.json`. Source and publication receipts remain historical where labelled. This task remains in progress until Task25's missing media prerequisites are resolved; Task24 browser receipts are integrated; no media/browser completion is inferred from documentation validation.
+
+### Final reconciliation (2026-11-02)
+
+Task24's browser receipts and Task25's new desktop/phone recordings, source provenance, synthetic-data disclosure, playback and cleanup evidence are integrated. Original Task16 and repair Tasks25/26 are now done, with current checkpoints near the top of both manifests and matching table/checklist statuses. All 29 repair work orders and all original work orders are done; earlier pending statements remain only in labelled historical checkpoints. The user clarified that the existing feature checkout is the demo source, so the earlier landing-repository/camera prerequisites were removed from Task25 rather than left as artificial blockers.
+
+Public guidance already matches the implemented behavior; this final change updates internal acceptance records only. Local media is linked from Task25 without publishing assets or changing the screenshot catalog. Earlier PostgreSQL skips and provider-specific limitations remain unchanged. Final validation passed: catalog (422 decisions and 1,862 specifications), all specification lint, 63/63 public-doc tests, 54 published pages, whitespace checks and full-range documentation coverage (728 changed paths, 88 reference documents, status `covered`). Receipts: `/tmp/errands-demo-doc-catalog.log`, `/tmp/errands-demo-spec-lint.log`, `/tmp/errands-demo-public-tests.log`, `/tmp/errands-demo-public-validate.log` and `/tmp/errands-final-demo-coverage.json`.

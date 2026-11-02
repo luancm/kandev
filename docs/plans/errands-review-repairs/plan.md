@@ -31,13 +31,21 @@ legacy_specs: []
 
 # Errands review repairs
 
+## Current acceptance checkpoint (2026-11-02)
+
+All 29 repair work orders are done. Task24 closed mixed-parent/browser acceptance, Task25 now supplies current dark desktop and native-phone recordings, and Task26 reconciles the final evidence. Original Tasks16/17 are also complete. The later [normal-session consumer repair](../errand-session-consumers/plan.md) is implemented and pushed in `065ebb42c7`, which is the exact source revision used for the new demo.
+
+Task24 passed 14 desktop and 12 phone browser tests without retries or skips. Task25 passed separate desktop/phone rehearsals and recordings, full browser playback in MP4/WebM and media/cleanup checks. Its [work order](task-25-current-dark-media.md) links the local videos and provenance and explicitly identifies mock agents and synthetic context telemetry. No landing repository or camera pipeline is needed. Documentation closure is recorded in [Task26](task-26-documentation-reconciliation.md). Historical PostgreSQL skips and provider limitations remain explicit; none of these checks converts them into passes.
+
+Publication remains the user's feature branch on origin. Local video artifacts are retained under `apps/web/e2e-artifacts/errands-demo-065ebb42c7/`, outside Git. No PR, live-instance restart, deployment or shipped-default promotion is included. The dated checkpoints below preserve execution history and are superseded by this current checkpoint where their pending status differs.
+
 ## Implementation authorization
 
-The user explicitly authorized implementation of all repair work orders and selected Option C for historical await entries. Implementation is active. Use Errands with bounded file ownership and TDD; no further planning approval is required. Completed checks must be recorded before marking any packet done.
+The user explicitly authorized implementation of all repair work orders and selected Option C for historical await entries. All 29 repair work orders are complete. The authorized execution used Errands with bounded file ownership and TDD; no further planning approval is required. Completed checks must be recorded before marking any packet done.
 
 ## Outcome and current state
 
-Repair every finding from the full review of `74a91cfc161916f0d5264b86762adae14e43119e..6400a265bb8a0a35fb702eced2aff1eeb81023d9`: nineteen correctness defects plus fallback identity and manifest recommendations. The checkout was clean at review completion. Implementation is active, with completed and partial repairs recorded in the work orders below. Original passing suites did not cover the reproduced failure windows; new receipts are recorded per packet. The original [Errands manifest](../errands/plan.md) retains historical receipts; this package owns new repair evidence.
+Repair every finding from the full review of `74a91cfc161916f0d5264b86762adae14e43119e..6400a265bb8a0a35fb702eced2aff1eeb81023d9`: nineteen correctness defects plus fallback identity and manifest recommendations. The checkout was clean at review completion. All repair work orders are complete, with acceptance receipts recorded below and in their work orders. Original passing suites did not cover the reproduced failure windows; new receipts are recorded per packet. The original [Errands manifest](../errands/plan.md) retains historical receipts; this package owns new repair evidence.
 
 The user requested all repairs using Errands and explicitly permits the configured Luna profile for implementation. The primary session owns integration, durable artifacts and shared schema contracts. The design checkpoint is complete and the user has explicitly requested implementation. The user subsequently authorized coherent verified commits and pushing this feature branch. A PR, shipped-default promotion and live-instance mutation remain outside scope.
 
@@ -83,8 +91,8 @@ The small packets separate independently testable storage, pure classification, 
 | 22 | [Hide ownership actions for retained errands](task-22-preview-menu-isolation.md) | 16 | 21 | done |
 | 23 | [Announce rendered Threads status changes](task-23-visible-status-announcements.md) | 17 | 20 | done |
 | 24 | [Verify mixed-parent ordering and transitions](task-24-mixed-parent-browser-acceptance.md) | task17 acceptance | 13, 15, 17, 18, 20, 22, 23 | done |
-| 25 | [Complete current dark desktop and phone evidence](task-25-current-dark-media.md) | task16 acceptance | 24 | blocked |
-| 26 | [Reconcile manifests and final repair evidence](task-26-documentation-reconciliation.md) | 21 | 25 | in_progress |
+| 25 | [Complete current dark desktop and phone evidence](task-25-current-dark-media.md) | task16 acceptance | 24 | done |
+| 26 | [Reconcile manifests and final repair evidence](task-26-documentation-reconciliation.md) | 21 | 25 | done |
 | 27 | [Compact historical await disclosure](task-27-history-disclosure.md) | User-reported historical spinner/visual weight | None | done |
 | 28 | [Avoid notification guard re-entry](task-28-notification-guard.md) | Session-stall investigation | None | done |
 | 29 | [Separate errand navigation and unify history](task-29-conversation-navigation-and-history.md) | Approved UI clarification | 27 | done |
@@ -556,3 +564,7 @@ Task24 and original Task17 are done: 14 desktop and 12 phone browser tests passe
 ### Normal-session consumer follow-up (2026-11-02)
 
 The subsequent [consumer repair](../errand-session-consumers/plan.md) closes summary-source leakage in New Agent/New Subtask and automatic route, preview and task-picker selection of errands. Its two work orders are complete with 142 focused tests and desktop/phone browser acceptance. Explicit child navigation and permission routing remain available. This follow-up does not change Task25 media prerequisites or Task26 final closure status.
+
+### Demo scope correction (2026-11-02)
+
+Task25 used this branch's existing checkout and a fresh isolated fixture. The earlier landing-repository/Xvfb blocker belonged to an unnecessarily selected promotional-video workflow; ordinary desktop/phone browser recordings and dark screenshots satisfy the clarified demo scope. Core real errand admission, parent follow-up, context display, child navigation and result delivery evidence remain required. Capture, playback and cleanup passed; Task25, Task26 and original Task16 are complete. The current checkpoint above and final work-order Results contain the acceptance evidence.
