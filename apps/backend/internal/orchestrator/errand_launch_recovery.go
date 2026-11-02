@@ -427,16 +427,19 @@ func (s *Service) confirmErrandLaunchRuntimeAbsent(ctx context.Context, sessionI
 	if s.hasPendingRemoteRecovery(sessionID, running.AgentExecutionID) {
 		return errors.New("reserved runtime authenticated recovery is pending")
 	}
-	if claim, ok := s.executionTeardownClaimFor(sessionID, running.AgentExecutionID); ok && claim.cleanupCompleted {
-		return nil
-	}
-	if running.Status == models.ExecutorRunningStatusStopped && running.LocalPID == 0 {
-		return nil
-	}
-	if s.rowLiveness(running) == models.ProcessLivenessDead {
+	if s.hasErrandRuntimeAbsenceWitness(sessionID, running) {
 		return nil
 	}
 	return errors.New("reserved runtime absence is unconfirmed by persisted inventory")
+}
+
+// Callers must exclude missing inventory and pending authenticated recovery.
+func (s *Service) hasErrandRuntimeAbsenceWitness(sessionID string, running *models.ExecutorRunning) bool {
+	if claim, ok := s.executionTeardownClaimFor(sessionID, running.AgentExecutionID); ok && claim.cleanupCompleted {
+		return true
+	}
+	return (running.Status == models.ExecutorRunningStatusStopped && running.LocalPID == 0) ||
+		s.rowLiveness(running) == models.ProcessLivenessDead
 }
 
 func recoveredErrandLaunch(e errandLaunchRecoveryEvidence, state errandLaunchRecoveryState) (errands.LaunchResult, *LaunchSessionResponse, error) {

@@ -246,13 +246,7 @@ func (o *errandTeardownOwner) confirmRuntimeAbsence(ctx context.Context, session
 	if o.svc.hasPendingRemoteRecovery(sessionID, running.AgentExecutionID) {
 		return errors.New("errand runtime authenticated recovery is pending")
 	}
-	if claim, ok := o.svc.executionTeardownClaimFor(sessionID, running.AgentExecutionID); ok && claim.cleanupCompleted {
-		return nil
-	}
-	if running.Status == models.ExecutorRunningStatusStopped && running.LocalPID == 0 {
-		return nil
-	}
-	if o.svc.rowLiveness(running) != models.ProcessLivenessDead {
+	if !o.svc.hasErrandRuntimeAbsenceWitness(sessionID, running) {
 		return errors.New("errand runtime absence is unconfirmed by recovered inventory")
 	}
 	return nil
