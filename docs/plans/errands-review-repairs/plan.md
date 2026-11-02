@@ -2,6 +2,7 @@
 created: 2026-10-30
 status: draft
 requirements:
+  - REQ-PLATFORM-INTERACTIVE-READS-005
   - REQ-TASKS-ERRAND-ORDER-001
   - REQ-TASKS-ERRAND-AWAIT-DURATION-001
   - REQ-TASKS-ERRANDS-001
@@ -17,6 +18,8 @@ requirements:
   - REQ-TASKS-ERRANDS-012
   - REQ-TASKS-ERRANDS-CONTEXT-001
 system_design:
+  - ../../specs/platform/system-design/interactive-read-availability.md
+  - ../../specs/tasks/system-design/errand-conversation-navigation.md
   - ../../specs/tasks/system-design/errand-await-duration.md
   - ../../specs/tasks/system-design/errand-context-window.md
   - ../../specs/tasks/system-design/errand-panel-order.md
@@ -36,7 +39,7 @@ The user explicitly authorized implementation of all repair work orders and sele
 
 Repair every finding from the full review of `74a91cfc161916f0d5264b86762adae14e43119e..6400a265bb8a0a35fb702eced2aff1eeb81023d9`: nineteen correctness defects plus fallback identity and manifest recommendations. The checkout was clean at review completion. Implementation is active, with completed and partial repairs recorded in the work orders below. Original passing suites did not cover the reproduced failure windows; new receipts are recorded per packet. The original [Errands manifest](../errands/plan.md) retains historical receipts; this package owns new repair evidence.
 
-The user requested all repairs using Errands and explicitly permits the configured Luna profile for implementation. The primary session owns integration, durable artifacts and shared schema contracts. The design checkpoint is complete and the user has explicitly requested implementation. Nothing here authorizes commits, push, a PR, shipped-default promotion or live-instance mutation.
+The user requested all repairs using Errands and explicitly permits the configured Luna profile for implementation. The primary session owns integration, durable artifacts and shared schema contracts. The design checkpoint is complete and the user has explicitly requested implementation. The user subsequently authorized coherent verified commits and pushing this feature branch. A PR, shipped-default promotion and live-instance mutation remain outside scope.
 
 ## Evidence and Errand handoffs
 
@@ -79,9 +82,9 @@ The small packets separate independently testable storage, pure classification, 
 | 21 | [Keep errand navigation inside its preview](task-21-preview-navigation.md) | 15 | None | done |
 | 22 | [Hide ownership actions for retained errands](task-22-preview-menu-isolation.md) | 16 | 21 | done |
 | 23 | [Announce rendered Threads status changes](task-23-visible-status-announcements.md) | 17 | 20 | done |
-| 24 | [Verify mixed-parent ordering and transitions](task-24-mixed-parent-browser-acceptance.md) | task17 acceptance | 13, 15, 17, 18, 20, 22, 23 | pending |
-| 25 | [Complete current dark desktop and phone evidence](task-25-current-dark-media.md) | task16 acceptance | 24 | pending |
-| 26 | [Reconcile manifests and final repair evidence](task-26-documentation-reconciliation.md) | 21 | 25 | pending |
+| 24 | [Verify mixed-parent ordering and transitions](task-24-mixed-parent-browser-acceptance.md) | task17 acceptance | 13, 15, 17, 18, 20, 22, 23 | done |
+| 25 | [Complete current dark desktop and phone evidence](task-25-current-dark-media.md) | task16 acceptance | 24 | blocked |
+| 26 | [Reconcile manifests and final repair evidence](task-26-documentation-reconciliation.md) | 21 | 25 | in_progress |
 | 27 | [Compact historical await disclosure](task-27-history-disclosure.md) | User-reported historical spinner/visual weight | None | done |
 | 28 | [Avoid notification guard re-entry](task-28-notification-guard.md) | Session-stall investigation | None | done |
 | 29 | [Separate errand navigation and unify history](task-29-conversation-navigation-and-history.md) | Approved UI clarification | 27 | done |
@@ -540,3 +543,12 @@ All final local selectors passed with PostgreSQL skips recorded, but review foun
 ### Task15 accepted after review correction
 
 Task15 local backend acceptance is complete, including all eight legacy refusal/reopen regression cases and the final 47-test orchestrator selector. Review confirms both authoritative source-generation stamps resolve the last finding; all 35 source hashes match final tested evidence. Other required selectors, build, scoped lint and static checks pass; unchanged SQL guard/conformance receipts apply. PostgreSQL skips remain explicit, and browser/real-provider certification is not claimed. Evidence: `/tmp/errands-task15-legacy-generation-handoff.md` and `/tmp/errands-task15-ownership-handoff.md`. Totals: 26 done, three pending (24/25/26). Commit this coherent integration before the Task24 browser packet. Disk checkpoint has approximately 11 GiB free; invocation scratch is cleaned.
+
+
+### Final acceptance resumed (2026-11-02)
+
+All implemented changes through `a8f28bee130b47006d6709c2bd44fb6cfeb89655` are pushed to origin and the remote SHA was verified. Task24 is in progress in the primary session because the errand launcher is unavailable; Tasks25/26 remain pending. Browser acceptance will add live mixed-parent ordering and durable uncertainty coverage before final desktop/phone runs. Disk checkpoint: 50 GiB available, 57% used after cache cleanup. Heavy checks remain serialized.
+
+### Final acceptance checkpoint (2026-11-02)
+
+Task24 and original Task17 are done: 14 desktop and 12 phone browser tests passed without retries or skips, with 49 frontend unit tests and seven backend fixture race tests passing. Normal hooks remain enabled. Task25 is blocked on the missing landing camera/encoder checkout and Xvfb; the repository location has been requested. Task26 documentation changes pass catalog, specification, public-page and coverage checks, but final closure waits for Task25 media. Totals: 27 done, one blocked, one in progress. No live-instance restart, deployment or flag promotion is included.

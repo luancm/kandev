@@ -141,13 +141,16 @@ holds one deferral per task and refuses a different second deferral with
   their conversation with the user.
 - Core gains a session role and parent columns, an errand bookkeeping table,
   an `errand` MCP mode and surface, two prompts, WebSocket events, and
-  frontend surfaces. All of it is reachable only while the flag is on.
+  frontend management surfaces. New work and management actions are gated
+  by the flag; persisted role restrictions remain active.
 - Any new session-selection path (primary promotion, routing, reuse, task
   state, workflow hooks) must consult the workflow-detached predicate.
 - Turning the flag off stops new errands, status blocks, delivery, and the
   parent's workflow deferral.
   Existing errand sessions keep their role, so they stay workflow-detached
-  and remain viewable as ordinary session tabs.
+  and remain inspectable through retained transcripts and parent-hosted
+  navigation, without permanent normal-session tabs. This reflects the
+  subsequent parent-owned conversation navigation contract.
 - Isolated errand worktrees, errands of depth greater than one, and errands
   in Office or coordinator tasks each need a new decision.
 

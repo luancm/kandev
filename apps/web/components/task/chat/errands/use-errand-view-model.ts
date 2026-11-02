@@ -21,8 +21,8 @@ export type ErrandViewModel = {
 };
 
 /**
- * View model of the errand shown in a chat panel, or null when the panel's
- * session is not an errand or the errands flag is off.
+ * View model of an errand conversation. Persisted role and parent identity
+ * remain available when Errands is disabled; live errand data is flag-gated.
  */
 export function useErrandViewModel(
   sessionId: string | null | undefined,

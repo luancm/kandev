@@ -1,7 +1,7 @@
 ---
 id: "26-documentation-reconciliation"
 title: "Reconcile manifests and final repair evidence"
-status: pending
+status: in_progress
 wave: 26
 depends_on:
   - "25-current-dark-media"
@@ -90,4 +90,11 @@ The listed production and regression files are exclusive ownership for this pack
 
 ## Results
 
-Design checkpoint: manifest table/checklist, Tasks 07/09/13 status enum, Tasks 17/18 edit-order clarification, specification map and coordination-history EOF are corrected. Catalog/specification lint, full-range documentation coverage and whitespace checks passed as recorded in plan.md. This work order remains pending for implemented-behavior public recovery copy, final task acceptance receipts and media/browser gate closure. Do not convert this documentation check into product validation.
+Design checkpoint: manifest table/checklist, Tasks 07/09/13 status enum, Tasks 17/18 edit-order clarification, specification map and coordination-history EOF are corrected. Catalog/specification lint, full-range documentation coverage and whitespace checks passed as recorded in plan.md. The reconciliation checkpoint below supersedes this initial design-only status. Do not convert this documentation check into product validation.
+
+
+### Reconciliation checkpoint (2026-11-02)
+
+Public coordination guidance and the agent-tool reference now distinguish known retryable failures from uncertain reception and describe await correlation metadata without calling it a receipt. Current design notes cover fallback identity, aggregate repair, request freshness, Preview/Threads ownership, active-surface announcements, passive context reconciliation, and flag-off retained-role restrictions. The old ordinary-tab ADR wording and view-model comment are reconciled. The missing conversation-navigation design reference in the repair manifest is added.
+
+Catalog/spec lint passed (422 decisions, 1,862 specifications), public-doc tests passed 63/63, and all 54 published pages validated. The full committed feature range plus current changes passes documentation coverage: 709 changed paths and 85 loaded reference documents, `/tmp/errands-task26-coverage.json`. Source and publication receipts remain historical where labelled. This task remains in progress until Task25's missing media prerequisites are resolved; Task24 browser receipts are integrated; no media/browser completion is inferred from documentation validation.

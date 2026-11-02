@@ -119,7 +119,14 @@ project as `dto.ErrandDTO`: `errand_id`, `task_id`, `parent_session_id`,
 `result_preview` (first 280 characters), `result_truncated`, `created_at`,
 `updated_at`, `settled_at`, and `can_send_result`, the
 [send-result rule](#errand-turn-settlement-and-results). Full result text is
-returned only to the parent through MCP.
+returned only to the parent through MCP. Optional `delivery_state` is
+`uncertain` or `received` for applicable current-revision await evidence;
+omission does not imply reception.
+
+Fallback sessions preserve immutable role and parent identity. Task summary
+reads repair the bounded aggregate under the feature flag; CAS conflicts
+re-observe the aggregate. An unavailable reader is unobserved, while a
+disabled feature explicitly projects zero.
 
 `statussummary.TaskStatusSummary` gains `Errands *ErrandsSummary`
 (`live`, `waiting`), omitted when both are zero so rows without errands stay
@@ -149,7 +156,7 @@ kanban surface with the new `CapabilityErrands`:
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `start_errand_kandev` | `title`, `prompt`, optional `agent_profile` (ID or exact name) | `errand_id`, `session_id`, `status`, `agent_profile_id`, `agent_profile_name` |
-| `await_errands_kandev` | `errand_ids` (1 to 5), `mode` (`all` or `any`), optional `max_wait_seconds` (0 to 600, default 600) | `errands[]`: `errand_id`, `status` (or `pending`), `result` and `truncated` when undelivered, `delivered_via` when already delivered |
+| `await_errands_kandev` | `errand_ids` (1 to 5), `mode` (`all` or `any`), optional `max_wait_seconds` (0 to 600, default 600) | `errands[]`: `errand_id`, `status` (or `pending`), `result` and `truncated` when undelivered, `delivered_via` when already delivered; `duration_ms`, `end_reason`, and `await_delivery` correlation metadata |
 | `cancel_errand_kandev` | `errand_id` | `errand_id`, `status` |
 
 Inherited MCP servers add no Kandev tools, since `AC-TASKS-ERRANDS-009.2`
@@ -476,10 +483,16 @@ session, errand, and parent IDs as fields only.
   `use-task-errands.ts` own the shared list/live state and reconnect refresh;
   `use-errand-actions.ts` owns mutations. Mounting multiple surfaces must
   retain one shared list request. Historical result cards use message
-  snapshots, not today's rows.
+  snapshots, not today's rows. Shared connection generation and read scope
+  fence list freshness; stale requests cannot publish or clear replacements.
 - **Conversations and history.** [Errand conversation navigation](errand-conversation-navigation.md) owns parent-tab hosting, scoped preview/Threads selection, normal phone selectors, parent-owned panels, collapsed completed history and consistent historical disclosures. Role restrictions and direct child transcripts survive the release toggle. Normal conversations retain their tabs; opening an errand never transfers workflow ownership.
+- **Navigation ownership.** Kanban `PreviewSessionTabs` and Threads
+  `TaskSessionNavigationContext` own selection and Back within their host.
+  Neither operation transfers workflow ownership.
 - **Copy/accessibility.** Use existing locale namespaces and seven shipped
   locales, keyboard-operable actions and one polite status announcer per view.
+  Eligibility follows the rendered, detail-active surface independently of
+  unread acknowledgement.
 
 ### Current management and transcript history
 
@@ -497,8 +510,9 @@ Reuse the shipped Errands bottom Drawer and `mobile-picker-sheet.tsx`: normal co
 exposed as `errands` in `lib/state/slices/features/types.ts`; E2E specs
 enable it with `backend.useEnv`. It gates `CapabilityErrands`, the errand
 prompt sections, the MCP actions, the WebSocket requests,
-`ComposeParentTurn`, `OnParentTurnSettled`, delivery, and the frontend errand
-surfaces. Errand mode resolution, the workflow-detached predicate, and
+`ComposeParentTurn`, `OnParentTurnSettled`, delivery, and frontend errand
+management and mutation surfaces. Retained child transcripts, parent Back
+navigation, and persisted-role restrictions remain available while disabled. Errand mode resolution, the workflow-detached predicate, and
 reconciliation of cancellations do not read the flag, so existing errand
 sessions stay isolated and fail closed.
 

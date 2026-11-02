@@ -33,6 +33,10 @@ With the experimental `features.errands` flag enabled and a compatible structure
 | `message_task_kandev` | A parent can address the returned child `session_id` for follow-up work. Use the current task ID and the explicit child session ID. |
 | `list_task_sessions_kandev` | Discovers child sessions and their role, parent and state. Queued errand identities can exist before a session row is launched. |
 
+Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.
+
+Successful await responses also include `await_delivery: {version: 1, token, items: [{errand_id, result_revision}]}`. This correlates the result revisions carried by that response; it is not acknowledgement that the parent received them. Empty or status-only responses do not acknowledge any result.
+
 Keep the parent conversational: starting an errand is enough to receive its result later. Await only when the current turn needs to join. Every parent turn with errands in flight receives a bounded status block; results settling mid-turn wait for await or a later turn. A delivered result is claimed once, while its immutable transcript card remains available after reload and later child turns. Notification turns use the parent's normal queue and respect Auto-run.
 
 Use separate start calls and retain each returned identity. Errands have depth one, share the task workspace and are limited to five live children per task. Their parent retains workflow ownership while outstanding results keep it in progress. Parent-turn cancellation does not stop children; explicit Stop and parent/task termination have different scopes.

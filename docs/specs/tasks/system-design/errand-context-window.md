@@ -18,7 +18,7 @@ The opened errand already receives `TokenUsageDisplay` through the shared `TaskC
 
 ## Data and existing transport
 
-Use `useSessionContextWindow(errand.errand_id, false)`. It selects `contextWindow.bySessionId`, hydrates a missing entry from `taskSessions.items[childId].metadata.context_window` and reads the session's persisted compaction count. The false detail flag prevents `subscribeSession(childId)`; this is a local read of shared session data. Mount this read only with the existing panel rows. Do not create a second loader or add context fields to the Errand DTO.
+Use `useSessionContextWindow(errand.errand_id, false)`. It passively selects the reconciled `contextWindow.bySessionId` cache and reads the session's persisted compaction count. Shared session hydration reconciles metadata with the cache; the hook must not revive a cleared value from an older metadata fallback. The false detail flag prevents `subscribeSession(childId)`; this is a local read of shared session data. Mount this read only with the existing panel rows. Do not create a second loader or add context fields to the Errand DTO.
 
 Existing backend context handling in `internal/orchestrator/event_handlers_git.go` publishes `session.state_changed`; `internal/gateway/websocket/task_notifications.go` broadcasts that event to the workspace. Frontend `lib/ws/handlers/agent-session.ts` already consumes `metadata`/`session_metadata`, updating or clearing the per-session cache. Task-session summary DTOs expose a bounded metadata projection, not full session metadata. Extend that existing projection for reload as described below. No new route, schema, event or producer change is needed.
 
@@ -44,7 +44,7 @@ Prefer existing localized task keys for the context label, measured percentage a
 
 Add the readout below title/profile/status in `RowSummary`. Keep desktop Open separate. Derive the context view once for each `ErrandsPanelRow` and pass it to its presentation branches. The phone `DrawerRow` is already a whole-row button; an interactive `TokenUsageDisplay` inside it would nest buttons. Use passive text instead. Associate the emitted text with the phone row using `aria-describedby` when present, so the existing explicit Open accessible name does not hide context information from assistive technology.
 
-The existing Errands drawer is the mobile exemplar: temporary task-wide navigation, one internal list scroller, a fixed bulk-action footer and safe-area clearance. Preserve its 44px row/actions, including 767px fine-pointer layouts. Allow the context line to wrap within the row; do not introduce horizontal scrolling, a second overlay or another tap target. Open retains the existing full-screen child view and Back. Source and compaction details stay in that child's existing widget.
+The existing Errands drawer is the mobile exemplar: temporary parent-scoped navigation, one internal list scroller, a fixed bulk-action footer and safe-area clearance. Preserve its 44px row/actions, including 767px fine-pointer layouts. Allow the context line to wrap within the row; do not introduce horizontal scrolling, a second overlay or another tap target. Open retains the existing full-screen child view and Back. Source and compaction details stay in that child's existing widget.
 
 ## Verification and compatibility
 

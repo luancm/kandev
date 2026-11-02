@@ -1,7 +1,7 @@
 ---
 id: "25-current-dark-media"
 title: "Complete current dark desktop and phone evidence"
-status: pending
+status: blocked
 wave: 25
 depends_on:
   - "24-mixed-parent-browser-acceptance"
@@ -183,3 +183,8 @@ The listed production and regression files are exclusive ownership for this pack
 ## Results
 
 Pending. Record each final command, observed result, test count and log path; distinguish skips, infrastructure failures and reproduced defects from passes.
+
+
+### Capture prerequisite checkpoint (2026-11-02)
+
+The primary checked PATH, standard binary locations, retained capture tooling, and the local project/task checkouts. Working FFmpeg/FFprobe remain at `/tmp/kandev-errands-dark.scyGKz/tooling/usr/bin/`, but Xvfb is not installed and no checkout containing `product-loop-camera.mjs`, `product-loop-encoder.mjs`, or their tested landing-editorial profile was found. The user has been asked for the landing repository URL or local path. No new capture, encoding, asset publication, or current-source media acceptance is claimed. Existing historical media remains preserved. Browser acceptance and documentation preparation can proceed independently; final media and acceptance closure remain pending.

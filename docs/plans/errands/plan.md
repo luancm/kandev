@@ -29,7 +29,7 @@ legacy_specs: []
 
 # Implementation Plan: Errands
 
-## Review and repair checkpoint (2026-10-30)
+## Historical review and repair checkpoint (2026-10-30)
 
 The reviewed baseline is `6400a265bb8a0a35fb702eced2aff1eeb81023d9`.
 The [review repair package](../errands-review-repairs/plan.md) owns nineteen
@@ -46,7 +46,9 @@ Task 17 for shared-file edit order, not completion of its browser acceptance.
 No PR, shipped-default promotion or live-instance change is part of this repair
 checkpoint. The earlier origin publication receipt is preserved below.
 
-## Accepted UI refinement (2026-10-30)
+## Historical UI refinement (2026-10-30)
+
+The later parent-owned navigation contract supersedes the task-wide grouping described in this historical checkpoint. Each parent now shows only its own errands; Stop all retains task-wide scope.
 
 Personal use confirmed the status-bar pill and its panel as the preferred
 management entry point. Keep its task-wide parent groups, live and completed
@@ -463,7 +465,7 @@ is not acceptance of a newly found gap; the continuation owns those deltas.
 | 15 | [14](task-14-pill-owned-management.md) | Pill-owned management; compact transcript history (done) | 13, 09 | Frontend | 010, 011 |
 | 16 | [15](task-15-context-window.md) | Passive per-child context occupancy with bounded reload projection (done) | 14 | Task sessions + frontend | ERRANDS-CONTEXT-001 |
 | 17 | [16](task-16-context-token-readout.md) | Token counts implemented; current dark media pending (in_progress) | 15 | Frontend | ERRANDS-CONTEXT-001 |
-| 18 | [17](task-17-panel-order.md) | Active-first ordering implemented; mixed-parent browser evidence pending (in_progress) | 16 source edits | Frontend | ERRAND-ORDER-001 |
+| 18 | [17](task-17-panel-order.md) | Active-first ordering and parent-scoped browser acceptance complete (done) | 16 source edits | Frontend | ERRAND-ORDER-001 |
 | 19 | [18](task-18-await-duration.md) | Elapsed await duration and outcome (done) | 17 source edits | Both | ERRAND-AWAIT-DURATION-001 |
 
 Progress:
@@ -480,7 +482,7 @@ Progress:
 - [x] Task 14: removed duplicate transcript inventory; desktop/phone management, immutable history and scrolling verified.
 - [x] Task 15: context implementation and original validation accepted; the review repair package owns the later clear/cache defect.
 - [ ] Task 16: implementation accepted; fresh dark desktop/phone media pending in repair Task 25.
-- [ ] Task 17: implementation accepted; mixed-parent browser transition evidence pending in repair Task 24.
+- [x] Task 17: parent-scoped ordering and transitions accepted through repair Task 24 (14 desktop and 12 phone tests).
 - [x] Task 18: await duration, result and reload validation accepted.
 
 ## Continuation checkpoint (2026-10-27)
@@ -1122,3 +1124,7 @@ Task15 integration accepted, 2026-10-30: actual PostgreSQL selector passed at `/
 ## Publication checkpoint, 2026-10-30
 
 The user authorized committing and pushing the current changes to origin. Task18 is done with real desktop/phone await and reload evidence. Task16 token-count/bar implementation and task17 ordering implementation are present; focused tests and desktop/phone suites pass. Task16 remains in progress for new dark images/video with visible context and parent follow-up; task17 remains in progress for explicit mixed-parent ordering browser coverage. Existing older media does not certify the current UI. Public coordination and agent-communication documentation matches the implemented behavior. No PR, upstream push, live-instance mutation or shipped-default promotion is authorized.
+
+### Current acceptance checkpoint (2026-11-02)
+
+Original Task17 is complete under the later Task29 parent-scoped navigation contract. Repair Task24 passed 14 desktop and 12 phone browser tests without retries or skips. Original Task16 media remains open: repair Task25 needs the landing camera/encoder checkout and Xvfb. Repair Task26 reconciles current public and design documentation but cannot close its final media gate yet. Older task-wide ordering and delivery checkpoints above are historical.

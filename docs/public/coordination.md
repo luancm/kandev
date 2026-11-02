@@ -52,6 +52,8 @@ Errand rows also show used and total context tokens with a usage bar when a reli
 
 An opened child offers **Stop** while live, a follow-up composer, and **Send result to parent** when a user-initiated result is eligible. Cancelling the parent's current turn leaves its errands running; stopping or deleting the parent/task cascades to its errands.
 
+Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.
+
 Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
 
 All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands snapshot the parent's session MCP additions and exclusions at start; later parent selection changes do not rewrite that snapshot. Removed or disabled servers are omitted at launch.
