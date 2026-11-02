@@ -69,17 +69,23 @@ afterEach(cleanup);
 beforeEach(() => setState());
 
 describe("MobileSessionPickerRow", () => {
-  it("shows the sessions pill for an ordinary session", () => {
-    render(<MobileSessionPickerRow taskId={TASK_ID} sessionId={PARENT_ID} />);
-    expect(screen.getByTestId(PILL).getAttribute("data-session-id")).toBe(PARENT_ID);
-  });
+  it.each([true, false])(
+    "shows the sessions pill for an ordinary session with errands=%s",
+    (enabled) => {
+      setState({ enabled });
+      render(<MobileSessionPickerRow taskId={TASK_ID} sessionId={PARENT_ID} />);
+      expect(screen.getByTestId("mobile-session-picker-row")).toBeTruthy();
+      expect(screen.getByTestId(PILL).getAttribute("data-session-id")).toBe(PARENT_ID);
+    },
+  );
 
   it("shows the pill when there is no session yet", () => {
     render(<MobileSessionPickerRow taskId={TASK_ID} sessionId={null} />);
     expect(screen.getByTestId(PILL)).toBeTruthy();
   });
 
-  it("hides the row while an errand is the active session", () => {
+  it.each([true, false])("hides the row for a persisted errand with errands=%s", (enabled) => {
+    setState({ enabled });
     render(<MobileSessionPickerRow taskId={TASK_ID} sessionId={ERRAND_ID} />);
     expect(screen.queryByTestId("mobile-session-picker-row")).toBeNull();
     expect(screen.queryByTestId(PILL)).toBeNull();
@@ -91,9 +97,10 @@ describe("MobileSessionPickerRow", () => {
     expect(screen.queryByTestId(PILL)).toBeNull();
   });
 
-  it("keeps the pill while the errands flag is off", () => {
-    setState({ enabled: false });
+  it("hides the row for a retained errand without a cached row while the flag is off", () => {
+    setState({ enabled: false, row: false });
     render(<MobileSessionPickerRow taskId={TASK_ID} sessionId={ERRAND_ID} />);
-    expect(screen.getByTestId(PILL)).toBeTruthy();
+    expect(screen.queryByTestId("mobile-session-picker-row")).toBeNull();
+    expect(screen.queryByTestId(PILL)).toBeNull();
   });
 });
