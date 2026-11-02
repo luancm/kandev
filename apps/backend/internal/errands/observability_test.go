@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -83,13 +84,17 @@ func TestFailedErrandCreateLogsFailureWithoutAdmission(t *testing.T) {
 }
 
 func TestSettlementAndCancellationLogsCarryIdentifiers(t *testing.T) {
-	h := newHarness(t)
-	settled := h.mustStart("settle").Errand
-	cancelled := h.mustStart("cancel").Errand
+	h, repo, settled, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "settled answer", "")
+	cancelled := &models.Errand{ID: "cancelled-child", TaskID: testTask, ParentSessionID: testParent,
+		Title: "cancel", Objective: "cancel", AgentProfileID: "profile-1", FirstTurnID: "cancelled-turn", SubmissionID: "cancelled-submission",
+		Lifecycle: models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone}
+	require.NoError(t, repo.CreateErrand(t.Context(), cancelled))
+	h.stopper.target = nil
 	logs := observeErrandLogs(t, h)
 
 	if err := h.service.OnErrandTurnSettled(context.Background(), TurnSettlement{
-		SessionID: settled.ID, TurnID: settled.FirstTurnID, Outcome: models.ErrandOutcomeDone,
+		SessionID: settled.ID, TurnID: settled.FirstTurnID, SubmissionID: settled.SubmissionID, Outcome: models.ErrandOutcomeDone,
 	}); err != nil {
 		t.Fatalf("OnErrandTurnSettled: %v", err)
 	}
@@ -117,38 +122,34 @@ func TestSettlementAndCancellationLogsCarryIdentifiers(t *testing.T) {
 	})
 }
 
+type terminalCommitFailureStore struct {
+	Store
+	err error
+}
+
+func (s terminalCommitFailureStore) CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error) {
+	return false, s.err
+}
+
 func TestReconcileLogsOnlyCommittedTransitions(t *testing.T) {
-	h := newHarness(t)
-	err := h.mustStart("audit").Errand
+	h, repo, row, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "", "failed")
+	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), row.ID, models.TaskSessionStateFailed, ""))
 	logs := observeErrandLogs(t, h)
-	h.store.setSessionState(err.ID, models.TaskSessionStateFailed)
-	h.service.store = updateErrandFailureStore{Store: h.store, err: errors.New("write failed")}
-
-	if err := h.service.Reconcile(context.Background()); err != nil {
-		t.Fatalf("Reconcile with a failed errand update: %v", err)
-	}
-	if got := logs.FilterMessage("errand.reconciled").Len(); got != 0 {
-		t.Fatalf("errand.reconciled logs = %d after a failed write, want none", got)
-	}
-	row, errRead := h.store.GetErrand(context.Background(), err.ID)
-	if errRead != nil {
-		t.Fatalf("GetErrand after failed reconciliation: %v", errRead)
-	}
-	if row.ResultState != models.ErrandResultNone || !row.AwaitingResult {
-		t.Fatalf("failed reconciliation changed result to %q, awaiting=%v", row.ResultState, row.AwaitingResult)
-	}
-
-	h.service.store = h.store
-	if err := h.service.Reconcile(context.Background()); err != nil {
-		t.Fatalf("Reconcile after restoring the store: %v", err)
-	}
-	reconciled := logs.FilterMessage("errand.reconciled").All()
-	if len(reconciled) != 1 {
-		t.Fatalf("errand.reconciled logs = %d after a committed write, want one", len(reconciled))
-	}
-	assertErrandLogFields(t, reconciled[0], map[string]string{
-		"task_id": testTask, "session_id": err.ID, "errand_id": err.ID,
-		"parent_session_id": testParent, "action": "failed_launched_row",
+	h.service.store = terminalCommitFailureStore{Store: repo, err: errors.New("write failed")}
+	require.NoError(t, h.service.Reconcile(t.Context()))
+	require.Zero(t, logs.FilterMessage("errand.settled").Len(), "failed atomic capture cannot log a settlement")
+	require.Empty(t, h.publisher.statuses(), "failed atomic capture cannot publish a result")
+	after := reconcileRow(t, repo, row.ID)
+	require.Equal(t, models.ErrandResultNone, after.ResultState)
+	require.True(t, after.AwaitingResult)
+	h.service.store = repo
+	require.NoError(t, h.service.Reconcile(t.Context()))
+	settled := logs.FilterMessage("errand.settled").All()
+	require.Len(t, settled, 1)
+	assertErrandLogFields(t, settled[0], map[string]string{
+		"task_id": testTask, "session_id": row.ID, "errand_id": row.ID,
+		"parent_session_id": testParent, "status": string(models.ErrandStatusFailed),
 	})
 }
 
@@ -227,14 +228,5 @@ type createErrandFailureStore struct {
 }
 
 func (s createErrandFailureStore) CreateErrand(context.Context, *models.Errand) error {
-	return s.err
-}
-
-type updateErrandFailureStore struct {
-	Store
-	err error
-}
-
-func (s updateErrandFailureStore) UpdateErrand(context.Context, *models.Errand) error {
 	return s.err
 }

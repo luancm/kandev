@@ -37,36 +37,7 @@ type TurnSettlement struct {
 // errand is ignored. Capture of a parent-initiated turn is idempotent on the
 // result turn id.
 func (s *Service) OnErrandTurnSettled(ctx context.Context, settlement TurnSettlement) error {
-	if store, ok := s.store.(terminalDecisionStore); ok {
-		return s.settleExactTerminal(ctx, store, settlement)
-	}
-	return s.onErrandTurnSettled(ctx, settlement, "")
-}
-
-func (s *Service) onErrandTurnSettled(ctx context.Context, settlement TurnSettlement, reconciliationAction string) error {
-	if settlement.SessionID == "" || settlement.TurnID == "" {
-		return nil
-	}
-	errand, err := s.store.GetErrand(ctx, settlement.SessionID)
-	if errors.Is(err, models.ErrErrandNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("load errand for settlement: %w", err)
-	}
-	unlock := s.parentLocks.lock(errand.ParentSessionID)
-	row, changed, settleErr := s.settleTurn(ctx, errand, settlement)
-	unlock()
-	if settleErr != nil {
-		return settleErr
-	}
-	if changed {
-		if reconciliationAction != "" {
-			s.logReconciled(row, reconciliationAction)
-		}
-		s.afterResultWrite(ctx, row)
-	}
-	return nil
+	return s.settleExactTerminal(ctx, settlement)
 }
 
 // OnErrandTurnCancelled settles the exact turn observed by cancellation. A
@@ -160,53 +131,6 @@ func (s *Service) SendResult(ctx context.Context, errandID string) (*Snapshot, e
 
 func sentResult(row *models.Errand, turnID string) bool {
 	return row != nil && row.ResultState == models.ErrandResultPending && row.ResultTurnID == turnID
-}
-
-func (s *Service) settleTurn(
-	ctx context.Context, errand *models.Errand, settlement TurnSettlement,
-) (*models.Errand, bool, error) {
-	if s.turns != nil {
-		latestID, _, err := s.turns.LatestTurn(ctx, errand.ID)
-		if err != nil {
-			return nil, false, fmt.Errorf("verify current errand turn: %w", err)
-		}
-		if latestID != "" && latestID != settlement.TurnID {
-			return errand, false, nil
-		}
-	}
-	if settlement.TurnID == errand.FirstTurnID && settlement.SubmissionID != "" && settlement.SubmissionID != errand.SubmissionID {
-		return errand, false, nil
-	}
-	view, err := s.readTurn(ctx, errand.ID, settlement.TurnID)
-	if err != nil {
-		return nil, false, err
-	}
-	parentInitiated := parentInitiatedTurn(errand, settlement.TurnID, view)
-	alreadyCaptured := errand.ResultTurnID == settlement.TurnID && resultAlreadyCaptured(errand.ResultState)
-	text, truncated, kind := resultOf(settlement, view, parentInitiated)
-	now := s.clock.Now()
-	row, changed, err := s.update(ctx, errand.ID, func(e *models.Errand) bool {
-		return applySettlement(e, settlement, parentInitiated, text, truncated, kind, now)
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("record errand settlement: %w", err)
-	}
-	if changed && parentInitiated && !alreadyCaptured {
-		status := models.ErrandStatusDone
-		if settlement.Outcome == models.ErrandOutcomeFailed {
-			status = models.ErrandStatusFailed
-		}
-		countSettled(status)
-		s.logger.Info("errand.settled", s.errandFields(row, "status", string(status))...)
-	}
-	return row, changed, nil
-}
-
-func parentInitiatedTurn(errand *models.Errand, turnID string, view TurnView) bool {
-	if turnID == errand.FirstTurnID {
-		return true
-	}
-	return view.EarliestUserSender != "" && view.EarliestUserSender == errand.ParentSessionID
 }
 
 func (s *Service) readTurn(ctx context.Context, sessionID, turnID string) (TurnView, error) {

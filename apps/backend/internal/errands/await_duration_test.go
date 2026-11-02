@@ -9,7 +9,7 @@ import (
 
 func TestAwaitOutcomeMetadata(t *testing.T) {
 	t.Run("ready any", func(t *testing.T) {
-		h, id := settleFirstTurn(t, "answer")
+		h, id := pendingResultHarness(t, "answer")
 		result, err := h.service.Await(context.Background(), AwaitRequest{ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAny})
 		if err != nil || result.EndReason != "any_ready" || result.DurationMS < 0 {
 			t.Fatalf("await = %+v, %v", result, err)

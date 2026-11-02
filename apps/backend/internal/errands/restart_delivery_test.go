@@ -10,9 +10,10 @@ import (
 // @covers AC-TASKS-ERRANDS-004.8
 func TestRestartDeliversAResultThatWasStillPending(t *testing.T) {
 	ctx := context.Background()
-	h, errandID := settleFirstTurn(t, "the answer")
+	h, repo, errand := settledTerminalFixture(t, "the answer")
+	errandID := errand.ID
 
-	row, err := h.store.GetErrand(ctx, errandID)
+	row, err := repo.GetErrand(ctx, errandID)
 	if err != nil {
 		t.Fatalf("GetErrand: %v", err)
 	}

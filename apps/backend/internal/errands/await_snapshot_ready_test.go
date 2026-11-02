@@ -38,7 +38,7 @@ func (s *resumedClaimStore) ClaimResults(ctx context.Context, task, parent strin
 
 func TestAwaitStaleSnapshotRechecksReadiness(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		h, id := settleFirstTurn(t, "obsolete result")
+		h, id := pendingResultHarness(t, "obsolete result")
 		store := &resumedClaimStore{Store: h.store, memory: h.store, id: id, changed: make(chan struct{})}
 		h.service.store = store
 		ctx, cancel := context.WithCancel(t.Context())

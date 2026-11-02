@@ -16,7 +16,7 @@ func (s *awaitLoadFailureStore) GetErrand(context.Context, string) (*models.Erra
 }
 
 func TestAwaitErrorBeforeClaimCommitsAbortTombstone(t *testing.T) {
-	h, id := settleFirstTurn(t, "answer")
+	h, id := pendingResultHarness(t, "answer")
 	h.service.store = &awaitLoadFailureStore{Store: h.store}
 	_, err := h.service.Await(context.Background(), AwaitRequest{
 		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "load-error",

@@ -24,6 +24,9 @@ func (s *fakeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Er
 	default:
 		target.SessionIncarnation, target.ExecutionID, target.NoTurn = "test-incarnation", row.ID, true
 	}
+	if s.target != nil {
+		target = *s.target
+	}
 	if err := commit(target); err != nil {
 		return err
 	}
@@ -218,7 +221,8 @@ func TestCancelOfDoneErrandWithoutPendingTeardownIsNoOp(t *testing.T) {
 }
 
 // Receipt completion is the only allowed concurrent write in stale-settlement
-// assertions. Identity, result and all other row metadata must remain exact.
+// assertions. Its version and update timestamp advance together; identity,
+// result and all other row metadata must remain exact.
 func expectedAfterTeardownReceipt(before, after *models.Errand) *models.Errand {
 	expected := *before
 	if before.TeardownIntent != nil && after.TeardownIntent != nil &&
@@ -227,6 +231,7 @@ func expectedAfterTeardownReceipt(before, after *models.Errand) *models.Errand {
 		intent.State = models.ErrandTeardownIntentCompleted
 		expected.TeardownIntent = &intent
 		expected.Version++
+		expected.UpdatedAt = after.UpdatedAt
 	}
 	return &expected
 }

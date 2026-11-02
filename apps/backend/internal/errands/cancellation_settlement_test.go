@@ -10,7 +10,7 @@ import (
 
 // @covers AC-TASKS-ERRANDS-007.5
 func TestParentTurnCancellationLeavesResultsAndLiveErrandsForLaterTurn(t *testing.T) {
-	h, settledID := settleFirstTurn(t, "the answer")
+	h, settledID := pendingResultHarness(t, "the answer")
 	live := h.mustStart("still running").Errand
 	before := len(h.deliverer.delivered())
 
@@ -33,15 +33,11 @@ func TestParentTurnCancellationLeavesResultsAndLiveErrandsForLaterTurn(t *testin
 
 // @covers AC-TASKS-ERRANDS-002.1
 func TestCancelledErrandTurnPreservesCompletionThatWonTheRace(t *testing.T) {
-	h := newHarness(t)
-	errand := h.mustStart("audit").Errand
-	view := TurnView{Completed: true, EarliestUserSender: testParent, LastAgentText: "finished first"}
-	h.service.SetTurnReader(&cancellationTurns{
-		views: map[string]TurnView{errand.FirstTurnID: view}, latestID: errand.FirstTurnID, latest: view,
-	})
+	h, repo, errand, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "finished first", "")
 
 	require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), errand.ID, errand.FirstTurnID, errand.SubmissionID))
-	row, err := h.store.GetErrand(t.Context(), errand.ID)
+	row, err := repo.GetErrand(t.Context(), errand.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandOutcomeDone, row.LastOutcome)
 	require.Equal(t, models.ErrandResultOutput, row.ResultKind)

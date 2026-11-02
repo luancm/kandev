@@ -5,16 +5,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestAwaitAllWakesWhenCapturedResultSessionBecomesIdle(t *testing.T) {
 	ctx := context.Background()
-	h := newHarness(t)
-	row := h.mustStart("audit").Errand
-	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
-		row.FirstTurnID: {LastAgentText: "Settled result", EarliestUserSender: testParent},
-	}})
+	h, repo, row, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "Settled result", "")
+
 	req := AwaitRequest{ParentSessionID: testParent, ErrandIDs: []string{row.ID}, Mode: awaitModeAll, Token: "state-wake", MaxWaitSeconds: 600}
 	rows, err := h.service.loadAwaitErrands(ctx, req)
 	if err != nil {
@@ -23,7 +23,7 @@ func TestAwaitAllWakesWhenCapturedResultSessionBecomesIdle(t *testing.T) {
 	waiter := h.service.awaits.register(testParent, req.Token)
 	defer h.service.awaits.remove(waiter)
 	if err := h.service.OnErrandTurnSettled(ctx, TurnSettlement{
-		SessionID: row.ID, TurnID: row.FirstTurnID, Outcome: models.ErrandOutcomeDone,
+		SessionID: row.ID, TurnID: row.FirstTurnID, SubmissionID: row.SubmissionID, Outcome: models.ErrandOutcomeDone,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestAwaitAllWakesWhenCapturedResultSessionBecomesIdle(t *testing.T) {
 	if err != nil || ready {
 		t.Fatalf("still-running result readiness = %v, %v", ready, err)
 	}
-	h.store.setSessionState(row.ID, models.TaskSessionStateWaitingForInput)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, row.ID, models.TaskSessionStateWaitingForInput, ""))
 	if err := h.service.OnSessionStateChanged(ctx, row.ID); err != nil {
 		t.Fatal(err)
 	}

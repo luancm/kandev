@@ -38,7 +38,7 @@ func (s *insertingClaimStore) ClaimResults(ctx context.Context, task, parent str
 }
 
 func TestComposeParentTurnReprojectsNewInventoryMember(t *testing.T) {
-	h, _ := settleFirstTurn(t, "original output")
+	h, _ := pendingResultHarness(t, "original output")
 	store := &insertingClaimStore{Store: h.store}
 	h.service.store = store
 	result, err := h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)

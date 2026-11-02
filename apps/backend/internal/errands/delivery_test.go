@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -40,54 +42,64 @@ func (f *fakeTurns) LatestTurn(context.Context, string) (string, TurnView, error
 }
 
 type cancellationTurns struct {
-	views    map[string]TurnView
+	reader   TurnReader
 	latestID string
 	latest   TurnView
 }
 
-func (f *cancellationTurns) ReadTurn(_ context.Context, _, turnID string) (TurnView, error) {
-	return f.views[turnID], nil
+func (f *cancellationTurns) ReadTurn(ctx context.Context, sessionID, turnID string) (TurnView, error) {
+	return f.reader.ReadTurn(ctx, sessionID, turnID)
 }
 
 func (f *cancellationTurns) LatestTurn(context.Context, string) (string, TurnView, error) {
 	return f.latestID, f.latest, nil
 }
 
-// settleFirstTurn starts an errand whose first turn is parent-initiated and
-// settles it with text. It returns the harness and the errand ID.
-func settleFirstTurn(t *testing.T, text string) (*harness, string) {
+// pendingResultHarness seeds a pending result for delivery tests. Terminal
+// settlement itself is covered with the real SQLite fixture below.
+func pendingResultHarness(t *testing.T, text string) (*harness, string) {
 	t.Helper()
 	h := newHarness(t)
 	errand := h.mustStart("audit").Errand
 	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
-		errand.FirstTurnID: {LastAgentText: text, EarliestUserSender: testParent},
+		errand.FirstTurnID: {LastAgentText: text, EarliestUserSender: testParent, Completed: true},
 	}})
 	h.store.setSessionState(errand.ID, models.TaskSessionStateWaitingForInput)
-	err := h.service.OnErrandTurnSettled(context.Background(), TurnSettlement{
-		SessionID: errand.ID, TurnID: errand.FirstTurnID, Outcome: models.ErrandOutcomeDone,
+	row, _, err := h.service.update(t.Context(), errand.ID, func(e *models.Errand) bool {
+		e.LatestSettledTurnID, e.ResultTurnID = e.FirstTurnID, e.FirstTurnID
+		e.ResultState, e.ResultKind, e.ResultText = models.ErrandResultPending, models.ErrandResultOutput, text
+		e.AwaitingResult, e.LastOutcome = false, models.ErrandOutcomeDone
+		return true
 	})
-	if err != nil {
-		t.Fatalf("OnErrandTurnSettled: %v", err)
-	}
+	require.NoError(t, err)
+	h.service.afterResultWrite(t.Context(), row)
 	return h, errand.ID
 }
 
 // @covers AC-TASKS-ERRANDS-003.1
 func TestParentInitiatedTurnCapturesItsFinalMessageAsOneResult(t *testing.T) {
-	h, id := settleFirstTurn(t, "the answer")
-	row, err := h.store.GetErrand(context.Background(), id)
-	if err != nil {
-		t.Fatalf("GetErrand: %v", err)
-	}
-	if row.ResultState != models.ErrandResultPending || row.ResultText != "the answer" || row.ResultTurnID == "" {
-		t.Fatalf("result = %q/%s turn %q, want one pending result", row.ResultText, row.ResultState, row.ResultTurnID)
-	}
-	if row.AwaitingResult {
-		t.Fatal("a settled parent-initiated turn left the errand awaiting its result")
-	}
-	if got := h.deliverer.delivered(); len(got) != 1 {
-		t.Fatalf("deliveries = %v, want one notification request", got)
-	}
+	h, repo, errand, effect := newTerminalFixture(t)
+	require.NoError(t, repo.CreateMessage(t.Context(), &models.Message{ID: "earlier-output", TaskID: testTask,
+		TaskSessionID: errand.ID, TurnID: effect.TurnID, AuthorType: models.MessageAuthorAgent, Content: "earlier answer"}))
+	completeTerminalTurn(t, repo, effect, "the answer", "")
+	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), errand.ID, models.TaskSessionStateWaitingForInput, ""))
+	settlement := TurnSettlement{SessionID: errand.ID, TurnID: effect.TurnID, SubmissionID: effect.SubmissionID, Outcome: models.ErrandOutcomeDone}
+	require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), settlement))
+	row, err := repo.GetErrand(t.Context(), errand.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandResultPending, row.ResultState)
+	require.Equal(t, "the answer", row.ResultText)
+	require.Equal(t, effect.TurnID, row.ResultTurnID)
+	require.False(t, row.AwaitingResult)
+	require.Len(t, h.deliverer.delivered(), 1)
+	require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), settlement))
+	after, err := repo.GetErrand(t.Context(), errand.ID)
+	require.NoError(t, err)
+	require.Equal(t, row, after, "duplicate settlement cannot create a second result revision")
+	require.Len(t, h.deliverer.delivered(), 1)
+	pending, err := repo.PendingErrandTurnSettlements(t.Context(), errand.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending, "the exact terminal decision committed with its result")
 }
 
 // @covers AC-TASKS-ERRANDS-003.2
@@ -108,125 +120,116 @@ func TestOversizedResultIsBoundedAtACharacterBoundary(t *testing.T) {
 
 // @covers AC-TASKS-ERRANDS-003.3
 func TestUserTurnDoesNotProduceAResult(t *testing.T) {
-	h := newHarness(t)
-	errand := h.mustStart("audit").Errand
-	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
-		"user-turn": {LastAgentText: "chatter", EarliestUserSender: "someone-else"},
-	}})
-	err := h.service.OnErrandTurnSettled(context.Background(), TurnSettlement{
-		SessionID: errand.ID, TurnID: "user-turn", Outcome: models.ErrandOutcomeDone,
-	})
-	if err != nil {
-		t.Fatalf("OnErrandTurnSettled: %v", err)
-	}
-	row, _ := h.store.GetErrand(context.Background(), errand.ID)
-	if row.ResultState == models.ErrandResultPending || row.ResultText != "" {
-		t.Fatalf("a user turn produced result %q/%s", row.ResultText, row.ResultState)
-	}
-	if row.LatestSettledTurnID != "user-turn" {
-		t.Fatalf("latest settled turn = %q, want the user turn recorded", row.LatestSettledTurnID)
-	}
+	h, repo, row, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "parent answer", "done")
+	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+	_, err := h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
+	require.NoError(t, err)
+	before, err := repo.GetErrand(t.Context(), row.ID)
+	require.NoError(t, err)
+	user := reserveTerminalTurn(t, repo, row, "user-turn", "user-submission", "user")
+	completeTerminalTurn(t, repo, user, "chatter", "")
+	require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), TurnSettlement{
+		SessionID: row.ID, TurnID: user.TurnID, SubmissionID: user.SubmissionID, Outcome: models.ErrandOutcomeDone,
+	}))
+	after, err := repo.GetErrand(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Equal(t, "user-turn", after.LatestSettledTurnID)
+	require.Equal(t, before.ResultState, after.ResultState)
+	require.Equal(t, before.ResultText, after.ResultText)
+	require.Equal(t, before.ResultTurnID, after.ResultTurnID)
+	require.Equal(t, before.ResultRevision, after.ResultRevision, "user turn commits a no-result decision")
+	pending, err := repo.PendingErrandTurnSettlements(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending)
 }
 
 func TestCancelledParentTurnProducesInterruptedFailureAndClearsAwaiting(t *testing.T) {
-	h := newHarness(t)
-	err := h.mustStart("audit").Errand
-	h.service.SetTurnReader(&cancellationTurns{
-		views:    map[string]TurnView{err.FirstTurnID: {EarliestUserSender: testParent}},
-		latestID: err.FirstTurnID,
-		latest:   TurnView{EarliestUserSender: testParent},
-	})
-
-	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, err.FirstTurnID, err.SubmissionID); err != nil {
-		t.Fatalf("OnErrandTurnCancelled: %v", err)
-	}
-	row, getErr := h.store.GetErrand(context.Background(), err.ID)
-	if getErr != nil {
-		t.Fatalf("GetErrand: %v", getErr)
-	}
-	if row.LastOutcome != models.ErrandOutcomeFailed || row.ResultKind != models.ErrandResultInterrupted ||
-		row.ResultState != models.ErrandResultPending || row.ResultTurnID != err.FirstTurnID || row.AwaitingResult {
-		t.Fatalf("row = outcome %q kind %q state %q turn %q awaiting %v, want an interrupted pending failure with no outstanding bit",
-			row.LastOutcome, row.ResultKind, row.ResultState, row.ResultTurnID, row.AwaitingResult)
-	}
+	h, repo, row, effect := newTerminalFixture(t)
+	reader := terminalTranscript{repo}
+	latest, err := reader.ReadTurn(t.Context(), row.ID, effect.TurnID)
+	require.NoError(t, err)
+	completeTerminalTurn(t, repo, effect, "unfinished output", "")
+	// Cancellation observed the turn before completion; settlement reads the committed turn.
+	h.service.SetTurnReader(&cancellationTurns{reader: reader, latestID: effect.TurnID, latest: latest})
+	require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, effect.TurnID, effect.SubmissionID))
+	after, err := repo.GetErrand(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandOutcomeFailed, after.LastOutcome)
+	require.Equal(t, models.ErrandResultInterrupted, after.ResultKind)
+	require.Equal(t, interruptedTurnNotice, after.ResultText)
+	require.Equal(t, models.ErrandResultPending, after.ResultState)
+	require.Equal(t, effect.TurnID, after.ResultTurnID)
+	require.False(t, after.AwaitingResult)
 }
 
 func TestCancelledUserTurnPreservesPriorOutcomeWithoutAResult(t *testing.T) {
-	h := newHarness(t)
-	err := h.mustStart("audit").Errand
-	_, _, updateErr := h.service.update(context.Background(), err.ID, func(row *models.Errand) bool {
-		row.LastOutcome = models.ErrandOutcomeDone
-		row.LatestSettledTurnID = "previous-turn"
-		return true
-	})
-	if updateErr != nil {
-		t.Fatalf("seed prior outcome: %v", updateErr)
-	}
-	h.service.SetTurnReader(&cancellationTurns{
-		views:    map[string]TurnView{"user-turn": {EarliestUserSender: "user-session"}},
-		latestID: "user-turn",
-		latest:   TurnView{EarliestUserSender: "user-session"},
-	})
-
-	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, "user-turn", "user-submission"); err != nil {
-		t.Fatalf("OnErrandTurnCancelled: %v", err)
-	}
-	row, getErr := h.store.GetErrand(context.Background(), err.ID)
-	if getErr != nil {
-		t.Fatalf("GetErrand: %v", getErr)
-	}
-	if row.LastOutcome != models.ErrandOutcomeDone || row.ResultState == models.ErrandResultPending || row.ResultText != "" ||
-		row.LatestSettledTurnID != "user-turn" {
-		t.Fatalf("row = outcome %q state %q text %q latest %q, want the previous outcome and no implicit result",
-			row.LastOutcome, row.ResultState, row.ResultText, row.LatestSettledTurnID)
-	}
-	if got := h.deliverer.delivered(); len(got) != 0 {
-		t.Fatalf("cancelled user turn triggered result delivery: %v", got)
-	}
+	h, repo, row, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "parent answer", "done")
+	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+	_, err := h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
+	require.NoError(t, err)
+	before, err := repo.GetErrand(t.Context(), row.ID)
+	require.NoError(t, err)
+	user := reserveTerminalTurn(t, repo, row, "user-turn", "user-submission", "user")
+	reader := terminalTranscript{repo}
+	latest, err := reader.ReadTurn(t.Context(), row.ID, user.TurnID)
+	require.NoError(t, err)
+	completeTerminalTurn(t, repo, user, "unfinished user chatter", "")
+	h.service.SetTurnReader(&cancellationTurns{reader: reader, latestID: user.TurnID, latest: latest})
+	h.deliverer.parents = nil
+	require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, user.TurnID, user.SubmissionID))
+	after, err := repo.GetErrand(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandOutcomeDone, after.LastOutcome)
+	require.Equal(t, user.TurnID, after.LatestSettledTurnID)
+	require.Equal(t, before.ResultState, after.ResultState)
+	require.Equal(t, before.ResultText, after.ResultText)
+	require.Equal(t, before.ResultTurnID, after.ResultTurnID)
+	require.Equal(t, before.ResultRevision, after.ResultRevision)
+	require.Empty(t, h.deliverer.delivered())
 }
 
 func TestCancelledErrandTurnIgnoresSuccessorAndWrongInitialSubmission(t *testing.T) {
-	h := newHarness(t)
-	err := h.mustStart("audit").Errand
-	h.service.SetTurnReader(&cancellationTurns{
-		views:    map[string]TurnView{err.FirstTurnID: {EarliestUserSender: testParent}},
-		latestID: "successor-turn",
-		latest:   TurnView{EarliestUserSender: testParent},
+	t.Run("successor", func(t *testing.T) {
+		h, repo, row, effect := newTerminalFixture(t)
+		completeTerminalTurn(t, repo, effect, "parent answer", "done")
+		require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+		successor := reserveTerminalTurn(t, repo, row, "successor-turn", "successor-submission", "parent")
+		a := models.ErrandParentAdmission{TaskID: testTask, ParentSessionID: testParent, ErrandID: row.ID,
+			SenderSessionID: testParent, TurnID: successor.TurnID, SubmissionID: successor.SubmissionID}
+		_, err := h.service.ReserveParentAdmission(t.Context(), a)
+		require.NoError(t, err)
+		require.NoError(t, h.service.DecideParentAdmission(t.Context(), a, models.ErrandAdmissionAccepted))
+		before, err := repo.GetErrand(t.Context(), row.ID)
+		require.NoError(t, err)
+		require.True(t, before.AwaitingResult)
+		require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, effect.TurnID, effect.SubmissionID))
+		after, err := repo.GetErrand(t.Context(), row.ID)
+		require.NoError(t, err)
+		require.Equal(t, before, after, "stale cancellation preserves successor result ownership")
+		turn, err := repo.GetTurn(t.Context(), successor.TurnID)
+		require.NoError(t, err)
+		require.Nil(t, turn.CompletedAt)
 	})
-
-	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, err.FirstTurnID, err.SubmissionID); err != nil {
-		t.Fatalf("stale OnErrandTurnCancelled: %v", err)
-	}
-	row, getErr := h.store.GetErrand(context.Background(), err.ID)
-	if getErr != nil {
-		t.Fatalf("GetErrand: %v", getErr)
-	}
-	if row.AwaitingResult == false || row.ResultState == models.ErrandResultPending || row.LastOutcome != "" {
-		t.Fatalf("stale cancellation changed successor state: awaiting %v, result %q, outcome %q",
-			row.AwaitingResult, row.ResultState, row.LastOutcome)
-	}
-
-	h.service.SetTurnReader(&cancellationTurns{
-		views:    map[string]TurnView{err.FirstTurnID: {EarliestUserSender: testParent}},
-		latestID: err.FirstTurnID,
-		latest:   TurnView{EarliestUserSender: testParent},
+	t.Run("wrong initial submission", func(t *testing.T) {
+		h, repo, row, effect := newTerminalFixture(t)
+		completeTerminalTurn(t, repo, effect, "committed answer", "")
+		before, err := repo.GetErrand(t.Context(), row.ID)
+		require.NoError(t, err)
+		require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, effect.TurnID, "wrong-submission"))
+		after, err := repo.GetErrand(t.Context(), row.ID)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+		pending, err := repo.PendingErrandTurnSettlements(t.Context(), row.ID)
+		require.NoError(t, err)
+		require.Len(t, pending, 1)
 	})
-	if err := h.service.OnErrandTurnCancelled(context.Background(), err.ID, err.FirstTurnID, "wrong-submission"); err != nil {
-		t.Fatalf("wrong-submission OnErrandTurnCancelled: %v", err)
-	}
-	row, getErr = h.store.GetErrand(context.Background(), err.ID)
-	if getErr != nil {
-		t.Fatalf("GetErrand after wrong submission: %v", getErr)
-	}
-	if !row.AwaitingResult || row.ResultState == models.ErrandResultPending || row.LastOutcome != "" {
-		t.Fatalf("wrong submission changed errand: awaiting %v, result %q, outcome %q",
-			row.AwaitingResult, row.ResultState, row.LastOutcome)
-	}
 }
 
 // @covers AC-TASKS-ERRANDS-003.4
 func TestLaterParentTurnSupersedesAnUndeliveredResult(t *testing.T) {
-	h, id := settleFirstTurn(t, "first answer")
+	h, id := pendingResultHarness(t, "first answer")
 	a := models.ErrandParentAdmission{TaskID: testTask, ParentSessionID: testParent, ErrandID: id,
 		SenderSessionID: testParent, TurnID: "successor-turn", SubmissionID: "successor-submission"}
 	if _, err := h.service.ReserveParentAdmission(context.Background(), a); err != nil {
@@ -243,7 +246,7 @@ func TestLaterParentTurnSupersedesAnUndeliveredResult(t *testing.T) {
 
 // @covers AC-TASKS-ERRANDS-004.9
 func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
-	h, id := settleFirstTurn(t, "the answer")
+	h, id := pendingResultHarness(t, "the answer")
 	ctx := context.Background()
 	first, err := h.service.Await(ctx, AwaitRequest{
 		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-a",
@@ -270,7 +273,7 @@ func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
 
 // @covers AC-TASKS-ERRANDS-004.9
 func TestReleasedAwaitMakesTheResultDeliverableAgain(t *testing.T) {
-	h, id := settleFirstTurn(t, "the answer")
+	h, id := pendingResultHarness(t, "the answer")
 	ctx := context.Background()
 	if _, err := h.service.Await(ctx, AwaitRequest{
 		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-a",
@@ -288,7 +291,7 @@ func TestReleasedAwaitMakesTheResultDeliverableAgain(t *testing.T) {
 
 // @covers AC-TASKS-ERRANDS-004.9
 func TestStatusBlockClaimsResultsAndReleaseReturnsThem(t *testing.T) {
-	h, id := settleFirstTurn(t, "the answer")
+	h, id := pendingResultHarness(t, "the answer")
 	ctx := context.Background()
 	composition, err := h.service.ComposeParentTurn(ctx, testParent, models.ErrandDeliveryTurnContext)
 	if err != nil {
@@ -408,7 +411,7 @@ func oppositeDeliveryRoute(route models.ErrandDeliveryRoute) models.ErrandDelive
 func TestReleaseClaimDoesNotReleaseReplacementToken(t *testing.T) {
 	for _, route := range []models.ErrandDeliveryRoute{models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext} {
 		t.Run(string(route), func(t *testing.T) {
-			h, id := settleFirstTurn(t, "the answer")
+			h, id := pendingResultHarness(t, "the answer")
 			ctx := context.Background()
 			var tokenA string
 			if route == models.ErrandDeliveryAwait {
@@ -511,7 +514,7 @@ func TestReleaseClaimDoesNotReleaseReplacementToken(t *testing.T) {
 func TestReleaseClaimChecksRouteAuthority(t *testing.T) {
 	for _, claimRoute := range []models.ErrandDeliveryRoute{models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext, models.ErrandDeliveryNotification} {
 		t.Run(string(claimRoute), func(t *testing.T) {
-			h, id := settleFirstTurn(t, "the answer")
+			h, id := pendingResultHarness(t, "the answer")
 			token := "token-a"
 			if claimRoute != models.ErrandDeliveryAwait {
 				token = ""
@@ -547,7 +550,7 @@ func TestReleaseClaimRechecksExactIdentityAtStorageBoundary(t *testing.T) {
 	for _, route := range []models.ErrandDeliveryRoute{models.ErrandDeliveryAwait, models.ErrandDeliveryTurnContext} {
 		for _, replacement := range []string{"token-and-route", "route-only"} {
 			t.Run(string(route)+"/"+replacement, func(t *testing.T) {
-				h, id := settleFirstTurn(t, "the answer")
+				h, id := pendingResultHarness(t, "the answer")
 				tokenA := "token-a"
 				if route == models.ErrandDeliveryTurnContext {
 					tokenA = ""
@@ -627,7 +630,7 @@ func claimDeliveryForErrand(t *testing.T, h *harness, errandID string, route mod
 
 // @covers AC-TASKS-ERRANDS-004.11
 func TestBlockedParentIsNotNotifiedUntilTheSweep(t *testing.T) {
-	h, _ := settleFirstTurn(t, "the answer")
+	h, _ := pendingResultHarness(t, "the answer")
 	h.deliverer.parents = nil
 	h.deliverer.blocked = true
 	if err := h.service.SweepDelivery(context.Background()); err != nil {
@@ -647,7 +650,7 @@ func TestBlockedParentIsNotNotifiedUntilTheSweep(t *testing.T) {
 
 // @covers AC-TASKS-ERRANDS-006.1
 func TestOutstandingParentReportsOutstandingUntilTheResultIsDelivered(t *testing.T) {
-	h, _ := settleFirstTurn(t, "the answer")
+	h, _ := pendingResultHarness(t, "the answer")
 	ctx := context.Background()
 	outstanding, err := h.service.OnParentTurnSettled(ctx, testParent, SettleCauseTurnDone)
 	if err != nil || !outstanding {
@@ -718,28 +721,19 @@ func TestRefusedCancellationNoticeFailsTheDeleteInsteadOfLosingIt(t *testing.T) 
 
 // @covers AC-TASKS-ERRANDS-003.3
 func TestSendResultCapturesAUserTurnOnlyWhenTheRuleAllows(t *testing.T) {
-	h, id := settleFirstTurn(t, "captured")
-	ctx := context.Background()
-	if _, err := h.service.SendResult(ctx, id); err == nil {
-		t.Fatal("SendResult accepted a turn whose result is already pending or delivered")
-	}
-	h.store.setSessionState(id, models.TaskSessionStateWaitingForInput)
-	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
-		"user-turn": {LastAgentText: "sent by the user", EarliestUserSender: "user"},
-	}})
-	if err := h.service.OnErrandTurnSettled(ctx, TurnSettlement{
-		SessionID: id, TurnID: "user-turn", Outcome: models.ErrandOutcomeDone,
-	}); err != nil {
-		t.Fatalf("OnErrandTurnSettled: %v", err)
-	}
-	if _, err := h.service.ComposeParentTurn(ctx, testParent, models.ErrandDeliveryTurnContext); err != nil {
-		t.Fatalf("ComposeParentTurn: %v", err)
-	}
-	snapshot, err := h.service.SendResult(ctx, id)
-	if err != nil {
-		t.Fatalf("SendResult after a user turn: %v", err)
-	}
-	if snapshot.Errand.ResultText != "sent by the user" || snapshot.Errand.ResultState != models.ErrandResultPending {
-		t.Fatalf("result = %q/%s, want the user turn pending", snapshot.Errand.ResultText, snapshot.Errand.ResultState)
-	}
+	h, repo, row, effect := newTerminalFixture(t)
+	completeTerminalTurn(t, repo, effect, "captured", "done")
+	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+	_, err := h.service.SendResult(t.Context(), row.ID)
+	require.Error(t, err, "the captured result is still pending")
+	user := reserveTerminalTurn(t, repo, row, "user-turn", "user-submission", "user")
+	completeTerminalTurn(t, repo, user, "sent by the user", "done")
+	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), row.ID, models.TaskSessionStateWaitingForInput, ""))
+	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+	_, err = h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
+	require.NoError(t, err)
+	snapshot, err := h.service.SendResult(t.Context(), row.ID)
+	require.NoError(t, err)
+	require.Equal(t, "sent by the user", snapshot.Errand.ResultText)
+	require.Equal(t, models.ErrandResultPending, snapshot.Errand.ResultState)
 }

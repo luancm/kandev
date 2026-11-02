@@ -43,7 +43,7 @@ func (s *replacingClaimStore) ClaimResults(ctx context.Context, task, parent str
 }
 
 func TestAwaitCancellationAfterClaimCannotReturnSuccess(t *testing.T) {
-	h, id := settleFirstTurn(t, "must not escape after cancellation")
+	h, id := pendingResultHarness(t, "must not escape after cancellation")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	h.service.store = &replacingClaimStore{Store: h.store, afterClaim: cancel}
@@ -60,7 +60,7 @@ func TestAwaitCancellationAfterClaimCannotReturnSuccess(t *testing.T) {
 func TestClaimSnapshotRetryIsBounded(t *testing.T) {
 	for _, await := range []bool{false, true} {
 		t.Run(map[bool]string{false: "compose", true: "await"}[await], func(t *testing.T) {
-			h, id := settleFirstTurn(t, "original")
+			h, id := pendingResultHarness(t, "original")
 			store := &replacingClaimStore{Store: h.store, ids: []string{id}, always: true}
 			h.service.store = store
 			var err error
@@ -88,7 +88,7 @@ func TestClaimSnapshotRetryIsBounded(t *testing.T) {
 }
 
 func TestComposeParentTurnReprojectsStaleClaim(t *testing.T) {
-	h, id := settleFirstTurn(t, "stale output")
+	h, id := pendingResultHarness(t, "stale output")
 	store := &replacingClaimStore{Store: h.store, ids: []string{id}}
 	h.service.store = store
 	result, err := h.service.ComposeParentTurn(context.Background(), testParent, models.ErrandDeliveryTurnContext)
@@ -98,7 +98,7 @@ func TestComposeParentTurnReprojectsStaleClaim(t *testing.T) {
 }
 
 func TestAwaitReprojectsStaleClaim(t *testing.T) {
-	h, id := settleFirstTurn(t, "stale output")
+	h, id := pendingResultHarness(t, "stale output")
 	store := &replacingClaimStore{Store: h.store, ids: []string{id}}
 	h.service.store = store
 	result, err := h.service.Await(context.Background(), AwaitRequest{

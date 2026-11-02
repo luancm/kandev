@@ -24,6 +24,19 @@ type memoryStore struct {
 	claims     map[string][]models.ErrandResultClaim
 }
 
+// Terminal settlement tests use SQLite; this fixture must never infer a decision.
+func (*memoryStore) ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error {
+	panic("terminal settlement requires the SQLite fixture")
+}
+
+func (*memoryStore) CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error) {
+	panic("terminal settlement requires the SQLite fixture")
+}
+
+func (*memoryStore) PendingErrandTurnSettlements(context.Context, string) ([]*models.AgentDeliveryEffect, error) {
+	panic("terminal settlement requires the SQLite fixture")
+}
+
 func (s *memoryStore) BeginErrandAwait(context.Context, models.ErrandAwaitIdentity) error { return nil }
 func (s *memoryStore) OfferErrandAwait(context.Context, models.ErrandAwaitIdentity, []models.ErrandAwaitDeliveryItem) error {
 	return nil
@@ -295,8 +308,12 @@ func (l *fakeLauncher) calls() []LaunchRequest {
 }
 
 type fakeStopper struct {
-	mu        sync.Mutex
-	store     *memoryStore
+	mu    sync.Mutex
+	store interface {
+		Store
+		TeardownIntentStore
+	}
+	target    *ErrandTeardownTarget
 	stopped   []string
 	reasons   []string
 	rowAtStop map[string]models.ErrandLifecycle
