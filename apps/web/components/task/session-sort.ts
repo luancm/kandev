@@ -1,3 +1,4 @@
+import { isErrandConversation } from "@/lib/task-conversation-navigation";
 import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { t } from "@/lib/i18n";
@@ -58,8 +59,8 @@ export function pickActiveSessionId(
   if (preferredSessionId && sessions.some((s) => s.id === preferredSessionId)) {
     return preferredSessionId;
   }
-  const primary = sessions.find((s) => s.is_primary);
-  return (primary ?? sessions[0]).id;
+  const normal = sessions.filter((session) => !isErrandConversation(session));
+  return (normal.find((session) => session.is_primary) ?? normal[0])?.id ?? null;
 }
 
 export function isSessionActive(state: TaskSessionState | null | undefined): boolean {

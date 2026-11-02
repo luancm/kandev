@@ -1,3 +1,4 @@
+import { SessionPage } from "../pages/session-page";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
@@ -798,5 +799,46 @@ export async function openDefaultErrandParent(
     await writeFile(`${path}.json`, JSON.stringify(evidence, null, 2));
     await page.screenshot({ path: `${path}.png`, fullPage: true });
     throw new Error(`Default errand route failed; evidence: ${path}.json`, { cause: error });
+  }
+}
+
+/** Summary context must use normal conversations while child transcripts stay retained. */
+export async function expectNormalContextSources(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  backend: BackendContext,
+  mobile: boolean,
+) {
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  let gates: Array<ReturnType<typeof mockTurnGate>> = [];
+  try {
+    const fixture = await startErrands(api, seed, backend, { count: 2 });
+    gates = fixture.gates;
+    await page.goto(`/t/${fixture.taskId}?sessionId=${fixture.parentId}`);
+    await expect(parentChat(page, fixture.parentId)).toBeVisible();
+    const session = new SessionPage(page);
+    if (mobile) await session.openMobileNewSessionDialog();
+    else await session.openNewSessionDialog();
+    const dialog = session.newSessionDialog();
+    await expect(dialog).toHaveCount(1);
+    const context = dialog.getByRole("combobox").filter({ hasText: "Blank" });
+    await expect(context).toHaveCount(1);
+    if (mobile) await context.tap();
+    else await context.click();
+    const options = page.getByRole("listbox").getByRole("option");
+    await expect(options).toHaveCount(3);
+    await expect(options.nth(2)).toContainText("1");
+    await expectNoHorizontalOverflow(page);
+    await page.goto(`/t/${fixture.taskId}?sessionId=${fixture.errands[0].errand_id}`);
+    await expect(
+      parentChat(page, fixture.errands[0].errand_id).getByTestId("errand-header"),
+    ).toBeVisible();
+    expect((await api.listTaskSessions(fixture.taskId)).sessions.map((row) => row.id)).toEqual(
+      expect.arrayContaining(fixture.errands.map((row) => row.errand_id)),
+    );
+  } finally {
+    for (const gate of gates) await gate.release();
+    await restore();
   }
 }

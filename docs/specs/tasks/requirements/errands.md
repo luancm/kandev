@@ -131,6 +131,9 @@ The [result delivery contract](errand-result-delivery.md) owns REQ-TASKS-ERRANDS
   not transfer workflow ownership. Session menus shall not offer
   **Set as Primary** or **Handoff** for an errand.
 
+- **AC-TASKS-ERRANDS-005.6:** Automatic conversation selection and replacement in task routes, previews and desktop/phone task pickers shall choose only normal sessions. With no normal candidate they shall retain the existing sessionless behavior. Explicit child URLs, remembered child selections and permission/input-owner navigation shall remain available.
+- **AC-TASKS-ERRANDS-005.7:** New Agent and New Subtask summary-source menus shall list only normal task conversations, numbered contiguously after filtering. Retained errands shall remain excluded when the feature is disabled. Blank and explicit summary selection semantics shall remain unchanged; transcript APIs shall retain child access.
+
 ### REQ-TASKS-ERRANDS-006: Parent session while errands run
 
 **Intent:** Keep parents conversational and defer workflow for outstanding errands.

@@ -43,3 +43,11 @@ Reuse the current Errands bottom Drawer and mobile Sessions picker. Normal conve
 ## Verification
 
 [Task29](../../../plans/errands-review-repairs/task-29-conversation-navigation-and-history.md) maps implementation and evidence to AC-TASKS-ERRANDS-010.2/010.4/010.7, 011.1/011.2/011.7 and 012.3. Pure navigation and mounted owner tests exercise parent hosting, sibling/foreign-scope isolation and restoration. Fresh desktop and native Pixel5 browser tests exercise many children and normal conversations, Open/Back, direct links/reload, embedded preview/Threads navigation, static expandable historical markers, drawer scrolling and containment. Preserve [Task27](../../../plans/errands-review-repairs/task-27-history-disclosure.md)'s measured WAIT semantics and browser proof. Rendering hidden tabs is never transcript deletion or runtime cleanup.
+
+## Normal conversation selection
+
+Summary-source menus in New Agent and New Subtask share one option projection over normal task sessions. Filter with retained role and known errand identity before ordering and numbering, independent of the release toggle. This keeps delegated transcripts out of ordinary context choices; a separate explicit errand-source UI is outside this contract. The complete session cache and transcript API remain unchanged.
+
+Automatic route, preview, and task-picker fallbacks exclude errands before considering primary or first-row candidates. Valid explicit or remembered child IDs remain selectable. Preview deletion chooses a normal replacement from current state after the request settles, preserving its existing concurrent-selection guard. Input/permission-owner routing remains separate because an errand may legitimately require attention. Errands-only input yields the existing sessionless fallback, never accidental child adoption.
+
+[Normal-session consumer repair](../../../plans/errand-session-consumers/plan.md) records summary, replacement and fallback regressions for AC-TASKS-ERRANDS-005.6/005.7.

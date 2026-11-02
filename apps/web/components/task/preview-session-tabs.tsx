@@ -4,7 +4,7 @@ import {
   TaskSessionNavigationContext,
   useScopedTaskSessionNavigation,
 } from "./chat/errands/task-session-navigation-context";
-import { conversationTabSessionId } from "@/lib/task-conversation-navigation";
+import { conversationTabSessionId, isErrandConversation } from "@/lib/task-conversation-navigation";
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -338,7 +338,9 @@ export function PreviewSessionTabs({
   const handleSessionRemoved = useCallback(
     (removedSessionId: string) => {
       if (removedSessionId !== activeSessionIdRef.current) return;
-      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
+      const remaining = sortedSessionsRef.current.filter(
+        (s) => s.id !== removedSessionId && !isErrandConversation(s),
+      );
       onSessionChange?.(remaining[0]?.id ?? null);
     },
     [onSessionChange],

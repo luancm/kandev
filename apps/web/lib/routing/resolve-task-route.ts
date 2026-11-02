@@ -1,3 +1,4 @@
+import { isErrandConversation } from "@/lib/task-conversation-navigation";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 
 export async function resolveTaskRoute(taskId: string, requestedSessionId?: string) {
@@ -11,10 +12,11 @@ export async function resolveTaskRoute(taskId: string, requestedSessionId?: stri
   const requestedSession = requestedSessionId
     ? ownedSessions.find((session) => session.id === requestedSessionId)
     : undefined;
+  const normalSessions = ownedSessions.filter((session) => !isErrandConversation(session));
   const primarySession = task.primary_session_id
-    ? ownedSessions.find((session) => session.id === task.primary_session_id)
+    ? normalSessions.find((session) => session.id === task.primary_session_id)
     : undefined;
-  const sessionId = requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id;
+  const sessionId = requestedSession?.id ?? primarySession?.id ?? normalSessions[0]?.id;
   return {
     task,
     sessionId,

@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import {
   deliverySnapshots,
+  expectNormalContextSources,
   expectDurableAwaitRecovery,
   expectMixedParentOrdering,
   expectAwaitSnapshot,
@@ -984,4 +985,15 @@ test("phone durable await recovery clears uncertainty only after a matching rece
   } finally {
     await restore();
   }
+});
+
+// @covers AC-TASKS-ERRANDS-005.7
+test("phone normal context sources exclude errands", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await expectNormalContextSources(testPage, apiClient, seedData, backend, true);
 });

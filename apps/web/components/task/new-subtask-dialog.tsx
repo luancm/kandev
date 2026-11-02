@@ -19,6 +19,7 @@ import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
+import { useContextSessionOptions } from "@/hooks/use-context-session-options";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -176,27 +177,6 @@ function useSubtaskDialogState(
     executors,
     ...parentContext,
   };
-}
-
-function useSessionOptions(taskId: string) {
-  const { t } = useTranslation();
-  const { sessions, loadSessions } = useTaskSessions(taskId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  useEffect(() => {
-    loadSessions(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return useMemo(() => {
-    const sorted = [...sessions].sort(
-      (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-    );
-    return sorted.map((s, idx) => {
-      const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
-      const parts = profile?.label.split(" \u2022 ");
-      const name = parts?.[1] || parts?.[0] || t("task:panelAgent");
-      return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
-    });
-  }, [sessions, agentProfiles, t]);
 }
 
 function useExecutorProfiles(
@@ -407,7 +387,7 @@ function NewSubtaskForm({
   useGitHubUrlErrorEffect(fs, isOpen, workspaceId);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const profileOptions = useAgentProfileOptions(agentProfiles, "task_create");
-  const sessionOptions = useSessionOptions(parentTaskId);
+  const sessionOptions = useContextSessionOptions(parentTaskId);
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);

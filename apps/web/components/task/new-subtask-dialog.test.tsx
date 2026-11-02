@@ -15,7 +15,7 @@ vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => {
   return { ...actual, createTask: vi.fn().mockResolvedValue({ id: "created-child" }) };
 });
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => {} }));
-vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
+vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => true }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock("@/hooks/use-summarize-session", () => ({
   useSummarizeSession: () => ({ summarize: vi.fn(), isSummarizing: false }),
@@ -403,4 +403,37 @@ describe("explicit remote subtask source", () => {
     });
     expect(screen.getByTestId(NEW_MODE_ID).getAttribute(CHECKED_ATTRIBUTE)).toBe("true");
   });
+});
+
+// @covers AC-TASKS-ERRANDS-005.7
+it("offers only normal parent conversations as subtask context", async () => {
+  openDialog({
+    loaded: true,
+    sessions: [
+      { ...primary, started_at: "2026-01-01" },
+      {
+        ...primary,
+        id: sessionId("child"),
+        role: "errand",
+        is_primary: false,
+        started_at: "2026-01-02",
+      },
+      { ...primary, id: sessionId("normal-b"), is_primary: false, started_at: "2026-01-03" },
+    ],
+  });
+  fireEvent.pointerDown(
+    screen.getByText("Blank", { selector: '[data-slot="select-value"]' }).closest("button")!,
+    {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    },
+  );
+  await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(4));
+  expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+    "Blank",
+    "Copy initial prompt",
+    "1Agent",
+    "2Agent",
+  ]);
 });

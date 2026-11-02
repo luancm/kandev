@@ -120,3 +120,12 @@ describe("isSessionActive", () => {
     expect(isSessionActive(undefined)).toBe(false);
   });
 });
+
+// @covers AC-TASKS-ERRANDS-005.6
+it("excludes errands from automatic selection while preserving explicit child access", () => {
+  const child = makeSession({ id: "child", role: "errand", is_primary: true });
+  const normal = makeSession({ id: "normal" });
+  expect(pickActiveSessionId([child, normal], null)).toBe("normal");
+  expect(pickActiveSessionId([child], null)).toBeNull();
+  expect(pickActiveSessionId([child, normal], "child")).toBe("child");
+});

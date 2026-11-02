@@ -552,3 +552,7 @@ All implemented changes through `a8f28bee130b47006d6709c2bd44fb6cfeb89655` are p
 ### Final acceptance checkpoint (2026-11-02)
 
 Task24 and original Task17 are done: 14 desktop and 12 phone browser tests passed without retries or skips, with 49 frontend unit tests and seven backend fixture race tests passing. Normal hooks remain enabled. Task25 is blocked on the missing landing camera/encoder checkout and Xvfb; the repository location has been requested. Task26 documentation changes pass catalog, specification, public-page and coverage checks, but final closure waits for Task25 media. Totals: 27 done, one blocked, one in progress. No live-instance restart, deployment or flag promotion is included.
+
+### Normal-session consumer follow-up (2026-11-02)
+
+The subsequent [consumer repair](../errand-session-consumers/plan.md) closes summary-source leakage in New Agent/New Subtask and automatic route, preview and task-picker selection of errands. Its two work orders are complete with 142 focused tests and desktop/phone browser acceptance. Explicit child navigation and permission routing remain available. This follow-up does not change Task25 media prerequisites or Task26 final closure status.

@@ -3,6 +3,7 @@ import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
   deliverySnapshots,
+  expectNormalContextSources,
   openDefaultErrandParent,
   expectDurableAwaitRecovery,
   expectMixedParentOrdering,
@@ -991,4 +992,15 @@ test("desktop durable await recovery clears uncertainty only after a matching re
   } finally {
     await restore();
   }
+});
+
+// @covers AC-TASKS-ERRANDS-005.7
+test("desktop normal context sources exclude errands", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await expectNormalContextSources(testPage, apiClient, seedData, backend, false);
 });
