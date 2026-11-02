@@ -18,6 +18,7 @@ import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-se
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { linkToTaskOverview } from "@/lib/links";
 import {
+  isTaskNavigationAbort,
   isTemporaryTaskNavigationError,
   readTaskNavigationIdentity,
   useTaskNavigationReadState,
@@ -313,6 +314,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
         setTaskLoadError(null);
       } catch (error) {
         if (!isCurrentTaskDetailsRequest(requestId, requestedTaskId)) return;
+        if (isTaskNavigationAbort(error)) return;
         console.error("[TaskPageContent] Failed to load task details:", error);
         setTaskLoadError(error);
       }

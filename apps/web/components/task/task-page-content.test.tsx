@@ -225,6 +225,7 @@ describe("useTaskDetails reconnect refresh", () => {
     const initialTask = { id: taskId(TASK_A), title: "Before reconnect" } as Task;
     const refreshedTask = { ...initialTask, title: "After reconnect" };
     const fetchTask = vi.spyOn(api, "fetchTask").mockResolvedValue(refreshedTask);
+    vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
     let setReady!: (ready: boolean) => void;
     function Wrapper({ children }: { children: ReactNode }) {
       const [isReady, updateReady] = useState(false);
@@ -492,4 +493,32 @@ it("uses newly hydrated route details without retaining the provisional task", (
   rerender({ task: authoritative });
   expect(result.current.task).toBe(authoritative);
   expect(fetchTask).not.toHaveBeenCalled();
+});
+
+// @covers AC-PLATFORM-INTERACTIVE-READS-005.7
+it("keeps authoritative route details when an older same-task read is aborted", async () => {
+  const initial = { id: taskId(TASK_A), title: "Provisional task" } as Task;
+  const authoritative = { ...initial, title: "Authoritative task", repositories: [] };
+  let abortRead!: (error: Error) => void;
+  const pending = new Promise<Task>((_resolve, reject) => {
+    abortRead = reject;
+  });
+  vi.spyOn(api, "fetchTask").mockReturnValue(pending);
+  vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
+  const { result, rerender } = renderHook(({ task }) => useTaskDetails(TASK_A, task), {
+    wrapper: createStateWrapper({ tasks: { activeTaskId: TASK_A } }),
+    initialProps: { task: initial },
+  });
+  let refresh!: Promise<void>;
+  act(() => {
+    refresh = result.current.refreshTask();
+  });
+  rerender({ task: authoritative });
+  await act(async () => {
+    abortRead(new DOMException("Task navigation read aborted", "AbortError"));
+    await refresh;
+  });
+  expect(result.current.task).toBe(authoritative);
+  expect(result.current.taskLoadError).toBeNull();
+  expect(result.current.navigationReadState.phase).not.toBe("failed");
 });

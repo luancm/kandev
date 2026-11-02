@@ -504,12 +504,17 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       identity,
       token: Object.freeze({}),
     } as NavigationReadOwner;
-    const sessionReads = getTaskSessionReads(store);
     const scopeIsCurrent = () =>
       owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity;
     nextOwner.reads = new TaskNavigationReads(
       (taskId, signal) =>
-        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, scopeIsCurrent),
+        fetchTaskNavigationIdentity(
+          store,
+          taskId,
+          signal,
+          getTaskSessionReads(store),
+          scopeIsCurrent,
+        ),
       scopeIsCurrent,
     );
     owner = nextOwner;
