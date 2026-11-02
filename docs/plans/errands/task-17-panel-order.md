@@ -1,7 +1,7 @@
 ---
 id: "17-panel-order"
 title: "Order active errands before finished errands"
-status: in_progress
+status: done
 wave: 18
 depends_on:
   - "16-context-token-readout"
@@ -69,3 +69,7 @@ Follow task16 to avoid overlapping edits to shared panel and browser fixtures. T
 
 Implementation is present. Focused formatter/ordering tests pass 6/6 and existing chip/widget/hook tests pass 34/34. Typecheck, exact-file lint and i18n checks passed. Desktop Errands suite passed 8/8 (`/tmp/kandev-run.e2e.H64y3Jis.log`); final phone suite passed 6/6 (`/tmp/kandev-run.e2e.YzSKukDM.log`), including context updates/reload/clear and await history. The initial phone viewport assertion assumed oldest-first order; scrolling to each target fixed that fixture assumption.
 Explicit mixed-parent ordering and transition browser coverage remains outstanding. Pure ordering tests cover multiple parents, status partition, ties and transition; this work order remains `in_progress`.
+
+### Final acceptance (2026-11-02)
+
+Closed by repair Task24: 14 desktop and 12 phone browser tests passed without retries or skips. Task29 supersedes the original task-wide parent grouping with parent-scoped normal conversations and independent active/history ordering. See [Task24](../errands-review-repairs/task-24-mixed-parent-browser-acceptance.md) for the final acceptance mapping and receipts.

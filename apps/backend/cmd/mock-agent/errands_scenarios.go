@@ -12,6 +12,7 @@ import (
 type errandScenarioRequest struct {
 	Profile string   `json:"profile"`
 	Prompts []string `json:"prompts"`
+	After   string   `json:"after,omitempty"`
 }
 type errandScenarioCall func(context.Context, string, map[string]any) (string, error)
 
@@ -64,6 +65,9 @@ func emitErrandsScenario(e *emitter, request errandScenarioRequest, await bool) 
 		return
 	}
 	e.text("Errands parent returned")
+	if request.After != "" {
+		executeScript(e, "", request.After)
+	}
 }
 
 func scenarioErrands(e *emitter)      { emitErrandsScenario(e, errandScenarioRequest{}, false) }

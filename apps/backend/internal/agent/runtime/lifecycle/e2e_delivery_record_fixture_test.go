@@ -41,6 +41,8 @@ func TestDeliveryRecordRecoveryFixture(t *testing.T) {
 	require.NoError(t, err)
 
 	switch action {
+	case "errand_recover", "errand_receipt", "errand_status", "errand_zero", "errand_offered", "errand_supersede":
+		errandsAwaitBrowserFixture(t, repo, sessionID, action)
 	case "seed_pruned":
 		seedPrunedDeliveryIncident(t, repo, root, sessionID)
 	case "assert_pruned_restored":

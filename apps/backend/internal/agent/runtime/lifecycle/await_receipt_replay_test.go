@@ -60,7 +60,11 @@ func nativeAwaitReplayFrame(t *testing.T, delivery models.ErrandAwaitDelivery) s
 	t.Cleanup(func() { _ = a.Close(); _ = inputR.Close(); <-done })
 	_, err := a.NewSession(t.Context(), nil)
 	require.NoError(t, err)
-	body, err := json.Marshal(map[string]any{"duration_ms": 7, "end_reason": "all_ready", "errands": []any{map[string]any{"errand_id": "child", "status": "done", "result": strings.Repeat("actual ", 2000)}}, "await_delivery": delivery})
+	outcomes := make([]any, 0, len(delivery.Items))
+	for _, item := range delivery.Items {
+		outcomes = append(outcomes, map[string]any{"errand_id": item.ErrandID, "status": "done", "result": strings.Repeat("actual ", 2000)})
+	}
+	body, err := json.Marshal(map[string]any{"duration_ms": 7, "end_reason": "all_ready", "errands": outcomes, "await_delivery": delivery})
 	require.NoError(t, err)
 	native := map[string]any{"content": []any{map[string]any{"type": "text", "text": string(body)}}}
 	frame := map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "native-parent", "turnId": "native-turn", "item": map[string]any{"type": "mcpToolCall", "id": "native-call", "server": "kandev", "tool": "await_errands_kandev", "arguments": map[string]any{}, "status": "completed", "error": nil, "result": native}}}
@@ -344,7 +348,11 @@ func acpAwaitReplayFrame(t *testing.T, delivery models.ErrandAwaitDelivery) stre
 	require.NoError(t, a.Initialize(ctx))
 	_, err := a.NewSession(ctx, nil)
 	require.NoError(t, err)
-	body, err := json.Marshal(map[string]any{"duration_ms": 7, "end_reason": "all_ready", "errands": []any{map[string]any{"errand_id": "child", "status": "done", "result": strings.Repeat("actual ", 2000)}}, "await_delivery": delivery})
+	outcomes := make([]any, 0, len(delivery.Items))
+	for _, item := range delivery.Items {
+		outcomes = append(outcomes, map[string]any{"errand_id": item.ErrandID, "status": "done", "result": strings.Repeat("actual ", 2000)})
+	}
+	body, err := json.Marshal(map[string]any{"duration_ms": 7, "end_reason": "all_ready", "errands": outcomes, "await_delivery": delivery})
 	require.NoError(t, err)
 	input := map[string]any{"server": "kandev", "tool": "await_errands_kandev", "arguments": map[string]any{}}
 	for _, update := range []map[string]any{

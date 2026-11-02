@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, type Page, type Locator } from "@playwright/test";
@@ -138,7 +142,7 @@ export async function startErrands(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
-  options: { count?: number; await?: boolean } = {},
+  options: { count?: number; await?: boolean; after?: string } = {},
 ) {
   const count = options.count ?? 2;
   const gates = Array.from({ length: count }, (_, index) =>
@@ -159,6 +163,7 @@ export async function startErrands(
   const request = JSON.stringify({
     profile: seed.agentProfileId,
     prompts: gates.map((gate) => gate.prompt),
+    after: options.after,
   });
   const launched = await api.launchSession({
     task_id: task.id,
@@ -435,4 +440,363 @@ export async function seedLegacyErrandTab(page: Page, parentId: string, childId:
     { parent: parentId, child: childId },
   );
   expect(written).toBeGreaterThan(0);
+}
+
+/** Independent timestamp/identity oracle; deliberately does not import the UI sorter. */
+function orderedErrandIds(rows: Errand[]): string[] {
+  return [...rows]
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.created_at);
+      const rightTime = Date.parse(right.created_at);
+      const difference =
+        (Number.isNaN(rightTime) ? -Infinity : rightTime) -
+        (Number.isNaN(leftTime) ? -Infinity : leftTime);
+      return difference || left.errand_id.localeCompare(right.errand_id);
+    })
+    .map((row) => `errands-panel-row-${row.errand_id}`);
+}
+
+/** Exercise both real parent scopes with settlement while their management surface is open. */
+export async function expectMixedParentOrdering(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  backend: BackendContext,
+  phone: boolean,
+) {
+  const first = await startErrands(api, seed, backend, { count: 3 });
+  const secondGates = [
+    mockTurnGate(backend.tmpDir, "SECOND_A"),
+    mockTurnGate(backend.tmpDir, "SECOND_B"),
+  ];
+  const allGates = [...first.gates, ...secondGates];
+  try {
+    const second = await api.launchSession({
+      task_id: first.taskId,
+      agent_profile_id: seed.agentProfileId,
+      executor_profile_id: seed.worktreeExecutorProfileId,
+      prompt: `/e2e:errands ${JSON.stringify({ profile: seed.agentProfileId, prompts: secondGates.map((gate) => gate.prompt) })}`,
+    });
+    await expect.poll(async () => (await listErrands(api, first.taskId)).length).toBe(5);
+    await waitParentIdle(api, first.taskId, second.session_id);
+    await api.setQueueAutoRun(
+      await api.getQueueSessionIdentity(first.taskId, second.session_id),
+      true,
+    );
+    const rows = await listErrands(api, first.taskId);
+    await expect
+      .poll(async () => {
+        const sessions = (await api.listTaskSessions(first.taskId)).sessions;
+        return rows.every(
+          (row) => sessions.find((session) => session.id === row.errand_id)?.state === "RUNNING",
+        );
+      })
+      .toBe(true);
+    const secondRows = rows.filter((row) => row.parent_session_id === second.session_id);
+    const rowFor = (gate: ReturnType<typeof mockTurnGate>) => {
+      const matches = rows.filter((row) => row.objective === gate.prompt);
+      expect(matches).toHaveLength(1);
+      return matches[0];
+    };
+    const firstDone = first.gates.slice(0, 2).map(rowFor);
+    const secondDone = rowFor(secondGates[0]);
+    const socket = await routeErrandBrowserSocket(page);
+    await openDefaultErrandParent(page, api, first.taskId, first.parentId, true);
+    await socket.waitForInitialConnection();
+    const surface = page.getByTestId(phone ? "errands-drawer-content" : "errands-popover");
+    const activate = async (control: Locator) => {
+      if (phone) await control.tap();
+      else await control.click();
+    };
+    const open = async (parentId: string) => {
+      await expect(parentChat(page, parentId)).toBeVisible();
+      await activate(parentChat(page, parentId).getByTestId("errands-chip"));
+      await expect(surface).toBeVisible();
+    };
+    const assertOrder = async (parentId: string, expanded: boolean) => {
+      const current = (await listErrands(api, first.taskId)).filter(
+        (row) => row.parent_session_id === parentId,
+      );
+      const active = current.filter((row) =>
+        ["queued", "running", "needs_attention"].includes(row.status),
+      );
+      const finished = current.filter((row) => !active.includes(row));
+      await expect(surface.locator('[data-testid^="errands-panel-row-"]')).toHaveCount(
+        active.length + (expanded ? finished.length : 0),
+      );
+      await expect
+        .poll(() =>
+          surface
+            .locator('[data-testid^="errands-panel-row-"]')
+            .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid"))),
+        )
+        .toEqual([...orderedErrandIds(active), ...(expanded ? orderedErrandIds(finished) : [])]);
+    };
+    const switchParent = async (id: string) => {
+      await page.keyboard.press("Escape");
+      if (phone) {
+        await page.getByTestId("mobile-sessions-pill").tap();
+        await page.getByTestId(`mobile-session-row-${id}`).tap();
+      } else await page.getByTestId(`session-tab-${id}`).click();
+      await open(id);
+    };
+    await open(first.parentId);
+    await assertOrder(first.parentId, false);
+    await switchParent(second.session_id);
+    await assertOrder(second.session_id, false);
+    await switchParent(first.parentId);
+    for (const gate of [...first.gates.slice(0, 2), secondGates[0]]) await gate.release();
+    await waitDelivered(
+      api,
+      first.taskId,
+      [...firstDone, secondDone].map((row) => row.errand_id),
+    );
+    await waitParentIdle(api, first.taskId, first.parentId);
+    await waitParentIdle(api, first.taskId, second.session_id);
+    await expect(surface.getByTestId("errands-completed-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await assertOrder(first.parentId, false);
+    await activate(surface.getByTestId("errands-completed-toggle"));
+    await assertOrder(first.parentId, true);
+    await first.gates[2].release();
+    await waitDelivered(api, first.taskId, [rowFor(first.gates[2]).errand_id]);
+    await assertOrder(first.parentId, true);
+    await expect(surface.getByTestId("errands-stop-all")).toBeVisible();
+    await seedErrandContextWindow(api, first.taskId, firstDone[0].errand_id, {
+      size: 100000,
+      used: 68000,
+      remaining: 32000,
+      efficiency: 0.68,
+      source: "acp",
+    });
+    await expect(surface.getByTestId(`errands-panel-row-${firstDone[0].errand_id}`)).toContainText(
+      "68.0K",
+    );
+    await assertOrder(first.parentId, true);
+    if (phone) {
+      const list = surface.getByTestId("errands-panel-list");
+      await expect
+        .poll(() => list.evaluate((node) => node.scrollHeight > node.clientHeight))
+        .toBe(true);
+      const footer = surface.getByTestId("errands-stop-all");
+      await expectTouchTarget(footer);
+      await expect(footer).toBeInViewport();
+      const beforeScroll = await footer.boundingBox();
+      await list.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      const afterScroll = await footer.boundingBox();
+      expect(afterScroll?.y).toBe(beforeScroll?.y);
+      expect(afterScroll!.y + afterScroll!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollHeight <= document.documentElement.clientHeight + 1,
+        ),
+      ).toBe(true);
+      await expectNoHorizontalOverflow(page);
+    }
+    await switchParent(second.session_id);
+    await expect(surface.getByTestId("errands-completed-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await assertOrder(second.session_id, false);
+    await activate(surface.getByTestId("errands-completed-toggle"));
+    await assertOrder(second.session_id, true);
+    const child = secondRows[0];
+    const target = surface.getByTestId(
+      phone ? `errands-panel-row-${child.errand_id}` : `errand-open-${child.errand_id}`,
+    );
+    await target.scrollIntoViewIfNeeded();
+    await activate(target);
+    await expect(parentChat(page, child.errand_id)).toBeVisible();
+    await activate(parentChat(page, child.errand_id).getByTestId("errand-back-to-parent"));
+    await page.reload();
+    await open(second.session_id);
+    await activate(surface.getByTestId("errands-completed-toggle"));
+    await assertOrder(second.session_id, true);
+    await socket.setOfflineAndClose();
+    const reconnected = socket.waitForReconnect();
+    await page.context().setOffline(false);
+    await reconnected;
+    await assertOrder(second.session_id, true);
+    await secondGates[1].release();
+    await waitDelivered(api, first.taskId, [rowFor(secondGates[1]).errand_id]);
+    await assertOrder(second.session_id, true);
+    await expect(surface.getByTestId("errands-stop-all")).toHaveCount(0);
+    await switchParent(first.parentId);
+    const toggle = surface.getByTestId("errands-completed-toggle");
+    if ((await toggle.getAttribute("aria-expanded")) === "false") await activate(toggle);
+    await assertOrder(first.parentId, true);
+    await expect(surface.getByTestId("errands-stop-all")).toHaveCount(0);
+    for (const row of rows)
+      expect((await api.getTaskSession(row.errand_id)).session.id).toBe(row.errand_id);
+  } finally {
+    await page.context().setOffline(false);
+    for (const gate of allGates) await gate.release();
+  }
+}
+
+async function mutateAwaitFixture(backend: BackendContext, parentId: string, action: string) {
+  const { stdout } = await promisify(execFile)(
+    resolve("../backend/bin/e2e-delivery-fixture"),
+    ["-test.run=^TestDeliveryRecordRecoveryFixture$", "-test.timeout=30s", "-test.v"],
+    {
+      env: {
+        ...process.env,
+        KANDEV_E2E_RECORD_ROOT: backend.tmpDir,
+        KANDEV_E2E_RECORD_SESSION: parentId,
+        KANDEV_E2E_RECORD_ACTION: action,
+      },
+      timeout: 40000,
+    },
+  );
+  expect(stdout).toContain("KANDEV_E2E_ERRAND_FIXTURE:");
+}
+
+export async function expectDurableAwaitRecovery(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  backend: BackendContext,
+  phone: boolean,
+) {
+  const parentGate = mockTurnGate(backend.tmpDir, "PARENT_RECEIPT_COMPLETE");
+  const fixture = await startErrands(api, seed, backend, {
+    count: 1,
+    await: true,
+    after: parentGate.prompt,
+  });
+  const { taskId, parentId, errands, gates } = fixture;
+  try {
+    await gates[0].release();
+    await waitDelivered(api, taskId, [errands[0].errand_id]);
+    await expect
+      .poll(async () =>
+        (await api.listSessionMessages(parentId)).messages.some((message) =>
+          message.content.includes("Errands parent returned"),
+        ),
+      )
+      .toBe(true);
+    expect((await api.getTaskSession(parentId)).session.state).toBe("RUNNING");
+    await mutateAwaitFixture(backend, parentId, "errand_offered");
+    const activate = async (control: Locator) => {
+      if (phone) await control.tap();
+      else await control.click();
+    };
+    const surface = page.getByTestId(phone ? "errands-drawer-content" : "errands-popover");
+    const row = surface.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
+    const open = async () => {
+      await openDefaultErrandParent(page, api, taskId, parentId, true);
+      await expect(parentChat(page, parentId)).toBeVisible();
+      await activate(parentChat(page, parentId).getByTestId("errands-chip"));
+      await activate(surface.getByTestId("errands-completed-toggle"));
+      await expect(row).toBeVisible();
+    };
+    await open();
+    await expect(row.getByTestId("errand-delivery-uncertain")).toHaveCount(0);
+    await mutateAwaitFixture(backend, parentId, "errand_recover");
+    await open();
+    await expect(row.getByTestId("errand-delivery-uncertain")).toBeVisible();
+    await activate(phone ? row : row.getByTestId(`errand-open-${errands[0].errand_id}`));
+    const child = parentChat(page, errands[0].errand_id);
+    await expect(child.getByTestId("errand-header")).toBeVisible();
+    await activate(child.getByTestId("errand-back-to-parent"));
+    for (const action of ["errand_status", "errand_zero"]) {
+      await mutateAwaitFixture(backend, parentId, action);
+      expect((await listErrands(api, taskId))[0].delivery_state).toBe("uncertain");
+      await open();
+      await expect(row.getByTestId("errand-delivery-uncertain")).toBeVisible();
+    }
+    await activate(phone ? row : row.getByTestId(`errand-open-${errands[0].errand_id}`));
+    await api.addUserMessage(taskId, errands[0].errand_id, 'e2e:message("SUCCESSOR_RESULT")');
+    await waitParentIdle(api, taskId, errands[0].errand_id);
+    if (phone) {
+      await child.getByTestId("errand-actions-menu").tap();
+      await page.getByRole("menuitem", { name: "Send result to parent", exact: true }).tap();
+    } else await child.getByTestId("errand-send-result-button").click();
+    await expect.poll(async () => (await listErrands(api, taskId))[0].result_state).toBe("pending");
+    await mutateAwaitFixture(backend, parentId, "errand_supersede");
+    expect((await listErrands(api, taskId))[0].delivery_state).toBe("uncertain");
+    await open();
+    await expect(row.getByTestId("errand-delivery-uncertain")).toBeVisible();
+    expect((await listErrands(api, taskId))[0].result_preview).toContain("SUCCESSOR_RESULT");
+    await mutateAwaitFixture(backend, parentId, "errand_receipt");
+    expect((await listErrands(api, taskId))[0].delivery_state).toBe("received");
+    await open();
+    await expect(row.getByTestId("errand-delivery-uncertain")).toHaveCount(0);
+    await page.reload();
+    await activate(parentChat(page, parentId).getByTestId("errands-chip"));
+    await activate(surface.getByTestId("errands-completed-toggle"));
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("errand-delivery-uncertain")).toHaveCount(0);
+    await expectNoHorizontalOverflow(page);
+  } finally {
+    for (const gate of [...gates, parentGate]) await gate.release();
+  }
+}
+
+/** Preserve the complete default-route evidence before fixture teardown or any retry. */
+export async function openDefaultErrandParent(
+  page: Page,
+  api: ApiClient,
+  taskId: string,
+  parentId: string,
+  explicit = false,
+) {
+  const evidence: Record<string, unknown> = {
+    expectedParent: parentId,
+    task: await api.getTask(taskId),
+    sessions: await api.listTaskSessions(taskId),
+  };
+  const responses: Promise<unknown>[] = [];
+  const errors: string[] = [];
+  page.on("response", (response) => {
+    if (new URL(response.url()).pathname.startsWith(`/api/v1/tasks/${taskId}`)) {
+      responses.push(
+        response.text().then(
+          (body) => ({ url: response.url(), status: response.status(), body }),
+          (error: unknown) => ({
+            url: response.url(),
+            status: response.status(),
+            error: String(error),
+          }),
+        ),
+      );
+    }
+  });
+  page.on("console", (message) => {
+    if (["error", "warning"].includes(message.type())) errors.push(message.text());
+  });
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(`/t/${taskId}${explicit ? `?sessionId=${parentId}` : ""}`);
+  try {
+    await expect(parentChat(page, parentId)).toBeVisible({ timeout: 15000 });
+  } catch (error) {
+    const path = `/tmp/errands-route-${randomUUID()}`;
+    evidence.responses = await Promise.allSettled(responses);
+    evidence.errors = errors;
+    evidence.browser = await page.evaluate(() => {
+      const target = window as typeof window & {
+        __KANDEV_E2E_STORE__?: { getState: () => unknown };
+        __KANDEV_BOOT_PAYLOAD__?: unknown;
+      };
+      return {
+        url: location.href,
+        chats: Array.from(document.querySelectorAll('[data-testid="session-chat"]')).map(
+          (node) => ({
+            id: node.getAttribute("data-session-id"),
+            active: node.getAttribute("data-detail-active"),
+          }),
+        ),
+        store: target.__KANDEV_E2E_STORE__?.getState(),
+        boot: target.__KANDEV_BOOT_PAYLOAD__,
+      };
+    });
+    await writeFile(`${path}.json`, JSON.stringify(evidence, null, 2));
+    await page.screenshot({ path: `${path}.png`, fullPage: true });
+    throw new Error(`Default errand route failed; evidence: ${path}.json`, { cause: error });
+  }
 }

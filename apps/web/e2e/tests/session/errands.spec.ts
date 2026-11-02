@@ -3,6 +3,9 @@ import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
   deliverySnapshots,
+  openDefaultErrandParent,
+  expectDurableAwaitRecovery,
+  expectMixedParentOrdering,
   expectAwaitSnapshot,
   expectNoHorizontalOverflow,
   listErrands,
@@ -348,7 +351,7 @@ test("desktop errand panel shows only explicit await delivery uncertainty", asyn
       "Settled errand parent remains addressable from the workspace task list",
     ).toBe(true);
     expect((await api.getTask(taskId)).id).toBe(taskId);
-    await page.goto(`/t/${taskId}`);
+    await openDefaultErrandParent(page, api, taskId, parentId);
     const chat = parentChat(page, parentId);
     await expect(chat).toBeVisible({ timeout: 15_000 });
     await expect.poll(deliveryEvents.isConnected, { timeout: 15_000 }).toBe(true);
@@ -953,6 +956,38 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     expect((await api.listTaskSessions(taskId)).sessions.find((row) => row.is_primary)?.id).toBe(
       primaryBefore,
     );
+  } finally {
+    await restore();
+  }
+});
+
+// @covers AC-TASKS-ERRAND-ORDER-001.1 AC-TASKS-ERRAND-ORDER-001.2 AC-TASKS-ERRAND-ORDER-001.3 AC-TASKS-ERRANDS-010.4 AC-TASKS-ERRANDS-010.8 AC-TASKS-ERRANDS-011.2 AC-TASKS-ERRANDS-011.4 AC-TASKS-ERRANDS-011.7
+test("desktop parent panels isolate errands and preserve ordering through settlement and switching", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(240_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    await expectMixedParentOrdering(page, api, seed, backend, false);
+  } finally {
+    await restore();
+  }
+});
+
+// @covers AC-TASKS-ERRANDS-004.13
+test("desktop durable await recovery clears uncertainty only after a matching receipt", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(180_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    await expectDurableAwaitRecovery(page, api, seed, backend, false);
   } finally {
     await restore();
   }
