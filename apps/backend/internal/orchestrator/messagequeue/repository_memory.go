@@ -968,13 +968,14 @@ func (r *memoryRepository) TakeHead(_ context.Context, sessionID string) (*Queue
 }
 
 // ReserveHead returns the lowest-position entry, deleting ordinary rows and retaining durable deliveries.
-func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*QueuedMessage, error) {
+func (r *memoryRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.reserveHeadLocked(sessionID, nil, false), nil
+	return r.reserveHeadLocked(ctx, sessionID, nil, false), nil
 }
 
 func (r *memoryRepository) reserveHeadLocked(
+	ctx context.Context,
 	sessionID string,
 	identity *QueueSessionIdentity,
 	retainOrdinary bool,
@@ -983,11 +984,14 @@ func (r *memoryRepository) reserveHeadLocked(
 	if len(list) == 0 {
 		return nil
 	}
-	headIndex := lowestPositionIndex(list)
+	headIndex := dispatchHeadIndex(ctx, list)
+	if headIndex < 0 {
+		return nil
+	}
 	head := list[headIndex]
 	if head.IsDeliveryAttempted() && !isManagedInputQueueEntry(head) {
 		r.removeEntryLocked(sessionID, headIndex)
-		return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
+		return r.reserveHeadLocked(ctx, sessionID, identity, retainOrdinary)
 	}
 	if head.IsDurablePlanComment() && head.IsReservedInFlight() {
 		reservationIncarnation := lifecycleReservationIncarnation(head.Metadata)
@@ -1001,13 +1005,15 @@ func (r *memoryRepository) reserveHeadLocked(
 	if head.IsDurableDelivery() || retainOrdinary {
 		if reservationBelongsToDifferentIncarnation(head.Metadata, identity) {
 			r.removeEntryLocked(sessionID, headIndex)
-			return r.reserveHeadLocked(sessionID, identity, retainOrdinary)
+			return r.reserveHeadLocked(ctx, sessionID, identity, retainOrdinary)
 		}
+		applyDispatchSourceMetadata(ctx, head)
 		out := reserveMemoryDelivery(head, identity)
 		r.captureReservationLocked(out)
 		return out
 	}
 	out := cloneQueuedMessage(head)
+	applyDispatchSourceMetadata(ctx, out)
 	r.captureReservationLocked(out)
 	r.removeEntryLocked(sessionID, headIndex)
 	return out
@@ -1155,16 +1161,16 @@ func (r *memoryRepository) pauseAutoRunIfPendingLocked(
 }
 
 // ReserveHeadIfAutoRun atomically checks policy and reserves the FIFO head.
-func (r *memoryRepository) ReserveHeadIfAutoRun(_ context.Context, sessionID string) (*QueuedMessage, bool, error) {
+func (r *memoryRepository) ReserveHeadIfAutoRun(ctx context.Context, sessionID string) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.autoRunLocked(sessionID) {
 		return nil, false, nil
 	}
-	return r.reserveHeadLocked(sessionID, nil, false), true, nil
+	return r.reserveHeadLocked(ctx, sessionID, nil, false), true, nil
 }
 
-func (r *memoryRepository) ReserveHeadIfAutoRunForSession(_ context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error) {
+func (r *memoryRepository) ReserveHeadIfAutoRunForSession(ctx context.Context, identity QueueSessionIdentity) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.bindIdentityLocked(identity); err != nil {
@@ -1173,11 +1179,11 @@ func (r *memoryRepository) ReserveHeadIfAutoRunForSession(_ context.Context, ide
 	if !r.autoRunForIdentityLocked(identity) {
 		return nil, false, nil
 	}
-	return r.reserveHeadLocked(identity.SessionID, &identity, false), true, nil
+	return r.reserveHeadLocked(ctx, identity.SessionID, &identity, false), true, nil
 }
 
 func (r *memoryRepository) ReserveHeadForDeliveryIfAutoRunForSession(
-	_ context.Context,
+	ctx context.Context,
 	identity QueueSessionIdentity,
 ) (*QueuedMessage, bool, error) {
 	r.mu.Lock()
@@ -1188,7 +1194,7 @@ func (r *memoryRepository) ReserveHeadForDeliveryIfAutoRunForSession(
 	if !r.autoRunForIdentityLocked(identity) {
 		return nil, false, nil
 	}
-	return r.reserveHeadLocked(identity.SessionID, &identity, true), true, nil
+	return r.reserveHeadLocked(ctx, identity.SessionID, &identity, true), true, nil
 }
 
 // AcknowledgeReserved removes only the exact lifecycle delivery attempt.
@@ -1580,13 +1586,17 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 		return err
 	}
 
-	for _, source := range claim.Sources {
+	sources, err := normalizedRestoredSendNowSources(ctx, claim)
+	if err != nil {
+		return err
+	}
+	for _, source := range sources {
 		if sendNowSourceGenerationChanged(claim, source, r.generation[source.TaskID]) {
 			continue
 		}
 		if existing[source.ID] != nil {
 			if source.IsDurableDelivery() {
-				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
+				existing[source.ID].Metadata = restoredSendNowMetadata(ctx, source.ID, restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata))
 			}
 			continue
 		}

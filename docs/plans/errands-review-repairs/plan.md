@@ -70,7 +70,7 @@ The small packets separate independently testable storage, pure classification, 
 | 12 | [Persist and classify reserved launch authority](task-12-reserved-launch-authority.md) | 7 | 06, 09 | done |
 | 13 | [Recover launch bookkeeping without replay](task-13-adopt-reserved-launches.md) | 7 | 08, 11, 12 | done |
 | 14 | [Preserve Send Now sources and receipt identity](task-14-send-now-source-identity.md) | 18 | 04, 08 | done |
-| 15 | [Gate prepared results without losing user input](task-15-disabled-prepared-delivery.md) | 19 | 14 | pending |
+| 15 | [Gate prepared results without losing user input](task-15-disabled-prepared-delivery.md) | 19 | 14 | done |
 | 16 | [Batch bounded errand summary observations](task-16-bounded-summary-aggregate.md) | 12 | None | done |
 | 17 | [Repair missing and stale errand summaries](task-17-authoritative-summary-repair.md) | 12 | 16 | done |
 | 18 | [Preserve role and parent in summary fallback](task-18-fallback-session-identity.md) | 20 | None | done |
@@ -524,3 +524,19 @@ The first Task14B pass implemented source-aware durable receipts, deterministic 
 Task14's complete source/receipt integration passes its original backend acceptance and adjacent common-admission controls. The final runtime prompt is persisted before provider I/O for established, CREATED and fallback paths under both protocols; attachment-only text and ambiguous legacy metadata now follow the approved contract. Source restoration, all-token recovery, reservations, uncertainty and exact successor fences remain covered. Focused review found no issues. All 18 source/test hashes match the final tested handoff.
 
 Race selectors passed with per-selector top-level counts 38 orchestrator, 86 queue, four reader, six codec and 28 admission tests. Eight optional PostgreSQL cases/subcases skipped without a DSN; no PostgreSQL or browser/provider certification is claimed. Build, SQL guard, SQLite conformance, scoped lint, formatting and whitespace checks passed. Evidence: `/tmp/errands-task14b-completion-handoff.md`. Totals are 25 done and four pending before Task15 starts. Commit this coherent integration before granting Task15 disabled prepared-delivery work.
+
+### Task15 behavioral RED and integrated wiring ownership
+
+Task15 has seven valid SQLite behavioral regressions and no production implementation yet. Failures cover disabled prepared dispatch, ordinary FIFO/Send Now preservation, durable idempotence and uncertain mixed-claim recovery. The primary grants the canonical flag/FIFO/recovery wiring and adjacent deletion-fixture setup needed by the existing contract; exact boundaries are in the Task15 work order. The original selector's nil-repository fixture panic must be resolved and rerun, not excluded. Handoff: `/tmp/errands-task15-handoff.md`. Totals remain 25 done, one in progress, three pending. No Task15 commit or acceptance is claimed.
+
+### Task15 prepared-owner crash window remains open
+
+All seven original regressions now pass; the complete selector has 43 passing tests and one duplicate cancellation-delivery failure after durable notice admission but before row deletion. Current changes remain uncommitted. The shared database and existing task guard support atomic prepared-source admission plus exact result claiming; the Task15 work order grants the narrow repository/queue/reconciliation integration and requires recovery/release to recognize complete live source/claim evidence. Evidence: `/tmp/errands-task15-completion-handoff.md`. Finish this ownership gap and original acceptance before committing Task15. PostgreSQL queue/store cases were skipped; no cross-database certification is claimed.
+
+### Task15 integration review holds acceptance
+
+All final local selectors passed with PostgreSQL skips recorded, but review found a missing QueueGeneration in legacy FIFO and Send Now refusal normalization. Exact ownership rejects the normalized source while dispatch still accepts it, risking result re-exposure. The next bounded correction must reproduce refusal/reopen ownership and stamp the validated generation without weakening the reader. Task15 remains uncommitted/in progress. Final evidence before correction: `/tmp/errands-task15-ownership-handoff.md`. Disk checkpoint pruned 12.6 GiB of old unused compiled cache entries under the build lock; approximately 16 GiB free afterward. Cleanup receipt: `/tmp/errands-task15-build-cache-cleanup.json`.
+
+### Task15 accepted after review correction
+
+Task15 local backend acceptance is complete, including all eight legacy refusal/reopen regression cases and the final 47-test orchestrator selector. Review confirms both authoritative source-generation stamps resolve the last finding; all 35 source hashes match final tested evidence. Other required selectors, build, scoped lint and static checks pass; unchanged SQL guard/conformance receipts apply. PostgreSQL skips remain explicit, and browser/real-provider certification is not claimed. Evidence: `/tmp/errands-task15-legacy-generation-handoff.md` and `/tmp/errands-task15-ownership-handoff.md`. Totals: 26 done, three pending (24/25/26). Commit this coherent integration before the Task24 browser packet. Disk checkpoint has approximately 11 GiB free; invocation scratch is cleaned.

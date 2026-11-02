@@ -298,7 +298,7 @@ func (s *Service) withdrawErrandNotification(ctx context.Context, parentSessionI
 	var identity messagequeue.QueueSessionIdentity
 	for i := range status.Entries {
 		entry := &status.Entries[i]
-		if !isErrandNotificationEntry(entry) {
+		if !isErrandNotificationPlaceholder(entry) {
 			continue
 		}
 		if identity.SessionID == "" {

@@ -31,13 +31,14 @@ type autoMergePolicyLoader struct {
 
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
-	repo            Repository
-	maxPerSession   atomic.Int64
-	mergeEnabled    atomic.Bool
-	autoMergePolicy atomic.Pointer[AutoMergePolicy]
-	autoMergeLoader atomic.Pointer[autoMergePolicyLoader]
-	statusEpoch     string
-	logger          *logger.Logger
+	repo                 Repository
+	maxPerSession        atomic.Int64
+	mergeEnabled         atomic.Bool
+	autoMergePolicy      atomic.Pointer[AutoMergePolicy]
+	autoMergeLoader      atomic.Pointer[autoMergePolicyLoader]
+	dispatchSourcePolicy atomic.Pointer[dispatchSourcePolicy]
+	statusEpoch          string
+	logger               *logger.Logger
 	// lifecycleMu fences task-wide purges against every session-scoped queue
 	// admission. A task purge cannot enumerate every possibly empty session,
 	// so the barrier must cover admissions before they reach the repository.
@@ -2146,7 +2147,11 @@ func (s *Service) ReserveQueuedWithAutoRun(ctx context.Context, sessionID string
 			autoRun, err = s.repo.GetAutoRun(admittedCtx, sessionID)
 			return err
 		}
-		msg, autoRun, err = s.repo.ReserveHeadIfAutoRun(admittedCtx, sessionID)
+		selectionCtx, err := s.dispatchSelectionContext(admittedCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		msg, autoRun, err = s.repo.ReserveHeadIfAutoRun(selectionCtx, sessionID)
 		return err
 	})
 	if err != nil {
@@ -2164,7 +2169,11 @@ func (s *Service) ReserveQueuedWithAutoRunForSession(ctx context.Context, identi
 	var autoRun bool
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		var err error
-		msg, autoRun, err = s.repo.ReserveHeadIfAutoRunForSession(admittedCtx, identity)
+		selectionCtx, selectionErr := s.dispatchSelectionContext(admittedCtx, identity.SessionID)
+		if selectionErr != nil {
+			return selectionErr
+		}
+		msg, autoRun, err = s.repo.ReserveHeadIfAutoRunForSession(selectionCtx, identity)
 		return err
 	})
 	if err != nil {
@@ -2183,7 +2192,11 @@ func (s *Service) ReserveQueuedForDeliveryWithAutoRunForSession(
 	var autoRun bool
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		var err error
-		msg, autoRun, err = s.repo.ReserveHeadForDeliveryIfAutoRunForSession(admittedCtx, identity)
+		selectionCtx, selectionErr := s.dispatchSelectionContext(admittedCtx, identity.SessionID)
+		if selectionErr != nil {
+			return selectionErr
+		}
+		msg, autoRun, err = s.repo.ReserveHeadForDeliveryIfAutoRunForSession(selectionCtx, identity)
 		return err
 	})
 	if err != nil {

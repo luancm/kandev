@@ -126,13 +126,19 @@ func (s *Service) PreserveCancellationNotice(ctx context.Context, errandID strin
 		}
 		return nil
 	}
-	if row.ResultState != models.ErrandResultPending || s.deliverer == nil {
+	if row.ResultState != models.ErrandResultPending {
 		return nil
 	}
-	now := s.clock.Now()
+	if s.deliverer == nil {
+		return errors.New("prepared errand delivery is unavailable")
+	}
+	now := row.UpdatedAt
+	if row.SettledAt != nil {
+		now = *row.SettledAt
+	}
 	block := renderStatusBlock([]composedErrand{{errand: row, status: models.ErrandStatusCancelled}},
 		map[string]*models.Errand{row.ID: row}, now)
-	token := uuid.NewString()
+	token := uuid.NewSHA1(uuid.NameSpaceOID, []byte(row.TaskID+"\x00"+row.ParentSessionID+"\x00"+row.ID+"\x00"+row.ResultRevision)).String()
 	metadata := map[string]interface{}{
 		DeliveryEnvelopeMetadataKey: DeliveryEnvelope{
 			Token: token, Route: models.ErrandDeliveryNotification,

@@ -513,18 +513,22 @@ func (r *sqliteRepository) validateSessionIdentityTx(
 	if !r.tasksTablePresent {
 		return ErrSessionIdentityMismatch
 	}
+	return validateSessionIdentityInTransaction(ctx, tx, identity)
+}
+
+func validateSessionIdentityInTransaction(ctx context.Context, tx *sqlx.Tx, identity QueueSessionIdentity) error {
 	var incarnationID string
 	query := `
 		SELECT queue_incarnation_id
 		  FROM task_sessions
 		 WHERE id = ? AND task_id = ?`
-	if r.db.DriverName() == "pgx" {
+	if tx.DriverName() == "pgx" {
 		query += postgresForUpdateSuffix
 	}
 	err := tx.GetContext(
 		ctx,
 		&incarnationID,
-		r.db.Rebind(query),
+		tx.Rebind(query),
 		identity.SessionID,
 		identity.TaskID,
 	)
@@ -591,7 +595,10 @@ func (r *sqliteRepository) ResolveSessionIdentity(ctx context.Context, taskID, s
 // transaction (see lockSessionTx). It is the shared core used by the
 // repository methods and by PurgeTaskInTransaction, which runs inside the task
 // repository's archive transaction.
-func lockSessionTxIn(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID string) error {
+func lockSessionTxIn(ctx context.Context, tx *sqlx.Tx, db interface {
+	Rebind(string) string
+	DriverName() string
+}, sessionID string) error {
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO queue_session_locks (session_id) VALUES (?)
 		ON CONFLICT(session_id) DO NOTHING
@@ -1864,7 +1871,7 @@ func (r *sqliteRepository) LifecycleGeneration(ctx context.Context, taskID strin
 	return generation, nil
 }
 
-func getLifecycleGenerationTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string) (int64, error) {
+func getLifecycleGenerationTx(ctx context.Context, tx *sqlx.Tx, db interface{ Rebind(string) string }, taskID string) (int64, error) {
 	var generation int64
 	err := tx.GetContext(ctx, &generation, db.Rebind(`
 		SELECT generation FROM lifecycle_queue_generations WHERE task_id = ?
@@ -3103,8 +3110,12 @@ func (r *sqliteRepository) setAutoRunTx(
 	return nil
 }
 func (r *sqliteRepository) getSendNowGenerationTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
+	return sessionGenerationInTx(ctx, tx, sessionID)
+}
+
+func sessionGenerationInTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
 	var generation int64
-	err := tx.GetContext(ctx, &generation, r.db.Rebind(`
+	err := tx.GetContext(ctx, &generation, tx.Rebind(`
 		SELECT send_now_generation FROM queue_session_state WHERE session_id = ?
 	`), sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -3258,6 +3269,7 @@ func (r *sqliteRepository) reserveHeadTx(
 	retainOrdinary bool,
 ) (*QueuedMessage, bool, error) {
 	discardedStaleReservation := false
+	offset := 0
 	for {
 		row := tx.QueryRowxContext(ctx, r.db.Rebind(`
 			SELECT id, session_id, task_id, position, content, model, plan_mode,
@@ -3265,8 +3277,8 @@ func (r *sqliteRepository) reserveHeadTx(
 			FROM queued_messages
 			WHERE session_id = ?
 			ORDER BY position ASC
-			LIMIT 1
-		`), sessionID)
+			LIMIT 1 OFFSET ?
+		`), sessionID, offset)
 		msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
 		if errors.Is(err, sql.ErrNoRows) {
 			if discardedStaleReservation {
@@ -3278,6 +3290,14 @@ func (r *sqliteRepository) reserveHeadTx(
 		}
 		if err != nil {
 			return nil, true, fmt.Errorf("reserve head: %w", err)
+		}
+		selected, current := dispatchSourceSelected(ctx, msg)
+		if !current {
+			return nil, true, commitReservationDiscardIfNeeded(tx, discardedStaleReservation)
+		}
+		if !selected {
+			offset++
+			continue
 		}
 		staleFence, err := r.taskManagementFenceIsStaleTx(ctx, tx, msg.ID, msg.TaskID)
 		if err != nil {
@@ -3324,6 +3344,7 @@ func (r *sqliteRepository) reserveHeadTx(
 		if blocked {
 			return nil, true, nil
 		}
+		applyDispatchSourceMetadata(ctx, msg)
 		if err := r.captureReservationGenerationsTx(ctx, tx, msg); err != nil {
 			return nil, true, err
 		}
@@ -4170,7 +4191,11 @@ func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 		return err
 	}
 
-	for _, source := range claim.Sources {
+	sources, err := normalizedRestoredSendNowSources(ctx, claim)
+	if err != nil {
+		return err
+	}
+	for _, source := range sources {
 		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
 			continue
 		}
@@ -4601,7 +4626,7 @@ func (r *sqliteRepository) restoreSQLiteSendNowSource(
 	if !source.IsDurableDelivery() || !entry.message.IsReservedInFlight() {
 		return nil
 	}
-	metadataJSON, err := marshalMetadata(restoreSendNowMetadata(entry.message.Metadata, source.Metadata))
+	metadataJSON, err := marshalMetadata(restoredSendNowMetadata(ctx, source.ID, restoreSendNowMetadata(entry.message.Metadata, source.Metadata)))
 	if err != nil {
 		return err
 	}

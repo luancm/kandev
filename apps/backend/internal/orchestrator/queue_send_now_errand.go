@@ -16,10 +16,12 @@ import (
 const errandSourceMetadataKey = "errand_source"
 
 type sendNowErrandSource struct {
-	Provenance    string                          `json:"provenance"`
-	Kind          errands.SendNowSourceKind       `json:"kind"`
-	PreparedBlock string                          `json:"prepared_block,omitempty"`
-	Receipt       *errands.SendNowDeliveryReceipt `json:"receipt,omitempty"`
+	QueueGeneration *int64                             `json:"queue_generation,omitempty"`
+	Identity        *messagequeue.QueueSessionIdentity `json:"identity,omitempty"`
+	Provenance      string                             `json:"provenance"`
+	Kind            errands.SendNowSourceKind          `json:"kind"`
+	PreparedBlock   string                             `json:"prepared_block,omitempty"`
+	Receipt         *errands.SendNowDeliveryReceipt    `json:"receipt,omitempty"`
 }
 
 type sendNowErrandInput struct {
@@ -58,7 +60,7 @@ func (s *Service) prepareSendNowErrandInput(ctx context.Context, claim *messageq
 		if !captured {
 			return nil, messagequeue.ErrSendNowClaimChanged
 		}
-		part, receipt, err := s.sendNowSource(ctx, source, generation)
+		part, receipt, err := s.selectedSendNowSource(ctx, source, generation)
 		if err != nil {
 			return nil, err
 		}
@@ -83,6 +85,13 @@ func (s *Service) prepareSendNowErrandInput(ctx context.Context, claim *messageq
 		delete(claim.Dispatch.Metadata, key)
 	}
 	return input, nil
+}
+
+func (s *Service) selectedSendNowSource(ctx context.Context, source *messagequeue.QueuedMessage, generation int64) (errands.SendNowDeliverySource, *errands.SendNowDeliveryReceipt, error) {
+	if !s.errandQueueSourceSelection(ctx, source).Allowed {
+		return errands.SendNowDeliverySource{}, nil, errands.ErrInvalidSendNowDelivery
+	}
+	return s.sendNowSource(ctx, source, generation)
 }
 
 func sendNowSourceHasInput(source *messagequeue.QueuedMessage) bool {
@@ -122,6 +131,9 @@ func (s *Service) sendNowSource(ctx context.Context, source *messagequeue.Queued
 		return part, nil, nil
 	}
 	receipt := *stamp.Receipt
+	if receipt.SourceID != "" && receipt.SourceID != source.ID {
+		return part, nil, errands.ErrInvalidSendNowDelivery
+	}
 	receipt.SourceID = source.ID
 	return part, &receipt, nil
 }

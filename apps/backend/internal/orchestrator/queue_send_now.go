@@ -276,6 +276,10 @@ func (s *Service) loadSendNowSelection(
 	if err != nil {
 		return "", "", nil, err
 	}
+	entries = s.messageQueue.SelectDispatchSources(ctx, entries)
+	if len(entries) == 0 {
+		return "", "", nil, ErrSendNowQueueEmpty
+	}
 	if err := messagequeue.ValidateSendNowEntries(entries); err != nil {
 		return "", "", nil, err
 	}

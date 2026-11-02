@@ -102,6 +102,17 @@ func (r *sqliteRepository) AdmitQueueMessage(
 	if err := r.guardQueueAdmissionTx(ctx, tx, identity, policy); err != nil {
 		return nil, false, err
 	}
+	accepted, replay, err := r.admitQueueMessageTx(ctx, tx, identity, clientQueueID, admitted, claim, maxPerSession, policy, workflowEntry, fingerprint)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, fmt.Errorf("commit queue admission: %w", err)
+	}
+	return accepted, replay, nil
+}
+
+func (r *sqliteRepository) admitQueueMessageTx(ctx context.Context, tx *sqlx.Tx, identity QueueSessionIdentity, clientQueueID string, admitted *QueuedMessage, claim *QueueAttachmentClaim, maxPerSession int, policy *AutoMergePolicy, workflowEntry *WorkflowEntryIdentity, fingerprint string) (*QueuedMessage, bool, error) {
 	receipt, err := r.readQueueAdmissionReceiptTx(ctx, tx, identity, clientQueueID)
 	if err != nil {
 		return nil, false, err
@@ -110,16 +121,13 @@ func (r *sqliteRepository) AdmitQueueMessage(
 		if receipt.Fingerprint != fingerprint {
 			return nil, false, ErrQueueIDConflict
 		}
-		if err := tx.Commit(); err != nil {
-			return nil, false, fmt.Errorf("commit queue admission replay: %w", err)
-		}
 		return receipt.Message, true, nil
 	}
-	if err := r.validateWorkflowEntryTx(ctx, tx, candidate.TaskID, candidate.SessionID, workflowEntry); err != nil {
+	if err := r.validateWorkflowEntryTx(ctx, tx, admitted.TaskID, admitted.SessionID, workflowEntry); err != nil {
 		return nil, false, err
 	}
 	if workflowEntry != nil && workflowEntry.EnforceTaskManagementClaim {
-		if err := r.ensureQueueCapacityTx(ctx, tx, candidate.SessionID, maxPerSession); err != nil {
+		if err := r.ensureQueueCapacityTx(ctx, tx, admitted.SessionID, maxPerSession); err != nil {
 			return nil, false, err
 		}
 	}
@@ -137,9 +145,6 @@ func (r *sqliteRepository) AdmitQueueMessage(
 	}
 	if err := r.insertQueueAdmissionReceiptTx(ctx, tx, identity, clientQueueID, fingerprint, accepted); err != nil {
 		return nil, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, false, fmt.Errorf("commit queue admission: %w", err)
 	}
 	return accepted, false, nil
 }

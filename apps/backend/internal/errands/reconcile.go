@@ -80,8 +80,16 @@ func (s *Service) releaseUndeliveredClaims(ctx context.Context, owners *lifecycl
 	orphaned := map[string]struct{}{}
 	candidates := map[string][]*models.Errand{}
 	for _, row := range rows {
-		if !owners.permits(row) || row.ResultState != models.ErrandResultDelivered || row.DeliveryToken == "" ||
-			(row.DeliveredRoute != models.ErrandDeliveryNotification && row.DeliveredRoute != models.ErrandDeliveryTurnContext) {
+		if !owners.permits(row) || !isDeliveredParentClaim(row) {
+			continue
+		}
+		claim := models.ErrandResultClaim{ErrandID: row.ID, ResultRevision: row.ResultRevision,
+			ParentAdmissionGeneration: row.ParentAdmissionGeneration, Token: row.DeliveryToken, Route: row.DeliveredRoute}
+		owned, err := s.store.HasErrandPreparedOwnership(ctx, row.TaskID, row.ParentSessionID, claim)
+		if err != nil {
+			return fmt.Errorf("check prepared source ownership: %w", err)
+		}
+		if owned {
 			continue
 		}
 		found, err := s.receipts.HasDeliveryToken(ctx, row.ParentSessionID, row.DeliveryToken)
@@ -102,6 +110,11 @@ func (s *Service) releaseUndeliveredClaims(ctx context.Context, owners *lifecycl
 		}
 	}
 	return nil
+}
+
+func isDeliveredParentClaim(row *models.Errand) bool {
+	return row.ResultState == models.ErrandResultDelivered && row.DeliveryToken != "" &&
+		(row.DeliveredRoute == models.ErrandDeliveryNotification || row.DeliveredRoute == models.ErrandDeliveryTurnContext)
 }
 
 func (s *Service) logReleasedDelivery(ctx context.Context, candidate *models.Errand) {

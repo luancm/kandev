@@ -238,8 +238,16 @@ func (s *Service) restoreSendNowClaimWithRetry(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
 ) error {
+	updates, err := restoredPreparedSourceMetadata(claim)
+	if err != nil {
+		return err
+	}
 	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
-		return s.messageQueue.RestoreSendNowClaim(recoveryCtx, claim)
+		normalizedCtx, err := messagequeue.WithRestoredSourceMetadata(recoveryCtx, claim, updates)
+		if err != nil {
+			return err
+		}
+		return s.messageQueue.RestoreSendNowClaim(normalizedCtx, claim)
 	})
 }
 
@@ -314,8 +322,10 @@ func (s *Service) reconcilePendingSendNowClaimsOnStartup(ctx context.Context) er
 					zap.String("claim_id", claim.ClaimID),
 					zap.String("session_id", claim.Dispatch.SessionID))
 			}
-		} else {
+		} else if !s.sendNowClaimOwnsErrandSources(claim) {
 			recoveryErr = s.restoreSendNowClaimWithRetry(ctx, claim)
+		} else {
+			continue
 		}
 		if recoveryErr != nil {
 			if !errors.Is(recoveryErr, messagequeue.ErrSendNowClaimChanged) {
@@ -348,8 +358,11 @@ func (s *Service) restorePendingSendNowClaimsForRecovery(ctx context.Context, se
 		}
 		if pending.Accepted {
 			err = s.acknowledgeSendNowClaimWithRetry(ctx, claim)
-		} else {
+		} else if !s.sendNowClaimOwnsErrandSources(claim) {
 			err = s.restoreSendNowClaimWithRetry(context.WithoutCancel(ctx), claim)
+		} else {
+			// Generic session recovery supplies no proof of refusal.
+			continue
 		}
 		if err != nil {
 			if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {

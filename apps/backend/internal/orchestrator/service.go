@@ -946,7 +946,8 @@ type Service struct {
 	mcpSelectionReader MCPSelectionReader
 	// errands receives session lifecycle notifications and queue drain ticks.
 	// Nil leaves errand cleanup and queued admission off.
-	errands ErrandController
+	errands        ErrandController
+	errandsEnabled func() bool
 	// parentAwaits ends the in-flight awaits of a parent whose turn was cancelled.
 	parentAwaits ParentAwaitEnder
 
@@ -2116,9 +2117,13 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
-// SetErrandsEnabled hands the executor the errands gate that controls the
-// parent errand tools in task MCP profiles.
+// SetErrandsEnabled binds the canonical gate to parent MCP tools and
+// selection of persisted errand queue sources.
 func (s *Service) SetErrandsEnabled(enabled func() bool) {
+	s.errandsEnabled = enabled
+	if s.messageQueue != nil {
+		s.messageQueue.SetDispatchSourcePolicy(s.errandQueueSourceSelection)
+	}
 	if s.executor != nil {
 		s.executor.SetErrandsEnabled(enabled)
 	}

@@ -47,7 +47,9 @@ func TestPreserveErrandNoticeOnDeleteKeepsRowWhenAdmissionRefused(t *testing.T) 
 }
 
 func TestPreserveErrandNoticeOnDeleteIgnoresSessionThatIsNotAnErrand(t *testing.T) {
-	svc := &Service{logger: testLogger()}
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	svc := &Service{logger: testLogger(), repo: repo}
 	controller := &deletingErrandController{preserveE: models.ErrErrandNotFound}
 	svc.SetErrandController(controller)
 
@@ -58,7 +60,13 @@ func TestPreserveErrandNoticeOnDeleteIgnoresSessionThatIsNotAnErrand(t *testing.
 }
 
 func TestPreserveErrandNoticeOnDeleteFallsBackToCancelWithoutNotifier(t *testing.T) {
-	svc := &Service{logger: testLogger()}
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "parent-1", "step-1")
+	require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", Role: models.SessionRoleErrand, ParentSessionID: "parent-1",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: time.Now().UTC(),
+	}))
+	svc := &Service{logger: testLogger(), repo: repo}
 	controller := &recordingErrandController{}
 	svc.SetErrandController(controller)
 

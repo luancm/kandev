@@ -81,6 +81,7 @@ func (d *ErrandParentDeliverer) admit(
 	for key, value := range metadata {
 		stamped[key] = value
 	}
+	var prepared *sendNowErrandSource
 	if content == "" {
 		stamped[errandSourceMetadataKey] = sendNowErrandSource{Provenance: errands.SendNowErrandProvenance, Kind: errands.SendNowSourceNotification}
 	} else if envelope, ok := decodeErrandDeliveryEnvelope(metadata[errandDeliveryKey]); ok && envelope.Token != "" {
@@ -89,10 +90,21 @@ func (d *ErrandParentDeliverer) admit(
 			return stampErr
 		}
 		stamped[errandSourceMetadataKey] = stamp
+		prepared = &stamp
+	} else {
+		return errands.ErrInvalidSendNowDelivery
 	}
-	_, err = s.messageQueue.QueueMessageWithMetadataForSession(
-		ctx, identity, content, "", messagequeue.QueuedByServer, false, nil, stamped,
-	)
+	if prepared != nil {
+		key := preparedErrandQueueKey(identity, *prepared)
+		prepared.Receipt.SourceID = key
+		owner, ok := s.repo.(messagequeue.PreparedServerAdmission)
+		if !ok {
+			return errors.New("prepared errand ownership admission is unavailable")
+		}
+		_, err = s.messageQueue.QueuePreparedServerMessageForSession(ctx, identity, key, content, stamped, owner)
+	} else {
+		_, err = s.messageQueue.QueueMessageWithMetadataForSession(ctx, identity, content, "", messagequeue.QueuedByServer, false, nil, stamped)
+	}
 	if err != nil {
 		return fmt.Errorf("queue errand notification: %w", err)
 	}
@@ -128,12 +140,20 @@ func (s *Service) capturePreparedErrandSource(ctx context.Context, taskID, paren
 		if err != nil {
 			return sendNowErrandSource{}, fmt.Errorf("capture prepared errand revision: %w", err)
 		}
-		if row.TaskID != taskID || row.ParentSessionID != parentID || row.ResultRevision == "" || row.ResultState != models.ErrandResultPending {
+		if !preparedErrandRowMatches(row, taskID, parentID) {
 			return sendNowErrandSource{}, errands.ErrInvalidSendNowDelivery
 		}
 		receipt.Claims = append(receipt.Claims, models.ErrandResultClaim{ErrandID: row.ID, ResultRevision: row.ResultRevision,
 			ParentAdmissionGeneration: row.ParentAdmissionGeneration, Token: envelope.Token, Route: envelope.Route})
 	}
-	return sendNowErrandSource{Provenance: errands.SendNowErrandProvenance, Kind: errands.SendNowSourcePrepared,
+	identity, err := s.parentQueueIdentity(ctx, parentID)
+	if err != nil {
+		return sendNowErrandSource{}, err
+	}
+	return sendNowErrandSource{Identity: &identity, Provenance: errands.SendNowErrandProvenance, Kind: errands.SendNowSourcePrepared,
 		PreparedBlock: content, Receipt: receipt}, nil
+}
+
+func preparedErrandRowMatches(row *models.Errand, taskID, parentID string) bool {
+	return row.TaskID == taskID && row.ParentSessionID == parentID && row.ResultRevision != "" && (row.ResultState == models.ErrandResultPending || row.ResultState == models.ErrandResultDelivered)
 }

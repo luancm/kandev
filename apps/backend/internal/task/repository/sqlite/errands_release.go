@@ -75,6 +75,10 @@ func releaseErrandResultClaim(ctx context.Context, tx *sqlx.Tx, taskID, parentID
 	if err != nil || (state != errandClaimedState && state != "release_pending") {
 		return nil, err
 	}
+	owned, err := hasErrandPreparedOwnershipTx(ctx, tx, taskID, parentID, claim)
+	if err != nil || owned {
+		return nil, err
+	}
 	row, err := scanErrand(tx.QueryRowContext(ctx, tx.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE id = ?`), claim.ErrandID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, setErrandClaimState(ctx, tx, claim, "superseded", at)

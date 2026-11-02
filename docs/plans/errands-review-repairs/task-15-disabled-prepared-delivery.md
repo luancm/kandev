@@ -1,7 +1,7 @@
 ---
 id: "15-disabled-prepared-delivery"
 title: "Gate prepared results without losing user input"
-status: pending
+status: done
 wave: 15
 depends_on:
   - "14-send-now-source-identity"
@@ -68,3 +68,31 @@ The listed production and regression files are exclusive ownership for this pack
 ## Results
 
 Pending. Record each final command, observed result, test count and log path; distinguish skips, infrastructure failures and reproduced defects from passes.
+
+### Ownership integration after behavioral RED
+
+The initial pass added seven real SQLite regressions, all failing behavioral assertions against unchanged production. Task15 remains in progress, without acceptance. Handoff: `/tmp/errands-task15-handoff.md`. The original selector additionally exposes an old deletion fixture with a nil repository; it must be repaired without weakening its assertions or excluding the test.
+
+The primary grants narrowly coupled edits to `internal/orchestrator/service.go:SetErrandsEnabled` and necessary Service state/wiring to bind the existing canonical flag callback to queue source selection; `task_operations.go:drainQueuedMessageForPromptableSessionLockedForIdentity` for pre-reservation FIFO selection; and `queue_send_now_claim.go:restorePendingSendNowClaimsForRecovery` to preserve accepted/uncertain ownership unless definite refusal authorizes restoration. Existing queue source-selection consumers in `step_handoff_carry.go` and `event_handlers_workflow.go` may receive the minimal shared policy plumbing where required. Relevant adjacent tests, including `errand_deletion_test.go` fixture setup, are included.
+
+These edits implement the existing reviewed contract, not a new flag reader, queue mechanism, or recovery policy. Prefer one shared source-selection policy over caller-specific gates. Keep generic non-errand admission/recovery behavior and exact successor fences; do not weaken ambiguous evidence into permission to restore. Complete the entire original Task15 acceptance, including the previously panicking selector, before claiming done. No broad refactor or Task24/25/26 implementation is included.
+
+### Prepared-source and exact-result ownership integration
+
+The continuation implements the selection/recovery fixes and passes all seven original regressions, but the complete orchestrator selector remains RED (43 pass, one fail). `TestPreparedErrandCancellationRetainedBeforeDeletionDeliversRevisionOnce` reopens after notice admission before row deletion and receives the same cancellation revision twice: the prepared queue block and independently composed pending result. Evidence: `/tmp/errands-task15-completion-handoff.md`. No acceptance or commit is claimed.
+
+The existing shared design already defines queue and delivery storage as one task-guarded integration boundary. Production uses a shared database pool. Coordinate immutable prepared-source admission/replay and its exact notification result claim in one transaction under the existing task delivery guard, before readiness/provider work. Preserve the deterministic source/token and exact revision/generation/incarnation; queue-full/write failure rolls back both, and uncertain commit retries the same identity. Prefer task-repository-owned coordination with transaction-aware existing queue helpers because task SQLite already depends on messagequeue; do not introduce a reverse import, second outbox or competing SQL writer. Existing composition excludes a properly claimed revision; do not filter duplicate text.
+
+The primary grants narrowly necessary changes in `errands/{delivery,interfaces,reconcile}.go`, `orchestrator/errand_parent_deliverer.go`, queue `server_admission.go`, `repository_admission.go` and exact ownership readers, task repository `errands_claims.go`/claim-record helpers and `errands_release.go`, associated repository interfaces/wiring and adjacent tests. Recovery and explicit release must respect full exact evidence from a pending source or durable FIFO/Send Now claim; a historical admission receipt or token alone is insufficient. Restored sources retain ownership, deleted errand rows retain their queued notice, and stale revisions/generations/incarnations must not acquire or release successor claims.
+
+Required additional proofs cover the saved crash window, queue/claim write rollback, uncertain commit replay, independent-connection composition/admission serialization, reconciliation before dispatch, FIFO/Send Now refusal and reopen, accepted/uncertain claims and successor identity fences. Preserve all completed Task14/15 behavior and run full original Task15 acceptance. This implements existing authority, not a new product policy.
+
+### Final integration review: legacy generation regression required
+
+The full recorded local acceptance passed, but parent review identified a concrete missing identity field in both legacy FIFO normalization and `restoredPreparedStamp`: normalized prepared sources carry identity/receipt without `QueueGeneration`, while exact ownership rejects an omitted generation. That source can remain selectable after refusal while reconciliation releases its result. This is a static finding, not an executed regression yet. Task15 remains in progress and uncommitted. Stamp only the validated authoritative generation in both paths and reproduce FIFO and Send Now refusal/reopen ownership before accepting the correction; preserve explicit omitted/stale-generation rejection. Existing ownership covers this correction.
+
+### Final local acceptance
+
+Task15 is accepted within SQLite and controlled-runtime scope. Atomic prepared-source/result ownership, disabled selection, refusal/restart recovery and exact successor fencing pass. Final review's legacy generation omission was reproduced in eight real refusal/reopen cases, corrected in both normalization paths using authoritative source generations, and re-reviewed with no issues. All 35 final source hashes match recorded evidence.
+
+Final selectors pass: 47 orchestrator tests, 22 errands, 97 queue, 38 Task14, 35 common admission, four reader, eight ownership repository and 17 repository controls (overlapping per-selector counts). Scoped lint/build/formatting checks pass; unchanged SQL guard and store-conformance receipts remain applicable. PostgreSQL cases were skipped without a DSN and are not certified; no browser or real-provider acceptance is claimed. Complete evidence: `/tmp/errands-task15-ownership-handoff.md` and `/tmp/errands-task15-legacy-generation-handoff.md`. Task24/25/26 remain separate.
