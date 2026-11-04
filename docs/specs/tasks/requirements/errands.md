@@ -70,6 +70,8 @@ relationship. The rationale and boundaries are in
 
 **Intent:** Expose one consistent errand status.
 
+The [completed-session contract](errand-completion-cleanup.md) separately defines successful runtime cleanup, retained session state and explicit continuation.
+
 #### Acceptance criteria
 
 - **AC-TASKS-ERRANDS-002.1:** An errand shall report exactly one status:

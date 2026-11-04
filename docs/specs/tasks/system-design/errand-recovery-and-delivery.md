@@ -63,6 +63,8 @@ Executor failure flows use the existing session-aware runtime task-state seam. N
 
 ## Teardown and lifecycle recovery
 
+The [successful completion design](errand-completion-cleanup.md) extends this ownership boundary with distinct success-close effects. The cancellation rules below remain unchanged; automatic successful close must not reuse cancellation notice or discard semantics.
+
 Persist a versioned private teardown intent alongside logical cancellation in the existing errand row. The intent records its ID, pending/completed/superseded state and captured session/incarnation/execution/turn/submission authority, or an exact reserved initial-launch tuple when no session exists. An absent intent is not proof of teardown. Schema expansion must update every scanner/insert/update and both dialects; no public lifecycle status is added.
 
 Capture and commit under existing cancellation/admission arbitration, release SQL before external I/O, and stop only the captured owned execution. Scheduling asynchronous teardown is not completion: exact stop acknowledgement or confirmed absence completes the intent. Transient failures remain pending for startup and the existing sweep, including flag-off operation. Same-execution successor turns invalidate old stop authority; revalidation and the physical side effect share operation ownership so a successor cannot slip between them. Legacy identity is never fabricated from today's active turn.
