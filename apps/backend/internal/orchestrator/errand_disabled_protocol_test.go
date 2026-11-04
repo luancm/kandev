@@ -114,9 +114,7 @@ func TestDisabledErrandDefiniteRefusalRestoresWholeClaimBeforeReselection(t *tes
 	manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: "refused"}
 	f.svc.agentManager = manager
 	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
-	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
-	require.NoError(t, err)
-	waitSendNowErrandWorkers(t, f.svc)
+	f.executeWithAutoRunPaused(t)
 	f.restartDelivery(t, false)
 	restored := f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries
 	require.Len(t, restored, 2)

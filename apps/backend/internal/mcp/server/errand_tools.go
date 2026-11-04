@@ -68,7 +68,8 @@ var errandCatalogTools = []string{
 // registrations and then removes every tool outside the allowlist. Plugin tools
 // are never added to this mode (see registerTools).
 func (s *Server) registerErrandCatalogTools() {
-	s.registerKanbanTools()
+	s.registerCoreDiscoveryTools()
+	s.registerCoreTaskTools()
 	s.registerRelatedTasksTool()
 	s.registerPlanTools()
 	s.keepOnlyTools(errandCatalogTools)

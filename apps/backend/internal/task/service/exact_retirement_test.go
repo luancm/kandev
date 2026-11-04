@@ -155,7 +155,7 @@ func TestPreviewExactRetirementRejectsDeletedWorkspace(t *testing.T) {
 		OldTaskID: "old", ReplacementTaskID: "replacement", WorkspaceID: workspaceID,
 		ExpectedOldGeneration: exactRetirementGeneration(oldTask), ExpectedReplacementGeneration: exactRetirementGeneration(replacementTask),
 	})
-	require.ErrorIs(t, err, repoerrors.ErrWorkspaceNotFound)
+	require.ErrorIs(t, err, repoerrors.ErrTaskNotFound)
 	require.Nil(t, preview)
 }
 

@@ -110,9 +110,13 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if err := ctx.Err(); err != nil {
 		return summaries, err
 	}
+	var unread summaryUnreadObservation
+	if sessionsByTask != nil {
+		unread = s.loadSummaryUnread(ctx, flattenTaskSessions(tasks, sessionsByTask))
+	}
 	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
 		ctx, tasks, sessionsByTask, sessionsByTask != nil, pendingBySession, summaries, activityByTask,
-		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, errandsByTask,
+		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, errandsByTask, unread,
 	)
 	if err := ctx.Err(); err != nil {
 		return summaries, err
@@ -132,7 +136,7 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	var rebuildErr error
 	summaries, rebuildErr = s.rebuildMissingSummaries(
 		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask,
-		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, errandsByTask,
+		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, errandsByTask, unread,
 	)
 	if err := ctx.Err(); err != nil {
 		return summaries, err
@@ -153,6 +157,7 @@ func (s *Service) reconcileExistingSummaries(
 	completionGates map[string]completionGateSummaryObservation,
 	completionGatesLoaded bool,
 	errandsByTask map[string]errandsSummaryObservation,
+	unread summaryUnreadObservation,
 ) (map[string]struct{}, error) {
 	var reconcileErr error
 	failedTaskIDs := make(map[string]struct{})
@@ -178,6 +183,7 @@ func (s *Service) reconcileExistingSummaries(
 		var reconciled *statussummary.TaskStatusSummary
 		var err error
 		observation := completionGates[task.ID]
+		unreadValue := unread.forTask(sessions)
 		if completionGatesLoaded {
 			if _, ok := completionGates[task.ID]; !ok {
 				observation.err = fmt.Errorf("completion-gate batch omitted task %q", task.ID)
@@ -186,7 +192,7 @@ func (s *Service) reconcileExistingSummaries(
 			observation.summary, observation.observed, observation.err = s.completionGateSummary(ctx, task.ID)
 		}
 		errandsObservation := errandsByTask[task.ID]
-		reconciled, err = s.reconcileExistingSummaryWithObservations(ctx, task, summaries[task.ID], action, activityByTask[task.ID], activityObserved, runningSessions, observation, &errandsObservation, launchQueueByTask[task.ID])
+		reconciled, err = s.reconcileExistingSummaryWithObservations(ctx, task, summaries[task.ID], action, activityByTask[task.ID], activityObserved, runningSessions, observation, &errandsObservation, unreadValue, launchQueueByTask[task.ID])
 		errandsByTask[task.ID] = errandsObservation
 		if err != nil {
 			if errandsObservation.err != nil && reconciled != nil {
@@ -229,6 +235,7 @@ func (s *Service) rebuildMissingSummaries(
 	completionGates map[string]completionGateSummaryObservation,
 	completionGatesLoaded bool,
 	errandsByTask map[string]errandsSummaryObservation,
+	unread summaryUnreadObservation,
 ) (map[string]*statussummary.TaskStatusSummary, error) {
 	if ctx.Err() != nil {
 		return summaries, nil
@@ -287,6 +294,8 @@ func (s *Service) rebuildMissingSummaries(
 		errandsObservation := errandsByTask[task.ID]
 		input := s.rebuildInput(
 			taskLaunchErrorSummary(task),
+			taskTurnErrorSummary(task),
+			true,
 			sessionsByTask[task.ID],
 			environmentIDsByTask[task.ID],
 			pendingBySession,
@@ -304,6 +313,7 @@ func (s *Service) rebuildMissingSummaries(
 			sessionsByTask != nil,
 			now,
 		)
+		unread.applyToRebuild(&input)
 		if err := s.rebuildMissingSummary(ctx, task, summaries, input); err != nil {
 			rebuildErr = errors.Join(rebuildErr, fmt.Errorf("reconcile missing task %s status summary: %w", task.ID, err))
 		}
@@ -552,11 +562,16 @@ func (s *Service) rebuildMissingSummary(
 		activityAt = *input.LastActivityAt
 	}
 	errands := reloaded.errands
+	unread, err := s.reloadTaskUnread(ctx, task.ID, summaryUnreadValue{observed: input.UnreadObserved})
+	if err != nil {
+		s.logSummaryRepairFailure(ctx, task.ID, "reload unread", err)
+		return fmt.Errorf("reload unread state: %w", err)
+	}
 	reconciled, err := s.reconcileExistingSummaryWithObservations(
 		ctx, task, reloaded.current, reloaded.pendingAction, activityAt, activityObserved,
 		reloaded.runningSessions,
 		reloaded.completionGate,
-		&errands, launchQueue,
+		&errands, unread, launchQueue,
 	)
 	if err != nil {
 		if reconciled != nil {

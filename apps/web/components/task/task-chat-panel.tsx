@@ -42,9 +42,15 @@ import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
-import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
+import {
+  dividerCursorForRenderedItems,
+  findUnreadDividerItemId,
+  newestAcknowledgeableMessageId,
+} from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
+import { isSessionReadableInPanel } from "./chat/session-read-ownership";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { useSessionPrompts } from "@/hooks/domains/session/use-session-prompts";
@@ -661,15 +667,17 @@ export function usePendingScrollToStart({
 }
 
 /** Computes the render-item key the unread "New" divider should appear
- * immediately before: tracks the latest rendered message id for session read
- * tracking, then maps the resulting divider anchor onto the grouped items. */
+ * immediately before. Read tracking acknowledges the newest loaded message,
+ * including rows the transcript hides; the resulting divider anchor is mapped
+ * onto the rendered items before placement. */
 function useUnreadDividerBeforeItemKey(
   sessionId: string | null,
   isVisible: boolean,
-  groupedItems: Parameters<typeof lastRenderedMessageId>[0],
+  messages: Message[],
+  groupedItems: RenderItem[],
   isInitialMessagesLoading: boolean,
 ) {
-  const latestMessageId = useMemo(() => lastRenderedMessageId(groupedItems), [groupedItems]);
+  const latestMessageId = useMemo(() => newestAcknowledgeableMessageId(messages), [messages]);
   const dividerAnchor = useSessionReadTracking(
     sessionId,
     isVisible,
@@ -677,8 +685,12 @@ function useUnreadDividerBeforeItemKey(
     isInitialMessagesLoading,
   );
   return useMemo(
-    () => findUnreadDividerItemId(groupedItems, dividerAnchor),
-    [groupedItems, dividerAnchor],
+    () =>
+      findUnreadDividerItemId(
+        groupedItems,
+        dividerCursorForRenderedItems(messages, groupedItems, dividerAnchor),
+      ),
+    [messages, groupedItems, dividerAnchor],
   );
 }
 
@@ -1310,6 +1322,7 @@ const TaskChatPanelContent = memo(function TaskChatPanelContent({
     historyError,
     retryHistory,
     groupedItems,
+    messages,
     allMessages,
     footerActionMessages,
     permissionsByToolCallId,
@@ -1347,7 +1360,8 @@ const TaskChatPanelContent = memo(function TaskChatPanelContent({
   const messageListRef = useRef<MessageListHandle>(null);
   const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
     resolvedSessionId,
-    isVisible,
+    isSessionReadableInPanel(isVisible, session?.task_id, statusTaskId ?? taskIdHint),
+    messages,
     groupedItems,
     isInitialMessagesLoading,
   );
@@ -1575,6 +1589,7 @@ const TaskChatPanelContent = memo(function TaskChatPanelContent({
   );
   const search = useSessionSearch(resolvedSessionId, loadMoreRaw, navigateSearchHit);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
+  const subscriptionUsage = useSessionSubscriptionUsage(resolvedSessionId);
   usePanelSearch({
     containerRef: searchContainerRef,
     isOpen: search.isOpen,
@@ -1746,6 +1761,7 @@ const TaskChatPanelContent = memo(function TaskChatPanelContent({
               statusTaskId={statusTaskId ?? taskIdHint}
               showAgentStartHint={showAgentStartHint}
               launchErrorOwned={launchErrorOwned}
+              subscriptionUsage={subscriptionUsage}
             />
           </div>
         </ComposerFooterAllocation>
@@ -1780,6 +1796,8 @@ type ChatFooterProps = {
   /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
   showAgentStartHint: boolean;
   launchErrorOwned: boolean;
+  /** Antigravity personal sessions show the subscription cost guidance. */
+  subscriptionUsage: boolean;
 };
 
 /**
@@ -1810,6 +1828,7 @@ function ChatFooter({
   statusTaskId,
   showAgentStartHint,
   launchErrorOwned,
+  subscriptionUsage,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -1824,6 +1843,7 @@ function ChatFooter({
             taskId={panelState.taskId ?? statusTaskId}
             sessionId={panelState.resolvedSessionId}
             detailActive={panelState.detailActive}
+            subscriptionBilling={subscriptionUsage}
           />
           <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
         </div>

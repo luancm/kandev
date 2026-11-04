@@ -1133,19 +1133,20 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
-	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
-	agentManager              AgentManagerClient
-	attachmentReader          AttachmentReader
-	repo                      executorStore
-	secretStore               secrets.SecretStore
-	shellPrefs                ShellPreferenceProvider
-	capabilities              ExecutorTypeCapabilities
-	gitlabCredentials         GitLabCredentialResolver
-	logger                    *logger.Logger
-	canvasesEnabled           bool
-	// errandsEnabled reports the runtime errands gate. It is read on every
-	// profile resolution, so a runtime override applies to new sessions.
+	builtinPolicyReader           BuiltinPolicyReader
+	autonomousExecutorContext     func(context.Context, string, string) (context.Context, error)
+	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
+	agentManager                  AgentManagerClient
+	attachmentReader              AttachmentReader
+	repo                          executorStore
+	secretStore                   secrets.SecretStore
+	shellPrefs                    ShellPreferenceProvider
+	capabilities                  ExecutorTypeCapabilities
+	gitlabCredentials             GitLabCredentialResolver
+	logger                        *logger.Logger
+	canvasesEnabled               bool
+	workspaceCollaborationEnabled bool
+	// errandsEnabled reports the runtime errands gate for new sessions.
 	errandsEnabled func() bool
 
 	// coordinators resolves a coordinator conversation task to its
@@ -1208,6 +1209,7 @@ type Executor struct {
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
 	// tear down the same execution.
 	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+	onStaleExecutionCleanup func(context.Context, string)
 	// Callback for cancelled resume startup cleanup, which must share the
 	// orchestrator's retryable exact-execution teardown claim.
 	onCancelledResumeExecutionCleanup CancelledResumeExecutionCleanupFunc
@@ -1536,6 +1538,12 @@ func (e *Executor) SetCanvasesEnabled(enabled bool) {
 // sessions receive the parent errand tools.
 func (e *Executor) SetErrandsEnabled(enabled func() bool) {
 	e.errandsEnabled = enabled
+}
+
+// SetWorkspaceCollaborationEnabled controls whether task MCP profiles expose
+// the report-only delivery mode. Applied before any new session launch.
+func (e *Executor) SetWorkspaceCollaborationEnabled(enabled bool) {
+	e.workspaceCollaborationEnabled = enabled
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

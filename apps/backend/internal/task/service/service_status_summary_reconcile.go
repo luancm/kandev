@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,6 +38,9 @@ type summaryReconcileState struct {
 	completionGate         *statussummary.CompletionGateSummary
 	completionGateObserved bool
 	errands                errandsSummaryObservation
+	turnError              *statussummary.TurnErrorSummary
+	turnErrorObserved      bool
+	unread                 summaryUnreadValue
 }
 
 func (s *Service) reconcileExistingSummary(
@@ -47,6 +51,7 @@ func (s *Service) reconcileExistingSummary(
 	authoritativeActivity time.Time,
 	activityObserved bool,
 	runningSessions runningSessionObservation,
+	unread summaryUnreadValue,
 	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
@@ -58,7 +63,7 @@ func (s *Service) reconcileExistingSummary(
 	}
 	return s.reconcileExistingSummaryWithGateObservation(
 		ctx, task, current, pendingAction, authoritativeActivity, activityObserved,
-		runningSessions, completionGateSummaryObservation{summary: completionGate, observed: completionGateObserved}, launchQueueValues...,
+		runningSessions, completionGateSummaryObservation{summary: completionGate, observed: completionGateObserved}, unread, launchQueueValues...,
 	)
 }
 
@@ -71,29 +76,43 @@ func (s *Service) reconcileExistingSummaryWithGateObservation(
 	activityObserved bool,
 	runningSessions runningSessionObservation,
 	gateObservation completionGateSummaryObservation,
+	unread summaryUnreadValue,
 	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
 	errands := s.loadSummaryErrands(ctx, []string{task.ID})[task.ID]
-	return s.reconcileExistingSummaryWithObservations(ctx, task, current, pendingAction, authoritativeActivity, activityObserved, runningSessions, gateObservation, &errands, launchQueueValues...)
+	return s.reconcileExistingSummaryWithObservations(ctx, task, current, pendingAction, authoritativeActivity, activityObserved, runningSessions, gateObservation, &errands, unread, launchQueueValues...)
 }
 
 func (s *Service) reconcileExistingSummaryWithObservations(
 	ctx context.Context, task *models.Task, current *statussummary.TaskStatusSummary,
 	pendingAction string, authoritativeActivity time.Time, activityObserved bool,
 	runningSessions runningSessionObservation, gateObservation completionGateSummaryObservation,
-	errands *errandsSummaryObservation, launchQueueValues ...*statussummary.LaunchQueueSummary,
+	errands *errandsSummaryObservation, unread summaryUnreadValue, launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
 	launchQueue, launchQueueObserved := summaryReconcileLaunchQueue(task, current, launchQueueValues)
 	completionGate, completionGateObserved, err := completionGateObservationValue(ctx, gateObservation)
 	if err != nil {
 		return current, err
 	}
+	// Read turn-error metadata after the summary revision used for repair, not
+	// from the caller's older task-list snapshot. A dismissal can land between
+	// that snapshot and the summary map; reading the row now prevents writing
+	// the pre-dismissal error back at the next revision.
+	turnErrorTask := task
+	if s.tasks != nil {
+		if loaded, loadErr := s.tasks.GetTask(ctx, task.ID); loadErr == nil && loaded != nil {
+			turnErrorTask = loaded
+		}
+	}
+	turnError := taskTurnErrorSummary(turnErrorTask)
+	turnErrorObserved := turnErrorTask.Metadata != nil
 	state := summaryReconcileState{
 		current: current, pendingAction: pendingAction,
 		authoritativeActivity: authoritativeActivity, activityObserved: activityObserved,
 		runningSessions: runningSessions, launchQueue: launchQueue,
 		launchQueueObserved: launchQueueObserved, completionGate: completionGate,
 		completionGateObserved: completionGateObserved, errands: *errands,
+		turnError: turnError, turnErrorObserved: turnErrorObserved, unread: unread,
 	}
 	defer func() { *errands = state.errands }()
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && state.current != nil; attempt++ {
@@ -124,7 +143,7 @@ func (s *Service) reconcileExistingSummaryWithObservations(
 	return s.finishSummaryReconcile(ctx, task.ID, state.current, state.pendingAction,
 		state.authoritativeActivity, state.activityObserved, state.runningSessions,
 		state.launchQueue, state.launchQueueObserved, state.completionGate,
-		state.completionGateObserved, state.errands)
+		state.completionGateObserved, state.errands, state.turnError, state.turnErrorObserved, state.unread)
 }
 
 func (s *Service) reconcileSummaryAttempt(
@@ -135,7 +154,7 @@ func (s *Service) reconcileSummaryAttempt(
 ) (*statussummary.TaskStatusSummary, bool, bool, error) {
 	if !summaryNeedsReconcile(state.current, state.pendingAction, state.authoritativeActivity,
 		state.activityObserved, state.runningSessions, state.launchQueue, state.launchQueueObserved,
-		state.completionGate, state.completionGateObserved, state.errands) {
+		state.completionGate, state.completionGateObserved, state.errands, state.turnError, state.turnErrorObserved, state.unread) {
 		return state.current, false, false, nil
 	}
 	if err := prepareSummaryReconcileAttempt(ctx, attempt, state.current.Revision); err != nil {
@@ -143,7 +162,7 @@ func (s *Service) reconcileSummaryAttempt(
 	}
 	next, err := nextReconciledSummary(state.current, state.pendingAction, state.runningSessions,
 		state.authoritativeActivity, state.activityObserved, state.launchQueue, state.completionGate,
-		state.completionGateObserved, state.errands)
+		state.completionGateObserved, state.errands, state.turnError, state.turnErrorObserved, state.unread)
 	if err != nil {
 		return state.current, true, false, err
 	}
@@ -182,6 +201,16 @@ func (s *Service) reloadSummaryAfterCASRejection(
 	}
 	state.pendingAction = reloaded.pendingAction
 	state.runningSessions = reloaded.runningSessions
+	if s.tasks != nil {
+		if task, readErr := s.tasks.GetTask(ctx, taskID); readErr == nil && task != nil {
+			state.turnError = taskTurnErrorSummary(task)
+			state.turnErrorObserved = task.Metadata != nil
+		}
+	}
+	state.unread, err = s.reloadTaskUnread(ctx, taskID, state.unread)
+	if err != nil {
+		return false, fmt.Errorf("reload unread state: %w", err)
+	}
 	if state.launchQueueObserved {
 		state.launchQueue = reloaded.launchQueue
 	}
@@ -221,6 +250,9 @@ func summaryNeedsReconcile(
 	completionGate *statussummary.CompletionGateSummary,
 	completionGateObserved bool,
 	errands errandsSummaryObservation,
+	turnError *statussummary.TurnErrorSummary,
+	turnErrorObserved bool,
+	unread summaryUnreadValue,
 ) bool {
 	if current == nil {
 		return false
@@ -240,6 +272,12 @@ func summaryNeedsReconcile(
 	if completionGateObserved && !equalCompletionGateSummary(current.CompletionGate, completionGate) {
 		return true
 	}
+	if turnErrorObserved && !statussummary.EqualTurnErrorSummary(current.TurnError, turnError) {
+		return true
+	}
+	if unread.observed && !slices.Equal(current.UnreadSessionIDs, unread.sessionIDs) {
+		return true
+	}
 	return summaryActivityNeedsReconcile(current, authoritativeActivity, activityObserved)
 }
 
@@ -250,6 +288,14 @@ func summaryActivityNeedsReconcile(
 ) bool {
 	return activityObserved && authoritativeActivity.After(time.Time{}) &&
 		(current.LastActivityAt == nil || authoritativeActivity.After(*current.LastActivityAt))
+}
+
+func cloneTurnErrorForService(value *statussummary.TurnErrorSummary) *statussummary.TurnErrorSummary {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneCompletionGateForService(gate *statussummary.CompletionGateSummary) *statussummary.CompletionGateSummary {
@@ -572,6 +618,13 @@ func (s *Service) loadSummaryGit(
 	return byEnvironment, true
 }
 
+func taskTurnErrorSummary(task *models.Task) *statussummary.TurnErrorSummary {
+	if task == nil {
+		return nil
+	}
+	return statussummary.TurnErrorSummaryFromMetadata(task.Metadata)
+}
+
 func taskLaunchErrorSummary(task *models.Task) *statussummary.ActiveErrorSummary {
 	if task == nil {
 		return nil
@@ -678,7 +731,7 @@ func maxInt(value, minimum int) int {
 	return value
 }
 
-func nextReconciledSummary(current *statussummary.TaskStatusSummary, pendingAction string, runningSessions runningSessionObservation, authoritativeActivity time.Time, activityObserved bool, launchQueue *statussummary.LaunchQueueSummary, completionGate *statussummary.CompletionGateSummary, completionGateObserved bool, errands errandsSummaryObservation) (statussummary.TaskStatusSummary, error) {
+func nextReconciledSummary(current *statussummary.TaskStatusSummary, pendingAction string, runningSessions runningSessionObservation, authoritativeActivity time.Time, activityObserved bool, launchQueue *statussummary.LaunchQueueSummary, completionGate *statussummary.CompletionGateSummary, completionGateObserved bool, errands errandsSummaryObservation, turnError *statussummary.TurnErrorSummary, turnErrorObserved bool, unread summaryUnreadValue) (statussummary.TaskStatusSummary, error) {
 	next := *current
 	next.PendingAction = pendingAction
 	if runningSessions.observed {
@@ -694,6 +747,12 @@ func nextReconciledSummary(current *statussummary.TaskStatusSummary, pendingActi
 	}
 	if errands.observed {
 		next.Errands = cloneErrandsForService(errands.summary)
+	}
+	if turnErrorObserved {
+		next.TurnError = cloneTurnErrorForService(turnError)
+	}
+	if unread.observed {
+		next.UnreadSessionIDs = slices.Clone(unread.sessionIDs)
 	}
 	next.Revision = current.Revision + 1
 	next.UpdatedAt = advancedSummaryTime(current.UpdatedAt, time.Now().UTC())
@@ -770,6 +829,9 @@ func (s *Service) finishSummaryReconcile(
 	completionGate *statussummary.CompletionGateSummary,
 	completionGateObserved bool,
 	errands errandsSummaryObservation,
+	turnError *statussummary.TurnErrorSummary,
+	turnErrorObserved bool,
+	unread summaryUnreadValue,
 ) (*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return current, err
@@ -777,7 +839,7 @@ func (s *Service) finishSummaryReconcile(
 	if errands.err != nil {
 		return current, fmt.Errorf("load errands: %w", errands.err)
 	}
-	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved, errands) {
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved, errands, turnError, turnErrorObserved, unread) {
 		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 	}
 	s.logSummaryReconcileExhaustion(taskID, current)

@@ -75,6 +75,24 @@ func (f *sendNowErrandFixture) queue(t *testing.T, content, sender string, metad
 	return entry
 }
 
+func (f *sendNowErrandFixture) claimForExecution(t *testing.T) *messagequeue.SendNowClaim {
+	t.Helper()
+	identity, err := f.svc.parentQueueIdentity(t.Context(), "session-1")
+	require.NoError(t, err)
+	claim, err := f.svc.messageQueue.ClaimSendNowForSession(t.Context(), identity,
+		f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries)
+	require.NoError(t, err)
+	f.svc.markQueuedDispatchInFlight("session-1", claim.Dispatch.ID)
+	return claim
+}
+
+func (f *sendNowErrandFixture) executeWithAutoRunPaused(t *testing.T) {
+	t.Helper()
+	claim := f.claimForExecution(t)
+	require.NoError(t, f.svc.messageQueue.SetAutoRun(t.Context(), "session-1", false))
+	f.svc.executeSendNowClaim(claim)
+}
+
 func preparedSendNowMetadata(token, id string) map[string]interface{} {
 	return map[string]interface{}{
 		errandDeliveryKey:              errands.DeliveryEnvelope{Token: token, Route: models.ErrandDeliveryNotification, Items: []errands.DeliveryItem{{ErrandID: id, Title: id, Status: models.ErrandStatusCancelled, Preview: "preview " + id}}},
@@ -188,9 +206,9 @@ func TestSendNowErrandContradictoryLegacyNotificationPreservesSource(t *testing.
 				block = "complete legacy prepared output"
 			}
 			source := f.queue(t, block, messagequeue.QueuedByServer, metadata)
-			_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
-			require.NoError(t, err)
-			waitSendNowErrandWorkers(t, f.svc)
+			claim := f.claimForExecution(t)
+			f.svc.SetErrandsEnabled(func() bool { return true })
+			f.svc.executeSendNowClaim(claim)
 			f.manager.mu.Lock()
 			prompts := append([]string(nil), f.manager.capturedPrompts...)
 			f.manager.mu.Unlock()
@@ -433,9 +451,7 @@ func TestSendNowErrandClaimsSurviveRestartAndRefusal(t *testing.T) {
 			manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: outcome}
 			f.svc.agentManager = manager
 			f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
-			_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
-			require.NoError(t, err)
-			waitSendNowErrandWorkers(t, f.svc)
+			f.executeWithAutoRunPaused(t)
 			reopened, queue := f.reopen(t)
 			row, err := reopened.GetErrand(t.Context(), live.ID)
 			require.NoError(t, err)
@@ -567,9 +583,9 @@ func TestSendNowErrandAmbiguousLegacySourcesRetained(t *testing.T) {
 				content = "full prepared legacy block"
 			}
 			source := f.queue(t, content, messagequeue.QueuedByServer, metadata)
-			_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
-			require.NoError(t, err)
-			waitSendNowErrandWorkers(t, f.svc)
+			claim := f.claimForExecution(t)
+			f.svc.SetErrandsEnabled(func() bool { return true })
+			f.svc.executeSendNowClaim(claim)
 			f.manager.mu.Lock()
 			prompts := append([]string(nil), f.manager.capturedPrompts...)
 			f.manager.mu.Unlock()

@@ -194,7 +194,7 @@ func TestGatewayAuthorizesQueuedErrandIDsThroughTheirOwningTask(t *testing.T) {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if authorization := c.GetHeader("Authorization"); strings.HasPrefix(authorization, "Bearer ") {
-			if identity, ok := authSvc.ResolveBearer(c.Request.Context(), strings.TrimPrefix(authorization, "Bearer ")); ok {
+			if identity, ok, err := authSvc.ResolveBearer(c.Request.Context(), strings.TrimPrefix(authorization, "Bearer ")); err == nil && ok {
 				authn.SetOnGin(c, identity)
 			}
 		}

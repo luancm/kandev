@@ -476,6 +476,8 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	workspaceCollaboration          WorkspaceCollaborationBoundary
+	workspaceCollaborationStore     WorkspaceCollaborationStore
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
@@ -547,6 +549,7 @@ type Service struct {
 	parkedProjectionCanceller       ParkedProjectionCanceller
 	taskErrandCanceller             TaskErrandCanceller
 	sessionCeilingReleaser          SessionCeilingReleaser
+	deferredLaunchDiscard           DeferredLaunchDiscardSettler
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
 	pendingRemoteRecoveryChecker    func(sessionID, executionID string) bool
@@ -610,6 +613,7 @@ type Service struct {
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
 	mcpSelectionWriter             MCPSelectionWriter
+	builtinCreationWriter          BuiltinCreationWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 

@@ -13,6 +13,7 @@ type mcpExecutionContextKey struct{}
 type MCPExecutionContext struct {
 	ParentIncarnationID       string
 	HarnessGeneration         int64
+	BuiltinAuthority          BuiltinMCPAuthority
 	ExecutionID               string
 	TaskID                    string
 	SessionID                 string
@@ -39,6 +40,7 @@ func WithMCPExecutionContext(ctx context.Context, execution MCPExecutionContext)
 		policy.ToolNames = append([]string(nil), execution.CoordinatorToolPolicy.ToolNames...)
 		execution.CoordinatorToolPolicy = &policy
 	}
+	execution.BuiltinAuthority = execution.BuiltinAuthority.Clone()
 	return context.WithValue(ctx, mcpExecutionContextKey{}, execution)
 }
 

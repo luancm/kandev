@@ -33,6 +33,7 @@ func (s *Service) wrapTaskSessionPrompt(ctx context.Context, in taskPromptInputs
 	prompt, errandContext := applyErrandOriginContext(in.prompt, "", errand)
 	includeErrands, errandProfiles := s.parentErrandPromptOptions(ctx, in.taskID, in.session)
 	return sysprompt.InjectKandevContextWithOptions(in.taskID, in.sessionID, prompt, sysprompt.KandevContextOptions{
+		BuiltinPackages:                preparedBuiltinPackages(ctx, in.taskID, in.sessionID),
 		RequiresCompletionSignal:       errand == nil && s.WorkflowStepRequiresCompletionSignal(ctx, in.dbTask.WorkflowStepID),
 		IncludeCoordinatorTaskControls: !in.configMode,
 		IncludeTaskTitleTool:           !in.configMode && in.titleOwner,

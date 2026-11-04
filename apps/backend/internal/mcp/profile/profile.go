@@ -44,6 +44,9 @@ const (
 	// CapabilityErrands grants a parent session the errand start, await, and
 	// cancel tools. It is granted only while features.errands is on.
 	CapabilityErrands Capability = "errands"
+	// CapabilityWorkspaceCollaborationReport exposes the report-only delivery
+	// mode on the task message tool while collaboration enforcement is enabled.
+	CapabilityWorkspaceCollaborationReport Capability = "workspace-collaboration-report"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent
@@ -57,6 +60,7 @@ type Context struct {
 	// CoordinatorToolPolicy is the tool list bound to a coordinator
 	// conversation; nil for every other surface.
 	CoordinatorToolPolicy *CoordinatorToolPolicy `json:"coordinator_tool_policy,omitempty"`
+	BuiltinPackages       *BuiltinManifest       `json:"builtin_packages,omitempty"`
 }
 
 // ManagedToolPolicy is the backend-resolved authority for one retained plugin
@@ -178,6 +182,7 @@ func (c Context) WithManagedToolPolicy(policy ManagedToolPolicy) Context {
 // canonicalization rules.
 func Normalize(c Context) Context {
 	normalized := New(c.Surface, c.Capabilities, c.Providers)
+	normalized.BuiltinPackages = c.BuiltinPackages.Clone()
 	if c.ManagedToolPolicy != nil {
 		policy := *c.ManagedToolPolicy
 		policy.AgentToolNames = slices.Clone(c.ManagedToolPolicy.AgentToolNames)

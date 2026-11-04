@@ -176,7 +176,7 @@ func (s *Service) sendNowDeliveryClaimUpdater(claim *messagequeue.SendNowClaim) 
 		}
 		if present {
 			if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, payload.Attachments, sendNowSourceIDs(claim)...); err != nil {
-				return fmt.Errorf("persist Send Now runtime prompt transcript: %w", err)
+				return fmt.Errorf("%w: persist Send Now runtime prompt transcript: %w", errLifecyclePromptMessagePersistence, err)
 			}
 		}
 		return nil

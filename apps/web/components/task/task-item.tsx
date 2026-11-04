@@ -128,6 +128,8 @@ type TaskItemProps = {
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  /** Show the unread dot; the shared row resolves setting and selection. */
+  hasUnreadMessages?: boolean;
   automaticColor?: TaskMarkerPresentation;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
@@ -242,6 +244,7 @@ type TaskItemContentProps = {
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  hasUnreadMessages?: boolean;
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
@@ -268,6 +271,7 @@ function TaskItemContent({
   launchQueue,
   issueInfo,
   agentErrorMessage,
+  hasUnreadMessages,
   comparisonUnavailable,
   resolvedTaskRow,
   relativeTime,
@@ -289,6 +293,7 @@ function TaskItemContent({
           }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
+          hasUnreadMessages={hasUnreadMessages}
         />
         <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
@@ -419,6 +424,7 @@ export const TaskItem = memo(function TaskItem({
   issueInfo,
   isPinned,
   agentErrorMessage,
+  hasUnreadMessages,
   automaticColor,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
@@ -491,6 +497,7 @@ export const TaskItem = memo(function TaskItem({
         launchQueue={launchQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        hasUnreadMessages={hasUnreadMessages}
         comparisonUnavailable={comparisonUnavailable}
         resolvedTaskRow={resolvedTaskRow}
         relativeTime={relativeTime}

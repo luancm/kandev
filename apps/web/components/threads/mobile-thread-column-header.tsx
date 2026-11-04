@@ -23,6 +23,7 @@ export function MobileThreadColumnHeader({
   onSelectSession,
   onOpenTask,
   navigation,
+  isMotionVisible = true,
 }: {
   thread: ActiveThread;
   status: ThreadStatus;
@@ -31,6 +32,7 @@ export function MobileThreadColumnHeader({
   onSelectSession: (sessionId: string) => void;
   onOpenTask: (taskId: string) => void;
   navigation: MobileThreadNavigation;
+  isMotionVisible?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -71,6 +73,7 @@ export function MobileThreadColumnHeader({
               status={status}
               label={t(status.labelKey)}
               testId={`thread-status-${status.kind}`}
+              ownerVisible={isMotionVisible}
             />
           </span>
           <span className="truncate">{t(status.labelKey)}</span>

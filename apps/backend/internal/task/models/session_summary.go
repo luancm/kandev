@@ -6,42 +6,43 @@ import "time"
 // navigation, status summaries, and compact session rows. It intentionally
 // excludes the full session metadata and configuration snapshots.
 type TaskSessionSummaryObservation struct {
-	ID                 string
-	TaskID             string
-	QueueIncarnationID string
-	Name               string
-	AgentExecutionID   string
-	ContainerID        string
-	AgentProfileID     string
-	AgentProfileName   string
-	ExecutionProfileID string
-	RouteGeneration    int64
-	RouteState         string
-	RouteReason        string
-	ExecutorID         string
-	ExecutorProfileID  string
-	ExecutorType       string
-	ExecutorName       string
-	EnvironmentID      string
-	RepositoryID       string
-	RepositoryPath     string
-	BaseBranch         string
-	BaseCommitSHA      string
-	WorkspacePath      string
-	State              TaskSessionState
-	ErrorMessage       string
-	Metadata           map[string]interface{}
-	StartedAt          time.Time
-	CompletedAt        *time.Time
-	UpdatedAt          time.Time
-	IsPrimary          bool
-	IsPassthrough      bool
-	ReviewStatus       ReviewStatus
-	TaskEnvironmentID  string
-	LastReadMessageID  string
-	Role               SessionRole
-	ParentSessionID    string
-	Worktrees          []*TaskEnvironmentRepo
+	ID                  string
+	TaskID              string
+	QueueIncarnationID  string
+	Name                string
+	AgentExecutionID    string
+	ContainerID         string
+	AgentProfileID      string
+	AgentProfileName    string
+	AgentProfileAgentID string
+	ExecutionProfileID  string
+	RouteGeneration     int64
+	RouteState          string
+	RouteReason         string
+	ExecutorID          string
+	ExecutorProfileID   string
+	ExecutorType        string
+	ExecutorName        string
+	EnvironmentID       string
+	RepositoryID        string
+	RepositoryPath      string
+	BaseBranch          string
+	BaseCommitSHA       string
+	WorkspacePath       string
+	State               TaskSessionState
+	ErrorMessage        string
+	Metadata            map[string]interface{}
+	StartedAt           time.Time
+	CompletedAt         *time.Time
+	UpdatedAt           time.Time
+	IsPrimary           bool
+	IsPassthrough       bool
+	ReviewStatus        ReviewStatus
+	TaskEnvironmentID   string
+	LastReadMessageID   string
+	Worktrees           []*TaskEnvironmentRepo
+	Role                SessionRole
+	ParentSessionID     string
 }
 
 // ToTaskSession returns the bounded model fields represented by this
@@ -65,8 +66,14 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		Role: o.Role, ParentSessionID: o.ParentSessionID,
 		Worktrees: o.Worktrees,
 	}
-	if o.AgentProfileName != "" {
-		session.AgentProfileSnapshot = map[string]interface{}{"name": o.AgentProfileName}
+	if o.AgentProfileName != "" || o.AgentProfileAgentID != "" {
+		session.AgentProfileSnapshot = map[string]interface{}{}
+		if o.AgentProfileName != "" {
+			session.AgentProfileSnapshot["name"] = o.AgentProfileName
+		}
+		if o.AgentProfileAgentID != "" {
+			session.AgentProfileSnapshot["agent_id"] = o.AgentProfileAgentID
+		}
 	}
 	if o.ExecutorType != "" || o.ExecutorName != "" {
 		session.ExecutorSnapshot = map[string]interface{}{}

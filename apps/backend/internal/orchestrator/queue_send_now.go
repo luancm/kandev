@@ -518,15 +518,33 @@ func (s *Service) executeSendNowClaimWithContext(
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
 	ctx = s.queuedRecoveryContext(ctx, reservation)
+	allowFollowupDrain := true
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.drainQueuedDispatchIfPending(ctx, sessionID)
+		if allowFollowupDrain {
+			s.drainQueuedDispatchIfPending(ctx, sessionID)
+		}
 	}()
 
 	restore := func() {
 		if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
-			s.logger.Error("failed to restore send-now queue claim",
-				zap.String("session_id", sessionID), zap.Error(err))
+			if errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
+				if releaseErr := s.releaseUnrecoverableSendNowClaim(ctx, claim); releaseErr != nil {
+					s.logger.Error("failed to release unrestorable send-now queue claim",
+						zap.String("session_id", sessionID),
+						zap.String("claim_id", claim.ClaimID),
+						zap.Error(releaseErr))
+				}
+			} else {
+				s.logger.Error("failed to restore send-now queue claim",
+					zap.String("session_id", sessionID), zap.Error(err))
+			}
+		} else {
+			// A restore is a delivery trigger: the readiness drain may already
+			// have run while this claim was held, so nothing else would pick
+			// these entries up. The deferred drain below runs after the
+			// dispatch marker clears.
+			s.markQueuedDispatchDrainPending(sessionID)
 		}
 		s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	}
@@ -555,6 +573,9 @@ func (s *Service) executeSendNowClaimWithContext(
 		}
 	}
 	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
+	if isBuiltinIntentError(err) || errors.Is(err, errLifecyclePromptMessagePersistence) {
+		allowFollowupDrain = false
+	}
 	if errors.Is(err, errSendNowInitialPromptUncertain) || errors.Is(err, agentruntime.ErrUncertainPromptDelivery) {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
 		defer cancel()
@@ -617,6 +638,11 @@ func (s *Service) claimSendNowExecution(sessionID, dispatchID string) error {
 
 //nolint:nestif // Send Now keeps transcript, ceiling, and created-session ownership in one dispatch boundary.
 func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.SendNowClaim) (bool, error) {
+	var intentErr error
+	ctx, intentErr = s.prepareQueuedBuiltinIntent(ctx, &claim.Dispatch)
+	if intentErr != nil {
+		return false, intentErr
+	}
 	sessionID := claim.Dispatch.SessionID
 	deliveryAttempted := false
 	keepErrandClaim := false
@@ -720,7 +746,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 					sourceIDs = append(sourceIDs, claim.Sources[i].ID)
 				}
 				if err := s.recordQueuedUserMessage(prepareCtx, &claim.Dispatch, attachments, sourceIDs...); err != nil {
-					return "", false, fmt.Errorf("record Send Now errand delivery before created-session launch: %w", err)
+					return "", false, fmt.Errorf("%w: record Send Now errand delivery before created-session launch: %w", errLifecyclePromptMessagePersistence, err)
 				}
 				markSendNowSourcesRecorded(claim)
 				if err := s.persistSendNowErrandSnapshot(prepareCtx, claim); err != nil {
@@ -768,7 +794,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 				startOptions.preserveDirectPrompt = input.preserveDirectPrompt
 				if input.recordQueueMessage {
 					if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sendNowSourceIDs(claim)...); err != nil {
-						return false, fmt.Errorf("record Send Now continuation before created-session launch: %w", err)
+						return false, fmt.Errorf("%w: record Send Now continuation before created-session launch: %w", errLifecyclePromptMessagePersistence, err)
 					}
 					markSendNowSourcesRecorded(claim)
 				}
@@ -835,6 +861,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
 			errandParentSources:    claim.Sources,
+			capacityIntent:         turnCapacityOverride,
 			claimEntryID:           claim.Dispatch.ID,
 			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
 			afterDispatchAdmission: s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),

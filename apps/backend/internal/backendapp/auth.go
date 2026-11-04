@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	notificationservice "github.com/kandev/kandev/internal/notifications/service"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -139,6 +141,26 @@ func gatewayAuthPolicy(
 			}
 			return errand.TaskID, nil
 		},
+	}
+}
+
+// organizationStatusChecker adapts the organization service to the auth gate.
+// A missing or suspended organization is a definitive rejection; any other
+// read error is unavailable and must not be reported as an invalid credential.
+// The interface keeps the mapping testable without constructing the full
+// organization service.
+func organizationStatusChecker(orgs interface {
+	Get(context.Context, string) (*org.Org, error)
+}) auth.OrgStatusChecker {
+	return func(ctx context.Context, orgID string) (bool, error) {
+		record, err := orgs.Get(ctx, orgID)
+		if errors.Is(err, org.ErrOrgNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return record.Active(), nil
 	}
 }
 

@@ -37,6 +37,41 @@ var errandParentToolsWant = []string{
 	"cancel_errand_kandev",
 }
 
+func TestParentErrandToolsSurviveBuiltinCoreBinding(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		name := "without capability"
+		if enabled {
+			name = "with capability"
+		}
+		t.Run(name, func(t *testing.T) {
+			profile := packageTestProfile(mcpprofile.PackageCore)
+			if enabled {
+				profile.Capabilities = append(profile.Capabilities, mcpprofile.CapabilityErrands)
+			}
+			log := newTestLogger(t)
+			s := NewWithProfile(&testBackend{}, "parent-session", "task", 0, log, "", false, profile)
+			actions, err := ResolveBuiltinActions(profile, log)
+			require.NoError(t, err)
+			for _, tool := range errandParentToolsWant {
+				if enabled {
+					require.Contains(t, getRegisteredToolNames(s), tool)
+					require.Contains(t, s.BuiltinCatalog()[mcpprofile.PackageCore], tool)
+				} else {
+					require.NotContains(t, getRegisteredToolNames(s), tool)
+					require.NotContains(t, s.BuiltinCatalog()[mcpprofile.PackageCore], tool)
+				}
+			}
+			for _, action := range []string{ws.ActionMCPStartErrand, ws.ActionMCPAwaitErrands, ws.ActionMCPCancelErrand, ws.ActionMCPAwaitErrandsRelease} {
+				if enabled {
+					require.Contains(t, actions, action)
+				} else {
+					require.NotContains(t, actions, action)
+				}
+			}
+		})
+	}
+}
+
 func TestModeForProfile_MapsTheErrandSurface(t *testing.T) {
 	require.Equal(t, ModeErrand, modeForProfile(mcpprofile.New(mcpprofile.SurfaceErrand, nil, nil)))
 }

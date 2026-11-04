@@ -193,10 +193,7 @@ func refuseLegacyPreparedErrand(t *testing.T, f *sendNowErrandFixture, path stri
 	f.svc.agentManager = manager
 	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
 	if path == "send_now" {
-		n, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
-		require.NoError(t, err)
-		require.Equal(t, 1, n)
-		waitSendNowErrandWorkers(t, f.svc)
+		f.executeWithAutoRunPaused(t)
 	} else {
 		require.NoError(t, f.svc.messageQueue.SetAutoRun(t.Context(), "session-1", true))
 		identity, err := f.svc.parentQueueIdentity(t.Context(), "session-1")

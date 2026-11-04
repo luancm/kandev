@@ -9,6 +9,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const errandTurnSourceUser = "user"
+
 func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionID string) error {
 	controller, ok := s.errands.(interface {
 		ReconcileTerminalDecisions(context.Context, string) error
@@ -34,7 +36,7 @@ func (s *Service) reserveErrandTerminalIntent(ctx context.Context, session *mode
 	if err != nil {
 		return err
 	}
-	source := "user"
+	source := errandTurnSourceUser
 	if origin.SenderSessionID == session.ParentSessionID {
 		source = "parent"
 	}

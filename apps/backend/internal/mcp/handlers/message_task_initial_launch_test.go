@@ -413,6 +413,10 @@ func (m *peerLaunchAgentManager) RegisterInitialPromptAdmissionCallbacks(
 	return nil
 }
 
+func (*peerLaunchAgentManager) SetInitialDeliverySubmissionID(context.Context, string, string) error {
+	return nil
+}
+
 func (m *peerLaunchAgentManager) StartAgentProcess(ctx context.Context, _ string) error {
 	if m.beforeAdmission != nil {
 		if err := m.beforeAdmission(ctx, m.launchRequest.TaskDescription, m.launchRequest.Attachments); err != nil {

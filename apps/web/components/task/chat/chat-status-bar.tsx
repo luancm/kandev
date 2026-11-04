@@ -25,6 +25,7 @@ import { ConversationUsageDisplay } from "@/components/task/chat/conversation-us
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
+import { useSessionSubscriptionUsage } from "@/hooks/domains/session/use-session-subscription-usage";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
@@ -142,6 +143,8 @@ export type ChatStatusBarProps = {
   onJumpToLatest?: () => void;
   showScrollToStart?: boolean;
   onScrollToStart?: () => void;
+  /** Stable composer focus target when a dismissed chip no longer exists. */
+  onFocusComposer?: () => void;
 };
 
 export function ComposerCIStatus({
@@ -175,14 +178,20 @@ function WorkChips({
   taskId,
   sessionId,
   detailActive,
+  onRequestComposerFocus,
 }: {
   taskId: string | null;
   sessionId: string | null;
   detailActive: boolean;
+  onRequestComposerFocus?: () => void;
 }) {
   return (
     <>
-      <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
+      <BackgroundWorkChip
+        sessionId={sessionId}
+        detailActive={detailActive}
+        onRequestComposerFocus={onRequestComposerFocus}
+      />
       <ErrandsChip taskId={taskId} sessionId={sessionId} />
     </>
   );
@@ -234,6 +243,7 @@ function ChatStatusBarRightControls({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarRightControlsProps) {
+  const subscriptionUsage = useSessionSubscriptionUsage(sessionId);
   return (
     <div
       data-testid="chat-status-bar-right-controls"
@@ -258,6 +268,7 @@ function ChatStatusBarRightControls({
               taskId={taskId}
               sessionId={sessionId}
               detailActive={detailActive}
+              subscriptionBilling={subscriptionUsage}
             />
           ) : null
         }
@@ -324,6 +335,16 @@ function ChatStatusBarActions({
   );
 }
 
+function useActiveAgentGoal(sessionId: string | null) {
+  const metadata = useAppStore((state) =>
+    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
+  );
+  return useMemo(() => {
+    const goal = getAgentGoal(metadata);
+    return goal?.status === "active" ? goal : null;
+  }, [metadata]);
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -344,6 +365,7 @@ export function ChatStatusBar({
   onJumpToLatest,
   showScrollToStart,
   onScrollToStart,
+  onFocusComposer,
 }: ChatStatusBarProps) {
   const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
@@ -355,13 +377,7 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
-  const activeGoalMetadata = useAppStore((state) =>
-    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
-  );
-  const activeGoal = useMemo(() => {
-    const goal = getAgentGoal(activeGoalMetadata);
-    return goal?.status === "active" ? goal : null;
-  }, [activeGoalMetadata]);
+  const activeGoal = useActiveAgentGoal(sessionId);
   const { canShare, showConversationUsage, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -388,16 +404,15 @@ export function ChatStatusBar({
     showScrollToStart,
     onScrollToStart,
   };
-  if (
-    !shouldRenderChatStatusBar({
-      hasTask: !!taskId,
-      hasTodos: showTodos,
-      hasQueueChip: !!queueChip,
-      showRightControls,
-      showProceed,
-      hasGoal: !!activeGoal,
-    })
-  ) {
+  const renderStatusBar = shouldRenderChatStatusBar({
+    hasTask: !!taskId,
+    hasTodos: showTodos,
+    hasQueueChip: !!queueChip,
+    showRightControls,
+    showProceed,
+    hasGoal: !!activeGoal,
+  });
+  if (!renderStatusBar) {
     return null;
   }
   // PRMergedBanner returns null internally when not applicable
@@ -421,7 +436,12 @@ export function ChatStatusBar({
         <TaskDependencyChip taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-        <WorkChips taskId={taskId} sessionId={sessionId} detailActive={detailActive} />
+        <WorkChips
+          taskId={taskId}
+          sessionId={sessionId}
+          detailActive={detailActive}
+          onRequestComposerFocus={onFocusComposer}
+        />
         {queueChip}
       </ChatStatusBarActions>
     </div>

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -15,6 +16,7 @@ func TestInjectAutoStartRuntimeContext_ErrandOmitsAskTool(t *testing.T) {
 	svc := &Service{}
 	newState := func(role models.SessionRole) *autoStartStepPromptState {
 		return &autoStartStepPromptState{
+			ctx: context.Background(),
 			session: &models.TaskSession{
 				ID:    "session-1",
 				State: models.TaskSessionStateCreated,

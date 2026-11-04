@@ -41,6 +41,17 @@ export type TaskStatusSummaryActiveError = {
   recovery_actions?: TaskLaunchRecoveryAction[];
 };
 
+export type TaskStatusSummaryTurnError = {
+  /** Source session of the failed turn. Attention is task-wide but only this session can acknowledge it with a prompt. */
+  session_id?: string;
+  turn_id?: string;
+  /** Idempotent failed-turn message id; also the acknowledgement stamp. */
+  message_id?: string;
+  stamp: string;
+  occurred_at: string;
+  preview: string;
+};
+
 export type TaskStatusSummaryLaunchQueue = {
   session_id?: string;
   agent_profile_id?: string;
@@ -90,9 +101,13 @@ export type TaskStatusSummary = {
   completion_gate?: TaskStatusSummaryCompletionGate | null;
   /** Omitted when no errands are live and no parent is waiting on a result. */
   errands?: TaskStatusSummaryErrands | null;
+  /** Sorted IDs of sessions with an unread transcript-visible message. */
+  unread_session_ids?: string[];
   active_error?: TaskStatusSummaryActiveError | null;
   /** Current task-owned failure, independent of the selected session. */
   task_error?: TaskStatusSummaryActiveError | null;
+  /** Current failed-turn attention. Never blocks the composer or authorizes recovery. */
+  turn_error?: TaskStatusSummaryTurnError | null;
   git?: {
     additions?: number;
     deletions?: number;

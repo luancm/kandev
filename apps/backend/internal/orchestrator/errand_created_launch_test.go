@@ -275,12 +275,8 @@ func TestScheduleTaskForSessionErrandPreservesTaskEligibilityAndArchiveGuards(t 
 	t.Run("archived task", func(t *testing.T) {
 		f := newErrandLaunchFixture(t)
 		seedCreatedErrand(t, f, v1.TaskStateTODO)
-		task, err := f.repo.GetTask(ctx, f.taskID)
-		require.NoError(t, err)
-		archivedAt := time.Now().UTC()
-		task.ArchivedAt = &archivedAt
-		require.NoError(t, f.repo.UpdateTask(ctx, task))
-		err = f.svc.scheduleTaskForSession(ctx, f.taskID, createdErrandSessionID)
+		require.NoError(t, f.repo.ArchiveTask(ctx, f.taskID))
+		err := f.svc.scheduleTaskForSession(ctx, f.taskID, createdErrandSessionID)
 		require.ErrorIs(t, err, executor.ErrTaskArchived)
 		f.taskRepo.mu.Lock()
 		require.Empty(t, f.taskRepo.stateHistory[f.taskID])

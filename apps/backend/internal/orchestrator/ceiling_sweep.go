@@ -161,6 +161,8 @@ func (s *Service) ceilingSweepTick(ctx context.Context) {
 		s.drainQueuedErrands(ctx)
 		s.sweepErrandDelivery(ctx)
 	}
+	s.resumeFixedProfileWaits(ctx)
+	s.retryMessageCapacityWaits(ctx)
 }
 
 // An installed controller without recovery cannot authorize admission or
