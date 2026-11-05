@@ -10,6 +10,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { updateContextWindowMetadata } from "./context-window";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
+import { buildGitInventoryActions } from "./git-status-inventory";
 import {
   beginWorkspaceRestoration,
   clearWorkspaceRestoration,
@@ -150,6 +151,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.gitStatusDisplay.byEnvironmentRepo[envKey];
   delete state.gitStatus.refreshByEnvironmentId?.[envKey];
   delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
+  delete state.gitStatus.inventoryByEnvironment?.[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
@@ -186,6 +188,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     byEnvironmentRepo: {},
     refreshByEnvironmentId: {},
     refreshByEnvironmentRepo: {},
+    inventoryByEnvironment: {},
   },
   gitStatusDisplay: { byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
@@ -443,6 +446,9 @@ export function migrateEnvKeyedData(
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
   migrate(draft.gitStatusDisplay.byEnvironmentRepo);
+  if (draft.gitStatus.refreshByEnvironmentId) migrate(draft.gitStatus.refreshByEnvironmentId);
+  if (draft.gitStatus.refreshByEnvironmentRepo) migrate(draft.gitStatus.refreshByEnvironmentRepo);
+  if (draft.gitStatus.inventoryByEnvironment) migrate(draft.gitStatus.inventoryByEnvironment);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitCheckoutGeneration.byEnvironmentId);
@@ -588,14 +594,27 @@ export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set
       // backend and will never emit another update under the empty key. The
       // per-repo entries (real repo names) are intentionally left in place;
       // they continue to receive fresh status updates from the new trackers.
+      // Refresh failures belong to the same retired scope and must go too, or
+      // a blank repository name keeps the warning visible after every named
+      // repository has recovered.
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       const repoMap = draft.gitStatus.byEnvironmentRepo[envKey];
       if (repoMap && "" in repoMap) {
         delete repoMap[""];
       }
+      const refreshRepoMap = draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+      if (refreshRepoMap && "" in refreshRepoMap) {
+        delete refreshRepoMap[""];
+        if (Object.keys(refreshRepoMap).length === 0) {
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
+        }
+      }
       delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[""];
       delete draft.gitStatus.byEnvironmentId[envKey];
+      // The environment-level failure belonged to the retired unnamed root.
+      delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
     }),
+  ...buildGitInventoryActions(set),
   registerSessionEnvironment: (sessionId, environmentId) =>
     set((draft) => {
       draft.environmentIdBySessionId[sessionId] = environmentId;

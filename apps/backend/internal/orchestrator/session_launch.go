@@ -251,6 +251,12 @@ type LaunchSessionRequest struct {
 	// it is server-side provenance (`json:"-"`): a WS client must not be able to
 	// request errand isolation or forge the errand's trusted first-turn block.
 	Errand *ErrandLaunch `json:"-"`
+	// PreserveWorkflowSourceBinding marks a spawn_session_kandev launch: the
+	// helper session must not become the recorded recipient of the workflow
+	// step it was spawned from. It is server-only intent, independent of the
+	// optional SpawnOrigin attribution, and is kept off the wire protocol so a
+	// client cannot suppress source-binding writes.
+	PreserveWorkflowSourceBinding bool `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -970,12 +976,13 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
 		startTaskOptions{
-			ProfileExplicit:      req.ProfileExplicit,
-			SpawnOrigin:          req.SpawnOrigin,
-			MCPServerIDs:         req.MCPServerIDs,
-			reusePreparedPrimary: req.reusePreparedPrimary,
-			Errand:               req.Errand,
-			Origin:               errandStartOrigin(req.Errand),
+			ProfileExplicit:               req.ProfileExplicit,
+			SpawnOrigin:                   req.SpawnOrigin,
+			MCPServerIDs:                  req.MCPServerIDs,
+			reusePreparedPrimary:          req.reusePreparedPrimary,
+			Errand:                        req.Errand,
+			Origin:                        errandStartOrigin(req.Errand),
+			PreserveWorkflowSourceBinding: req.PreserveWorkflowSourceBinding,
 		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
