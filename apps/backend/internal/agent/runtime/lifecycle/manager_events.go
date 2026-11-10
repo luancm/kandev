@@ -299,13 +299,10 @@ func (m *Manager) claimPromptCompletion(
 	claim.locked = true
 	claimed := false
 	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
-		if current != execution {
+		if current != execution || !promptCompletionOwnerMatches(current, event) {
 			return
 		}
 		if event.PromptGeneration == 0 && event.DeliverySubmissionID != "" {
-			if current.deliverySubmissionIDSnapshot() != event.DeliverySubmissionID {
-				return
-			}
 			event.PromptGeneration = current.promptGeneration
 		}
 		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
@@ -358,6 +355,15 @@ func (m *Manager) claimPromptCompletion(
 		zap.String("execution_id", execution.ID),
 		zap.Uint64("event_prompt_generation", event.PromptGeneration))
 	return promptCompletionClaim{}, false
+}
+
+// Called with promptLifecycleMu held so admission cannot replace the turn
+// between the ownership check and the completion claim.
+func promptCompletionOwnerMatches(current *AgentExecution, event *agentctl.AgentEvent) bool {
+	submissionID := current.deliverySubmissionIDSnapshot()
+	legacyUnbound := submissionID == "" && current.promptTurnID == "" && event.TurnID == "" && event.PromptGeneration != 0
+	return (event.DeliverySubmissionID == "" || submissionID == event.DeliverySubmissionID || legacyUnbound) &&
+		(event.TurnID == "" || current.promptTurnID == "" || event.TurnID == current.promptTurnID)
 }
 
 func completeEventResult(event *agentctl.AgentEvent) (bool, string) {

@@ -16,7 +16,7 @@ func (r *Repository) persistCanonicalShellOutputTx(ctx context.Context, tx *sqlx
 	if agent.Type != streams.EventTypeShellOutputUpdate || agent.Role == authorKindUser || agent.ShellOutput == nil {
 		return streams.ErrShellOutputBaseline
 	}
-	messageID, metadata, err := loadShellOutputMessageTx(ctx, tx, event.SessionID, agent.ToolCallID)
+	messageID, metadata, err := loadShellOutputMessageTx(ctx, tx, event.SessionID, agent)
 	if err != nil {
 		return err
 	}
@@ -89,14 +89,45 @@ func (r *Repository) persistCanonicalShellChunksTx(ctx context.Context, tx *sqlx
 	return r.updateShellOutputSummaryTx(ctx, tx, messageID, metadata, agent, next.Output)
 }
 
-func loadShellOutputMessageTx(ctx context.Context, tx *sqlx.Tx, sessionID, toolID string) (string, map[string]any, error) {
-	if toolID == "" {
+func loadShellOutputMessageTx(ctx context.Context, tx *sqlx.Tx, sessionID string, agent streams.AgentEvent) (string, map[string]any, error) {
+	if agent.ToolCallID == "" {
 		return "", nil, streams.ErrShellOutputBaseline
 	}
-	query := fmt.Sprintf(`SELECT id,metadata FROM task_session_messages WHERE task_session_id=? AND %s=? AND type!='permission_request' ORDER BY created_at ASC LIMIT 1`, dialect.JSONExtract(tx.DriverName(), "metadata", "tool_call_id"))
-	var messageID, raw string
-	err := tx.QueryRowContext(ctx, tx.Rebind(query), sessionID, toolID).Scan(&messageID, &raw)
+	var role string
+	if err := tx.QueryRowContext(ctx, tx.Rebind("SELECT role FROM task_sessions WHERE id=?"), sessionID).Scan(&role); err != nil {
+		return "", nil, err
+	}
+	query := fmt.Sprintf(`SELECT id,metadata FROM task_session_messages WHERE task_session_id=? AND %s=? AND type!='permission_request'`, dialect.JSONExtract(tx.DriverName(), "metadata", "tool_call_id"))
+	args := []any{sessionID, agent.ToolCallID}
+	limit := 1
+	if role == string(models.SessionRoleErrand) {
+		if agent.TurnID == "" {
+			return "", nil, streams.ErrShellOutputBaseline
+		}
+		query += fmt.Sprintf(" AND turn_id=? AND COALESCE(%s,'')=?", dialect.JSONExtract(tx.DriverName(), "metadata", "parent_tool_call_id"))
+		args = append(args, agent.TurnID, agent.ParentToolCallID)
+		limit = 2
+	}
+	query += fmt.Sprintf(" ORDER BY created_at ASC LIMIT %d", limit)
+	rows, err := tx.QueryContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
+		return "", nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var messageID, raw string
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", nil, err
+		}
+		return "", nil, sql.ErrNoRows
+	}
+	if err := rows.Scan(&messageID, &raw); err != nil {
+		return "", nil, err
+	}
+	if rows.Next() {
+		return "", nil, streams.ErrShellOutputBaseline
+	}
+	if err := rows.Err(); err != nil {
 		return "", nil, err
 	}
 	var metadata map[string]any

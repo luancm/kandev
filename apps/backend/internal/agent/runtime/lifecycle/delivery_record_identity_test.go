@@ -61,6 +61,8 @@ func TestDeliveryRecordEvidenceUsesOnlyExactPromptOwner(t *testing.T) {
 	execution.DeliveryIncarnationID = "incarnation"
 	execution.DeliveryHarnessGeneration = 7
 	execution.DeliveryStreamID = "stream"
+	execution.ACPSessionID = "original-native"
+	execution.setPromptTurnID("original-turn")
 	execution.promptGeneration = 9
 	execution.dispatchedPromptGeneration = 9
 	execution.setDeliverySubmissionID("prompt:one")
@@ -72,6 +74,8 @@ func TestDeliveryRecordEvidenceUsesOnlyExactPromptOwner(t *testing.T) {
 	require.Equal(t, process, evidence.ControlIdentity.OriginalRuntime)
 	require.Equal(t, "original", evidence.ControlIdentity.ExecutionID)
 	require.EqualValues(t, 9, evidence.ControlIdentity.PromptGeneration)
+	require.Equal(t, "original-turn", evidence.ControlIdentity.TurnID)
+	require.Equal(t, "original-native", evidence.ControlIdentity.NativeSessionID)
 	execution.promptGeneration = 10
 	evidence, err = manager.InspectDeliveryRecordEvidence(ctx, request)
 	require.NoError(t, err)

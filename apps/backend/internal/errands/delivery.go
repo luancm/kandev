@@ -102,7 +102,8 @@ func (s *Service) hasPendingResult(ctx context.Context, parentSessionID string) 
 // The ceiling sweep calls it so a refused notification is not stranded.
 func (s *Service) SweepDelivery(ctx context.Context) (err error) {
 	teardownErr := s.retryPendingTeardowns(ctx)
-	defer func() { err = errors.Join(teardownErr, err) }()
+	recoveryErr := s.retryInterruptedDelegations(ctx)
+	defer func() { err = errors.Join(teardownErr, recoveryErr, err) }()
 	if !s.featureEnabled() {
 		return nil
 	}

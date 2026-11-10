@@ -237,3 +237,23 @@ reuse adapter-recorded child lineage even when incremental metadata omits it.
 When even the legacy dispatch scope is unavailable, the durable event sequence
 is the replay-stable message scope. Without grouping evidence, separate chunks
 remain separate rows rather than merging unrelated replies.
+
+## Interrupted delegation assessments
+
+The [Errand recovery authority decision](../../../decisions/2026-11-09-errand-recovery-settlement-authority.md)
+adds a separate consumer assessment without changing native admission evidence.
+`GetNativeResumeDeliveryEvidence` remains unable to change historical outcomes.
+Dead-owner recovery paths preserve the exact admitted turn and original-owner
+proof before source cleanup, binding replacement or journal retirement. The
+assessment also requires authenticated complete inventory and projection checks;
+a retirement-only early return does not supply termination provenance.
+
+Persist versioned assessment evidence through the durable effect mechanism and
+revalidate exact owner/submission identity before its consumer commits an
+interrupted-delegation receipt. SQL uncertainty and actual terminal evidence
+retain their authority. Failed persistence prevents evidence-destroying cleanup;
+restart retries exact pending evidence without redispatch. Historical recovery
+may rederive proof only from retained exact bindings and authenticated history,
+including validated retired inventory. Unsupported, missing or contradictory
+proof fails closed. The [Errands design](../../tasks/system-design/errand-recovery-and-delivery.md)
+owns result capture, receipt-only convergence and role isolation.

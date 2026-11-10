@@ -633,13 +633,17 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
+	event, errand, err := prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
+	if err != nil {
+		return preparedAgentEvent{}, err
+	}
 	process, skipCallback, effect, deferred, err := sm.prepareDurableAgentDeliveryEvent(
 		ctx, execution, durableEvent, delivery, client, deferReceipt, attempt,
 	)
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
 	}
-	if event.DeliverySubmissionID != "" {
+	if event.DeliverySubmissionID != "" && !errand {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -647,6 +651,11 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 			return preparedAgentEvent{}, err
 		}
 		return preparedAgentEvent{event: event, durableEvent: durableEvent, duplicate: true}, nil
+	}
+	historicalOwner := event.DeliverySubmissionID != "" && event.TurnID != execution.promptTurnIDSnapshot()
+	unownedNumberedTerminal := event.DeliverySubmissionID == "" && event.PromptGeneration != 0
+	if errand && durableEvent.Terminal && (historicalOwner || unownedNumberedTerminal) {
+		skipCallback = true
 	}
 	return preparedAgentEvent{
 		event:           event,

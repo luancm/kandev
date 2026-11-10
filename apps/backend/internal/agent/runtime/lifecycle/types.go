@@ -1153,13 +1153,26 @@ func (e *AgentExecution) promptTurnIDSnapshot() string {
 // dispatch ownership or a prompt is pending. Native async activity has no such
 // owner; the orchestrator captures its active turn at the readiness boundary.
 func (e *AgentExecution) promptTurnIDForEvent(event agentctl.AgentEvent) string {
-	if event.TurnID != "" || e == nil {
+	if e == nil {
 		return event.TurnID
+	}
+	if event.DeliveryStreamID != "" && event.DeliverySubmissionID == "" && event.PromptGeneration == 0 {
+		return event.TurnID
+	}
+	// A supplied submission must never inherit a mutable successor. The durable
+	// consumer resolves retained admissions when the local binding is gone.
+	if event.DeliverySubmissionID != "" && event.PromptGeneration == 0 && event.TurnID == "" {
+		if event.DeliverySubmissionID != e.deliverySubmissionIDSnapshot() {
+			return ""
+		}
 	}
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	if event.PromptGeneration != 0 {
 		if turnID := e.promptTurnIDs[event.PromptGeneration]; turnID != "" {
+			if event.TurnID != "" && event.TurnID != turnID {
+				return ""
+			}
 			return turnID
 		}
 		// A surviving prompt keeps its restored turn while the first live
@@ -1167,6 +1180,9 @@ func (e *AgentExecution) promptTurnIDForEvent(event agentctl.AgentEvent) string 
 		if event.PromptGeneration != e.promptGeneration && !e.recoveredPromptGenerationPending.Load() {
 			return ""
 		}
+	}
+	if event.TurnID != "" {
+		return event.TurnID
 	}
 	if event.PromptGeneration != 0 || event.DeliverySubmissionID != "" || e.dispatchedPromptPending.Load() {
 		return e.promptTurnID

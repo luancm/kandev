@@ -4821,15 +4821,13 @@ func (s *Service) persistModelSelectionWarningMessage(
 	if s.messageCreator == nil {
 		return nil
 	}
-	if err := s.messageCreator.CreateSessionMessage(
+	if err := s.messageCreator.CreateLifecycleSessionMessage(
 		ctx,
 		taskID,
 		"The executor could not use the saved model selection.",
 		sessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(sessionID),
 		modelSelectionWarningMetadata(warning),
-		false,
 	); err != nil {
 		s.logger.Warn("failed to persist model selection warning",
 			zap.String("task_id", taskID),

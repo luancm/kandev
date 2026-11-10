@@ -134,19 +134,9 @@ byte-identical.
 
 ### Status projection
 
-`errands.ProjectStatus(errand, session, permissionPending)` is a pure function:
-
-| Condition, first match wins | Status |
-| --- | --- |
-| `lifecycle = cancelled` | `cancelled` |
-| `lifecycle = queued` | `queued` |
-| Session missing or `FAILED` | `failed` |
-| `sessionstate.IsWorking(session.State)` and a permission request is pending | `needs_attention` |
-| `sessionstate.IsWorking(session.State)` | `running` |
-| `last_outcome` is `done` or `failed` | `last_outcome` |
-| Otherwise | `running` (reconciliation settles it) |
-
-Pending permission uses the signal behind the pending-action indicator.
+[Errand status and continuation](errand-status-and-continuation.md) owns the
+shared evidence-aware projection, attention reasons, count parity and explicit
+continuation refusal. Recovery attention confers no terminal authority.
 
 ### MCP contract
 

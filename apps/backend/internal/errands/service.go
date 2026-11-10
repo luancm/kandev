@@ -47,6 +47,8 @@ type Service struct {
 	teardownMu     sync.Mutex
 	teardownCursor string
 
+	reconcileInterruptedDelegation func(context.Context, string) error
+
 	turns    TurnReader
 	receipts DeliveryLog
 	enabled  func() bool

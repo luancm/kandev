@@ -64,19 +64,20 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
-	logger                   *logger.Logger
-	eventPublisher           *EventPublisher
-	streamManager            *StreamManager
-	executionStore           *ExecutionStore
-	promptStarter            func(executionID string) (uint64, error)
-	persistPromptTurnBinding func(context.Context, *AgentExecution) error
-	initialPromptFailure     func(failure InitialPromptFailure)
-	historyManager           *SessionHistoryManager
-	attachmentReader         AttachmentReader
-	stopCh                   <-chan struct{} // For graceful shutdown coordination
-	turnChangeAdmitted       func(context.Context, *AgentExecution, uint64) error
-	turnChangeFailed         func(context.Context, *AgentExecution, uint64, error)
+	executorAdmission             func(context.Context, string, string, string) (context.Context, error)
+	logger                        *logger.Logger
+	eventPublisher                *EventPublisher
+	streamManager                 *StreamManager
+	executionStore                *ExecutionStore
+	promptStarter                 func(executionID string) (uint64, error)
+	persistPromptTurnBinding      func(context.Context, *AgentExecution) error
+	preserveInterruptedDelegation func(context.Context, string) error
+	initialPromptFailure          func(failure InitialPromptFailure)
+	historyManager                *SessionHistoryManager
+	attachmentReader              AttachmentReader
+	stopCh                        <-chan struct{} // For graceful shutdown coordination
+	turnChangeAdmitted            func(context.Context, *AgentExecution, uint64) error
+	turnChangeFailed              func(context.Context, *AgentExecution, uint64, error)
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -837,6 +838,9 @@ func (sm *SessionManager) initializeACPConnection(
 			NativeStateReference: execution.ACPSessionID,
 		},
 	)
+	if err == nil && sm.preserveInterruptedDelegation != nil && (execution.InterruptedSubmissionID != "" || execution.replacesPredecessorGeneration()) {
+		err = sm.preserveInterruptedDelegation(ctx, execution.SessionID)
+	}
 	if err == nil && execution.InterruptedSubmissionID != "" {
 		if result == nil || result.SessionID != execution.RequiredNativeConversationID {
 			err = ErrDeliveryOwnerMismatch

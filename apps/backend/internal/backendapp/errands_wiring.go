@@ -106,6 +106,7 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) *errand
 	service.SetEnabled(func() bool { return p.features.Errands })
 	if p.lifecycleMgr != nil {
 		p.lifecycleMgr.SetErrandAwaitRefresh(service.RefreshAwaitDelivery)
+		service.SetInterruptedDelegationReconciler(p.lifecycleMgr.ReconcileInterruptedErrandDelivery)
 	}
 	p.orchestratorSvc.SetErrandController(service)
 	p.orchestratorSvc.SetErrandsEnabled(func() bool { return p.features.Errands })

@@ -357,6 +357,11 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 			return err
 		}
 	}
+	if prior != nil && prior.AgentExecutionID != execution.ID {
+		if err := m.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
+			return err
+		}
+	}
 	if execution.AgentProfileID == "" && prior != nil {
 		execution.AgentProfileID = prior.ExecutionProfileID
 	}

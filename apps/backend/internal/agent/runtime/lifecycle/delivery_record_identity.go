@@ -39,7 +39,7 @@ func (m *Manager) liveDeliveryRecordControlIdentity(request DeliveryRecordEviden
 		SessionID: captured.SessionID, ExecutionID: captured.ExecutionID,
 		SubmissionID: captured.SubmissionID, StreamID: captured.StreamID,
 		IncarnationID: captured.IncarnationID, HarnessGeneration: captured.HarnessGeneration,
-		PromptGeneration: captured.PromptGeneration,
+		PromptGeneration: captured.PromptGeneration, TurnID: captured.TurnID, NativeSessionID: captured.NativeSessionID,
 	}
 }
 
@@ -67,7 +67,7 @@ func (m *Manager) persistedDeliveryRecordControlIdentity(ctx context.Context, re
 	return &AgentDeliveryRecoveryIdentity{OriginalRuntime: binding.OriginalRuntime, TaskID: binding.TaskID,
 		SessionID: binding.SessionID, ExecutionID: binding.ExecutionID, IncarnationID: binding.IncarnationID,
 		HarnessGeneration: binding.HarnessGeneration, StreamID: binding.StreamID, SubmissionID: binding.SubmissionID,
-		PromptGeneration: binding.PromptGeneration}
+		PromptGeneration: binding.PromptGeneration, TurnID: binding.TurnID, NativeSessionID: binding.NativeSessionID}
 }
 
 func persistedPromptBindingMatches(binding deliveryPromptTurnBinding, request DeliveryRecordEvidenceRequest, selected journal.SubmissionSummary) bool {
