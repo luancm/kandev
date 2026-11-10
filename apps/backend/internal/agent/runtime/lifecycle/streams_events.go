@@ -85,6 +85,10 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
+	event, errand, err := prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
+	if err != nil {
+		return preparedAgentEvent{}, err
+	}
 	// A replayed event keeps its own prompt-attempt identity. Do not let it
 	// overwrite the live execution's submission before completion claims run.
 	staleSubmission := event.Recovered && deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID)
@@ -95,7 +99,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
 	}
-	if event.DeliverySubmissionID != "" && !staleSubmission {
+	if event.DeliverySubmissionID != "" && !staleSubmission && !errand {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -103,6 +107,11 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 			return preparedAgentEvent{}, err
 		}
 		return preparedAgentEvent{event: event, duplicate: true}, nil
+	}
+	historicalOwner := event.DeliverySubmissionID != "" && event.TurnID != execution.promptTurnIDSnapshot()
+	unownedNumberedTerminal := event.DeliverySubmissionID == "" && event.PromptGeneration != 0
+	if errand && durableEvent.Terminal && (historicalOwner || unownedNumberedTerminal) {
+		skipCallback = true
 	}
 	return preparedAgentEvent{
 		event:           event,

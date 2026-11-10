@@ -2,13 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -266,7 +269,10 @@ func TestErrandLaunchRecoveryAttemptedSuccessorBlocksAdoption(t *testing.T) {
 	row := rows[0]
 	require.NoError(t, f.svc.turnService.CompleteTurn(t.Context(), row.FirstTurnID))
 	successor, err := f.svc.turnService.ReserveTurn(t.Context(), row.ID, nil)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, db.ErrErrandSettlementPending)
+	require.Nil(t, successor)
+	// Recovery must also reject legacy invalid state that admission now prevents.
+	successor = seedLegacyUnsettledSuccessor(t, f, row)
 	require.NoError(t, f.svc.turnService.MarkReservedTurnDispatchAttempted(t.Context(), successor))
 	result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), errands.LaunchRequest{
 		ErrandID: row.ID, TaskID: row.TaskID, ParentSessionID: row.ParentSessionID, AgentProfileID: row.AgentProfileID,
@@ -305,4 +311,18 @@ func TestErrandLaunchRecoveryPreparedHonorsNativeRecoveryBlock(t *testing.T) {
 	blocks, err := f.repo.ListOpenSessionRecoveryBlocks(t.Context(), req.ErrandID, before.IncarnationID, before.ExpectedGeneration)
 	require.NoError(t, err)
 	require.Equal(t, []*models.SessionRecoveryBlock{before}, blocks, "retain native generation proof without adding another blocker")
+}
+
+func seedLegacyUnsettledSuccessor(t *testing.T, f *errandLaunchFixture, row *models.Errand) *models.Turn {
+	t.Helper()
+	at := time.Now().UTC()
+	metadata, err := json.Marshal(map[string]interface{}{models.TurnMetaKeyPromptDispatchPending: true})
+	require.NoError(t, err)
+	_, err = f.repo.DB().Exec(`INSERT INTO task_session_turns
+		(id, task_session_id, task_id, started_at, metadata, created_at, updated_at)
+		VALUES ('legacy-unsettled-successor', ?, ?, ?, ?, ?, ?)`, row.ID, row.TaskID, at, string(metadata), at, at)
+	require.NoError(t, err)
+	turn, err := f.repo.GetTurn(t.Context(), "legacy-unsettled-successor")
+	require.NoError(t, err)
+	return turn
 }

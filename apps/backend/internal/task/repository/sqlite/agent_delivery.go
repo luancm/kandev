@@ -281,6 +281,10 @@ func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliver
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
+	turn, errand, err := r.errandEventAdmissionTx(ctx, tx, event)
+	if err != nil {
+		return 0, err
+	}
 	if err := r.validateAgentDeliveryEventAdmissionTx(ctx, tx, event); err != nil {
 		return 0, err
 	}
@@ -303,6 +307,9 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 		if err != nil {
 			return 0, err
 		}
+	}
+	if err := r.retainUnownedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
+		return 0, err
 	}
 	if err := r.receiveErrandAwaitReceiptTx(ctx, tx, event); err != nil {
 		return 0, err
@@ -561,9 +568,16 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if !matches {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
+	admittedTurn, errand, err := r.errandEventAdmissionTx(ctx, tx, &stored)
+	if err != nil {
+		return false, err
+	}
 	terminalEffect, err := deliveryTerminalSettlementEffect(&stored)
 	if err != nil {
 		return false, err
+	}
+	if errand && terminalEffect != nil {
+		terminalEffect.TurnID = admittedTurn
 	}
 	if projectedAt.Valid {
 		return false, commitProjectedTerminalEffect(ctx, tx, r.db.Rebind, terminalEffect)

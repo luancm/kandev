@@ -124,6 +124,9 @@ func (r *Repository) CommitErrandTurnSettlement(ctx context.Context, row *models
 		if err := r.validateErrandSettlementOwner(ctx, tx, row.TaskID, effect); err != nil {
 			return err
 		}
+		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+			return err
+		}
 		stored, err := errandSettlementEffectTx(ctx, tx, effect.SessionID, effect.IncarnationID, effect.TurnID)
 		if err != nil {
 			return err
@@ -132,12 +135,10 @@ func (r *Repository) CommitErrandTurnSettlement(ctx context.Context, row *models
 			return db.ErrErrandSettlementPending
 		}
 		if stored.State == models.DeliveryEffectCompleted {
-			committed, err = scanErrand(tx.QueryRowContext(ctx, tx.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE id = ?`), row.ID))
-			if err != nil {
-				return err
-			}
-			return readWrittenErrandDeliveryState(ctx, tx, committed)
+			committed, err = r.readCompletedErrandSettlementTx(ctx, tx, row, effect)
+			return err
 		}
+
 		if stored.Outcome != effect.Outcome && stored.Outcome != settlementOrigin(effect.Outcome) {
 			return db.ErrErrandSettlementPending
 		}
@@ -146,6 +147,9 @@ func (r *Repository) CommitErrandTurnSettlement(ctx context.Context, row *models
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE agent_delivery_effects SET state = 'completed', outcome = ?, completed_at = ? WHERE effect_key = ? AND state = 'pending'`), outcome, *effect.CompletedAt, effect.EffectKey); err != nil {
+			return err
+		}
+		if err := supersedeInterruptedAssessmentTx(ctx, tx, row.TaskID, effect); err != nil {
 			return err
 		}
 		committed = next
@@ -246,17 +250,23 @@ func (r *Repository) PendingErrandTurnSettlements(ctx context.Context, sessionID
 		return nil, err
 	}
 	var pending []*models.AgentDeliveryEffect
+	var unresolved error
 	for _, turn := range turns {
 		if turn.CompletedAt == nil || turn.Metadata[models.TurnMetaKeyLifecycleOnly] == true {
 			continue
 		}
 		effect, err := r.readErrandSettlementEffect(ctx, sessionID, session.QueueIncarnationID, turn.ID)
+		if errors.Is(err, db.ErrErrandSettlementPending) {
+			unresolved = err
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
 		if effect == nil {
 			if turn.ID != row.FirstTurnID {
-				return nil, db.ErrErrandSettlementPending
+				unresolved = db.ErrErrandSettlementPending
+				continue
 			}
 			effect = &models.AgentDeliveryEffect{EffectKey: fmt.Sprintf("errand.turn:%s:%s:%s:%s", row.TaskID, session.QueueIncarnationID, turn.ID, row.SubmissionID),
 				EffectType: db.ErrandTurnSettlementEffect, State: models.DeliveryEffectPending, SessionID: sessionID,
@@ -270,7 +280,7 @@ func (r *Repository) PendingErrandTurnSettlements(ctx context.Context, sessionID
 		}
 		effect.TaskID = row.TaskID
 	}
-	return pending, nil
+	return pending, unresolved
 }
 
 func (r *Repository) readErrandSettlementEffect(ctx context.Context, sessionID, incarnationID, turnID string) (*models.AgentDeliveryEffect, error) {
@@ -293,4 +303,18 @@ func validErrandTerminalCommit(row *models.Errand, effect *models.AgentDeliveryE
 
 func matchingErrandTerminalReceipt(stored, observed *models.AgentDeliveryEffect) bool {
 	return stored != nil && sameErrandSettlementIdentity(stored, observed) && settlementOrigin(stored.Outcome) == settlementOrigin(observed.Outcome)
+}
+
+func (r *Repository) readCompletedErrandSettlementTx(ctx context.Context, tx *sqlx.Tx, row *models.Errand, effect *models.AgentDeliveryEffect) (*models.Errand, error) {
+	committed, err := scanErrand(tx.QueryRowContext(ctx, tx.Rebind(`SELECT `+errandColumns+` FROM task_session_errands WHERE id = ?`), row.ID))
+	if err != nil {
+		return nil, err
+	}
+	if err := supersedeInterruptedAssessmentTx(ctx, tx, row.TaskID, effect); err != nil {
+		return nil, err
+	}
+	if err := readWrittenErrandDeliveryState(ctx, tx, committed); err != nil {
+		return nil, err
+	}
+	return committed, nil
 }

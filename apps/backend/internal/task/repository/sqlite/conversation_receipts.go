@@ -30,6 +30,24 @@ func (r *Repository) beginConversationMutation(ctx context.Context, sessionID st
 	return tx, base, nil
 }
 
+// Turn admission takes task/Errand ownership before the session mutation lock.
+func (r *Repository) beginTurnConversationMutation(ctx context.Context, turn *models.Turn) (*sqlx.Tx, int64, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := r.guardErrandTurnReservation(ctx, tx, turn.TaskSessionID, turn.ID); err != nil {
+		_ = tx.Rollback()
+		return nil, 0, err
+	}
+	base, err := r.prepareConversationMutation(ctx, tx, turn.TaskSessionID)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, 0, err
+	}
+	return tx, base, nil
+}
+
 func (r *Repository) prepareConversationMutation(ctx context.Context, tx *sqlx.Tx, sessionID string) (int64, error) {
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return 0, err
@@ -401,7 +419,7 @@ func (r *Repository) DeleteMessageWithConversationReceipt(ctx context.Context, m
 
 func (r *Repository) CreateTurnWithConversationReceipt(ctx context.Context, turn *models.Turn) (*models.ConversationMutationReceipt, error) {
 	stampTurnDefaults(turn)
-	tx, base, err := r.beginConversationMutation(ctx, turn.TaskSessionID)
+	tx, base, err := r.beginTurnConversationMutation(ctx, turn)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +439,7 @@ func (r *Repository) CreateTurnWithConversationReceipt(ctx context.Context, turn
 
 func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Context, turn *models.Turn) (bool, *models.ConversationMutationReceipt, error) {
 	stampTurnDefaults(turn)
-	tx, base, err := r.beginConversationMutation(ctx, turn.TaskSessionID)
+	tx, base, err := r.beginTurnConversationMutation(ctx, turn)
 	if err != nil {
 		return false, nil, err
 	}

@@ -509,3 +509,10 @@ func (h *harness) mustStart(title string) *StartResult {
 	}
 	return result
 }
+
+func (*memoryStore) SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error {
+	panic("terminal settlement requires the SQLite fixture")
+}
+func (*memoryStore) CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error {
+	panic("terminal settlement requires the SQLite fixture")
+}

@@ -851,6 +851,9 @@ func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string
 	m.deliveryPromptMu.Lock()
 	defer m.deliveryPromptMu.Unlock()
 	mapped := m.deliveryPromptByGeneration[update.PromptGeneration]
+	if mapped == "" {
+		mapped = m.deliverySubmissionHistory[update.PromptGeneration]
+	}
 	if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
 		delete(m.deliveryPromptByGeneration, update.PromptGeneration)
 	}
@@ -860,7 +863,7 @@ func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string
 	if mapped != "" {
 		return mapped
 	}
-	if active != "" {
+	if update.PromptGeneration == 0 {
 		return active
 	}
 	return ""
@@ -2786,6 +2789,10 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			}
 		}
 		persisted, err := m.persistDeliveryEvent(update)
+		if errors.Is(err, errDeliveryEventIdentity) {
+			m.logger.Warn("rejected conflicting delivery event identity", zap.Error(err))
+			continue
+		}
 		if err != nil {
 			m.logger.Error("failed to commit durable delivery event", zap.Error(err))
 			// Capture the failure before cancellation, then keep the sole
@@ -2863,10 +2870,24 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 	return m.persistDeliveryEventContext(context.Background(), update)
 }
 
+var errDeliveryEventIdentity = errors.New("delivery event submission conflicts with prompt generation")
+
+func (m *Manager) validateDeliveryEventIdentity(update adapter.AgentEvent) error {
+	if owner := m.submissionForGeneration(update.PromptGeneration); owner != "" &&
+		update.DeliverySubmissionID != "" && update.DeliverySubmissionID != owner {
+		return errDeliveryEventIdentity
+	}
+	return nil
+}
+
 // persistDeliveryEventContext is the cancellable variant used by the plugin
 // ingress. A cancelled caller receives an error and no acknowledgement even if
 // the writer later commits the queued observation.
 func (m *Manager) persistDeliveryEventContext(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	// Reject before entering the shared writer: invalid ownership is not a storage failure.
+	if err := m.validateDeliveryEventIdentity(update); err != nil {
+		return update, err
+	}
 	deliveryJournal, eventLimit, configured, writer := m.deliveryWriteState()
 	if eventLimit <= 0 {
 		eventLimit = deliverylimits.MaxEventBytes
@@ -2931,6 +2952,9 @@ func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter
 	}
 	events := make([]journal.Event, len(updates))
 	for i, update := range updates {
+		if err := m.validateDeliveryEventIdentity(update); err != nil {
+			return updates, err
+		}
 		payload, err := json.Marshal(update)
 		if err != nil {
 			return updates, err

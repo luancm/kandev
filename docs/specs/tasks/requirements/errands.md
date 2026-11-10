@@ -66,25 +66,7 @@ relationship. The rationale and boundaries are in
   set under REQ-AGENTS-WORKSPACE-MCP-CONFIGURATION-003. Later parent changes
   shall not reach it; the user can add servers from the errand's composer.
 
-### REQ-TASKS-ERRANDS-002: Errand status
-
-**Intent:** Expose one consistent errand status.
-
-The [completed-session contract](errand-completion-cleanup.md) separately defines successful runtime cleanup, retained session state and explicit continuation.
-
-#### Acceptance criteria
-
-- **AC-TASKS-ERRANDS-002.1:** An errand shall report exactly one status:
-  `queued` (waiting for session capacity, no runtime), `running` (starting or
-  executing a turn), `needs_attention` (running with a permission request
-  waiting for the user), `done` (its latest parent-initiated turn completed),
-  `failed` (launch failed, its latest parent-initiated turn ended in error or
-  interruption, or its session failed), or `cancelled`.
-- **AC-TASKS-ERRANDS-002.2:** While a user-initiated errand turn is active,
-  the errand shall report `running` or `needs_attention`. When that turn
-  settles, the errand shall return to its previous settled status.
-- **AC-TASKS-ERRANDS-002.3:** The parent agent's session listing shall report
-  each session's role, parent session, and errand status.
+The [Errand status and continuation contract](errand-status-and-continuation.md) owns REQ-TASKS-ERRANDS-002, including recovery attention and explicit follow-up.
 
 ### REQ-TASKS-ERRANDS-003: Errand results
 
@@ -109,6 +91,15 @@ The [completed-session contract](errand-completion-cleanup.md) separately define
   it is outstanding, the parent shall receive a cancellation notice as a
   result. A cancellation requested by the parent or caused by a cascade shall
   produce no result.
+
+- **AC-TASKS-ERRANDS-003.6:** Recovery with exact owner-termination and
+  reconciled-admission proof shall settle an interrupted parent delegation once,
+  preserving provider and side-effect uncertainty. Missing or conflicting proof
+  shall not create a result or replay work.
+- **AC-TASKS-ERRANDS-003.7:** A proven historical decision shall remain
+  recoverable despite later missing evidence. Its receipt alone shall preserve
+  current results, delivery and cancellation; unresolved later work shall still
+  block successor admission.
 
 ## Result delivery
 

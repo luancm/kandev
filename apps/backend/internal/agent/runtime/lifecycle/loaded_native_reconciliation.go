@@ -26,7 +26,7 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 		return nil, ErrDeliveryRecoveryBlocked
 	}
 	if proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID); err == nil && proof != nil {
-		return proof, nil
+		return proof, m.consumeInterruptedDelegations(ctx, proof)
 	}
 	if settled, err := m.hasProjectedTerminalRetirement(ctx, execution); err == nil && settled {
 		if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
@@ -34,12 +34,24 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 		}
 		return m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
 	}
+	if err := m.preserveInterruptedDelegation(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	historical, err := m.readLoadedNativeHistoricalOwner(ctx, execution)
 	if err != nil {
 		return nil, err
 	}
-	if historical == nil || historical.ExecutionID == execution.ID || !loadedRecoverySuccessorMatches(execution, *historical) {
+	if historical == nil || historical.ExecutionID == execution.ID {
 		return nil, ErrDeliveryRecoveryBlocked
+	}
+	if !loadedRecoverySuccessorMatches(execution, *historical) {
+		matches, err := m.savedInterruptedSuccessorMatches(ctx, execution, *historical)
+		if err != nil {
+			return nil, err
+		}
+		if !matches {
+			return nil, ErrDeliveryRecoveryBlocked
+		}
 	}
 	if err := proveHistoricalDeliveryOwnerDead(*historical); err != nil {
 		return nil, err
@@ -109,6 +121,13 @@ func (m *Manager) loadedNativeHistoricalOwner(ctx context.Context, execution *Ag
 			}
 			historical = m.persistedDeliveryRecordControlIdentity(ctx, DeliveryRecordEvidenceRequest{TaskID: execution.TaskID, SessionID: execution.SessionID}, journal.SubmissionSummary{
 				ID: submission.ID, SessionID: submission.SessionID, IncarnationID: submission.IncarnationID, HarnessGeneration: submission.HarnessGeneration, StreamID: submission.StreamID})
+			if historical == nil {
+				var err error
+				historical, err = m.savedInterruptedDelegationOwner(ctx, execution, row, submission.StreamID)
+				if err != nil {
+					return nil, err
+				}
+			}
 			if historical == nil {
 				return nil, ErrDeliveryRecoveryBlocked
 			}

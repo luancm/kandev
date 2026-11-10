@@ -1,0 +1,7 @@
+# Recovery attention backend handoff
+
+Implementation in progress. Scope: AC-TASKS-ERRANDS-002.4–002.8 backend only; preserve prior uncommitted slices. Read the paired status/continuation contract, work order, authority ADR and backend/TDD instructions. Confirmed both conversation-receipt turn writers bypass the reservation guard. First milestone is permanent SQLite/PostgreSQL regression coverage and transactional guard before session mutation. Warning-stream fixture needs a typed thinking expectation correction. No live mutations, index operations or provider calls.
+
+Initial resources: root 27 GiB available; executable task scratch has 6.9 GiB available. Heavy checks serialized with GOMAXPROCS=2 and GOMEMLIMIT=3GiB.
+
+Receipt milestone: permanent RED handle 82222, exit 1, all three receipt paths admitted unresolved prior work. Added beginTurnConversationMutation used only by turn-creation receipt writers; guard runs in the owning transaction before prepareConversationMutation. GREEN race handle 70593, exit 0, SQLite 1.679s. Repeated refusal preserves revision and inserts no successor; exact historical interruption receipt is a positive admission control. PostgreSQL cases selected and skipped because KANDEV_TEST_POSTGRES_DSN is unset. Command from apps/backend: `GOTMPDIR=/dev/shm/kandev-errand-remediation-0n6s5t7i GOMAXPROCS=2 GOMEMLIMIT=3GiB go test -trimpath -p 1 -race ./internal/task/repository/sqlite -run 'Test(Postgres)?ErrandReceiptReservation' -count=1 -v`.

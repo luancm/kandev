@@ -54,6 +54,8 @@ An opened child offers **Stop** while live, a follow-up composer, and **Send res
 
 Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.
 
+After a restart, Kandev can report an errand as interrupted when it verifies the original process ended and reconciles the saved delegation records. The parent receives an interruption result; this does not establish whether external commands completed or had side effects. Kandev does not resend the uncertain instruction. A new follow-up requires verified settlement of all earlier work. Older records with missing or conflicting evidence can remain blocked, so restarting with an updated build does not guarantee repair of every previously stranded errand.
+
 Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
 
 All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands snapshot the parent's session MCP additions and exclusions at start; later parent selection changes do not rewrite that snapshot. Removed or disabled servers are omitted at launch.

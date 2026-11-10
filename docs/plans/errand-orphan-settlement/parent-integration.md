@@ -1,0 +1,9 @@
+# Parent integration, 2026-11-10
+
+Integrated core commit `9db45d3e75` after completing upstream merge `f09f1bc420` (upstream `52309e613fc9`). The only merge conflict was the upstream extraction of event processing from `streams.go` into `streams_events.go`. The merged function preserves upstream stale-submission/terminal guards and adds the Errand retained-ownership checks in the extracted module.
+
+Combined verification passed before cache cleanup: lifecycle 5.466s, SQLite 25.969s, orchestrator 15.221s, Errands 0.629s, backendapp 1.711s and producer 0.035s using `GOMAXPROCS=2 GOMEMLIMIT=3GiB go -C apps/backend test -p 1 ./internal/agent/runtime/lifecycle ./internal/task/repository/sqlite ./internal/orchestrator ./internal/errands ./internal/backendapp ./internal/agentctl/server/process -run 'Errand|RetainedTerminal|PromptGeneration|DurableEvent'`. Conflict-focused lifecycle race check passed in 11.706s with `-race -run 'Errand|RetainedTerminal|Stale.*Terminal|Recovered.*Terminal'`. Web typecheck passed. The upstream merge separately passed full orchestrator, SQLite, MCP, ACP and mock-agent suites plus existing frontend validation. Its context-window parser extraction passed 31 focused tests and normal hooks.
+
+The broader attention-status and explicit-resume work remains deferred as recorded in the subtask delivery checkpoint. PostgreSQL runtime parity and repair eligibility for the original historical incident remain unproven. No live runtime or database changes were made. Original untracked planning files were preserved under `/tmp/errand-original-plan-ivhjcnsb` before accepting the subtask's updated documents.
+
+At the user's request, development caches were cleared after tests, reducing disk usage from 89% to 57%. Hook execution may regenerate caches; saved test evidence remains valid because source files were unchanged.

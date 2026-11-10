@@ -16,6 +16,8 @@ import (
 type Store interface {
 	HasErrandPreparedOwnership(context.Context, string, string, models.ErrandResultClaim) (bool, error)
 	ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
+	SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
+	CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error
 	CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error)
 	PendingErrandTurnSettlements(context.Context, string) ([]*models.AgentDeliveryEffect, error)
 	BeginErrandAwait(context.Context, models.ErrandAwaitIdentity) error

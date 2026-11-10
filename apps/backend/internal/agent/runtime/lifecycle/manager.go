@@ -582,6 +582,7 @@ func NewManager(
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
 	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
+	sessionManager.preserveInterruptedDelegation = mgr.preserveInterruptedDelegation
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
 	sessionManager.SetTurnChangeCaptureCallbacks(mgr.admitTurnChangeCapture, mgr.failTurnChangeDispatch)
 

@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,29 +17,44 @@ const terminalInterruptedCause = "interrupted"
 // ReconcileTerminalDecisions replays exact sealed terminal intents before
 // admission. Unsealed/missing terminal evidence remains a durable fence.
 func (s *Service) ReconcileTerminalDecisions(ctx context.Context, sessionID string) error {
-	pending, err := s.store.PendingErrandTurnSettlements(ctx, sessionID)
-	if err != nil {
+	if err := s.reconcileTerminalReceipts(ctx, sessionID); err != nil && !errors.Is(err, db.ErrErrandSettlementPending) {
 		return err
 	}
+	if s.reconcileInterruptedDelegation != nil {
+		if err := s.reconcileInterruptedDelegation(ctx, sessionID); err != nil {
+			return err
+		}
+	}
+	return s.reconcileTerminalReceipts(ctx, sessionID)
+}
+
+func (s *Service) reconcileTerminalReceipts(ctx context.Context, sessionID string) error {
+	pending, err := s.store.PendingErrandTurnSettlements(ctx, sessionID)
+	if err != nil && !errors.Is(err, db.ErrErrandSettlementPending) {
+		return err
+	}
+	unresolved := err
 	for _, effect := range pending {
 		if !strings.Contains(effect.Outcome, ":") {
-			return db.ErrErrandSettlementPending
+			unresolved = db.ErrErrandSettlementPending
+			continue
 		}
-		if err := s.store.ReserveErrandTurnSettlement(ctx, effect.TaskID, effect); err != nil {
+		if err := s.sealTerminalIntent(ctx, effect); err != nil {
 			return err
 		}
 		if err := s.settleTerminalDecision(ctx, effect, TurnSettlement{}); err != nil {
 			return err
 		}
 	}
-	return nil
+	return unresolved
 }
 
 func (s *Service) settleExactTerminal(ctx context.Context, settlement TurnSettlement) error {
 	pending, err := s.store.PendingErrandTurnSettlements(ctx, settlement.SessionID)
-	if err != nil {
+	if err != nil && !errors.Is(err, db.ErrErrandSettlementPending) {
 		return err
 	}
+	unresolved := err
 	for _, effect := range pending {
 		if effect.TurnID != settlement.TurnID {
 			continue
@@ -54,12 +70,20 @@ func (s *Service) settleExactTerminal(ctx context.Context, settlement TurnSettle
 		if !strings.Contains(effect.Outcome, ":") {
 			effect.Outcome = origin + ":" + cause
 		}
-		if err := s.store.ReserveErrandTurnSettlement(ctx, effect.TaskID, effect); err != nil {
+		if err := s.sealTerminalIntent(ctx, effect); err != nil {
 			return err
 		}
 		return s.settleTerminalDecision(ctx, effect, settlement)
 	}
-	return nil
+	return unresolved
+}
+
+func (s *Service) sealTerminalIntent(ctx context.Context, effect *models.AgentDeliveryEffect) error {
+	err := s.store.SealErrandTurnSettlement(ctx, effect.TaskID, effect)
+	if errors.Is(err, sql.ErrNoRows) {
+		return s.store.ReserveErrandTurnSettlement(ctx, effect.TaskID, effect)
+	}
+	return err
 }
 
 func (s *Service) settleTerminalDecision(ctx context.Context, effect *models.AgentDeliveryEffect, observed TurnSettlement) error {
@@ -103,6 +127,9 @@ func (s *Service) commitTerminalDecision(ctx context.Context, effect *models.Age
 		applied, commitErr := s.store.CommitErrandTurnSettlement(ctx, &next, &decision)
 		err = commitErr
 		unlock()
+		if errors.Is(err, db.ErrErrandSettlementPending) {
+			return s.store.CommitHistoricalErrandTurnReceipt(ctx, row.TaskID, &decision)
+		}
 		if err == nil {
 			if changed {
 				if applied {
