@@ -20,9 +20,10 @@ import type {
 } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import {
-  normalizeContextCompactionCount,
-  readContextWindowMetadataFromAliases,
-  parseContextWindowEntry,
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+  reconcileContextWindowMetadata,
+  sameContextWindowEntry,
 } from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
@@ -360,40 +361,20 @@ function carryDefinedFields(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSessionUpdate(payload: any): {
   sessionUpdate: Record<string, unknown>;
-  contextWindow: ReturnType<typeof readContextWindowMetadataFromAliases>;
 } {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
-  if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
-  const context = readContextWindowMetadataFromAliases(payload.metadata, payload.session_metadata);
-  if (context.present) {
-    let metadataBase: Record<string, unknown> = {};
-    if (
-      payload.session_metadata &&
-      typeof payload.session_metadata === "object" &&
-      !Array.isArray(payload.session_metadata)
-    ) {
-      metadataBase = payload.session_metadata;
-    } else if (
-      payload.metadata &&
-      typeof payload.metadata === "object" &&
-      !Array.isArray(payload.metadata)
-    ) {
-      metadataBase = payload.metadata;
-    }
-    update.metadata = {
-      ...metadataBase,
-      context_window: context.contextWindow,
-      context_compaction_count: normalizeContextCompactionCount(context.compactionCount),
-    };
-  }
+  const metadataSources = [payload.session_metadata, payload.metadata].filter(
+    (candidate) => candidate && typeof candidate === "object",
+  ) as Array<Record<string, unknown>>;
+  if (metadataSources.length > 0) update.metadata = Object.assign({}, ...metadataSources);
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   carryDefinedFields(update, payload);
-  return { sessionUpdate: update, contextWindow: context };
+  return { sessionUpdate: update };
 }
 
 /** Upsert the session in the per-task sessions list from a WS event.
@@ -441,6 +422,51 @@ function maybeFanOutOfficeRefetch(
   if (!setOfficeTrigger) return;
   setOfficeTrigger("dashboard");
   setOfficeTrigger("agents");
+}
+
+/** Extract context-window data or an explicit cache invalidation from a session event. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payload: any): void {
+  const metadataSources = [payload.metadata, payload.session_metadata];
+  const metadata = metadataSources.find(
+    (candidate) =>
+      candidate &&
+      typeof candidate === "object" &&
+      (Object.prototype.hasOwnProperty.call(candidate, "context_window") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_count") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_reporting")),
+  ) as Record<string, unknown> | undefined;
+  if (!metadata) return;
+  const existing = store.getState().contextWindow?.bySessionId?.[sessionId];
+  const sessionMetadata = store.getState().taskSessions?.items?.[sessionId]?.metadata as
+    | Record<string, unknown>
+    | undefined;
+  const count = mergeCompactionCountValue(
+    metadata.context_compaction_count,
+    sessionMetadata?.context_compaction_count,
+  );
+  const reporting = mergeCompactionReportingValue(
+    metadata.context_compaction_reporting,
+    sessionMetadata?.context_compaction_reporting,
+  );
+  const hasGauge = Object.prototype.hasOwnProperty.call(metadata, "context_window");
+  const next = reconcileContextWindowMetadata({
+    current: existing,
+    gauge: metadata.context_window,
+    hasGauge,
+    count,
+    reporting,
+    timestamp: new Date().toISOString(),
+    allowExplicitClear: true,
+  });
+  if (next === undefined) return;
+  if (next === null) {
+    store.getState().clearContextWindow(sessionId);
+    return;
+  }
+  if (!sameContextWindowEntry(next, existing)) {
+    store.getState().setContextWindow(sessionId, next);
+  }
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */
@@ -1023,7 +1049,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const taskId = toTaskId(rawTaskId);
       const sessionId = toSessionId(rawSessionId);
 
-      const { sessionUpdate, contextWindow } = buildSessionUpdate(payload);
+      const { sessionUpdate } = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
       if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
@@ -1054,22 +1080,12 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState,
         updatedAt: payload.updated_at,
       });
-      const sessionWasUpserted = upsertTaskSessionList(
-        store,
-        taskId,
-        sessionId,
-        payload,
-        sessionUpdate,
-      );
-      if (!sessionWasUpserted && contextWindow.present) {
-        const entry = parseContextWindowEntry(
-          contextWindow.contextWindow,
-          typeof payload.updated_at === "string" ? payload.updated_at : undefined,
-          contextWindow.compactionCount,
-        );
-        if (entry) store.getState().setContextWindow(sessionId, entry);
-        else store.getState().clearContextWindow(sessionId);
-      }
+      const contextEpoch =
+        store.getState().taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0;
+      upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      const acceptedContextEpoch =
+        store.getState().taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0;
+      if (acceptedContextEpoch === contextEpoch) extractContextWindow(store, sessionId, payload);
       store.getState().reconcileWorkflowSessionFocus?.(taskId);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);

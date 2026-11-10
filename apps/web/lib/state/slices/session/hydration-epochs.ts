@@ -2,7 +2,7 @@ import type { SessionSliceState, TaskSessionHydrationEpoch } from "./types";
 import type { TaskSession } from "@/lib/types/http";
 import type { ContextWindowEntry } from "@/lib/state/slices/session-runtime/types";
 import {
-  parseContextWindowEntry,
+  reconcileContextWindowMetadata,
   readContextWindowMetadata,
 } from "@/lib/state/slices/session-runtime/context-window";
 import { isStaleSessionStateEvent } from "@/lib/session-state";
@@ -10,7 +10,11 @@ import { isStaleSessionStateEvent } from "@/lib/session-state";
 type SessionHydrationState = Pick<SessionSliceState, "taskSessions" | "taskSessionsByTask">;
 type SessionEpochState = Pick<SessionSliceState, "taskSessions">;
 
-const CONTEXT_WINDOW_PAIR = ["context_window", "context_compaction_count"] as const;
+const CONTEXT_WINDOW_PAIR = [
+  "context_window",
+  "context_compaction_count",
+  "context_compaction_reporting",
+] as const;
 
 type ContextWindowCacheState = {
   contextWindow: { bySessionId: Record<string, ContextWindowEntry> };
@@ -94,14 +98,25 @@ export function synchronizeAcceptedContextWindow(
   incoming: TaskSession,
   accepted: TaskSession,
 ): void {
-  if (!readContextWindowMetadata(incoming.metadata).present) return;
-  const context = readContextWindowMetadata(accepted.metadata);
-  if (!context.present) {
+  const metadata = metadataRecord(accepted.metadata);
+  if (!hasContextWindowPair(metadataRecord(incoming.metadata))) return;
+  if (
+    Object.prototype.hasOwnProperty.call(metadata, "context_window") &&
+    metadata.context_window === null
+  ) {
     delete state.contextWindow.bySessionId[accepted.id];
     return;
   }
-
-  const entry = parseContextWindowEntry(context.contextWindow, undefined, context.compactionCount);
+  const entry = reconcileContextWindowMetadata({
+    current: state.contextWindow.bySessionId[accepted.id],
+    gauge: metadata.context_window,
+    hasGauge: Object.prototype.hasOwnProperty.call(metadata, "context_window"),
+    count: metadata.context_compaction_count,
+    reporting: metadata.context_compaction_reporting,
+    timestamp: undefined,
+    allowExplicitClear: true,
+  });
+  if (entry === undefined) return;
   if (entry) state.contextWindow.bySessionId[accepted.id] = entry;
   else delete state.contextWindow.bySessionId[accepted.id];
 }

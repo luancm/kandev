@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { deriveContextWindowUsage } from "@/lib/context-window-usage";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
+import type { ContextCompactionReporting } from "@/lib/state/slices/session-runtime/types";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 
 type TokenUsageDisplayProps = {
@@ -187,12 +188,41 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
   );
 }
 
-function ContextCompactionCount({ count }: { count: number }) {
+function compactionHelpKey(reporting: ContextCompactionReporting | undefined): string {
+  if (!reporting || reporting.source !== "copilot_native") {
+    return "common:contextCompactionCountHelp";
+  }
+  if (reporting.availability === "unavailable") {
+    return "common:contextCompactionCountHelpUnavailable";
+  }
+  if (reporting.coverage === "partial") {
+    return "common:contextCompactionCountHelpPartial";
+  }
+  return "common:contextCompactionCountHelpNative";
+}
+
+function compactionStatusKey(
+  reporting: ContextCompactionReporting | undefined,
+): string | undefined {
+  if (!reporting || reporting.source !== "copilot_native") return undefined;
+  if (reporting.availability === "unavailable") return "common:contextCompactionStatusUnavailable";
+  if (reporting.coverage === "partial") return "common:contextCompactionStatusPartial";
+  return undefined;
+}
+
+function ContextCompactionCount({
+  count,
+  reporting,
+}: {
+  count: number;
+  reporting: ContextCompactionReporting | undefined;
+}) {
   const { t } = useTranslation();
   const helpId = useId();
   const [helpOpen, setHelpOpen] = useState(false);
   const [touchMode, setTouchMode] = useState(false);
   const pointerDownRef = useRef(false);
+  const statusKey = compactionStatusKey(reporting);
 
   return (
     <div
@@ -201,6 +231,14 @@ function ContextCompactionCount({ count }: { count: number }) {
     >
       <span className="text-[11px] text-muted-foreground">{t("common:contextCompactions")}</span>
       <div className="group relative flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+        {statusKey && (
+          <span
+            className="rounded-sm border border-border px-1 text-[10px] uppercase tracking-wide"
+            data-testid="context-window-compactions-status"
+          >
+            {t(statusKey)}
+          </span>
+        )}
         <span className="font-medium tabular-nums text-foreground">{count}</span>
         <button
           type="button"
@@ -238,7 +276,7 @@ function ContextCompactionCount({ count }: { count: number }) {
             helpOpen && "opacity-100",
           )}
         >
-          {t("common:contextCompactionCountHelp")}
+          {t(compactionHelpKey(reporting))}
         </span>
       </div>
     </div>
@@ -256,7 +294,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
 
   if (!contextWindow) return null;
 
-  const { size, used, source, compactionCount } = contextWindow;
+  const { size, used, source, compactionCount, compactionReporting } = contextWindow;
   const usage = deriveContextWindowUsage(contextWindow);
   if (!usage) return null;
 
@@ -334,7 +372,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
                   {t("task:contextWindowUsagePendingExplain")}
                 </p>
               )}
-              <ContextCompactionCount count={compactionCount} />
+              <ContextCompactionCount count={compactionCount} reporting={compactionReporting} />
             </div>
           </div>
         </TooltipContent>
