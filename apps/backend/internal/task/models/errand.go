@@ -217,3 +217,23 @@ type ErrandClaimCandidate struct {
 	ID      string
 	Version int64
 }
+
+// ErrandAttentionReason distinguishes permission from unresolved recovered work.
+type ErrandAttentionReason string
+
+const (
+	ErrandAttentionPermission         ErrandAttentionReason = "permission"
+	ErrandAttentionRecoveryUnresolved ErrandAttentionReason = "recovery_unresolved"
+)
+
+// ProjectErrandAttentionReason limits the wire field to the closed attention set.
+// An omitted reason preserves the older permission-only producer contract.
+func ProjectErrandAttentionReason(status ErrandStatus, reasons ...ErrandAttentionReason) ErrandAttentionReason {
+	if status != ErrandStatusNeedsAttention {
+		return ""
+	}
+	if len(reasons) > 0 && reasons[0] == ErrandAttentionRecoveryUnresolved {
+		return ErrandAttentionRecoveryUnresolved
+	}
+	return ErrandAttentionPermission
+}

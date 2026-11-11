@@ -20,7 +20,7 @@ function isInFlight(status: KandevStatus): boolean {
 
 function QuotedSubject({ subject }: { subject: string | null }) {
   if (!subject) return null;
-  return <span className="max-w-[40ch] truncate">&ldquo;{subject}&rdquo;</span>;
+  return <q className="inline-block max-w-[40ch] truncate">{subject}</q>;
 }
 
 /** Plain Kandev row for a failed or abandoned errand call; tool text renders as text only. */

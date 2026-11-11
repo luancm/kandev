@@ -118,7 +118,7 @@ func (s *Service) SendResult(ctx context.Context, errandID string) (*Snapshot, e
 	if err != nil {
 		return nil, fmt.Errorf("send errand result: %w", err)
 	}
-	projected, err := s.Project(ctx, row)
+	snapshot, err := s.ProjectSnapshot(ctx, row)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (s *Service) SendResult(ctx context.Context, errandID string) (*Snapshot, e
 		return nil, newError(ReasonResultNotEligible, "errand result cannot be sent", nil)
 	}
 	s.afterResultWrite(ctx, row)
-	return &Snapshot{Errand: row, Status: projected}, nil
+	return &snapshot, nil
 }
 
 func sentResult(row *models.Errand, turnID string) bool {

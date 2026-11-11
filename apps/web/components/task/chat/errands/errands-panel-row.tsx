@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { errandElapsedLabel } from "./errand-display";
 import { ErrandProfileLabel } from "./errand-profile-label";
 import { ErrandOpenButton } from "./errand-open-button";
-import { ErrandStatusLabel, errandStatusLabelKey } from "./errand-status";
+import { ErrandRecoveryNotice, ErrandStatusLabel, errandStatusLabelKey } from "./errand-status";
 import { useOpenTaskSession } from "./use-open-task-session";
 
 type ErrandsPanelRowProps = {
@@ -32,6 +32,7 @@ type ErrandsPanelRowPresentationProps = Omit<ErrandsPanelRowProps, "drawer"> & {
   contextUsage: ContextWindowUsage | undefined;
   contextDescriptionId: string;
   deliveryUncertaintyDescriptionId: string;
+  recoveryDescriptionId: string;
   contextSize: number;
   contextUsed: number;
 };
@@ -50,6 +51,7 @@ function RowSummary({
   contextUsage,
   contextDescriptionId,
   deliveryUncertaintyDescriptionId,
+  recoveryDescriptionId,
   contextSize,
   contextUsed,
 }: {
@@ -59,6 +61,7 @@ function RowSummary({
   contextUsage: ContextWindowUsage | undefined;
   contextDescriptionId: string;
   deliveryUncertaintyDescriptionId: string;
+  recoveryDescriptionId: string;
   contextSize: number;
   contextUsed: number;
 }) {
@@ -75,7 +78,11 @@ function RowSummary({
         className="max-w-full text-[11px]"
       />
       <span className="flex items-center gap-1.5">
-        <ErrandStatusLabel status={errand.status} />
+        <ErrandStatusLabel
+          status={errand.status}
+          attentionReason={errand.attention_reason}
+          testId="errand-status"
+        />
         {elapsed && (
           <span className="text-[11px] tabular-nums text-muted-foreground">{elapsed}</span>
         )}
@@ -121,6 +128,9 @@ function RowSummary({
           {t("task:errandResultDeliveryUncertain")}
         </span>
       )}
+      {errand.status === "needs_attention" && errand.attention_reason === "recovery_unresolved" && (
+        <ErrandRecoveryNotice id={recoveryDescriptionId} />
+      )}
     </span>
   );
 }
@@ -135,16 +145,20 @@ function DrawerRow({
   contextUsage,
   contextDescriptionId,
   deliveryUncertaintyDescriptionId,
+  recoveryDescriptionId,
   contextSize,
   contextUsed,
 }: ErrandsPanelRowPresentationProps) {
   const { t } = useTranslation();
   const openSession = useOpenTaskSession();
   const title = errand.title || t("task:errandUntitled");
-  const status = t(errandStatusLabelKey(errand.status));
+  const status = t(
+    errandStatusLabelKey(errand.status, { attentionReason: errand.attention_reason }),
+  );
   const descriptions: string[] = [];
   if (contextUsage) descriptions.push(contextDescriptionId);
   if (errand.delivery_state === "uncertain") descriptions.push(deliveryUncertaintyDescriptionId);
+  if (errand.attention_reason === "recovery_unresolved") descriptions.push(recoveryDescriptionId);
   return (
     <li>
       <button
@@ -169,6 +183,7 @@ function DrawerRow({
           contextUsage={contextUsage}
           contextDescriptionId={contextDescriptionId}
           deliveryUncertaintyDescriptionId={deliveryUncertaintyDescriptionId}
+          recoveryDescriptionId={recoveryDescriptionId}
           contextSize={contextSize}
           contextUsed={contextUsed}
         />
@@ -188,6 +203,7 @@ function PopoverRow({
   contextUsage,
   contextDescriptionId,
   deliveryUncertaintyDescriptionId,
+  recoveryDescriptionId,
   contextSize,
   contextUsed,
 }: ErrandsPanelRowPresentationProps) {
@@ -205,6 +221,7 @@ function PopoverRow({
         contextUsage={contextUsage}
         contextDescriptionId={contextDescriptionId}
         deliveryUncertaintyDescriptionId={deliveryUncertaintyDescriptionId}
+        recoveryDescriptionId={recoveryDescriptionId}
         contextSize={contextSize}
         contextUsed={contextUsed}
       />
@@ -214,6 +231,14 @@ function PopoverRow({
         title={title}
         queued={errand.status === "queued"}
         onOpened={onOpened}
+        describedBy={
+          [
+            contextUsage ? contextDescriptionId : null,
+            errand.attention_reason === "recovery_unresolved" ? recoveryDescriptionId : null,
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
       />
     </li>
   );
@@ -225,11 +250,13 @@ export function ErrandsPanelRow({ drawer, ...rest }: ErrandsPanelRowProps) {
   const contextUsage = deriveContextWindowUsage(contextWindow);
   const contextDescriptionId = useId();
   const deliveryUncertaintyDescriptionId = useId();
+  const recoveryDescriptionId = useId();
   const presentationProps = {
     ...rest,
     contextUsage,
     contextDescriptionId,
     deliveryUncertaintyDescriptionId,
+    recoveryDescriptionId,
     contextSize: contextWindow?.size ?? 0,
     contextUsed: contextWindow?.used ?? 0,
   };

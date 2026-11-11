@@ -74,6 +74,29 @@ describe("upsertErrand", () => {
     expect(taskErrands(store)["errand-1"]).not.toHaveProperty("delivery_state");
   });
 
+  it("does not let an older list result roll back recovery attention from a newer event", () => {
+    const store = createAppStore();
+    const requestRevision = store.getState().errands.liveRevisionByTaskId[ERRAND_TASK_ID] ?? 0;
+    const recovery = {
+      ...makeErrand({ status: "needs_attention", updated_at: NEWER }),
+      attention_reason: "recovery_unresolved",
+    } as Errand;
+    store.getState().upsertErrand(recovery);
+
+    store.getState().setTaskErrands(
+      ERRAND_TASK_ID,
+      [
+        {
+          ...makeErrand({ status: "needs_attention", updated_at: OLDER }),
+          attention_reason: "permission",
+        } as Errand,
+      ],
+      requestRevision,
+    );
+
+    expect(taskErrands(store)["errand-1"].attention_reason).toBe("recovery_unresolved");
+  });
+
   it("accepts an update when a timestamp cannot be compared", () => {
     const store = createAppStore();
     store.getState().upsertErrand(makeErrand({ status: "done", updated_at: NEWER }));
@@ -97,6 +120,47 @@ describe("upsertErrand", () => {
     store.getState().upsertErrand(makeErrand({ updated_at: NEWER }));
 
     expect(store.getState().errands.liveRevisionByTaskId[ERRAND_TASK_ID]).toBe(2);
+  });
+});
+
+describe("errand attention projection", () => {
+  it("updates reason transitions and preserves prior result data", () => {
+    const store = createAppStore();
+    const recovery = {
+      ...makeErrand({
+        status: "needs_attention",
+        result_state: "delivered",
+        result_preview: "Earlier result remains authoritative",
+        result_truncated: true,
+      }),
+      attention_reason: "recovery_unresolved",
+      delivery_state: "uncertain" as const,
+    } as Errand;
+    store.getState().upsertErrand(recovery);
+
+    store.getState().upsertErrand({
+      ...recovery,
+      attention_reason: "permission",
+      updated_at: NEWER,
+    });
+    expect(taskErrands(store)["errand-1"].attention_reason).toBe("permission");
+
+    const running = {
+      ...recovery,
+      status: "running" as const,
+      updated_at: "2026-10-26T10:00:10Z",
+    };
+    delete running.attention_reason;
+    store.getState().upsertErrand(running);
+
+    expect(taskErrands(store)["errand-1"]).not.toHaveProperty("attention_reason");
+    expect(taskErrands(store)["errand-1"]).toMatchObject({
+      status: "running",
+      result_state: "delivered",
+      result_preview: "Earlier result remains authoritative",
+      result_truncated: true,
+      delivery_state: "uncertain",
+    });
   });
 });
 
@@ -153,6 +217,30 @@ describe("setTaskErrands", () => {
     const nextRevision = store.getState().errands.liveRevisionByTaskId[ERRAND_TASK_ID] ?? 0;
     store.getState().setTaskErrands(ERRAND_TASK_ID, [makeErrand()], nextRevision);
     expect(taskErrands(store)["errand-1"]).not.toHaveProperty("delivery_state");
+  });
+
+  it("applies the authoritative reason from a reconnect list and clears an omitted legacy reason", () => {
+    const store = createAppStore();
+    const reasoned = {
+      ...makeErrand({ status: "needs_attention" }),
+      attention_reason: "recovery_unresolved",
+    } as Errand;
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [reasoned], 0);
+    expect(taskErrands(store)["errand-1"].attention_reason).toBe("recovery_unresolved");
+
+    const permission = {
+      ...makeErrand({ status: "needs_attention", updated_at: NEWER }),
+      attention_reason: "permission",
+    } as Errand;
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [permission], 0);
+    expect(taskErrands(store)["errand-1"].attention_reason).toBe("permission");
+
+    const legacySnapshot = makeErrand({
+      status: "needs_attention",
+      updated_at: "2026-10-26T10:00:08Z",
+    });
+    store.getState().setTaskErrands(ERRAND_TASK_ID, [legacySnapshot], 0);
+    expect(taskErrands(store)["errand-1"]).not.toHaveProperty("attention_reason");
   });
 
   it("accepts a strictly newer listed row even after a live observation during the request", () => {

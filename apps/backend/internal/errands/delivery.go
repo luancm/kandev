@@ -56,7 +56,11 @@ func (s *Service) ParentErrandState(ctx context.Context, parentSessionID string)
 		return false, false, fmt.Errorf("list errands of parent: %w", err)
 	}
 	for _, row := range rows {
-		if IsOutstanding(row) {
+		snapshot, err := s.ProjectSnapshot(ctx, row)
+		if err != nil {
+			return false, false, err
+		}
+		if IsOutstanding(row, RecoveryAttention{Unresolved: snapshot.AttentionReason == models.ErrandAttentionRecoveryUnresolved}) {
 			return true, true, nil
 		}
 	}

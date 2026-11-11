@@ -1,3 +1,5 @@
+import { WebSocketRequestError } from "@/lib/ws/request-error";
+
 export type MessageSendErrorCode =
   | "connection-unavailable"
   | "no-active-session"
@@ -30,5 +32,14 @@ export function isMessageSendError(error: unknown): error is MessageSendError {
     code === "preview-feedback-changed" ||
     code === "primary-session-changed" ||
     code === "late-answer-admission-failed"
+  );
+}
+
+/** The backend's stable reason is the only signal for this localized refusal. */
+export function isErrandRecoveryRefusal(error: unknown): error is WebSocketRequestError {
+  return (
+    error instanceof WebSocketRequestError &&
+    error.code === "CONFLICT" &&
+    error.details?.reason === "errand_recovery_unresolved"
   );
 }

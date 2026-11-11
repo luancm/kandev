@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import React from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import type { TipTapInputHandle } from "./chat/tiptap-input";
+import { WebSocketRequestError } from "@/lib/ws/request-error";
 import { planCommentRecovery } from "@/lib/plan-comment-recovery";
+import { useChatInputState } from "./chat/use-chat-input-state";
 import {
   buildContextFilesMeta,
   buildPassthroughFinalMessage,
@@ -10,17 +15,73 @@ import {
   assertPlanCommentMigrationReady,
   clearPassthroughComposerContext,
   formatPassthroughBaseMessage,
+  useSendPassthroughMessage,
 } from "./passthrough-chat-composer";
 
 const mockGetTaskPlan = vi.hoisted(() => vi.fn());
+const mockSendMessageRequest = vi.hoisted(() => vi.fn());
+const mockToast = vi.hoisted(() => vi.fn());
+const mockMarkCommentsSent = vi.hoisted(() => vi.fn());
+const mockTranslations = vi.hoisted(() =>
+  vi.fn((key: string) => {
+    const entries: Record<string, string> = {
+      "task:messageNotSent": "Message not sent",
+      "task:errandRecoverySendRefused":
+        "Earlier work and possible external effects remain unknown. Recovery must verify what happened before this errand can continue. You can inspect the conversation or stop the errand.",
+    };
+    return entries[key] ?? key;
+  }),
+);
 
 vi.mock("@/lib/api/domains/plan-api", () => ({
   getTaskPlan: mockGetTaskPlan,
 }));
 
+vi.mock("@/hooks/use-message-handler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/use-message-handler")>()),
+  sendMessageRequest: mockSendMessageRequest,
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({
+      kanban: { steps: [] },
+      kanbanMulti: { snapshots: {} },
+      taskPlans: { byTaskId: {} },
+      setTaskPlanComments: vi.fn(),
+    }),
+  }),
+}));
+
+vi.mock("@/lib/state/slices/comments/comments-store", () => ({
+  useCommentsStore: (
+    selector: (state: { markCommentsSent: typeof mockMarkCommentsSent }) => unknown,
+  ) => selector({ markCommentsSent: mockMarkCommentsSent }),
+}));
+
+vi.mock("@/components/toast-provider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/toast-provider")>()),
+  useToast: () => ({ toast: mockToast }),
+  useOptionalToast: () => undefined,
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: mockTranslations }),
+}));
+
 const SESSION_ID = "session-1";
 const TASK_ID = "task-1";
 const PLAN_CONTEXT_PATH = "plan:context";
+const ERRAND_CONTEXT_FILE = "src/errand-context.ts";
+
+function attachInputHandle(inputRef: React.RefObject<TipTapInputHandle | null>, clear: () => void) {
+  (inputRef as React.MutableRefObject<Partial<TipTapInputHandle> | null>).current = {
+    clear,
+    getMentions: () => [],
+    getTaskMentions: () => [],
+    getEntityReferences: () => [],
+  };
+}
 
 function file(path: string, name = path): ContextFile {
   return { path, name };
@@ -111,6 +172,15 @@ function panelState(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   mockGetTaskPlan.mockReset();
+  mockSendMessageRequest.mockReset();
+  mockToast.mockReset();
+  mockMarkCommentsSent.mockReset();
+  mockTranslations.mockClear();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
 });
 
 describe("passthrough chat composer metadata helpers", () => {
@@ -382,4 +452,94 @@ it("sends whole-file feedback through passthrough review context", () => {
   expect(result.commentsToSend.map((c) => c.id)).toEqual(["file"]);
   expect(result.formatted).toContain("**api/README.md**");
   expect(result.formatted).toContain("> Split this file");
+});
+
+it("keeps the actual passthrough draft and context after an unresolved Errand refusal", async () => {
+  const refusal = new WebSocketRequestError("Errand recovery is unresolved", "CONFLICT", {
+    reason: "errand_recovery_unresolved",
+  });
+  mockSendMessageRequest.mockRejectedValue(refusal);
+  const onSent = vi.fn();
+  const state = panelState({
+    planModeEnabled: true,
+    pendingPRFeedback: [{ id: "feedback-1" }],
+    messageComments: [messageComment()],
+    contextFiles: [file(ERRAND_CONTEXT_FILE)],
+  }) as unknown as {
+    pendingPRFeedback: unknown[];
+    messageComments: unknown[];
+    contextFiles: ContextFile[];
+    handleClearPRFeedback: ReturnType<typeof vi.fn>;
+    handleClearMessageComments: ReturnType<typeof vi.fn>;
+    clearEphemeral: ReturnType<typeof vi.fn>;
+  };
+  const { result } = renderHook(() => {
+    const [isSending, setIsSending] = React.useState(false);
+    const send = useSendPassthroughMessage({
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      pendingComments: [comment()] as never,
+      panelState: state as never,
+      onSent,
+    });
+    const handleSubmit = React.useCallback(
+      async (payload: Parameters<typeof send>[0]) => {
+        if (isSending) return;
+        setIsSending(true);
+        try {
+          await send(payload);
+        } finally {
+          setIsSending(false);
+        }
+      },
+      [isSending, send],
+    );
+    const input = useChatInputState({
+      sessionId: SESSION_ID,
+      taskId: TASK_ID,
+      isSending,
+      contextItems: [],
+      showRequestChangesTooltip: false,
+      hasContextComments: true,
+      onSubmit: handleSubmit,
+    });
+    return { input, isSending };
+  });
+  const clearEditor = vi.fn();
+  act(() => {
+    result.current.input.handleChange("keep this Errand draft");
+    attachInputHandle(result.current.input.inputRef, clearEditor);
+  });
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+  act(() => result.current.input.handleSubmit(vi.fn()));
+
+  await waitFor(() =>
+    expect(mockToast).toHaveBeenCalledWith({
+      title: "Message not sent",
+      description:
+        "Earlier work and possible external effects remain unknown. Recovery must verify what happened before this errand can continue. You can inspect the conversation or stop the errand.",
+      variant: "error",
+    }),
+  );
+  await waitFor(() => expect(result.current.isSending).toBe(false));
+  expect(result.current.input.value).toBe("keep this Errand draft");
+  expect(clearEditor).not.toHaveBeenCalled();
+  expect(state.pendingPRFeedback).toHaveLength(1);
+  expect(state.messageComments).toHaveLength(1);
+  expect(state.contextFiles).toEqual([file(ERRAND_CONTEXT_FILE)]);
+  expect(state.handleClearPRFeedback).not.toHaveBeenCalled();
+  expect(state.handleClearMessageComments).not.toHaveBeenCalled();
+  expect(state.clearEphemeral).not.toHaveBeenCalled();
+  expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  expect(onSent).not.toHaveBeenCalled();
+  expect(mockSendMessageRequest).toHaveBeenCalledTimes(1);
+  expect(mockSendMessageRequest.mock.calls[0]?.[0]).toEqual(
+    expect.objectContaining({
+      taskId: TASK_ID,
+      resolvedSessionId: SESSION_ID,
+      finalMessage: expect.stringContaining("keep this Errand draft"),
+      contextFilesMeta: [{ path: ERRAND_CONTEXT_FILE, name: ERRAND_CONTEXT_FILE }],
+    }),
+  );
 });

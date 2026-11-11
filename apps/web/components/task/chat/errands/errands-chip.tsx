@@ -7,7 +7,7 @@ import {
   type ComponentPropsWithoutRef,
   type ForwardedRef,
 } from "react";
-import { IconShieldQuestion } from "@tabler/icons-react";
+import { IconAlertTriangle, IconShieldQuestion } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Drawer, DrawerContent, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -28,8 +28,11 @@ const TONE_CLASS: Record<ChipTone, string> = {
   idle: "border-border bg-muted/40 text-muted-foreground hover:bg-muted",
 };
 
-function ChipIndicator({ tone }: { tone: ChipTone }) {
+function ChipIndicator({ tone, recovery }: { tone: ChipTone; recovery: boolean }) {
   if (tone === "attention") {
+    if (recovery) {
+      return <IconAlertTriangle aria-hidden className="h-3.5 w-3.5 shrink-0 text-amber-500" />;
+    }
     return <IconShieldQuestion aria-hidden className="h-3.5 w-3.5 shrink-0 text-amber-500" />;
   }
   if (tone === "idle") return null;
@@ -46,12 +49,13 @@ type ErrandsTriggerProps = {
   label: string;
   ariaLabel: string;
   tone: ChipTone;
+  recovery: boolean;
   open: boolean;
   usesDrawer: boolean;
 } & Omit<ComponentPropsWithoutRef<"button">, "ref">;
 
 const ErrandsTrigger = forwardRef<HTMLButtonElement, ErrandsTriggerProps>(function ErrandsTrigger(
-  { detailsId, label, ariaLabel, tone, open, usesDrawer, className, ...buttonProps },
+  { detailsId, label, ariaLabel, tone, recovery, open, usesDrawer, className, ...buttonProps },
   ref: ForwardedRef<HTMLButtonElement>,
 ) {
   return (
@@ -72,7 +76,7 @@ const ErrandsTrigger = forwardRef<HTMLButtonElement, ErrandsTriggerProps>(functi
         usesDrawer ? "min-h-11 min-w-11 px-3" : "h-6 px-2.5",
       )}
     >
-      <ChipIndicator tone={tone} />
+      <ChipIndicator tone={tone} recovery={recovery} />
       <span className="truncate">{label}</span>
     </button>
   );
@@ -99,6 +103,10 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
   const detailsId = `errands-details-${useId()}`;
   if (errands.length === 0) return null;
 
+  const recoveryNeedsAttention = errands.some(
+    (errand) =>
+      errand.status === "needs_attention" && errand.attention_reason === "recovery_unresolved",
+  );
   const needsAttention = errands.some((errand) => errand.status === "needs_attention");
   let tone: ChipTone = "idle";
   if (needsAttention) tone = "attention";
@@ -107,13 +115,16 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
     liveCount > 0
       ? t("task:errandsChipRunning", { count: liveCount })
       : t("task:errandsChipIdle", { count: errands.length });
-  const ariaLabel = needsAttention ? t("task:errandsChipAttentionAria", { label }) : label;
+  let ariaLabel = label;
+  if (recoveryNeedsAttention) ariaLabel = t("task:errandsChipRecoveryAria", { label });
+  else if (needsAttention) ariaLabel = t("task:errandsChipAttentionAria", { label });
   const trigger = (
     <ErrandsTrigger
       detailsId={detailsId}
       label={label}
       ariaLabel={ariaLabel}
       tone={tone}
+      recovery={recoveryNeedsAttention}
       open={open}
       usesDrawer={usesDrawer}
     />

@@ -123,3 +123,23 @@ func TestErrandUpdatedEventFlattensTheDTOAndAddsTheWorkspace(t *testing.T) {
 		t.Fatalf("event payload = %v, want the flat DTO plus workspace_id", payload)
 	}
 }
+
+func TestErrandPermissionAttentionReason(t *testing.T) {
+	payload := encodeToMap(t, FromErrand(&models.Errand{}, models.ErrandStatusNeedsAttention))
+	if payload["attention_reason"] != "permission" {
+		t.Fatalf("attention_reason = %v", payload["attention_reason"])
+	}
+}
+
+func TestErrandRecoveryAttentionWireReason(t *testing.T) {
+	for _, status := range []models.ErrandStatus{models.ErrandStatusNeedsAttention, models.ErrandStatusRunning, models.ErrandStatusDone} {
+		payload := encodeToMap(t, FromErrand(&models.Errand{}, status, models.ErrandAttentionRecoveryUnresolved))
+		if status == models.ErrandStatusNeedsAttention {
+			if payload["attention_reason"] != "recovery_unresolved" {
+				t.Fatal(payload)
+			}
+		} else if _, exists := payload["attention_reason"]; exists {
+			t.Fatal(payload)
+		}
+	}
+}

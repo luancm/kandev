@@ -2,6 +2,10 @@ import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import {
+  exerciseErrandInterruptedContinuation,
+  exerciseErrandRecoveryRefusal,
+} from "../../helpers/errand-recovery";
+import {
   deliverySnapshots,
   expectNormalContextSources,
   openDefaultErrandParent,
@@ -1003,4 +1007,120 @@ test("desktop normal context sources exclude errands", async ({
 }) => {
   test.setTimeout(120_000);
   await expectNormalContextSources(testPage, apiClient, seedData, backend, false);
+});
+
+test("desktop unresolved errand recovery explains the refusal and preserves the draft", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  let gates: Array<ReturnType<typeof mockTurnGate>> = [];
+  try {
+    const fixture = await startErrands(api, seed, backend, {
+      count: 1,
+      waitForParentIdle: false,
+    });
+    const { taskId, parentId, errands } = fixture;
+    gates = fixture.gates;
+    await gates[0].release();
+    await waitDelivered(api, taskId, [errands[0].errand_id]);
+
+    const browserSocket = await routeErrandUpdateBrowserSocket(page);
+    await page.goto(
+      `/threads?workspace=${seed.workspaceId}&taskId=${taskId}&sessionId=${parentId}`,
+    );
+    await expect.poll(() => browserSocket.isConnected()).toBe(true);
+    const errand = errands[0];
+    browserSocket.notifyErrandUpdated({
+      ...errand,
+      status: "needs_attention",
+      attention_reason: "recovery_unresolved",
+      updated_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    const parent = parentChat(page, parentId);
+    await parent.getByTestId(CHIP).click();
+    const panel = page.getByTestId(PANEL);
+    const recoveryRow = panel.getByTestId(`errands-panel-row-${errand.errand_id}`);
+    await expect(recoveryRow).toContainText("Recovery needs verification");
+    await expect(recoveryRow).toContainText(
+      "Earlier work and possible external effects are unknown",
+    );
+    await expect(
+      page.getByTestId("toast-message").filter({ hasText: "Kandev update available" }),
+    ).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("errands-desktop-recovery-row.png") });
+
+    await panel.getByTestId(`errand-open-${errand.errand_id}`).click();
+    const child = parentChat(page, errand.errand_id);
+    await expect(child.getByTestId("errand-header")).toBeVisible();
+    await expect(child.getByTestId("errand-header")).toContainText(
+      "Earlier work and possible external effects are unknown",
+    );
+    const transcript = child.locator(".chat-message-list");
+    await expect(transcript).toBeVisible();
+    await expect(transcript).toContainText("ERRAND_RESULT_1");
+    await page.screenshot({ path: testInfo.outputPath("errands-desktop-recovery-child.png") });
+
+    const messageCount = (await api.listSessionMessages(errand.errand_id)).messages.length;
+    const turnCount = (await api.listSessionTurns(errand.errand_id)).turns.length;
+    const session = new SessionPage(page);
+    const editor = await session.fillMessage("Check whether the earlier operation completed.");
+    browserSocket.refuseNextPrompt();
+    await session.submitMessageWithKeyboard(editor);
+    const refusal = page
+      .getByTestId("toast-message")
+      .filter({ hasText: "Recovery must verify what happened before this errand can continue." });
+    await expect(refusal).toContainText(
+      "Earlier work and possible external effects remain unknown. Recovery must verify what happened before this errand can continue.",
+    );
+    await expect(editor).toContainText("Check whether the earlier operation completed.");
+    await expect(session.submitButton()).toBeEnabled();
+    expect(browserSocket.refusedActions()).toEqual(["message.add"]);
+    expect((await api.listSessionMessages(errand.errand_id)).messages).toHaveLength(messageCount);
+    expect((await api.listSessionTurns(errand.errand_id)).turns).toHaveLength(turnCount);
+  } finally {
+    for (const gate of gates) await gate.release();
+    await restore();
+  }
+});
+
+test("desktop real Errand recovery refusal preserves the admitted conversation", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}, testInfo) => {
+  test.setTimeout(240_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    await exerciseErrandRecoveryRefusal({ page, api, seed, backend, testInfo, mobile: false });
+  } finally {
+    await restore();
+  }
+});
+
+test("desktop explicit Errand continuation follows an exact interrupted receipt", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}, testInfo) => {
+  test.setTimeout(240_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    await exerciseErrandInterruptedContinuation({
+      page,
+      api,
+      seed,
+      backend,
+      testInfo,
+      mobile: false,
+    });
+  } finally {
+    await restore();
+  }
 });

@@ -56,8 +56,9 @@ type Service struct {
 
 // Snapshot is an errand row with its projected status.
 type Snapshot struct {
-	Errand *models.Errand
-	Status models.ErrandStatus
+	Errand          *models.Errand
+	Status          models.ErrandStatus
+	AttentionReason models.ErrandAttentionReason
 }
 
 // New builds a Service. It does not start its cascade worker; call
@@ -133,11 +134,16 @@ func (s *Service) StopWorkers() {
 
 // Project returns an errand's projected status.
 func (s *Service) Project(ctx context.Context, errand *models.Errand) (models.ErrandStatus, error) {
+	snapshot, err := s.ProjectSnapshot(ctx, errand)
+	return snapshot.Status, err
+}
+
+func (s *Service) ProjectSnapshot(ctx context.Context, errand *models.Errand) (Snapshot, error) {
 	var session *models.TaskSession
 	if errand.Lifecycle == models.ErrandLifecycleLaunched {
 		loaded, err := s.store.GetTaskSession(ctx, errand.ID)
 		if err != nil && !isMissingSession(err) {
-			return "", fmt.Errorf("load errand session %s: %w", errand.ID, err)
+			return Snapshot{}, fmt.Errorf("load errand session %s: %w", errand.ID, err)
 		}
 		session = loaded
 	}
@@ -145,11 +151,11 @@ func (s *Service) Project(ctx context.Context, errand *models.Errand) (models.Er
 	if session != nil && isWorking(session) {
 		actions, err := s.store.GetPendingActionsBySessionIDs(ctx, []string{session.ID})
 		if err != nil {
-			return "", fmt.Errorf("load pending action for errand %s: %w", errand.ID, err)
+			return Snapshot{}, fmt.Errorf("load pending action for errand %s: %w", errand.ID, err)
 		}
 		permission = actions[session.ID] == models.TaskPendingActionPermission
 	}
-	return ProjectStatus(errand, session, permission), nil
+	return s.projectObserved(ctx, errand, session, permission)
 }
 
 // publish emits errand.updated for a durable change. The status is projected
@@ -163,13 +169,13 @@ func (s *Service) publish(ctx context.Context, errand *models.Errand) {
 		}
 		errand = current
 	}
-	status, err := s.Project(ctx, errand)
+	snapshot, err := s.ProjectSnapshot(ctx, errand)
 	if err != nil {
 		s.logger.Warn("errand status projection failed; errand.updated not published",
 			zap.String("errand_id", errand.ID), zap.Error(err))
 		return
 	}
-	s.events.PublishErrandUpdated(ctx, errand, status)
+	s.publishSnapshot(ctx, snapshot)
 }
 
 type taskLockSet struct {

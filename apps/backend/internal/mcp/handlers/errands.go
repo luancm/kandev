@@ -64,11 +64,12 @@ type cancelErrandRequest struct {
 // awaitErrandView is one errand in an await response. Result and Truncated
 // appear only for an undelivered result, DeliveredVia only for a delivered one.
 type awaitErrandView struct {
-	ErrandID     string `json:"errand_id"`
-	Status       string `json:"status"`
-	Result       string `json:"result,omitempty"`
-	Truncated    bool   `json:"truncated,omitempty"`
-	DeliveredVia string `json:"delivered_via,omitempty"`
+	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
+	ErrandID        string                       `json:"errand_id"`
+	Status          string                       `json:"status"`
+	Result          string                       `json:"result,omitempty"`
+	Truncated       bool                         `json:"truncated,omitempty"`
+	DeliveredVia    string                       `json:"delivered_via,omitempty"`
 }
 
 type awaitErrandsResponse struct {
@@ -114,6 +115,9 @@ func startErrandView(result *errands.StartResult) map[string]interface{} {
 		stopTaskStatusKey:    string(result.Status),
 		"agent_profile_name": result.ProfileName,
 	}
+	if result.AttentionReason != "" {
+		view["attention_reason"] = result.AttentionReason
+	}
 	if result.Errand != nil {
 		view[errandIDKey] = result.Errand.ID
 		view["session_id"] = result.Errand.ID
@@ -157,11 +161,12 @@ func awaitErrandsView(result errands.AwaitResult) awaitErrandsResponse {
 	views := make([]awaitErrandView, 0, len(result.Errands))
 	for _, item := range result.Errands {
 		views = append(views, awaitErrandView{
-			ErrandID:     item.ErrandID,
-			Status:       item.Status,
-			Result:       item.Result,
-			Truncated:    item.Truncated,
-			DeliveredVia: item.DeliveredVia,
+			AttentionReason: item.AttentionReason,
+			ErrandID:        item.ErrandID,
+			Status:          item.Status,
+			Result:          item.Result,
+			Truncated:       item.Truncated,
+			DeliveredVia:    item.DeliveredVia,
 		})
 	}
 	return awaitErrandsResponse{Delivery: result.Delivery, Errands: views, Ended: result.Ended, DurationMS: result.DurationMS, EndReason: result.EndReason}

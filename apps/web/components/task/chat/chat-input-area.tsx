@@ -26,7 +26,11 @@ import {
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
 import { useToast } from "@/components/toast-provider";
-import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
+import {
+  isErrandRecoveryRefusal,
+  isMessageSendError,
+  MessageSendError,
+} from "@/lib/chat/message-send-error";
 import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
 import type { ReviewComment, AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
@@ -132,9 +136,10 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
  *  send error from an ambiguous connection drop/timeout. */
 function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
   console.error("Failed to send message:", sanitizeSessionErrorDetails(error));
+  const title = t("task:messageNotSent");
   if (error instanceof QueueFullError) {
     toast({
-      title: t("task:messageNotSent"),
+      title,
       description: t("task:queueAdmissionFull"),
       variant: "error",
     });
@@ -148,15 +153,23 @@ function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>
       unavailable: t("task:queueAdmissionUnavailable"),
     }[error.code];
     toast({
-      title: t("task:messageNotSent"),
+      title,
       description: copy,
+      variant: "error",
+    });
+    return;
+  }
+  if (isErrandRecoveryRefusal(error)) {
+    toast({
+      title,
+      description: t("task:errandRecoverySendRefused"),
       variant: "error",
     });
     return;
   }
   if (isMessageSendError(error)) {
     toast({
-      title: t("task:messageNotSent"),
+      title,
       description: sanitizeSessionErrorDetails(error, 240),
       variant: "error",
     });

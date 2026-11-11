@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/errands"
 	"reflect"
 	"strings"
 	"time"
@@ -2976,6 +2977,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return errResp, nil
 	}
 
+	if models.IsErrandSession(session) {
+		if validator, ok := h.sessionLauncher.(interface {
+			ValidateErrandContinuation(context.Context, string) error
+		}); ok {
+			if err := validator.ValidateErrandContinuation(ctx, session.ID); err != nil {
+				return errandServiceError(msg, err), nil
+			}
+		}
+	}
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapMessageForTarget(prompt, senderTask, session, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
@@ -3036,6 +3046,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
+		}
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
 		}
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {

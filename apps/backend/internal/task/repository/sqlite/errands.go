@@ -22,14 +22,6 @@ const errandColumns = `id, task_id, parent_session_id, title, objective, agent_p
 	delivered_route, delivery_token, delivered_at, latest_settled_turn_id,
 	version, created_at, updated_at, settled_at, result_revision, parent_admission_generation, teardown_intent`
 
-// liveErrandPredicate selects the errands whose projected status is queued,
-// running, or needs_attention: queued rows, and launched rows whose session
-// exists, has not failed, and is either working or has not yet settled a
-// parent-initiated turn.
-const liveErrandPredicate = `(e.lifecycle = 'queued' OR (
-	e.lifecycle = 'launched' AND s.id IS NOT NULL AND s.state <> 'FAILED'
-	AND (s.state IN ('STARTING', 'RUNNING') OR e.last_outcome = '')))`
-
 type errandRowScanner interface {
 	Scan(dest ...interface{}) error
 }
@@ -128,7 +120,7 @@ func (r *Repository) CountLiveErrandsByTask(ctx context.Context, taskID string) 
 	var count int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM task_session_errands e
 		LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND `+liveErrandPredicate), taskID).Scan(&count)
+		WHERE e.task_id = ? AND `+liveErrandPredicate(r.ro.DriverName())), taskID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count live errands for task %s: %w", taskID, err)
 	}
@@ -137,7 +129,9 @@ func (r *Repository) CountLiveErrandsByTask(ctx context.Context, taskID string) 
 
 // outstandingErrandPredicate mirrors errands.IsOutstanding: a queued errand,
 // one awaiting a parent-initiated turn, or one holding a pending result.
-const outstandingErrandPredicate = `(e.lifecycle = 'queued' OR e.awaiting_result OR e.result_state = 'pending')`
+func outstandingErrandPredicate(driver string) string {
+	return `(e.lifecycle = 'queued' OR e.awaiting_result OR e.result_state = 'pending' OR ` + recoveryAttentionPredicate(driver) + `)`
+}
 
 // ErrandsSummaryByTask returns the bounded errand projection for one task. It
 // is a single aggregate over the task's errand rows, joined by primary key to
@@ -146,8 +140,8 @@ const outstandingErrandPredicate = `(e.lifecycle = 'queued' OR e.awaiting_result
 func (r *Repository) ErrandsSummaryByTask(ctx context.Context, taskID string) (statussummary.ErrandsSummary, error) {
 	var live, waiting int64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT
-		COALESCE(SUM(CASE WHEN `+liveErrandPredicate+` THEN 1 ELSE 0 END), 0),
-		COALESCE(MAX(CASE WHEN ps.state = ? AND `+outstandingErrandPredicate+` THEN 1 ELSE 0 END), 0)
+		COALESCE(SUM(CASE WHEN `+liveErrandPredicate(r.ro.DriverName())+` THEN 1 ELSE 0 END), 0),
+		COALESCE(MAX(CASE WHEN ps.state = ? AND `+outstandingErrandPredicate(r.ro.DriverName())+` THEN 1 ELSE 0 END), 0)
 		FROM task_session_errands e
 		LEFT JOIN task_sessions s ON s.id = e.id
 		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id

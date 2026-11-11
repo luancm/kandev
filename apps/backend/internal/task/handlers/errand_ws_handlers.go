@@ -102,7 +102,7 @@ func (h *TaskHandlers) wsListErrands(ctx context.Context, msg *ws.Message) (*ws.
 	}
 	items := make([]dto.ErrandDTO, 0, len(snapshots))
 	for _, snapshot := range snapshots {
-		items = append(items, dto.FromErrand(snapshot.Errand, snapshot.Status))
+		items = append(items, dto.FromErrand(snapshot.Errand, snapshot.Status, snapshot.AttentionReason))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, errandListResponse{Errands: items})
 }
@@ -138,7 +138,7 @@ func (h *TaskHandlers) wsCancelErrand(ctx context.Context, msg *ws.Message) (*ws
 		return h.errandFailure(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, errandCancelResponse{
-		Errand: dto.FromErrand(snapshot.Errand, snapshot.Status),
+		Errand: dto.FromErrand(snapshot.Errand, snapshot.Status, snapshot.AttentionReason),
 	})
 }
 
@@ -170,7 +170,7 @@ func (h *TaskHandlers) wsSendErrandResult(ctx context.Context, msg *ws.Message) 
 		return h.errandFailure(msg, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, errandCancelResponse{
-		Errand: dto.FromErrand(snapshot.Errand, snapshot.Status),
+		Errand: dto.FromErrand(snapshot.Errand, snapshot.Status, snapshot.AttentionReason),
 	})
 }
 

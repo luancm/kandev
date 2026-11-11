@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { errandElapsedLabel } from "./errand-display";
 import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
 import { ErrandProfileLabel } from "./errand-profile-label";
-import { ErrandStatusLabel } from "./errand-status";
+import { ErrandRecoveryNotice, ErrandStatusLabel } from "./errand-status";
 import { useOpenTaskSession } from "./use-open-task-session";
 import type { ErrandViewModel } from "./use-errand-view-model";
 
@@ -34,7 +34,11 @@ function LiveElapsed({ errand }: { errand: Errand }) {
 function StatusWithElapsed({ errand }: { errand: Errand }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
-      <ErrandStatusLabel status={errand.status} testId="errand-header-status" />
+      <ErrandStatusLabel
+        status={errand.status}
+        attentionReason={errand.attention_reason}
+        testId="errand-header-status"
+      />
       <span className="tabular-nums text-muted-foreground" data-testid="errand-header-elapsed">
         {isLiveErrand(errand) ? (
           <LiveElapsed errand={errand} />
@@ -44,6 +48,14 @@ function StatusWithElapsed({ errand }: { errand: Errand }) {
       </span>
     </span>
   );
+}
+
+/** Recovery-attention copy stays beside the status in both child headers. */
+export function ErrandRecoveryHeaderNotice({ errand }: { errand: Errand | null }) {
+  if (errand?.attention_reason !== "recovery_unresolved" || errand.status !== "needs_attention") {
+    return null;
+  }
+  return <ErrandRecoveryNotice className="px-2" />;
 }
 
 /** Shared workspace path and branch; the path truncates from its start. */

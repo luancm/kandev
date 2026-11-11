@@ -5,6 +5,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { ErrandHeaderActionButton, ErrandHeaderActionsMenu } from "./errand-header-actions";
 import {
   BackToParentButton,
+  ErrandRecoveryHeaderNotice,
   ErrandMetaRow,
   ErrandObjectiveDisclosure,
 } from "./errand-header-parts";
@@ -38,6 +39,7 @@ function ErrandHeaderDesktop({ model }: { model: ErrandViewModel }) {
         <ErrandHeaderActionButton errand={model.errand} sessionId={model.sessionId} />
       </div>
       <ErrandMetaRow model={model} showWorkspace />
+      <ErrandRecoveryHeaderNotice errand={model.errand} />
       <ErrandObjectiveDisclosure model={model} includeWorkspace={false} />
     </header>
   );
@@ -63,6 +65,7 @@ function ErrandHeaderPhone({ model }: { model: ErrandViewModel }) {
       </div>
       <div className="space-y-1 px-2">
         <ErrandMetaRow model={model} showWorkspace={false} />
+        <ErrandRecoveryHeaderNotice errand={model.errand} />
         <ErrandObjectiveDisclosure model={model} includeWorkspace />
       </div>
     </header>

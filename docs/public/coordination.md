@@ -56,6 +56,10 @@ Known delivery failures retry automatically. If reception is uncertain, Kandev r
 
 After a restart, Kandev can report an errand as interrupted when it verifies the original process ended and reconciles the saved delegation records. The parent receives an interruption result; this does not establish whether external commands completed or had side effects. Kandev does not resend the uncertain instruction. A new follow-up requires verified settlement of all earlier work. Older records with missing or conflicting evidence can remain blocked, so restarting with an updated build does not guarantee repair of every previously stranded errand.
 
+When recovery cannot verify earlier work, an idle errand shows **Recovery needs verification** instead of running. Open its conversation to inspect the transcript. You can stop the errand, but stopping does not establish what earlier commands did or repair missing evidence. It remains a live errand for capacity accounting while recovery is unresolved.
+
+Continuing is blocked until all earlier work has verified settlement. Once an interruption is settled, send a new instruction through the existing composer; Kandev restores the same conversation where supported and does not replay the uncertain instruction. These explanations and actions are available in both the desktop panel and phone drawer.
+
 Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
 
 All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands snapshot the parent's session MCP additions and exclusions at start; later parent selection changes do not rewrite that snapshot. Removed or disabled servers are omitted at launch.

@@ -229,7 +229,7 @@ func (s *Service) clearAgentDeliveryRecoveryNotice(
 	if !ok {
 		return nil
 	}
-	_, err := recoveryStore.ClearAgentDeliveryRecovery(
+	cleared, err := recoveryStore.ClearAgentDeliveryRecovery(
 		ctx, sessionID, incarnationID, submissionID, harnessGeneration,
 	)
 	if err != nil {
@@ -237,7 +237,9 @@ func (s *Service) clearAgentDeliveryRecoveryNotice(
 			zap.String("session_id", sessionID), zap.String("submission_id", submissionID), zap.Error(err))
 		return err
 	}
-	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	if cleared {
+		s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	}
 	return nil
 }
 
@@ -253,4 +255,5 @@ func (s *Service) publishAgentDeliveryRecoveryState(ctx context.Context, session
 	updatedAt := session.UpdatedAt
 	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID,
 		session.State, session.State, session.ErrorMessage, &updatedAt, session)
+	s.notifyErrandSessionStateChanged(ctx, session.ID)
 }

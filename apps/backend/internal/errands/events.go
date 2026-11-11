@@ -30,6 +30,11 @@ func NewBusPublisher(eventBus bus.EventBus, workspaceOf TaskWorkspaceResolver, l
 }
 
 func (p *busPublisher) PublishErrandUpdated(ctx context.Context, errand *models.Errand, status models.ErrandStatus) {
+	p.PublishErrandSnapshot(ctx, Snapshot{Errand: errand, Status: status})
+}
+
+func (p *busPublisher) PublishErrandSnapshot(ctx context.Context, snapshot Snapshot) {
+	errand, status := snapshot.Errand, snapshot.Status
 	if p.bus == nil {
 		return
 	}
@@ -39,9 +44,19 @@ func (p *busPublisher) PublishErrandUpdated(ctx context.Context, errand *models.
 			zap.String("task_id", errand.TaskID), zap.String("errand_id", errand.ID), zap.Error(err))
 		return
 	}
-	payload := dto.ErrandUpdatedEvent{ErrandDTO: dto.FromErrand(errand, status), WorkspaceID: workspaceID}
+	payload := dto.ErrandUpdatedEvent{ErrandDTO: dto.FromErrand(errand, status, snapshot.AttentionReason), WorkspaceID: workspaceID}
 	if err := p.bus.Publish(ctx, events.ErrandUpdated, bus.NewEvent(events.ErrandUpdated, "errands", payload)); err != nil {
 		p.logger.Warn("errand.updated publish failed",
 			zap.String("task_id", errand.TaskID), zap.String("errand_id", errand.ID), zap.Error(err))
 	}
+}
+
+func (s *Service) publishSnapshot(ctx context.Context, snapshot Snapshot) {
+	if publisher, ok := s.events.(interface {
+		PublishErrandSnapshot(context.Context, Snapshot)
+	}); ok {
+		publisher.PublishErrandSnapshot(ctx, snapshot)
+		return
+	}
+	s.events.PublishErrandUpdated(ctx, snapshot.Errand, snapshot.Status)
 }

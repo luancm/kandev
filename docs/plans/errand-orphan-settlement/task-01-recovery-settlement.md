@@ -28,7 +28,7 @@ system_design:
 
 ## Summary
 
-Delivery checkpoint (2026-11-10): the user requested commit/push of the completed core before restarting their runtime. [Delivery checkpoint](delivery-checkpoint.md) owns final checks and the shipped/deferred distinction. This work order stays `in_progress`: attention projection, presentation, capacity parity and explicit-resume eligibility remain unfinished.
+Recovery status/continuation checkpoint (2026-11-11): AC002.4–002.8 implementation and scoped acceptance are complete, including real desktop/phone admission and passthrough refusal coverage. Era Sol reviews found no remaining actionable findings. See [accepted checkpoint](recovery-status-checkpoint.md) for the acceptance map and verification limits. This work order remains `in_progress` only for delivery and integration of the parent-owned terminal-identity regression correction; historical live repair eligibility is not claimed. Earlier summaries below record prior checkpoints.
 
 Reproduce the captured orphan-settlement gap, then connect authoritative recovery decisions to exact Errand settlement. Ensure eligible stranded records converge without synthesizing successful completion or replaying an uncertain prompt.
 

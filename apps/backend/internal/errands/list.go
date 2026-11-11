@@ -62,9 +62,24 @@ func (s *Service) list(ctx context.Context, taskID string) ([]Snapshot, error) {
 	snapshots := make([]Snapshot, 0, len(errands))
 	for _, errand := range errands {
 		permission := pending[errand.ID] == models.TaskPendingActionPermission
-		snapshots = append(snapshots, Snapshot{
-			Errand: errand, Status: ProjectStatus(errand, sessions[errand.ID], permission),
-		})
+		snapshot, err := s.projectObserved(ctx, errand, sessions[errand.ID], permission)
+		if err != nil {
+			return nil, err
+		}
+		snapshots = append(snapshots, snapshot)
 	}
 	return snapshots, nil
+}
+
+func (s *Service) projectObserved(ctx context.Context, row *models.Errand, session *models.TaskSession, permission bool) (Snapshot, error) {
+	recovery := RecoveryAttention{}
+	if row.Lifecycle == models.ErrandLifecycleLaunched && session != nil && !isWorking(session) && session.State != models.TaskSessionStateFailed {
+		unresolved, err := s.store.ErrandRecoveryAttention(ctx, row.ID)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("load errand recovery attention: %w", err)
+		}
+		recovery.Unresolved = unresolved
+	}
+	status := ProjectStatus(row, session, permission, recovery)
+	return Snapshot{Errand: row, Status: status, AttentionReason: attentionReason(status, permission, recovery)}, nil
 }

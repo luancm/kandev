@@ -4047,6 +4047,10 @@ func (s *Service) loadResumeSessionCandidate(
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
 	}
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	options, resumeErr := s.interruptedErrandResumeOptions(ctx, session, running, err, options)
+	if resumeErr != nil {
+		return nil, resumeErr
+	}
 	if resumeRequiresExecutorRecord(session, running, err, options, allowCompletedResume) {
 		// Cancelled/failed and explicit completed resumes can outlive cleanup of
 		// the executor record. Other sessions require that record.

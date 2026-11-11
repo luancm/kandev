@@ -1,5 +1,10 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
-import type { Errand, ErrandCancelAllResponse, ErrandListResponse } from "@/lib/types/errands";
+import {
+  normalizeErrandAttention,
+  type Errand,
+  type ErrandCancelAllResponse,
+  type ErrandListResponse,
+} from "@/lib/types/errands";
 
 // i18n-exempt: programmer precondition; UI callers render localized errors.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
@@ -18,7 +23,7 @@ export async function listErrands(taskId: string): Promise<Errand[]> {
   const response = await requireClient().request<ErrandListResponse>("errand.list", {
     task_id: taskId,
   });
-  return Array.isArray(response?.errands) ? response.errands : [];
+  return Array.isArray(response?.errands) ? response.errands.map(normalizeErrandAttention) : [];
 }
 
 /** Cancels one errand; the errand ID is its session ID. */

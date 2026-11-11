@@ -366,8 +366,9 @@ func TestListTaskSessionsReportsErrandRoleAndStatus(t *testing.T) {
 	h, fake, task, primary, repo := newErrandMCPFixture(t, true)
 	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
 	fake.listed = []errands.Snapshot{{
-		Errand: &models.Errand{ID: errandSession.ID},
-		Status: models.ErrandStatusRunning,
+		Errand:          &models.Errand{ID: errandSession.ID},
+		Status:          models.ErrandStatusNeedsAttention,
+		AttentionReason: models.ErrandAttentionRecoveryUnresolved,
 	}}
 
 	resp, err := h.handleListTaskSessions(context.Background(), makeWSMessage(t, ws.ActionMCPListTaskSessions,
@@ -382,7 +383,8 @@ func TestListTaskSessionsReportsErrandRoleAndStatus(t *testing.T) {
 	errandEntry := byID[errandSession.ID]
 	assert.Equal(t, "errand", errandEntry["role"])
 	assert.Equal(t, primary.ID, errandEntry["parent_session_id"])
-	assert.Equal(t, "running", errandEntry["errand_status"])
+	assert.Equal(t, "needs_attention", errandEntry["errand_status"])
+	assert.Equal(t, "recovery_unresolved", errandEntry["attention_reason"])
 	assert.NotContains(t, byID[primary.ID], "role")
 	assert.NotContains(t, byID[primary.ID], "errand_status")
 }
@@ -447,4 +449,11 @@ func TestWrapMessageForErrandTargetStatesResultContract(t *testing.T) {
 	wrapped, _ = wrapMessageForTarget("Check the logs", task, ordinary, "parent-sess", "", true)
 	assert.Contains(t, wrapped, "To reply")
 	assert.NotContains(t, wrapped, "Your result is your final message")
+}
+
+func TestAwaitRecoveryAttentionReason(t *testing.T) {
+	view := awaitErrandsView(errands.AwaitResult{Errands: []errands.AwaitErrand{{ErrandID: "recovered", Status: string(models.ErrandStatusNeedsAttention), AttentionReason: models.ErrandAttentionRecoveryUnresolved}}})
+	if len(view.Errands) != 1 || view.Errands[0].AttentionReason != models.ErrandAttentionRecoveryUnresolved {
+		t.Fatalf("lost recovery reason: %+v", view)
+	}
 }

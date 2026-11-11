@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/errands"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1190,6 +1191,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		if errors.Is(err, messagequeue.ErrQueueIDConflict) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
 		}
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
+		}
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
@@ -1633,6 +1637,11 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		h.logger.Error("failed to get task session", zap.String("session_id", sessionID), zap.Error(err))
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
 		return nil, wsErr
+	}
+	if models.IsErrandSession(session) {
+		if refusal := h.errandContinuationRefusal(ctx, msg, sessionID); refusal != nil {
+			return nil, refusal
+		}
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
