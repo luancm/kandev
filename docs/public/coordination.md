@@ -44,6 +44,8 @@ Errands are opt-in child conversations within one task. Ask the task's agent to 
 
 Start, wait and completion entries share a compact historical presentation. Expand an entry for its recorded titles, outcomes and available result text. A completed wait shows how long it waited and why it ended when that information is available; older entries may omit these details. Historical entries do not animate as running or change when an errand later finishes. Use the Errands panel for current progress.
 
+Completed results show recorded elapsed time when available, from errand creation to that result, including queued and idle time. This value stays unchanged after reload or later follow-up turns. Older results without a recorded duration omit it.
+
 Regular session tabs and session pickers are for normal task conversations. Errands remain accessible from their parent's panel and through direct conversation links, without accumulating permanent tabs. Their transcripts remain available after completion.
 
 The pill remains available after all errands finish. Its panel offers **Stop all errands** while any errand is live; this action retains task-wide scope, including errands belonging to other parent conversations.

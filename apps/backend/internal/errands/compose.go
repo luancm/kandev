@@ -33,10 +33,11 @@ const (
 
 // DeliveryItem is one errand attached to a parent turn.
 type DeliveryItem struct {
-	ErrandID string              `json:"errand_id"`
-	Title    string              `json:"title"`
-	Status   models.ErrandStatus `json:"status"`
-	Preview  string              `json:"preview"`
+	ErrandID   string              `json:"errand_id"`
+	Title      string              `json:"title"`
+	Status     models.ErrandStatus `json:"status"`
+	Preview    string              `json:"preview"`
+	DurationMS *int64              `json:"duration_ms,omitempty"`
 }
 
 // DeliveryEnvelope is the immutable message snapshot rendered by the web UI.
@@ -299,10 +300,11 @@ func deliveryItems(included []composedErrand, claimed map[string]*models.Errand)
 			continue
 		}
 		items = append(items, DeliveryItem{
-			ErrandID: result.ID,
-			Title:    result.Title,
-			Status:   row.status,
-			Preview:  previewText(result.ResultText),
+			ErrandID:   result.ID,
+			Title:      result.Title,
+			Status:     row.status,
+			Preview:    previewText(result.ResultText),
+			DurationMS: deliveryDurationMillis(result),
 		})
 	}
 	return items

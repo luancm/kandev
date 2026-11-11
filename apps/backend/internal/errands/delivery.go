@@ -144,8 +144,11 @@ func (s *Service) PreserveCancellationNotice(ctx context.Context, errandID strin
 		DeliveryEnvelopeMetadataKey: DeliveryEnvelope{
 			Token: token, Route: models.ErrandDeliveryNotification,
 			Items: []DeliveryItem{{
-				ErrandID: row.ID, Title: row.Title, Status: models.ErrandStatusCancelled,
-				Preview: previewText(row.ResultText),
+				ErrandID:   row.ID,
+				Title:      row.Title,
+				Status:     models.ErrandStatusCancelled,
+				Preview:    previewText(row.ResultText),
+				DurationMS: deliveryDurationMillis(row),
 			}},
 		},
 		DeliveryTokenMetadataKey: token,

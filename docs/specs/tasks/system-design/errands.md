@@ -202,6 +202,8 @@ notifications, and preserved deletion notices use the same snapshot in
 storage and live events. Keep `errand_delivery_token` for recovery readback.
 Cards use this immutable snapshot after reload or errand deletion.
 
+Historical result timing follows [the elapsed-time contract](errand-result-duration.md).
+
 ## Control flow
 
 ### Start

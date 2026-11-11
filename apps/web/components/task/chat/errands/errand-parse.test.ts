@@ -209,9 +209,49 @@ describe("parseErrandDelivery", () => {
     });
 
     expect(items).toEqual([
-      { errandId: "e-1", title: "Schema review", status: "done", preview: "No breaks." },
-      { errandId: "e-2", title: "Test plan", status: "cancelled", preview: "" },
+      {
+        errandId: "e-1",
+        title: "Schema review",
+        status: "done",
+        preview: "No breaks.",
+        durationMs: null,
+      },
+      { errandId: "e-2", title: "Test plan", status: "cancelled", preview: "", durationMs: null },
     ]);
+  });
+
+  it("keeps only nonnegative safe integer elapsed snapshots", () => {
+    const values = [
+      134000,
+      0,
+      undefined,
+      null,
+      -1,
+      0.5,
+      "134000",
+      Number.NaN,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+    ];
+    const items = parseErrandDelivery({
+      errand_delivery: {
+        items: values.map((duration_ms, index) => ({ errand_id: `e-${index}`, duration_ms })),
+      },
+    });
+
+    expect(items.map((item) => item.durationMs)).toEqual([
+      134000,
+      0,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(items).toHaveLength(values.length);
   });
 
   it.each([

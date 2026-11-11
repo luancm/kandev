@@ -182,6 +182,7 @@ export type ErrandDeliveryItem = {
   title: string;
   status: ErrandStatus | null;
   preview: string;
+  durationMs: number | null;
 };
 
 function capPreview(value: string): string {
@@ -194,11 +195,19 @@ function capPreview(value: string): string {
 function parseDeliveryItem(value: unknown): ErrandDeliveryItem | null {
   const errandId = stringField(value, "errand_id");
   if (!errandId) return null;
+  const duration = pickNumber(value, "duration_ms");
   return {
     errandId,
     title: pickString(value, "title") ?? "",
     status: parseErrandStatus(pickString(value, "status")),
     preview: capPreview(pickString(value, "preview") ?? ""),
+    durationMs:
+      typeof duration === "number" &&
+      Number.isFinite(duration) &&
+      Number.isSafeInteger(duration) &&
+      duration >= 0
+        ? duration
+        : null,
   };
 }
 
