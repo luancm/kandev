@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/db"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -11,6 +12,7 @@ import (
 type Reason string
 
 const (
+	ReasonRecoveryUnresolved  Reason = "errand_recovery_unresolved"
 	ReasonFeatureDisabled     Reason = "feature_disabled"
 	ReasonNotSupported        Reason = "errand_not_supported"
 	ReasonNotPermitted        Reason = "errand_not_permitted"
@@ -56,6 +58,9 @@ func newError(reason Reason, message string, details map[string]interface{}) *Er
 
 // ReasonOf returns the typed reason of err, if it carries one.
 func ReasonOf(err error) (Reason, bool) {
+	if isRecoveryRefusal(err) {
+		return ReasonRecoveryUnresolved, true
+	}
 	var typed *Error
 	if errors.As(err, &typed) {
 		return typed.Reason, true
@@ -72,7 +77,7 @@ func ErrorCode(reason Reason) string {
 		return ws.ErrorCodeForbidden
 	case ReasonProfileNotFound, ReasonProfileAmbiguous, ReasonProfileIncompatible:
 		return ws.ErrorCodeValidation
-	case ReasonLimitReached, ReasonResultNotEligible, ReasonErrandsOutstanding:
+	case ReasonLimitReached, ReasonResultNotEligible, ReasonErrandsOutstanding, ReasonRecoveryUnresolved:
 		return ws.ErrorCodeConflict
 	default:
 		return ws.ErrorCodeInternalError
@@ -82,6 +87,10 @@ func ErrorCode(reason Reason) string {
 // WSError renders err as a WebSocket error response when it is a typed errand
 // failure or an invalid request, and reports whether it did.
 func WSError(msgID, action string, err error) (*ws.Message, bool) {
+	if isRecoveryRefusal(err) {
+		err = newError(ReasonRecoveryUnresolved, "Earlier errand work and its external effects remain uncertain. Recovery must verify that work before you can continue. Inspect the conversation or cancel the errand; cancellation does not resolve the uncertainty.", nil)
+	}
+
 	var typed *Error
 	if errors.As(err, &typed) {
 		details := map[string]interface{}{"reason": string(typed.Reason)}
@@ -96,4 +105,19 @@ func WSError(msgID, action string, err error) (*ws.Message, bool) {
 		return msg, marshalErr == nil
 	}
 	return nil, false
+}
+
+// Joined operational errors must retain their failure classification.
+func isRecoveryRefusal(err error) bool {
+	for err != nil {
+		if err == db.ErrErrandSettlementPending {
+			return true
+		}
+		wrapped, ok := err.(interface{ Unwrap() error })
+		if !ok {
+			return false
+		}
+		err = wrapped.Unwrap()
+	}
+	return false
 }

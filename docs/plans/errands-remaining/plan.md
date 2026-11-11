@@ -21,11 +21,11 @@ legacy_specs: []
 
 ## Outcome and current state
 
-Current checkpoint, 2026-11-11: terminal identity repair and direct automatic Errand notification regression are committed as `a96adeec38`, following Era Sol acceptance, focused/broad checks, extended lint with zero issues and normal hook success without bypass. Focused race evidence is 9 top-level tests plus 4 notification/control tests; earlier broad checks passed 84 tests with 22 PostgreSQL skips. SQL guard, conformance and build passed. Duration source/browser acceptance is complete and is being committed separately. Recovery `f71b9e09d4` is committed and pushed on the subtask branch with normal hooks and accepted desktop/phone tests; integration into this branch is next. Nothing from these checkpoints has been pushed from the parent branch yet.
+Current checkpoint, 2026-11-11: parent terminal correction `a96adeec38` and historical duration `8ed56d94ef` are committed and pushed. Recovery checkpoint `f71b9e09d4` is integrated in the resolved index, with the sole conflict preserving both attention reason and elapsed duration. Combined acceptance passed: 128 primary and 13 additional backend race tests, SQL guard, race store conformance, web typecheck, 162 Vitest tests, and 3/3 desktop plus 3/3 phone managed browser cases. PostgreSQL and the environment-gated standalone browser fixture skips are explicit. Era Sol `523eba58` found no integration issues; parent verified all nine receipt hashes and seven reviewed source blobs. Normal merge hooks and checkpoint push are next.
 
-Duration keyboard worker `c92d2e8f` finished at 14:15 despite a stale running label: standard managed desktop Chromium passed 1/1 with real Tab navigation and scoped checks passed. Era Sol `952a4e39` accepted the narrow final review with no findings. Production, persistence and phone evidence were already accepted. Recovery browser writer `a705d242` finished at 13:43, desktop and phone each passing 2/2; the phone timeout was a desktop-only test selector corrected without production changes. Its coordinator has been resumed with the recovered final handoff for review and commit. No worker is to be resumed as an implementation writer merely because its status remains running.
+Successful-completion cleanup production is the remaining implementation. Its corrected RED regression packet is accepted, and the recovery dependency is now ready to commit. Next assign one Lunaldinho backend writer for durable success-close ownership, exact-success authority, retry, cancellation/successor fencing and completed-state projection; review with Era Sol before the desktop/phone continuation acceptance packet. Do not resume already-completed writers based on stale running labels.
 
-Successful-completion cleanup production remains unimplemented and follows recovery integration; its corrected RED regression packet is accepted. After accepted checkpoints land, integrate recovery, implement/review cleanup, refresh from latest upstream/main, run affected checks, push and verify the remote SHA. Disk has 24 GiB free (80% used). Final delivery remains incomplete.
+After cleanup acceptance, refresh from latest upstream/main, run affected checks and push the final branch. Upstream was fetched at `b2376186ed` (68 new commits); recheck it at merge time. Disk has 17 GiB free (85% used). No deployment or live database repair is claimed; final delivery remains incomplete.
 
 The following interruption audit and older dispatch entries are historical evidence; the checkpoint above governs current ownership and acceptance.
 
@@ -42,7 +42,7 @@ The parent branch contains the tested core recovery fix at `b2bbe9d5b7`. The rec
 | Parent terminal identity remediation | Exact completion releases queued notifications without another user prompt, including repairable stored effects | Parent-owned [repair work order](task-02-parent-terminal-identity.md); committed as `a96adeec38`; checks and review accepted | Blocks final recovery integration acceptance; independent of frontend work |
 | Recovery attention and continuation | Idle unresolved work says Needs attention, explains uncertainty, refuses unsafe sends without side effects, and permits supported explicit follow-up after exact settlement | Existing recovery subtask; in progress | Integrate/review remaining backend and desktop/phone changes |
 | Successful completion cleanup | Save result before closing the exact runtime, retain completed conversation, resume only on explicit follow-up | This primary coordinates bounded Lunaldinho packets under the existing cleanup work order; regression preparation first | Production integration follows recovery to reconcile shared lifecycle/resume code |
-| Historical result duration | Recorded elapsed time in completed disclosure summary and expanded row, stable after reload and later child activity | This primary; [duration work order](task-01-result-duration.md): all source/browser reviews and checks accepted; duration checkpoint being committed | Snapshot/parser/card can proceed independently; coordinate locale/browser ownership with recovery |
+| Historical result duration | Recorded elapsed time in completed disclosure summary and expanded row, stable after reload and later child activity | This primary; [duration work order](task-01-result-duration.md): all source/browser reviews and checks accepted; committed and pushed as `8ed56d94ef` | Snapshot/parser/card can proceed independently; coordinate locale/browser ownership with recovery |
 
 [Recovery work order](../errand-orphan-settlement/task-01-recovery-settlement.md) and [cleanup work order](../errand-completion-cleanup/task-01-completion-cleanup.md) remain the detailed execution contracts. No separate copies of their requirements are introduced. The [duration work order](task-01-result-duration.md) implements AC-TASKS-ERRANDS-010.7 using the owning design's historical result elapsed-time contract.
 
@@ -83,10 +83,10 @@ Illustrative wording must use supported locale keys. Phone retains its current s
 ## Acceptance ledger
 
 - [x] Diagnose and repair the separately observed [parent notification dispatch refusal](queue-notification-incident.md); the recovery attention patch does not cover ordinary parent terminal-identity binding.
-- [ ] Recovery attention, capacity parity, consistent reasons and stable refusal.
-- [ ] Safe supported explicit continuation after exact interruption settlement.
+- [x] Recovery attention, capacity parity, consistent reasons and stable refusal (combined acceptance passed).
+- [x] Safe supported explicit continuation after exact interruption settlement (combined acceptance passed).
 - [ ] Success-close ordering, durable retry, successor isolation and retained completed state.
-- [x] Historical recorded duration, legacy compatibility and immutable history (all local checks/reviews accepted; parent checkpoint being committed).
+- [x] Historical recorded duration, legacy compatibility and immutable history (accepted, committed and pushed as `8ed56d94ef`).
 - [ ] All applicable translations, desktop/phone acceptance, review disposition and integrated delivery.
 
 ## Verification results

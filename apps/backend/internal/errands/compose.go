@@ -33,11 +33,12 @@ const (
 
 // DeliveryItem is one errand attached to a parent turn.
 type DeliveryItem struct {
-	ErrandID   string              `json:"errand_id"`
-	Title      string              `json:"title"`
-	Status     models.ErrandStatus `json:"status"`
-	Preview    string              `json:"preview"`
-	DurationMS *int64              `json:"duration_ms,omitempty"`
+	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
+	ErrandID        string                       `json:"errand_id"`
+	Title           string                       `json:"title"`
+	Status          models.ErrandStatus          `json:"status"`
+	Preview         string                       `json:"preview"`
+	DurationMS      *int64                       `json:"duration_ms,omitempty"`
 }
 
 // DeliveryEnvelope is the immutable message snapshot rendered by the web UI.
@@ -57,6 +58,7 @@ type Composition struct {
 }
 
 type composedErrand struct {
+	reason  models.ErrandAttentionReason
 	errand  *models.Errand
 	status  models.ErrandStatus
 	profile string
@@ -128,14 +130,14 @@ func (s *Service) composeParentSnapshot(ctx context.Context, parent string, rout
 func (s *Service) includedErrands(ctx context.Context, rows []*models.Errand) ([]composedErrand, error) {
 	var included []composedErrand
 	for _, row := range rows {
-		status, err := s.Project(ctx, row)
+		snapshot, err := s.ProjectSnapshot(ctx, row)
 		if err != nil {
 			return nil, err
 		}
-		if !IsLive(status) && row.ResultState != models.ErrandResultPending {
+		if !IsLive(snapshot.Status) && row.ResultState != models.ErrandResultPending {
 			continue
 		}
-		included = append(included, composedErrand{errand: row, status: status, profile: s.profileName(ctx, row.AgentProfileID)})
+		included = append(included, composedErrand{errand: row, status: snapshot.Status, reason: snapshot.AttentionReason, profile: s.profileName(ctx, row.AgentProfileID)})
 	}
 	orderErrands(included)
 	return included, nil
@@ -271,7 +273,7 @@ func statusLine(row composedErrand, now time.Time) string {
 		safe(row.errand.ID),
 		safe(cutBytes(oneLine(row.errand.Title, titleByteLimit), titleByteLimit)),
 		safe(cutBytes(oneLine(row.profile, profileByteLimit), profileByteLimit)),
-		safe(string(row.status)),
+		safe(statusDescription(row)),
 		fmt.Sprintf("%dm", minutes),
 		result,
 	}, " | ")
@@ -300,11 +302,12 @@ func deliveryItems(included []composedErrand, claimed map[string]*models.Errand)
 			continue
 		}
 		items = append(items, DeliveryItem{
-			ErrandID:   result.ID,
-			Title:      result.Title,
-			Status:     row.status,
-			Preview:    previewText(result.ResultText),
-			DurationMS: deliveryDurationMillis(result),
+			ErrandID:        result.ID,
+			Title:           result.Title,
+			Status:          row.status,
+			AttentionReason: row.reason,
+			Preview:         previewText(result.ResultText),
+			DurationMS:      deliveryDurationMillis(result),
 		})
 	}
 	return items
@@ -393,4 +396,14 @@ func releaseResult(e *models.Errand) bool {
 	e.DeliveryToken = ""
 	e.DeliveredAt = nil
 	return true
+}
+
+func statusDescription(row composedErrand) string {
+	if row.reason == models.ErrandAttentionRecoveryUnresolved {
+		return string(row.status) + " (recovery_unresolved: earlier work and external effects remain uncertain; inspect conversation or cancel)"
+	}
+	if row.reason != "" {
+		return string(row.status) + " (" + string(row.reason) + ")"
+	}
+	return string(row.status)
 }

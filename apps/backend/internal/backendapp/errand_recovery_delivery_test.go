@@ -28,6 +28,12 @@ import (
 // transition, settlement, parent delivery or queue result is seeded.
 // @covers AC-TASKS-ERRANDS-003.6 AC-TASKS-ERRANDS-003.7
 func TestErrandRecoveryActualProviderDelivery(t *testing.T) {
+	for _, parent := range []bool{false, true} {
+		t.Run(map[bool]string{false: "user_continuation", true: "parent_continuation"}[parent], func(t *testing.T) { exerciseErrandRecoveryActualProviderDelivery(t, parent) })
+	}
+}
+
+func exerciseErrandRecoveryActualProviderDelivery(t *testing.T, parentFollowup bool) {
 	h := newBootStateTestHarness(t)
 	workspace, task, parent := createResumeCatalogTask(t, h, resumeCatalogCase{})
 	ctx := t.Context()
@@ -109,6 +115,7 @@ func TestErrandRecoveryActualProviderDelivery(t *testing.T) {
 	require.Equal(t, admission.TurnID, original.TurnID)
 	originalPayload, originalHash := append([]byte(nil), stored.Payload...), stored.PayloadHash
 	provider.interrupt(t, prompt.SubmissionID)
+	assertRecoveryTransportRefusals(t, h, svc, workspace, child)
 	mgr.ExecutionStoreForTesting().Remove(execution.ID)
 	initializeRecoveryExecution(t, mgr, provider, task.ID, workspace, "replacement")
 	require.NoError(t, mgr.UpdateStatus("replacement", v1.AgentStatusReady))
@@ -202,6 +209,41 @@ func TestErrandRecoveryActualProviderDelivery(t *testing.T) {
 	require.Empty(t, provider.prompts, "uncertain child prompt must never replay")
 	require.Empty(t, parentProvider.prompts, "repeated recovery must not deliver again")
 	afterTask, err := h.taskRepo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, task.WorkflowStepID, afterTask.WorkflowStepID)
+	// @covers AC-TASKS-ERRANDS-002.7
+	require.NoError(t, h.taskRepo.UpdateTaskSessionState(ctx, child.ID, models.TaskSessionStateWaitingForInput, ""))
+	// The replacement runtime's persisted binding must match its live identity.
+	running, err = h.taskRepo.GetExecutorRunningBySessionID(ctx, child.ID)
+	require.NoError(t, err)
+	running.AgentExecutionID = "replacement"
+	require.NoError(t, h.taskRepo.UpsertExecutorRunning(ctx, running))
+	promptCtx := ctx
+	if parentFollowup {
+		promptCtx = errands.WithParentPromptOrigin(ctx, errands.ParentPromptOrigin{SenderSessionID: parent.ID, SubmissionID: "explicit-parent-followup"})
+	}
+	_, err = svc.PromptTask(promptCtx, task.ID, child.ID, "new explicitly requested follow-up", "", false, nil, true)
+	require.NoError(t, err)
+
+	select {
+	case followup := <-provider.prompts:
+		require.Contains(t, followup.Text, "new explicitly requested follow-up")
+		require.NotContains(t, followup.Text, "inspect the exact original instruction")
+		require.NotEqual(t, prompt.SubmissionID, followup.SubmissionID)
+	case <-time.After(10 * time.Second):
+		t.Fatal("explicit continuation never reached provider")
+	}
+	continued, err := h.taskRepo.GetErrand(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, deliveredRow.ResultRevision, continued.ResultRevision)
+	require.Equal(t, deliveredRow.ResultText, continued.ResultText)
+	stored, err = h.taskRepo.GetAgentDeliverySubmission(ctx, prompt.SubmissionID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stored.State)
+	require.Equal(t, originalPayload, stored.Payload)
+	require.Equal(t, originalHash, stored.PayloadHash)
+
+	afterTask, err = h.taskRepo.GetTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, task.WorkflowStepID, afterTask.WorkflowStepID)
 

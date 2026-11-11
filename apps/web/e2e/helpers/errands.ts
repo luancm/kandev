@@ -30,6 +30,8 @@ export type ErrandBrowserSocket = {
 export type ErrandUpdateBrowserSocket = {
   isConnected: () => boolean;
   notifyErrandUpdated: (errand: Errand) => void;
+  refuseNextPrompt: () => void;
+  refusedActions: () => string[];
 };
 
 /** Send an existing errand.updated event through the browser's real handler path. */
@@ -38,10 +40,55 @@ export async function routeErrandUpdateBrowserSocket(
 ): Promise<ErrandUpdateBrowserSocket> {
   let notify: ((errand: Errand) => void) | undefined;
   let sequence = 0;
+  let refuseNextPrompt = false;
+  const refused: string[] = [];
 
   await page.routeWebSocket(/\/ws(?:\?.*)?$/, (socket) => {
     const server = socket.connectToServer();
-    socket.onMessage((message) => server.send(message));
+    socket.onMessage((message) => {
+      if (typeof message !== "string") {
+        server.send(message);
+        return;
+      }
+      const forwarded: string[] = [];
+      for (const part of message.split("\n")) {
+        let frame: Record<string, unknown> | undefined;
+        try {
+          const parsed: unknown = JSON.parse(part);
+          if (typeof parsed === "object" && parsed !== null) {
+            frame = parsed as Record<string, unknown>;
+          }
+        } catch {
+          forwarded.push(part);
+          continue;
+        }
+        if (
+          refuseNextPrompt &&
+          frame?.type === "request" &&
+          (frame.action === "message.add" || frame.action === "message.queue.add") &&
+          typeof frame.id === "string"
+        ) {
+          refuseNextPrompt = false;
+          refused.push(frame.action);
+          socket.send(
+            JSON.stringify({
+              type: "error",
+              id: frame.id,
+              action: frame.action,
+              payload: {
+                code: "CONFLICT",
+                message: "Errand recovery is unresolved",
+                details: { reason: "errand_recovery_unresolved" },
+              },
+            }),
+          );
+          continue;
+        }
+        forwarded.push(part);
+      }
+      const next = forwarded.join("\n");
+      if (next.trim()) server.send(next);
+    });
     server.onMessage((message) => socket.send(message));
     notify = (errand) => {
       sequence += 1;
@@ -62,6 +109,10 @@ export async function routeErrandUpdateBrowserSocket(
       if (!notify) throw new Error("Expected the browser WebSocket to connect first");
       notify(errand);
     },
+    refuseNextPrompt: () => {
+      refuseNextPrompt = true;
+    },
+    refusedActions: () => [...refused],
   };
 }
 
@@ -143,7 +194,13 @@ export async function startErrands(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
-  options: { count?: number; await?: boolean; after?: string } = {},
+  options: {
+    count?: number;
+    await?: boolean;
+    after?: string;
+    waitForParentIdle?: boolean;
+    errandAgentProfileId?: string;
+  } = {},
 ) {
   const count = options.count ?? 2;
   const gates = Array.from({ length: count }, (_, index) =>
@@ -162,7 +219,7 @@ export async function startErrands(
     },
   );
   const request = JSON.stringify({
-    profile: seed.agentProfileId,
+    profile: options.errandAgentProfileId ?? seed.agentProfileId,
     prompts: gates.map((gate) => gate.prompt),
     after: options.after,
   });
@@ -226,7 +283,9 @@ export async function startErrands(
         `Backend fixture logs: ${savedBackendLogSummary}`,
     );
   }
-  if (!options.await) await waitParentIdle(api, task.id, launched.session_id);
+  if (!options.await && options.waitForParentIdle !== false) {
+    await waitParentIdle(api, task.id, launched.session_id);
+  }
   await api.setQueueAutoRun(await api.getQueueSessionIdentity(task.id, launched.session_id), true);
   const errands = await listErrands(api, task.id);
   return { taskId: task.id, parentId: launched.session_id, errands, gates };

@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -72,6 +73,36 @@ func TestErrandRestartAbandonmentSettlesExactInterruptedTurn(t *testing.T) {
 				session, err := f.repo.GetTaskSession(t.Context(), row.ID)
 				require.NoError(t, err)
 				require.Equal(t, models.ErrandStatusFailed, errands.ProjectStatus(after, session, false))
+				// @covers AC-TASKS-ERRANDS-002.7
+				session.AgentProfileID = "native-profile"
+				session.DownstreamACPSessionID = "retained-native"
+				require.NoError(t, f.repo.UpdateTaskSession(t.Context(), session))
+				committed, err := f.repo.CommitHarnessSessionGeneration(t.Context(), &models.HarnessSessionGeneration{
+					SessionID: session.ID, IncarnationID: session.QueueIncarnationID, Generation: 1,
+					NativeSessionID: "retained-native", CreationReason: "initial", CreatedAt: time.Now().UTC(), CommittedAt: time.Now().UTC(),
+				}, 0)
+				require.NoError(t, err)
+				require.True(t, committed)
+				f.manager.resolveProfileInfo = &executor.AgentProfileInfo{NativeSessionResume: true}
+				require.NoError(t, f.repo.DeleteExecutorRunningBySessionID(t.Context(), session.ID))
+				candidate, err := f.svc.loadResumeSessionCandidate(t.Context(), row.TaskID, row.ID, executor.ResumeOptions{}, nil)
+				require.NoError(t, err, "exact interruption and retained native identity permit missing executor restoration")
+				require.Equal(t, "retained-native", candidate.options.RequiredNativeConversationID)
+				require.False(t, candidate.options.AllowCompletedSessionResume)
+				f.manager.resolveProfileInfo.NativeSessionResume = false
+				_, err = f.svc.loadResumeSessionCandidate(t.Context(), row.TaskID, row.ID, executor.ResumeOptions{}, nil)
+				require.Error(t, err, "unsupported provider stays fenced")
+				f.manager.resolveProfileInfo.NativeSessionResume = true
+				session.DownstreamACPSessionID = "different-native"
+				require.NoError(t, f.repo.UpdateTaskSession(t.Context(), session))
+				_, err = f.svc.loadResumeSessionCandidate(t.Context(), row.TaskID, row.ID, executor.ResumeOptions{}, nil)
+				require.Error(t, err, "conflicting native identities stay fenced")
+				session.DownstreamACPSessionID = "retained-native"
+				require.NoError(t, f.repo.UpdateTaskSession(t.Context(), session))
+				require.NoError(t, f.repo.CreateTurn(t.Context(), &models.Turn{ID: "unresolved-later", TaskID: row.TaskID, TaskSessionID: row.ID, StartedAt: time.Now().UTC()}))
+				_, err = f.svc.loadResumeSessionCandidate(t.Context(), row.TaskID, row.ID, executor.ResumeOptions{}, nil)
+				require.Error(t, err, "later open work cannot restore through the interrupted exception")
+
 			}
 			require.Zero(t, f.taskRepo.stateWrites[f.taskID])
 			select {

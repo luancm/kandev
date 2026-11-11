@@ -58,6 +58,7 @@ export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
       rebuildTarget: "build-e2e-send-now-fixture",
       sourceFiles: [
         path.join(BACKEND_DIR, "internal/orchestrator/e2e_send_now_not_delivered_fixture_test.go"),
+        path.join(BACKEND_DIR, "internal/orchestrator/e2e_errand_recovery_fixture_test.go"),
       ],
     },
     {

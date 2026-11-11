@@ -161,6 +161,20 @@ describe("ErrandsChip visibility and label", () => {
     expect(chip.getAttribute("aria-label")).toBe("Errands: 2 running, needs attention");
   });
 
+  it("names recovery verification accessibly when attention has a recovery reason", () => {
+    mocks.errands = [
+      errand("e1", {
+        status: "needs_attention",
+        ...({ attention_reason: "recovery_unresolved" } as Partial<Errand>),
+      }),
+    ];
+    render(<ErrandsChip taskId={TASK_ID} />);
+
+    const chip = screen.getByTestId(CHIP);
+    expect(chip.getAttribute("aria-label")).toBe("Errands: 1 running, recovery needs verification");
+    expect(chip.querySelector("svg")?.getAttribute("class")).toContain("text-amber-500");
+  });
+
   it("falls back to a total with plural forms when nothing is live", () => {
     mocks.errands = [errand("e1", { status: "done" })];
     const { unmount } = render(<ErrandsChip taskId={TASK_ID} />);
@@ -268,6 +282,32 @@ describe("ErrandsChip popover", () => {
     render(<ErrandsChip taskId={TASK_ID} />);
     openChip();
     expect(await screen.findByTestId("errands-panel-loading")).toBeTruthy();
+  });
+});
+
+describe("Errand recovery attention", () => {
+  it("explains unresolved recovery separately from permission attention", async () => {
+    mocks.errands = [
+      errand("e1", {
+        status: "needs_attention",
+        ...({ attention_reason: "recovery_unresolved" } as Partial<Errand>),
+      }),
+      errand("e2", { status: "needs_attention" }),
+    ];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+    const popover = await screen.findByTestId(POPOVER);
+
+    const recoveryRow = within(popover).getByTestId(ROW_E1);
+    const permissionRow = within(popover).getByTestId(ROW_E2);
+    expect(within(recoveryRow).getByTestId("errand-recovery-notice").textContent).toContain(
+      "Earlier work and possible external effects are unknown.",
+    );
+    expect(within(recoveryRow).getByTestId("errand-status").textContent).toBe(
+      "Recovery needs verification",
+    );
+    expect(within(permissionRow).queryByTestId("errand-recovery-notice")).toBeNull();
+    expect(within(permissionRow).getByTestId("errand-status").textContent).toBe("Needs attention");
   });
 });
 

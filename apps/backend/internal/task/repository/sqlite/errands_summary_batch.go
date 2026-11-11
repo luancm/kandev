@@ -30,8 +30,8 @@ func (r *Repository) BatchErrandsSummariesByTaskIDs(ctx context.Context, taskIDs
 	}
 
 	queryTemplate := `SELECT e.task_id,
-		COALESCE(SUM(CASE WHEN ` + liveErrandPredicate + ` THEN 1 ELSE 0 END), 0),
-		COALESCE(MAX(CASE WHEN ps.state = ? AND ` + outstandingErrandPredicate + ` THEN 1 ELSE 0 END), 0)
+		COALESCE(SUM(CASE WHEN ` + liveErrandPredicate(r.ro.DriverName()) + ` THEN 1 ELSE 0 END), 0),
+		COALESCE(MAX(CASE WHEN ps.state = ? AND ` + outstandingErrandPredicate(r.ro.DriverName()) + ` THEN 1 ELSE 0 END), 0)
 		FROM task_session_errands e
 		LEFT JOIN task_sessions s ON s.id = e.id
 		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id

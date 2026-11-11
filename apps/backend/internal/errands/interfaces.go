@@ -14,6 +14,7 @@ import (
 // Store is the errand persistence plus the read-only session lookups that
 // status projection needs. *sqlite.Repository satisfies it.
 type Store interface {
+	ErrandRecoveryAttention(context.Context, string) (bool, error)
 	HasErrandPreparedOwnership(context.Context, string, string, models.ErrandResultClaim) (bool, error)
 	ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
 	SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error

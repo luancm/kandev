@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
-	"github.com/mattn/go-sqlite3"
 )
 
 func TestBatchErrandsSummariesByTaskIDsSQLite(t *testing.T) {
@@ -47,32 +47,16 @@ func TestBatchErrandsSummariesByTaskIDsFailureDoesNotReturnPartialZero(t *testin
 		id: "batch-child-partial-failure", parentID: "batch-parent-partial-failure",
 		lifecycle: models.ErrandLifecycleQueued, resultState: models.ErrandResultNone,
 	}, 0)
-	failingRepo.ro.SetMaxOpenConns(1)
-	failingRepo.ro.SetMaxIdleConns(1)
+
 	var selects atomic.Int32
-	connection, err := failingRepo.ro.Connx(context.Background())
-	if err != nil {
-		t.Fatalf("reserve failing SQLite reader connection: %v", err)
-	}
-	if err := connection.Raw(func(driverConnection any) error {
-		sqliteConnection, ok := driverConnection.(*sqlite3.SQLiteConn)
-		if !ok {
-			return fmt.Errorf("reader connection = %T, want SQLiteConn", driverConnection)
+	gate := newErrandSQLGate("SELECT", false)
+	gate.queryFault = func(query string) error {
+		if strings.HasPrefix(strings.TrimSpace(query), "SELECT") && selects.Add(1) == 2 {
+			return errors.New("second summary query failed")
 		}
-		sqliteConnection.RegisterAuthorizer(func(operation int, _, _, _ string) int {
-			if operation == sqlite3.SQLITE_SELECT && selects.Add(1) == 2 {
-				return sqlite3.SQLITE_DENY
-			}
-			return sqlite3.SQLITE_OK
-		})
 		return nil
-	}); err != nil {
-		_ = connection.Close()
-		t.Fatalf("enable failing SQLite authorizer: %v", err)
 	}
-	if err := connection.Close(); err != nil {
-		t.Fatalf("release failing SQLite reader connection: %v", err)
-	}
+	failingRepo = independentErrandRepository(t, failingRepo, gate)
 	taskIDs := make([]string, sqliteMaxHostParams)
 	taskIDs[0] = activeTaskID
 	for index := 1; index < len(taskIDs); index++ {
@@ -86,34 +70,17 @@ func TestBatchErrandsSummariesByTaskIDsFailureDoesNotReturnPartialZero(t *testin
 
 func TestBatchErrandsSummariesByTaskIDsChunkQueryCountSQLite(t *testing.T) {
 	repo := newRepoForSessionTests(t)
-	repo.ro.SetMaxOpenConns(1)
-	repo.ro.SetMaxIdleConns(1)
 
+	// Count driver queries, not SQLite authorizer callbacks for nested SELECTs.
 	var queryCount atomic.Int32
-	connection, err := repo.ro.Connx(context.Background())
-	if err != nil {
-		t.Fatalf("reserve SQLite reader connection: %v", err)
-	}
-	if err := connection.Raw(func(driverConnection any) error {
-		sqliteConnection, ok := driverConnection.(*sqlite3.SQLiteConn)
-		if !ok {
-			return fmt.Errorf("reader connection = %T, want SQLiteConn", driverConnection)
+	gate := newErrandSQLGate("SELECT", false)
+	gate.queryFault = func(query string) error {
+		if strings.HasPrefix(strings.TrimSpace(query), "SELECT") {
+			queryCount.Add(1)
 		}
-		sqliteConnection.RegisterAuthorizer(func(operation int, _, _, _ string) int {
-			if operation == sqlite3.SQLITE_SELECT {
-				queryCount.Add(1)
-			}
-			return sqlite3.SQLITE_OK
-		})
 		return nil
-	}); err != nil {
-		_ = connection.Close()
-		t.Fatalf("enable SQLite statement trace: %v", err)
 	}
-	if err := connection.Close(); err != nil {
-		t.Fatalf("release traced SQLite reader connection: %v", err)
-	}
-
+	repo = independentErrandRepository(t, repo, gate)
 	empty, err := repo.BatchErrandsSummariesByTaskIDs(context.Background(), nil)
 	if err != nil || len(empty) != 0 || queryCount.Load() != 0 {
 		t.Fatalf("empty batch = %#v, err = %v, queries = %d; want empty map, no error, no query", empty, err, queryCount.Load())

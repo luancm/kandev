@@ -222,8 +222,8 @@ func (s *Service) resolveLaunchOwner(ctx context.Context, row *models.Errand) (l
 	if err := s.discardPending(ctx, row.ID); err != nil {
 		return launchOutcome{}, true, err
 	}
-	status, err := s.Project(ctx, cancelled)
-	return launchOutcome{snapshot: Snapshot{Errand: cancelled, Status: status}}, true, err
+	snapshot, err := s.ProjectSnapshot(ctx, cancelled)
+	return launchOutcome{snapshot: snapshot}, true, err
 }
 
 func (s *Service) recordQueued(ctx context.Context, errand *models.Errand) (launchOutcome, error) {
@@ -231,13 +231,13 @@ func (s *Service) recordQueued(ctx context.Context, errand *models.Errand) (laun
 	if err != nil {
 		return launchOutcome{}, fmt.Errorf("reload queued errand: %w", err)
 	}
-	status, err := s.Project(ctx, current)
+	snapshot, err := s.ProjectSnapshot(ctx, current)
 	if err != nil {
 		return launchOutcome{}, err
 	}
 	countStarted(StartOutcomeQueued)
 	s.logger.Info("errand.started", s.errandFields(current, "outcome", string(StartOutcomeQueued))...)
-	return launchOutcome{snapshot: Snapshot{Errand: current, Status: status}, queued: true}, nil
+	return launchOutcome{snapshot: snapshot, queued: true}, nil
 }
 
 func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (launchOutcome, error) {
@@ -262,14 +262,14 @@ func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (la
 		s.logger.Info("errand.started", s.errandFields(row, "outcome", string(StartOutcomeStarted))...)
 		s.logger.Info("errand.admitted", s.errandFields(row)...)
 	}
-	status, err := s.Project(ctx, row)
+	snapshot, err := s.ProjectSnapshot(ctx, row)
 	if err != nil {
 		return launchOutcome{}, err
 	}
 	if changed {
-		s.events.PublishErrandUpdated(ctx, row, status)
+		s.publishSnapshot(ctx, snapshot)
 	}
-	return launchOutcome{snapshot: Snapshot{Errand: row, Status: status}}, nil
+	return launchOutcome{snapshot: snapshot}, nil
 }
 
 // recordLaunchFailure settles an errand whose launch failed. A failure that
@@ -304,20 +304,20 @@ func (s *Service) recordLaunchFailure(
 	if err != nil {
 		return launchOutcome{}, errors.Join(launchErr, fmt.Errorf("record errand launch failure: %w", err))
 	}
-	status, err := s.Project(ctx, row)
+	snapshot, err := s.ProjectSnapshot(ctx, row)
 	if err != nil {
 		return launchOutcome{}, err
 	}
 	if changed {
-		s.events.PublishErrandUpdated(ctx, row, status)
-		countSettled(status)
+		s.publishSnapshot(ctx, snapshot)
+		countSettled(snapshot.Status)
 		countStarted(StartOutcomeFailed)
 		s.logger.Warn("errand.started", s.errandFields(row,
 			"outcome", string(StartOutcomeFailed), "error", oneLine(launchErr.Error(), 300))...)
-		s.logger.Warn("errand.settled", s.errandFields(row, "status", string(status), "error", oneLine(launchErr.Error(), 300))...)
+		s.logger.Warn("errand.settled", s.errandFields(row, "status", string(snapshot.Status), "error", oneLine(launchErr.Error(), 300))...)
 		s.deliverPending(ctx, row.ParentSessionID)
 	}
-	return launchOutcome{snapshot: Snapshot{Errand: row, Status: status}}, nil
+	return launchOutcome{snapshot: snapshot}, nil
 }
 
 // removeFailedStart deletes an errand whose start failed before any session

@@ -19,6 +19,7 @@ export function ErrandOpenButton({
   onOpened,
   className,
   testId,
+  describedBy,
 }: {
   taskId: string | null;
   errandId: string;
@@ -28,6 +29,7 @@ export function ErrandOpenButton({
   onOpened?: () => void;
   className?: string;
   testId?: string;
+  describedBy?: string;
 }) {
   const { t } = useTranslation();
   const openSession = useOpenTaskSession();
@@ -38,6 +40,7 @@ export function ErrandOpenButton({
       size="sm"
       disabled={!taskId || queued}
       aria-label={t("chat:errandOpenAria", { title })}
+      aria-describedby={describedBy}
       data-testid={testId ?? `errand-open-${errandId}`}
       onClick={() => {
         if (!taskId) return;

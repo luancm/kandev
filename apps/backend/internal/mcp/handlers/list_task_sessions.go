@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -18,15 +19,16 @@ import (
 // needs identity, role and state — not container IDs, worktree paths, or
 // profile snapshots.
 type taskSessionListEntry struct {
-	SessionID      string                  `json:"session_id"`
-	Name           string                  `json:"name,omitempty"`
-	State          models.TaskSessionState `json:"state"`
-	IsPrimary      bool                    `json:"is_primary"`
-	IsCurrent      bool                    `json:"is_current"`
-	AgentProfileID string                  `json:"agent_profile_id,omitempty"`
-	StartedAt      time.Time               `json:"started_at"`
-	CompletedAt    *time.Time              `json:"completed_at,omitempty"`
-	UpdatedAt      time.Time               `json:"updated_at"`
+	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
+	SessionID       string                       `json:"session_id"`
+	Name            string                       `json:"name,omitempty"`
+	State           models.TaskSessionState      `json:"state"`
+	IsPrimary       bool                         `json:"is_primary"`
+	IsCurrent       bool                         `json:"is_current"`
+	AgentProfileID  string                       `json:"agent_profile_id,omitempty"`
+	StartedAt       time.Time                    `json:"started_at"`
+	CompletedAt     *time.Time                   `json:"completed_at,omitempty"`
+	UpdatedAt       time.Time                    `json:"updated_at"`
 	// Role is "errand" for an errand session; ParentSessionID names the parent
 	// that started it. ErrandStatus is the errand's projected status.
 	Role            models.SessionRole  `json:"role,omitempty"`
@@ -97,7 +99,8 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 			UpdatedAt:       session.UpdatedAt,
 			Role:            session.Role,
 			ParentSessionID: session.ParentSessionID,
-			ErrandStatus:    errandStatuses[session.ID],
+			ErrandStatus:    errandStatuses[session.ID].Status,
+			AttentionReason: errandStatuses[session.ID].AttentionReason,
 		})
 	}
 
@@ -111,8 +114,8 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 // errandStatusBySession maps each errand session of the task to its projected
 // errand status. An errand's session ID is its errand ID. A failed read leaves
 // the map empty, so the session list is still returned without the annotation.
-func (h *Handlers) errandStatusBySession(ctx context.Context, taskID string) map[string]models.ErrandStatus {
-	statuses := map[string]models.ErrandStatus{}
+func (h *Handlers) errandStatusBySession(ctx context.Context, taskID string) map[string]errands.Snapshot {
+	statuses := map[string]errands.Snapshot{}
 	if h.errands == nil {
 		return statuses
 	}
@@ -124,7 +127,7 @@ func (h *Handlers) errandStatusBySession(ctx context.Context, taskID string) map
 	}
 	for _, snapshot := range snapshots {
 		if snapshot.Errand != nil {
-			statuses[snapshot.Errand.ID] = snapshot.Status
+			statuses[snapshot.Errand.ID] = snapshot
 		}
 	}
 	return statuses

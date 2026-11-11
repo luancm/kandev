@@ -516,3 +516,7 @@ func (*memoryStore) SealErrandTurnSettlement(context.Context, string, *models.Ag
 func (*memoryStore) CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error {
 	panic("terminal settlement requires the SQLite fixture")
 }
+
+func (s *memoryStore) ErrandRecoveryAttention(context.Context, string) (bool, error) {
+	return false, nil
+}

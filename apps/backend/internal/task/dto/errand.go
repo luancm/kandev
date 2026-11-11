@@ -13,28 +13,30 @@ const ErrandResultPreviewLength = 280
 // ErrandDTO is the browser projection of one errand. Full result text and
 // delivery identity are deliberately absent.
 type ErrandDTO struct {
-	ErrandID        string                     `json:"errand_id"`
-	TaskID          string                     `json:"task_id"`
-	ParentSessionID string                     `json:"parent_session_id"`
-	Title           string                     `json:"title"`
-	Objective       string                     `json:"objective"`
-	AgentProfileID  string                     `json:"agent_profile_id"`
-	Status          models.ErrandStatus        `json:"status"`
-	ResultState     models.ErrandResultState   `json:"result_state"`
-	DeliveryState   models.ErrandDeliveryState `json:"delivery_state,omitempty"`
-	ResultPreview   string                     `json:"result_preview"`
-	ResultTruncated bool                       `json:"result_truncated"`
-	CreatedAt       time.Time                  `json:"created_at"`
-	UpdatedAt       time.Time                  `json:"updated_at"`
-	SettledAt       *time.Time                 `json:"settled_at"`
+	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
+	ErrandID        string                       `json:"errand_id"`
+	TaskID          string                       `json:"task_id"`
+	ParentSessionID string                       `json:"parent_session_id"`
+	Title           string                       `json:"title"`
+	Objective       string                       `json:"objective"`
+	AgentProfileID  string                       `json:"agent_profile_id"`
+	Status          models.ErrandStatus          `json:"status"`
+	ResultState     models.ErrandResultState     `json:"result_state"`
+	DeliveryState   models.ErrandDeliveryState   `json:"delivery_state,omitempty"`
+	ResultPreview   string                       `json:"result_preview"`
+	ResultTruncated bool                         `json:"result_truncated"`
+	CreatedAt       time.Time                    `json:"created_at"`
+	UpdatedAt       time.Time                    `json:"updated_at"`
+	SettledAt       *time.Time                   `json:"settled_at"`
 	// CanSendResult is computed by the server so every client applies the
 	// same eligibility rule for Send result to parent.
 	CanSendResult bool `json:"can_send_result"`
 }
 
 // FromErrand projects an errand row with its already projected status.
-func FromErrand(errand *models.Errand, status models.ErrandStatus) ErrandDTO {
+func FromErrand(errand *models.Errand, status models.ErrandStatus, reasons ...models.ErrandAttentionReason) ErrandDTO {
 	return ErrandDTO{
+		AttentionReason: models.ProjectErrandAttentionReason(status, reasons...),
 		ErrandID:        errand.ID,
 		TaskID:          errand.TaskID,
 		ParentSessionID: errand.ParentSessionID,

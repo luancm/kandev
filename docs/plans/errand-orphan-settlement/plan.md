@@ -19,9 +19,13 @@ Repair restart recovery that leaves an idle Errand reporting running indefinitel
 
 ## Evidence and current state
 
-See [incident evidence](evidence.md). Historical receipts, exact recovery assessments, immutable ownership, shell isolation and actual child-to-parent provider delivery are implemented and have prior independent verification. The user requested committing and pushing this completed core for a new runtime build on 2026-11-10. Primary is checking the recovered receipt-writer guard and typed-warning tests before the commit; final evidence is recorded in [the delivery checkpoint](delivery-checkpoint.md). The parent checkout and staged merge remain untouched.
+Core recovery commit `9db45d3e75` was integrated by parent as `b2bbe9d5b764223c0dc100b9075a670159e1e9a8`, the base of this worktree. Recovery attention, capacity parity, stable refusal, exact explicit continuation and localized desktop/phone presentation are now implemented and accepted. Real isolated browser checks passed desktop 2/2 and phone 2/2 with repository global setup enabled; direct passthrough refusal tests passed 17/17. Era Sol final review `60481218` found no actionable findings. All writers released ownership; stale running projections are completion transport failures and must not be resumed as writers.
 
-The broader work order remains in progress. Evidence-aware `needs_attention`, `attention_reason`, SQL capacity parity, localized desktop/phone explanations, stable refusal mapping and explicit-resume eligibility remain designed but unimplemented. The turn-creation guard is included in this checkpoint, but does not complete the broader continuation contract. Historical incident repair eligibility remains unproven. A restart must use a build containing this branch and cannot reconstruct missing historical evidence by itself.
+[Recovery status checkpoint](recovery-status-checkpoint.md) owns the acceptance map and verification limits. Primary is preparing the normal-hook commit and push. Overall work remains `in_progress` pending delivery and integration with the parent-owned terminal identity correction. Parent review accepted that correction and direct automatic notification coverage; its final lint/commit receipt is pending. Parent also owns successful completion cleanup and result-card duration, excluded here. The parent checkout remains untouched.
+
+Original incident outcome and historical repair eligibility remain unproven. Attention exposes that uncertainty without success inference or replay. PostgreSQL runtime checks were skipped without a DSN; a previously reproduced Send Now baseline/intermittent failure remains documented. Browser provider coverage uses mock ACP and fixture-authorized exact domain settlement after browser Stop, not live historical recovery proof.
+
+All heavy checks across both worktrees use `/tmp/kandev-errands-repair-build.lock`. Parent reserves duration specs/helpers; our recovery tests stay in existing Errands specs plus the dedicated recovery helper. Earlier narratives below are historical and do not override this current state.
 
 ## Scope
 
@@ -41,7 +45,7 @@ Add `TestErrandRestartAbandonmentSettlesExactInterruptedTurn` in `apps/backend/i
 
 ## End-to-end evidence
 
-The orchestrator integration exercises admission through durable recovery, result capture and parent delivery. It must read the same Errand projection consumed by the panel and injected parent status. No rendered layout changes are planned; browser automation is not required to prove this backend mismatch.
+The orchestrator integration exercises admission through durable recovery, result capture and parent delivery. It reads the same Errand projection consumed by the panel and injected parent status. The approved status/continuation extension also requires localized explanations on existing desktop and phone surfaces, with focused browser acceptance for unresolved recovery refusal and supported explicit follow-up. Backend integration alone does not complete that acceptance.
 
 ## Work orders
 

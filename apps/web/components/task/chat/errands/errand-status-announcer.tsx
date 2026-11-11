@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { selectTaskErrands } from "@/lib/state/slices/errands/selectors";
-import type { Errand, ErrandStatus } from "@/lib/types/errands";
+import type { Errand } from "@/lib/types/errands";
 import { errandStatusLabelKey } from "./errand-status";
 
 /** Errands a chat view reports on: the errand it shows, or the errands its session started. */
@@ -23,15 +23,23 @@ export function errandsForView(errands: readonly Errand[], sessionId: string | n
  */
 function useStatusChangeAnnouncement(errands: readonly Errand[], active: boolean): string {
   const { t } = useTranslation();
-  const baseline = useRef<Map<string, ErrandStatus> | null>(null);
+  const baseline = useRef<Map<string, string> | null>(null);
   const [message, setMessage] = useState("");
   useEffect(() => {
     const previous = baseline.current;
-    baseline.current = new Map(errands.map((errand) => [errand.errand_id, errand.status]));
+    baseline.current = new Map(
+      errands.map((errand) => [
+        errand.errand_id,
+        JSON.stringify([errand.status, errand.attention_reason ?? null]),
+      ]),
+    );
     if (!previous || !active) return;
     const changed = errands.filter((errand) => {
       const before = previous.get(errand.errand_id);
-      return before !== undefined && before !== errand.status;
+      return (
+        before !== undefined &&
+        before !== JSON.stringify([errand.status, errand.attention_reason ?? null])
+      );
     });
     if (changed.length === 0) return;
     setMessage(
@@ -39,7 +47,9 @@ function useStatusChangeAnnouncement(errands: readonly Errand[], active: boolean
         .map((errand) =>
           t("task:errandStatusAnnouncement", {
             title: errand.title,
-            status: t(errandStatusLabelKey(errand.status)),
+            status: t(
+              errandStatusLabelKey(errand.status, { attentionReason: errand.attention_reason }),
+            ),
           }),
         )
         .join(" "),

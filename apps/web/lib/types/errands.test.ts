@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   canSendErrandResult,
   isLiveErrand,
+  normalizeErrandAttention,
+  parseErrandAttentionReason,
   parseErrandStatus,
   type Errand,
   type ErrandDeliveryState,
   type ErrandStatus,
 } from "./errands";
+
+const BASE_DATE = "2026-10-26T10:00:00Z";
 
 const STATUSES: Record<ErrandStatus, boolean> = {
   queued: true,
@@ -36,8 +40,8 @@ describe("Errand", () => {
       result_state: "none",
       result_preview: "",
       result_truncated: false,
-      created_at: "2026-10-26T10:00:00Z",
-      updated_at: "2026-10-26T10:00:00Z",
+      created_at: BASE_DATE,
+      updated_at: BASE_DATE,
       settled_at: null,
     };
 
@@ -70,7 +74,7 @@ describe("Errand", () => {
       result_state: "delivered",
       result_preview: "",
       result_truncated: false,
-      created_at: "2026-10-26T10:00:00Z",
+      created_at: BASE_DATE,
       updated_at: "2026-10-26T10:05:00Z",
       settled_at: "2026-10-26T10:05:00Z",
       can_send_result: true,
@@ -113,5 +117,47 @@ describe("parseErrandStatus", () => {
 
   it.each([undefined, null, "", "RUNNING", "pending", 3, {}])("rejects %s", (value) => {
     expect(parseErrandStatus(value)).toBeNull();
+  });
+});
+
+describe("Errand attention reason", () => {
+  it.each(["permission", "recovery_unresolved"] as const)("accepts %s", (reason) => {
+    expect(parseErrandAttentionReason(reason)).toBe(reason);
+  });
+
+  it.each([undefined, null, "unknown", "uncertain", 3, {}])("rejects %s", (reason) => {
+    expect(parseErrandAttentionReason(reason)).toBeNull();
+  });
+
+  it("keeps only a recognized reason on needs_attention snapshots", () => {
+    const attention = normalizeErrandAttention({
+      errand_id: "errand-1",
+      task_id: "task-1",
+      parent_session_id: "session-parent",
+      title: "API audit",
+      objective: "Audit the API",
+      agent_profile_id: "profile-1",
+      status: "needs_attention",
+      attention_reason: "recovery_unresolved",
+      result_state: "none",
+      result_preview: "",
+      result_truncated: false,
+      created_at: BASE_DATE,
+      updated_at: BASE_DATE,
+      settled_at: null,
+    });
+    expect(attention.attention_reason).toBe("recovery_unresolved");
+
+    const oldBackend = normalizeErrandAttention({ ...attention, attention_reason: undefined });
+    expect(oldBackend).not.toHaveProperty("attention_reason");
+
+    const invalid = normalizeErrandAttention({
+      ...attention,
+      attention_reason: "unknown",
+    } as unknown as Errand);
+    expect(invalid).not.toHaveProperty("attention_reason");
+
+    const nonAttention = normalizeErrandAttention({ ...attention, status: "running" });
+    expect(nonAttention).not.toHaveProperty("attention_reason");
   });
 });

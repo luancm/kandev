@@ -18,7 +18,10 @@ func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionI
 	if !ok {
 		return nil
 	}
-	return controller.ReconcileTerminalDecisions(ctx, sessionID)
+	if err := controller.ReconcileTerminalDecisions(ctx, sessionID); err != nil {
+		return err
+	}
+	return s.retireSettledErrandPrompt(ctx, sessionID)
 }
 
 func (s *Service) reserveErrandTerminalIntent(ctx context.Context, session *models.TaskSession, origin errands.ParentPromptOrigin, turnID, submissionID, executionID string) error {

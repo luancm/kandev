@@ -22,6 +22,27 @@ describe("errand API", () => {
     expect(request).toHaveBeenCalledWith("errand.list", { task_id: "task-1" });
   });
 
+  it("keeps recognized recovery reasons from list snapshots and drops unknown or stale reasons", async () => {
+    const recovery = {
+      ...makeErrand({ status: "needs_attention" }),
+      attention_reason: "recovery_unresolved",
+    };
+    const unknown = {
+      ...makeErrand({ errand_id: "errand-unknown", status: "needs_attention" }),
+      attention_reason: "future_reason",
+    };
+    const stale = {
+      ...makeErrand({ errand_id: "errand-stale", status: "running" }),
+      attention_reason: "recovery_unresolved",
+    };
+    request.mockResolvedValue({ errands: [recovery, unknown, stale] });
+
+    const rows = await listErrands("task-1");
+    expect(rows[0].attention_reason).toBe("recovery_unresolved");
+    expect(rows[1]).not.toHaveProperty("attention_reason");
+    expect(rows[2]).not.toHaveProperty("attention_reason");
+  });
+
   it("treats a response without an errand list as empty", async () => {
     request.mockResolvedValue({ errands: null });
     await expect(listErrands("task-1")).resolves.toEqual([]);

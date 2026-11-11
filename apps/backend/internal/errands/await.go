@@ -36,11 +36,12 @@ type AwaitRequest struct {
 
 // AwaitErrand is one named errand in an await response.
 type AwaitErrand struct {
-	ErrandID     string
-	Status       string
-	Result       string
-	Truncated    bool
-	DeliveredVia string
+	AttentionReason models.ErrandAttentionReason
+	ErrandID        string
+	Status          string
+	Result          string
+	Truncated       bool
+	DeliveredVia    string
 }
 
 // AwaitResult is the await response. Ended means the parent's turn cancelled
@@ -229,7 +230,7 @@ func (s *Service) finishAwaitSnapshot(ctx context.Context, req AwaitRequest, tim
 		}
 		timedOut = true
 		for i := range items {
-			if !errandSettled(models.ErrandStatus(items[i].Status)) {
+			if !errandSettled(models.ErrandStatus(items[i].Status)) && items[i].Status != string(models.ErrandStatusNeedsAttention) {
 				items[i].Status = awaitPending
 			}
 		}
@@ -295,12 +296,13 @@ func (s *Service) awaitItems(
 ) ([]AwaitErrand, error) {
 	items := make([]AwaitErrand, 0, len(rows))
 	for _, row := range rows {
-		status, err := s.Project(ctx, row)
+		snapshot, err := s.ProjectSnapshot(ctx, row)
 		if err != nil {
 			return nil, err
 		}
-		item := AwaitErrand{ErrandID: row.ID, Status: string(status)}
-		if timedOut && !ended && !errandSettled(status) {
+		status := snapshot.Status
+		item := AwaitErrand{ErrandID: row.ID, Status: string(status), AttentionReason: snapshot.AttentionReason}
+		if timedOut && !ended && !errandSettled(status) && status != models.ErrandStatusNeedsAttention {
 			item.Status = awaitPending
 		}
 		if !ended && row.DeliveryToken != token {

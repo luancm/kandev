@@ -1,7 +1,7 @@
 import type { StateCreator } from "zustand";
 import { stateReadScopeIdentity } from "../../shared-resource-reads";
 import type { AppState } from "../../app-state-types";
-import type { Errand } from "@/lib/types/errands";
+import { normalizeErrandAttention, type Errand } from "@/lib/types/errands";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { ErrandsListObservation, ErrandsSlice, ErrandsSliceState } from "./types";
 
@@ -74,15 +74,16 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
 
   upsertErrand: (errand) =>
     set((draft) => {
-      const taskId = errand.task_id;
-      if (draft.errands.removedSessionIdsByTaskId[taskId]?.[errand.errand_id]) return;
+      const snapshot = normalizeErrandAttention(errand);
+      const taskId = snapshot.task_id;
+      if (draft.errands.removedSessionIdsByTaskId[taskId]?.[snapshot.errand_id]) return;
       const errands = (draft.errands.byTaskId[taskId] ??= {});
-      if (isOlderErrand(errand, errands[errand.errand_id])) return;
-      errands[errand.errand_id] = errand;
+      if (isOlderErrand(snapshot, errands[snapshot.errand_id])) return;
+      errands[snapshot.errand_id] = snapshot;
       const revision = (draft.errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
       draft.errands.liveRevisionByTaskId[taskId] = revision;
       const rowRevisions = ((draft.errands.liveRevisionByErrandIdByTaskId ??= {})[taskId] ??= {});
-      rowRevisions[errand.errand_id] = revision;
+      rowRevisions[snapshot.errand_id] = revision;
     }),
 
   setTaskErrands: (taskId, errands, requestRevision, observation) =>
@@ -90,9 +91,9 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
       if (observation && !observationIsCurrent(draft, taskId, observation)) return;
       const current = (draft.errands.byTaskId[taskId] ??= {});
       const removedSessionIds = draft.errands.removedSessionIdsByTaskId[taskId] ?? {};
-      const listed = errands.filter(
-        (errand) => errand.task_id === taskId && !removedSessionIds[errand.errand_id],
-      );
+      const listed = errands
+        .filter((errand) => errand.task_id === taskId && !removedSessionIds[errand.errand_id])
+        .map(normalizeErrandAttention);
       const racedLiveUpdates =
         (draft.errands.liveRevisionByTaskId[taskId] ?? 0) !== requestRevision;
       if (!racedLiveUpdates) {

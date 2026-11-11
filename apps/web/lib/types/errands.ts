@@ -11,6 +11,9 @@ export type ErrandStatus =
   | "failed"
   | "cancelled";
 
+/** Closed reasons for an errand that needs attention. Older backends omit this field. */
+export type ErrandAttentionReason = "permission" | "recovery_unresolved";
+
 /** Delivery state of an errand's current result to its parent session. */
 export type ErrandResultState = "none" | "pending" | "delivered" | "superseded" | "discarded";
 
@@ -27,6 +30,8 @@ export type Errand = {
   objective: string;
   agent_profile_id: string;
   status: ErrandStatus;
+  /** Present only with `needs_attention`; absent on older backend snapshots. */
+  attention_reason?: ErrandAttentionReason;
   result_state: ErrandResultState;
   /** At most the first 280 characters of the current result; full text stays with the parent. */
   result_preview: string;
@@ -65,6 +70,10 @@ const ERRAND_STATUSES: ReadonlySet<string> = new Set<ErrandStatus>([
   "failed",
   "cancelled",
 ]);
+const ERRAND_ATTENTION_REASONS: ReadonlySet<string> = new Set<ErrandAttentionReason>([
+  "permission",
+  "recovery_unresolved",
+]);
 
 /** A live errand is queued, running, or needs attention. */
 export function isLiveErrand(errand: Pick<Errand, "status">): boolean {
@@ -82,4 +91,22 @@ export function canSendErrandResult(errand: Pick<Errand, "status" | "can_send_re
 /** Narrows an untrusted wire value to an errand status. */
 export function parseErrandStatus(value: unknown): ErrandStatus | null {
   return typeof value === "string" && ERRAND_STATUSES.has(value) ? (value as ErrandStatus) : null;
+}
+
+/** Narrows an untrusted wire value to a supported attention reason. */
+export function parseErrandAttentionReason(value: unknown): ErrandAttentionReason | null {
+  return typeof value === "string" && ERRAND_ATTENTION_REASONS.has(value)
+    ? (value as ErrandAttentionReason)
+    : null;
+}
+
+/** Normalize a complete list/event snapshot, keeping no stale or unknown reason. */
+export function normalizeErrandAttention(errand: Errand): Errand {
+  const snapshot = { ...errand };
+  delete snapshot.attention_reason;
+  const reason =
+    errand.status === "needs_attention"
+      ? parseErrandAttentionReason(errand.attention_reason)
+      : null;
+  return reason ? { ...snapshot, attention_reason: reason } : snapshot;
 }

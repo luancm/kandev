@@ -153,6 +153,14 @@ describe("ErrandHeader desktop", () => {
     expect(workspace.getAttribute("title")).toBe("/home/me/.kandev/tasks/auth (feat/auth)");
   });
 
+  it("keeps a legacy needs-attention snapshot free of inferred recovery wording", () => {
+    setState({ row: errand({ status: "needs_attention" }) });
+    renderHeader();
+
+    expect(screen.getByTestId("errand-header-status").textContent).toBe("Needs attention");
+    expect(screen.queryByTestId("errand-recovery-notice")).toBeNull();
+  });
+
   it("offers Stop only while live and sends errand.cancel", () => {
     renderHeader();
 
@@ -231,7 +239,42 @@ describe("ErrandHeader desktop", () => {
   });
 });
 
+describe("ErrandHeader recovery attention", () => {
+  it("explains unresolved recovery with an accessible reason label", () => {
+    setState({
+      row: errand({
+        status: "needs_attention",
+        ...({ attention_reason: "recovery_unresolved" } as Partial<Errand>),
+      }),
+    });
+    renderHeader();
+
+    const header = screen.getByTestId(HEADER);
+    expect(within(header).getByTestId("errand-header-status").textContent).toBe(
+      "Recovery needs verification",
+    );
+    expect(within(header).getByTestId("errand-recovery-notice").textContent).toContain(
+      "Earlier work and possible external effects are unknown.",
+    );
+  });
+});
+
 describe("ErrandHeader phone", () => {
+  it("keeps the recovery explanation visible in the full-screen child header", () => {
+    mocks.isMobile = true;
+    setState({
+      row: errand({
+        status: "needs_attention",
+        ...({ attention_reason: "recovery_unresolved" } as Partial<Errand>),
+      }),
+    });
+    renderHeader();
+
+    const header = screen.getByTestId(HEADER);
+    expect(header.getAttribute("data-layout")).toBe("phone");
+    expect(within(header).getByTestId("errand-recovery-notice")).toBeTruthy();
+  });
+
   it("puts Stop in a visible 44px actions menu", () => {
     mocks.isMobile = true;
     renderHeader();
@@ -293,6 +336,24 @@ describe("ErrandStatusAnnouncer", () => {
     });
 
     expect(screen.getByRole("status").textContent).toBe("Errand API audit: Done");
+  });
+
+  it("announces recovery attention without calling it a permission request", () => {
+    renderAnnouncer(PARENT_ID);
+
+    act(() => {
+      setState({
+        row: errand({
+          status: "needs_attention",
+          ...({ attention_reason: "recovery_unresolved" } as Partial<Errand>),
+        }),
+      });
+      mocks.emit();
+    });
+
+    expect(screen.getByRole("status").textContent).toBe(
+      "Errand API audit: Recovery needs verification",
+    );
   });
 
   it("stays silent for a hidden panel and for unrelated sessions", () => {

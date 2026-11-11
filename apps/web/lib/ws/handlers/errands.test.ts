@@ -89,3 +89,53 @@ describe("errand.updated", () => {
     expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)).toHaveLength(1);
   });
 });
+
+describe("errand.updated attention reason", () => {
+  it("projects recovery transitions and clears a missing reason", () => {
+    const store = createAppStore();
+    const handle = registerErrandsHandlers(store)["errand.updated"]!;
+    const recovery = {
+      ...makeErrand({
+        status: "needs_attention",
+        result_state: "delivered",
+        result_preview: "Prior result",
+        result_truncated: true,
+      }),
+      attention_reason: "recovery_unresolved",
+      delivery_state: "uncertain" as const,
+    } as Errand;
+    handle(errandUpdated(recovery));
+    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0].attention_reason).toBe(
+      "recovery_unresolved",
+    );
+
+    handle(
+      errandUpdated({
+        ...recovery,
+        attention_reason: "permission",
+        updated_at: "2026-10-26T10:00:02Z",
+      } as Errand),
+    );
+    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0].attention_reason).toBe(
+      "permission",
+    );
+
+    const running = {
+      ...recovery,
+      status: "running" as const,
+      updated_at: "2026-10-26T10:00:03Z",
+    };
+    delete running.attention_reason;
+    handle(errandUpdated(running));
+
+    const projected = selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0];
+    expect(projected).not.toHaveProperty("attention_reason");
+    expect(projected).toMatchObject({
+      status: "running",
+      result_state: "delivered",
+      result_preview: "Prior result",
+      result_truncated: true,
+      delivery_state: "uncertain",
+    });
+  });
+});
