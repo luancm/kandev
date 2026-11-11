@@ -60,7 +60,17 @@ func TestRetrySessionDeliveryWithoutExecutionReplaysRetainedTerminal(t *testing.
 	repository, database := runOwnerTestRepository(t)
 	require.NoError(t, repository.CreateTask(ctx, &models.Task{ID: "task", Title: "Retained recovery"}))
 	require.NoError(t, repository.CreateTaskSession(ctx, &models.TaskSession{ID: "session", TaskID: "task", QueueIncarnationID: "session"}))
-	require.NoError(t, repository.UpsertExecutorRunning(ctx, &models.ExecutorRunning{ID: "session", SessionID: "session", TaskID: "task", AgentExecutionID: "execution", Status: models.ExecutorRunningStatusRunning}))
+	require.NoError(t, repository.CreateTurn(ctx, &models.Turn{ID: "turn", TaskID: "task", TaskSessionID: "session"}))
+	require.NoError(t, repository.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session", SessionID: "session", TaskID: "task", AgentExecutionID: "execution",
+		Status: models.ExecutorRunningStatusRunning,
+		Metadata: map[string]any{"delivery_prompt_turn_binding": map[string]any{
+			"task_id": "task", "session_id": "session", "execution_id": "execution",
+			"incarnation_id": "session", "harness_generation": 1, "prompt_generation": 1,
+			"stream_id": "stream", "submission_id": "prompt", "turn_id": "turn",
+			"native_session_id": "native",
+		}},
+	}))
 	require.NoError(t, repository.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{SessionID: "session", IncarnationID: "session", Generation: 1, NativeSessionID: "native", CreationReason: "initial"}))
 	_, err = repository.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: "prompt", SessionID: "session", IncarnationID: "session", HarnessGeneration: 1, OwnerGeneration: 1, PayloadHash: "hash", Payload: []byte("original"), State: models.DeliverySubmissionInterruptedUnknown})
 	require.NoError(t, err)

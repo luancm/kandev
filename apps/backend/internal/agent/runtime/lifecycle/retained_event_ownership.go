@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -17,30 +18,26 @@ func resolveRetainedEventTurn(ctx context.Context, delivery AgentDeliveryReposit
 		return event, false, nil
 	}
 	turn, errand, err := resolver.ResolveAgentDeliveryEventTurn(ctx, retained)
-	if err == nil && errand {
+	if err == nil && turn != "" && event.TurnID == "" {
 		event.TurnID = turn
 	}
 	return event, errand, err
 }
 
-// Intake validates producer ownership before retaining lifecycle-derived fields.
-// Existing inbox replay uses resolveRetainedEventTurn without rewriting bytes.
+// Intake resolves callback attribution while leaving the received payload immutable.
 func prepareRetainedEventTurn(ctx context.Context, delivery AgentDeliveryRepository, retained *models.AgentDeliveryEvent, event agentctl.AgentEvent) (agentctl.AgentEvent, bool, error) {
-	source := *retained
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return event, false, err
+	if retained != nil && event.DeliverySubmissionID == "" && event.TurnID == "" {
+		// The intake envelope may include a lifecycle-derived turn for ordinary
+		// native activity. Errand attribution derives its own turn from retained
+		// stream evidence, so resolve against the producer event without that
+		// enrichment while leaving the receipt bytes untouched.
+		source := *retained
+		payload, err := json.Marshal(event)
+		if err != nil {
+			return event, false, err
+		}
+		source.Payload = payload
+		retained = &source
 	}
-	source.Payload = payload
-	resolved, errand, err := resolveRetainedEventTurn(ctx, delivery, &source, event)
-	if err != nil || !errand {
-		return resolved, errand, err
-	}
-	var stored agentctl.AgentEvent
-	if err = json.Unmarshal(retained.Payload, &stored); err != nil {
-		return event, true, err
-	}
-	stored.TurnID = event.TurnID
-	retained.Payload, err = json.Marshal(stored)
-	return resolved, true, err
+	return resolveRetainedEventTurn(ctx, delivery, retained, event)
 }

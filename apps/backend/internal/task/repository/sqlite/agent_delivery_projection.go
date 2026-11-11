@@ -187,7 +187,7 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 		if err := json.Unmarshal(stored.Payload, &agentEvent); err != nil {
 			return fmt.Errorf("decode canonical agent event: %w", err)
 		}
-		agentEvent, err = r.resolveCanonicalErrandEventTx(ctx, tx, &stored, agentEvent)
+		agentEvent, err = r.resolveCanonicalAgentDeliveryEventTx(ctx, tx, &stored, agentEvent)
 		if err != nil {
 			return err
 		}
@@ -557,11 +557,11 @@ func (r *Repository) canonicalDeliveryTurnTx(
 	sessionID, taskID, requestedTurnID string,
 	event *models.AgentDeliveryEvent,
 ) (string, error) {
-	turn, errand, ownershipErr := r.errandEventAdmissionTx(ctx, tx, event)
+	turn, errand, ownershipErr := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
 	if ownershipErr != nil {
 		return "", ownershipErr
 	}
-	if errand && turn != "" && event.SubmissionID != "" {
+	if turn != "" && event.SubmissionID != "" {
 		return turn, nil
 	}
 	if errand && taskID == "" {

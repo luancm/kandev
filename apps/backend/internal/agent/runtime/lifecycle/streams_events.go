@@ -84,10 +84,16 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// Capture the durable record before invoking lifecycle callbacks. Those
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
+	receivedEvent := event
 	durableEvent := durableAgentEvent(execution, event)
 	event, errand, err := prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
 	if err != nil {
 		return preparedAgentEvent{}, err
+	}
+	if errand && receivedEvent.DeliverySubmissionID == "" && receivedEvent.TurnID == "" {
+		// Errand native activity owns a source-derived turn. Keep the
+		// lifecycle's current prompt turn out of its retained producer payload.
+		durableEvent = durableAgentEventWithoutPromptTurn(execution, receivedEvent)
 	}
 	// A replayed event keeps its own prompt-attempt identity. Do not let it
 	// overwrite the live execution's submission before completion claims run.

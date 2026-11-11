@@ -281,7 +281,7 @@ func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliver
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
-	turn, errand, err := r.errandEventAdmissionTx(ctx, tx, event)
+	turn, errand, err := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
 	if err != nil {
 		return 0, err
 	}
@@ -568,7 +568,7 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if !matches {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
-	admittedTurn, errand, err := r.errandEventAdmissionTx(ctx, tx, &stored)
+	admittedTurn, _, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &stored)
 	if err != nil {
 		return false, err
 	}
@@ -576,10 +576,17 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if err != nil {
 		return false, err
 	}
-	if errand && terminalEffect != nil {
+	if admittedTurn != "" && terminalEffect != nil {
 		terminalEffect.TurnID = admittedTurn
 	}
 	if projectedAt.Valid {
+		if terminalEffect != nil {
+			if _, err := r.repairAgentDeliveryTerminalIdentityTx(
+				ctx, tx, terminalEffect.StreamID, terminalEffect.Sequence, terminalEffect, true,
+			); err != nil {
+				return false, err
+			}
+		}
 		return false, commitProjectedTerminalEffect(ctx, tx, r.db.Rebind, terminalEffect)
 	}
 	var projectedSequence int64

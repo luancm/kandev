@@ -78,9 +78,9 @@ func (r *Repository) retainPromptAdmissionTx(ctx context.Context, tx *sqlx.Tx, r
 	return nil
 }
 
-// errandEventAdmissionTx returns the admitted turn or a source-derived turn
-// for unowned activity. Ordinary sessions retain their attribution rules.
-func (r *Repository) errandEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, bool, error) {
+// agentDeliveryEventAdmissionTx resolves a submission's exact admitted turn.
+// Its boolean reports the session role and remains independent of attribution.
+func (r *Repository) agentDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, bool, error) {
 	var role, taskID string
 	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT role,task_id FROM task_sessions WHERE id=?`), event.SessionID).Scan(&role, &taskID)
 	if err == sql.ErrNoRows {
@@ -89,45 +89,56 @@ func (r *Repository) errandEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, ev
 	if err != nil {
 		return "", false, err
 	}
-	if role != string(models.SessionRoleErrand) {
-		return "", false, nil
-	}
+	isErrand := role == string(models.SessionRoleErrand)
 	var payload streams.AgentEvent
 	if err = json.Unmarshal(event.Payload, &payload); err != nil {
-		return "", true, err
+		return "", isErrand, err
 	}
 	conflict := repoerrors.ErrAgentDeliveryIdentityMismatch
 	if conflictingAdmissionEnvelope(taskID, event, payload) {
-		return "", true, conflict
+		return "", isErrand, conflict
 	}
 	if event.SubmissionID == "" {
+		if !isErrand {
+			return "", false, nil
+		}
 		turn, err := r.unownedErrandEventTurnTx(ctx, tx, event, payload)
 		return turn, true, err
 	}
 	var raw string
 	err = tx.QueryRowContext(ctx, tx.Rebind(`SELECT outcome FROM agent_delivery_effects WHERE effect_key=? AND effect_type=?`), promptAdmissionEffect+":"+event.SubmissionID, promptAdmissionEffect).Scan(&raw)
 	if err == sql.ErrNoRows {
-		return "", true, conflict
+		if isErrand {
+			return "", true, conflict
+		}
+		return "", false, nil
 	}
 	if err != nil {
-		return "", true, err
+		return "", isErrand, err
 	}
 	var p promptAdmission
 	if err = json.Unmarshal([]byte(raw), &p); err != nil {
-		return "", true, err
+		return "", isErrand, err
 	}
 	if !p.matchesEvent(taskID, event, payload) {
-		return "", true, conflict
+		return "", isErrand, conflict
 	}
 	var valid bool
-	err = tx.QueryRowContext(ctx, tx.Rebind(`SELECT EXISTS (SELECT 1 FROM task_session_turns t JOIN agent_delivery_submissions s ON s.id=? WHERE t.id=? AND t.task_session_id=? AND t.task_id=? AND s.session_id=? AND s.incarnation_id=? AND s.harness_generation=?)`), p.SubmissionID, p.TurnID, p.SessionID, p.TaskID, p.SessionID, p.IncarnationID, p.HarnessGeneration).Scan(&valid)
+	err = tx.QueryRowContext(ctx, tx.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM task_sessions ts
+			JOIN task_session_turns t ON t.task_session_id = ts.id AND t.task_id = ts.task_id
+			JOIN agent_delivery_submissions s ON s.id = ? AND s.session_id = ts.id
+				AND s.incarnation_id = ts.queue_incarnation_id AND s.harness_generation = ?
+			WHERE ts.id = ? AND ts.task_id = ? AND ts.queue_incarnation_id = ? AND t.id = ?
+		)`), p.SubmissionID, p.HarnessGeneration, p.SessionID, p.TaskID, p.IncarnationID, p.TurnID).Scan(&valid)
 	if err != nil {
-		return "", true, err
+		return "", isErrand, err
 	}
 	if !valid {
-		return "", true, conflict
+		return "", isErrand, conflict
 	}
-	return p.TurnID, true, r.validateAdmissionNativeSessionTx(ctx, tx, event, payload.SessionID, p.NativeSessionID)
+	return p.TurnID, isErrand, r.validateAdmissionNativeSessionTx(ctx, tx, event, payload.SessionID, p.NativeSessionID)
 }
 
 // ResolveAgentDeliveryEventTurn resolves callback attribution without changing
@@ -138,13 +149,14 @@ func (r *Repository) ResolveAgentDeliveryEventTurn(ctx context.Context, event *m
 		return "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	return r.errandEventAdmissionTx(ctx, tx, event)
+	return r.agentDeliveryEventAdmissionTx(ctx, tx, event)
 }
 
 func (p promptAdmission) matchesEvent(taskID string, event *models.AgentDeliveryEvent, payload streams.AgentEvent) bool {
 	return p.TaskID == taskID && p.SessionID == event.SessionID && p.IncarnationID == event.IncarnationID &&
 		p.HarnessGeneration == uint64(event.HarnessGeneration) && p.StreamID == event.StreamID &&
 		p.SubmissionID == event.SubmissionID && p.PromptGeneration != 0 &&
+		(event.ExecutionID == "" || p.ExecutionID == event.ExecutionID) &&
 		(payload.PromptGeneration == 0 || payload.PromptGeneration == p.PromptGeneration) &&
 		(payload.TurnID == "" || payload.TurnID == p.TurnID)
 }
@@ -175,10 +187,16 @@ func conflictingAdmissionEnvelope(taskID string, event *models.AgentDeliveryEven
 	return (event.TaskID != "" && event.TaskID != taskID) || (payload.DeliverySubmissionID != "" && payload.DeliverySubmissionID != event.SubmissionID)
 }
 
-func (r *Repository) resolveCanonicalErrandEventTx(ctx context.Context, tx *sqlx.Tx, stored *models.AgentDeliveryEvent, event streams.AgentEvent) (streams.AgentEvent, error) {
-	turn, errand, err := r.errandEventAdmissionTx(ctx, tx, stored)
+func (r *Repository) resolveCanonicalAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, stored *models.AgentDeliveryEvent, event streams.AgentEvent) (streams.AgentEvent, error) {
+	turn, errand, err := r.agentDeliveryEventAdmissionTx(ctx, tx, stored)
 	if err != nil || !errand {
-		return event, err
+		if err != nil {
+			return event, err
+		}
+		if turn != "" && event.TurnID == "" {
+			event.TurnID = turn
+		}
+		return event, nil
 	}
 	if stored.SubmissionID == "" && turn != "" {
 		turn, err = r.canonicalDeliveryTurnTx(ctx, tx, stored.SessionID, "", "", stored)
@@ -186,7 +204,9 @@ func (r *Repository) resolveCanonicalErrandEventTx(ctx context.Context, tx *sqlx
 			return event, err
 		}
 	}
-	event.TurnID = turn
+	if event.TurnID == "" {
+		event.TurnID = turn
+	}
 	if event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning {
 		event.CanonicalMessageBaseID = fmt.Sprintf("agent-delivery-owned:%s:%s:%s", turn, event.Type, event.ProtocolMessageID)
 		event.CanonicalMessageID = event.CanonicalMessageBaseID

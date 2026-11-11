@@ -620,6 +620,14 @@ func finalBootstrapAuthorityRead(
 }
 
 func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
+	return durableAgentEventWithPromptTurn(execution, event, true)
+}
+
+func durableAgentEventWithoutPromptTurn(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
+	return durableAgentEventWithPromptTurn(execution, event, false)
+}
+
+func durableAgentEventWithPromptTurn(execution *AgentExecution, event agentctl.AgentEvent, includePromptTurn bool) *models.AgentDeliveryEvent {
 	sessionID := ""
 	if execution != nil {
 		sessionID = execution.SessionID
@@ -642,7 +650,7 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 		harnessGeneration = 1
 	}
 	payloadEvent := event
-	if payloadEvent.TurnID == "" && event.DeliverySubmissionID == "" && execution != nil {
+	if includePromptTurn && payloadEvent.TurnID == "" && event.DeliverySubmissionID == "" && execution != nil {
 		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
 	}
 	payloadEvent.CanonicalMessageBaseID = canonicalAgentMessageID(execution, event)
