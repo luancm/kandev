@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type queuedTerminalEffectReader interface {
@@ -35,11 +36,21 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 		return errors.New("agent delivery submission repository is unavailable")
 	}
 	for _, effect := range effects {
-		if effect != nil {
-			if err := s.settleAgentDeliveryEffect(ctx, settlements, submissions, effect); err != nil {
-				return err
-			}
+		if effect == nil {
+			continue
 		}
+		err := s.settleAgentDeliveryEffect(ctx, settlements, submissions, effect)
+		if err == nil {
+			continue
+		}
+		// Startup can retain an unattributed terminal without granting settlement
+		// authority. Session-scoped callers still require exact identity.
+		if sessionID != "" || !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityMismatch) {
+			return err
+		}
+		s.logger.Warn("retaining delivery terminal with unresolved identity during startup",
+			zap.String("effect_key", effect.EffectKey), zap.String("session_id", effect.SessionID),
+			zap.Error(err))
 	}
 	if sessionID != "" {
 		// Completed effects in older installations can still leave a stale

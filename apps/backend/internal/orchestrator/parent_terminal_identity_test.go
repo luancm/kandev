@@ -272,6 +272,11 @@ func exerciseParentTerminalIdentityQueueRelease(t *testing.T, scenario parentTer
 	if err != nil {
 		t.Fatalf("queue ordinary user message: %v", err)
 	}
+	if scenario == parentTerminalIdentityMissingAdmission || scenario == parentTerminalIdentityConflictingEffect {
+		if err := service.reconcileDurableQueueStateOnStartup(ctx); err != nil {
+			t.Fatalf("startup must retain ambiguous terminal without aborting: %v", err)
+		}
+	}
 	completion := workflowEffectForEvent(watcher.AgentEventData{
 		TaskID: taskID, SessionID: sessionID, TurnID: terminal.TurnID,
 		DeliveryStreamID: streamID, DeliveryIncarnationID: incarnationID,
