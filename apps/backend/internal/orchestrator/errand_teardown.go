@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -31,6 +33,30 @@ type errandTeardownOwner struct {
 type errandTeardownTransition struct {
 	before *models.TaskSession
 	after  *models.TaskSession
+}
+
+type legacyAdmissionEvidenceError struct {
+	reason      string
+	fingerprint string
+}
+
+func (e legacyAdmissionEvidenceError) Error() string {
+	return "legacy errand lacks positive initial admission authority: " + e.reason
+}
+
+func (e legacyAdmissionEvidenceError) TeardownEvidenceKey() string { return e.fingerprint }
+
+func newLegacyAdmissionEvidenceError(reason string, turn *models.Turn, target models.ErrandTeardownTarget, parentID string) error {
+	evidence := []interface{}{reason, target, parentID}
+	if turn != nil {
+		evidence = append(evidence, turn.ID, turn.TaskID, turn.TaskSessionID, turn.Metadata[errandAdmissionTurnMetadataKey])
+	}
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return errors.New("legacy errand admission evidence could not be fingerprinted")
+	}
+	// Keep raw identity and admission values out of diagnostic messages and cache keys.
+	return legacyAdmissionEvidenceError{reason: reason, fingerprint: fmt.Sprintf("%x", sha256.Sum256(encoded))}
 }
 
 // CancelErrandWithTarget commits cancellation against a guarded runtime snapshot
@@ -90,8 +116,11 @@ func (o *errandTeardownOwner) captureLegacyTarget(ctx context.Context, row *mode
 	if err != nil {
 		return target, err
 	}
-	if !reservedTeardownSubmissionBound(turn, target, row.ParentSessionID) || !teardownTurnMatches(row, turn) {
-		return target, errors.New("legacy errand lacks positive initial admission authority")
+	if !teardownTurnMatches(row, turn) {
+		return target, newLegacyAdmissionEvidenceError("initial turn identity is missing or conflicting", turn, target, row.ParentSessionID)
+	}
+	if reason := legacyAdmissionEvidenceProblem(turn, target, row.ParentSessionID); reason != "" {
+		return target, newLegacyAdmissionEvidenceError(reason, turn, target, row.ParentSessionID)
 	}
 	return target, validateCapturedTeardownTarget(row, target)
 }
@@ -321,7 +350,7 @@ func observedTeardownSubmission(submissions []*models.AgentDeliverySubmission, r
 }
 
 func teardownTurnMatches(row *models.Errand, turn *models.Turn) bool {
-	return turn.TaskID == row.TaskID && turn.TaskSessionID == row.ID && strings.TrimSpace(turn.ID) != ""
+	return turn != nil && turn.TaskID == row.TaskID && turn.TaskSessionID == row.ID && strings.TrimSpace(turn.ID) != ""
 }
 
 func teardownSubmissionEvidence(submission *models.AgentDeliverySubmission, turn *models.Turn) (active, terminal bool, err error) {
@@ -452,8 +481,8 @@ func (o *errandTeardownOwner) classifyObservedPrompt(ctx context.Context, store 
 		}
 		return nil, "", errands.TeardownSuperseded, nil
 	}
-	if target.FirstTurnID != "" && !reservedTeardownSubmissionBound(turn, target, row.ParentSessionID) {
-		return nil, "", "", errors.New("reserved errand runtime lacks exact initial admission evidence")
+	if err := reservedTeardownSubmissionEvidenceError(turn, target, row.ParentSessionID); err != nil {
+		return nil, "", "", err
 	}
 	if absent {
 		return nil, "", errands.TeardownCompleted, nil
@@ -461,13 +490,34 @@ func (o *errandTeardownOwner) classifyObservedPrompt(ctx context.Context, store 
 	return session, executionID, "", nil
 }
 
-func reservedTeardownSubmissionBound(turn *models.Turn, target models.ErrandTeardownTarget, parentID string) bool {
-	if turn == nil {
-		return false
+func reservedTeardownSubmissionEvidenceError(turn *models.Turn, target models.ErrandTeardownTarget, parentID string) error {
+	if target.FirstTurnID == "" {
+		return nil
 	}
-	marker, _ := turn.Metadata[errandAdmissionTurnMetadataKey].(map[string]interface{})
-	return marker["submission_id"] == target.ReservedSubmissionID &&
-		marker["sender_session_id"] == parentID && marker["state"] == string(models.ErrandAdmissionAccepted)
+	if reason := legacyAdmissionEvidenceProblem(turn, target, parentID); reason != "" {
+		return newLegacyAdmissionEvidenceError(reason, turn, target, parentID)
+	}
+	return nil
+}
+
+func legacyAdmissionEvidenceProblem(turn *models.Turn, target models.ErrandTeardownTarget, parentID string) string {
+	if turn == nil {
+		return "initial turn evidence is missing"
+	}
+	marker, ok := turn.Metadata[errandAdmissionTurnMetadataKey].(map[string]interface{})
+	if !ok {
+		return "initial admission marker is missing"
+	}
+	if marker["submission_id"] != target.ReservedSubmissionID {
+		return "initial submission authority is missing or conflicting"
+	}
+	if marker["sender_session_id"] != parentID {
+		return "initial sender authority is missing or conflicting"
+	}
+	if marker["state"] != string(models.ErrandAdmissionAccepted) {
+		return "initial admission state is missing or conflicting"
+	}
+	return ""
 }
 
 func teardownTurnChanged(target models.ErrandTeardownTarget, turn *models.Turn) bool {

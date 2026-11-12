@@ -15,6 +15,11 @@ import (
 
 const maxTeardownRetriesPerSweep = 32
 
+type teardownEvidenceDiagnostic interface {
+	error
+	TeardownEvidenceKey() string
+}
+
 func pendingTeardown(row *models.Errand) bool {
 	if row.TeardownIntent == nil {
 		return false
@@ -153,6 +158,7 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	s.pruneTeardownEvidenceWarnings(candidates)
 	start := sort.Search(len(candidates), func(i int) bool { return candidates[i].ID > s.teardownCursor })
 	var failures []error
 	for i := 0; i < min(len(candidates), maxTeardownRetriesPerSweep); i++ {
@@ -177,11 +183,48 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 		}
 		cancel()
 		if err != nil {
+			if !s.shouldReportTeardownFailure(row.ID, err) {
+				continue
+			}
 			s.logger.Warn("errand teardown remains pending", zap.String("errand_id", row.ID), zap.Error(err))
 			failures = append(failures, fmt.Errorf("errand %s teardown: %w", row.ID, err))
+		} else {
+			delete(s.teardownEvidenceWarnings, row.ID)
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func (s *Service) pruneTeardownEvidenceWarnings(candidates []*models.Errand) {
+	if len(s.teardownEvidenceWarnings) == 0 {
+		return
+	}
+	active := make(map[string]struct{}, len(candidates))
+	for _, row := range candidates {
+		active[row.ID] = struct{}{}
+	}
+	for errandID := range s.teardownEvidenceWarnings {
+		if _, ok := active[errandID]; !ok {
+			delete(s.teardownEvidenceWarnings, errandID)
+		}
+	}
+}
+
+func (s *Service) shouldReportTeardownFailure(errandID string, err error) bool {
+	var diagnostic teardownEvidenceDiagnostic
+	if !errors.As(err, &diagnostic) || diagnostic.TeardownEvidenceKey() == "" {
+		delete(s.teardownEvidenceWarnings, errandID)
+		return true
+	}
+	if s.teardownEvidenceWarnings == nil {
+		s.teardownEvidenceWarnings = make(map[string]string)
+	}
+	key := diagnostic.TeardownEvidenceKey()
+	if s.teardownEvidenceWarnings[errandID] == key {
+		return false
+	}
+	s.teardownEvidenceWarnings[errandID] = key
+	return true
 }
 
 func legacyTeardown(row *models.Errand) bool {

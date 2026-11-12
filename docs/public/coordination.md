@@ -50,6 +50,8 @@ Regular session tabs and session pickers are for normal task conversations. Erra
 
 The pill remains available after all errands finish. Its panel offers **Stop all errands** while any errand is live; this action retains task-wide scope, including errands belonging to other parent conversations.
 
+The pill shows separate nonzero counts for running, queued and attention errands in the selected parent conversation. Every live row has its own named **Stop** beside **Open**, including queued and recovery-attention work. Stopping one errand keeps its transcript in the panel's completed history and leaves sibling errands running; the panel updates from the authoritative status. On phones, **Open** and **Stop** are separate touch controls.
+
 Errand rows also show used and total context tokens with a usage bar when a reliable reading is available, or say that usage is not measured when the window is known but has no positive sample. Rows without a usable window omit the readout. Open the child to inspect the full usage, source, and compaction details.
 
 An opened child offers **Stop** while live, a follow-up composer, and **Send result to parent** when a user-initiated result is eligible. Cancelling the parent's current turn leaves its errands running; stopping or deleting the parent/task cascades to its errands.

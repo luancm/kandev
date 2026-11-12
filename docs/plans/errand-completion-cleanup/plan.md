@@ -12,6 +12,8 @@ legacy_specs: []
 
 ## Current state and authorization
 
+2026-11-12 follow-up: the user reported repeated cancelled-session projection and legacy admission-authority warnings, then explicitly requested Errands to implement the fix. [Task 02](task-02-terminal-compatibility.md) owns this bounded remediation under the existing cancellation-precedence and conservative-recovery contract. Implementation and review remediation are accepted: 77 parent race tests and scoped Go lint passed; the fresh combined desktop suite passed 19/19. Final phone and delivery evidence are tracked in the [parent integration handoff](../errand-panel-controls/final-integration-handoff.md). The panel-controls work remains a separate package.
+
 The user approved automatic runtime close after durable result capture, retained transcripts/results, clear completed session state and explicit continuation, and requested an Errand to implement it. This is new lifecycle behavior: review-repair Task10 explicitly excluded successful-errand runtime parking. The existing 29 repair work orders remain complete; this package owns the new work.
 
 At source `18c03cc4cf591908ffb125beb7a24c50a089514c`, `settleDetachedAgentReadyTurn` publishes `WAITING_FOR_INPUT` after settlement and leaves a promptable runtime. `finishAgentCompletedTurn` schedules cleanup but leaves the same waiting state. Inspection found 81 retained errand sessions in that state, all with stopped executor records; live runtime inventory contained only the parent. Those observations demonstrate stale retained state, not 81 live runtime leaks.
@@ -55,6 +57,7 @@ This changes state semantics within existing surfaces, not layout. The phone ret
 ## Work order and acceptance mapping
 
 - [x] [Task 01: Close completed errand runtimes and preserve continuation](task-01-completion-cleanup.md)
+- [x] [Task 02: Reconcile cancelled and legacy cleanup obligations](task-02-terminal-compatibility.md)
 
 | Acceptance | Regression boundary |
 | --- | --- |

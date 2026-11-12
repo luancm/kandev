@@ -20,6 +20,23 @@ import { cn } from "@/lib/utils";
 import { ErrandsPanel } from "./errands-panel";
 
 type ChipTone = "live" | "attention" | "idle";
+type ErrandsChipCountKey =
+  | "task:errandsChipNeedsAttention"
+  | "task:errandsChipRunning"
+  | "task:errandsChipQueued";
+
+function getStatusCountLabels(
+  attentionCount: number,
+  runningCount: number,
+  queuedCount: number,
+  format: (key: ErrandsChipCountKey, count: number) => string,
+) {
+  const labels: string[] = [];
+  if (attentionCount > 0) labels.push(format("task:errandsChipNeedsAttention", attentionCount));
+  if (runningCount > 0) labels.push(format("task:errandsChipRunning", runningCount));
+  if (queuedCount > 0) labels.push(format("task:errandsChipQueued", queuedCount));
+  return labels;
+}
 
 const TONE_CLASS: Record<ChipTone, string> = {
   live: "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
@@ -73,11 +90,11 @@ const ErrandsTrigger = forwardRef<HTMLButtonElement, ErrandsTriggerProps>(functi
         className,
         "inline-flex max-w-full cursor-pointer items-center justify-center gap-1.5 rounded-full border text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         TONE_CLASS[tone],
-        usesDrawer ? "min-h-11 min-w-11 px-3" : "h-6 px-2.5",
+        usesDrawer ? "min-h-11 min-w-11 px-3 py-1" : "h-6 px-2.5",
       )}
     >
       <ChipIndicator tone={tone} recovery={recovery} />
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 whitespace-normal text-center">{label}</span>
     </button>
   );
 });
@@ -85,7 +102,7 @@ const ErrandsTrigger = forwardRef<HTMLButtonElement, ErrandsTriggerProps>(functi
 type ErrandsChipBodyProps = { taskId: string; sessionId?: string | null };
 
 function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const {
     errands: allErrands,
     errandsByParent,
@@ -97,6 +114,9 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
   );
   const errands = parentId ? (errandsByParent[parentId] ?? []) : allErrands;
   const liveCount = errands.filter(isLiveErrand).length;
+  const runningCount = errands.filter((errand) => errand.status === "running").length;
+  const queuedCount = errands.filter((errand) => errand.status === "queued").length;
+  const attentionCount = errands.filter((errand) => errand.status === "needs_attention").length;
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const usesDrawer = !isFinePointer || isMobile;
   const [open, setOpen] = useState(false);
@@ -107,17 +127,30 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
     (errand) =>
       errand.status === "needs_attention" && errand.attention_reason === "recovery_unresolved",
   );
-  const needsAttention = errands.some((errand) => errand.status === "needs_attention");
+  const needsAttention = attentionCount > 0;
   let tone: ChipTone = "idle";
   if (needsAttention) tone = "attention";
   else if (liveCount > 0) tone = "live";
+  const statusCounts = getStatusCountLabels(
+    attentionCount,
+    runningCount,
+    queuedCount,
+    (key, count) => t(key, { count }),
+  );
   const label =
-    liveCount > 0
-      ? t("task:errandsChipRunning", { count: liveCount })
+    statusCounts.length > 0
+      ? t("task:errandsChipStatus", {
+          counts: new Intl.ListFormat(
+            i18n.resolvedLanguage === "pseudo" ? "en" : (i18n.resolvedLanguage ?? i18n.language),
+            {
+              style: "long",
+              type: "conjunction",
+            },
+          ).format(statusCounts),
+        })
       : t("task:errandsChipIdle", { count: errands.length });
   let ariaLabel = label;
   if (recoveryNeedsAttention) ariaLabel = t("task:errandsChipRecoveryAria", { label });
-  else if (needsAttention) ariaLabel = t("task:errandsChipAttentionAria", { label });
   const trigger = (
     <ErrandsTrigger
       detailsId={detailsId}

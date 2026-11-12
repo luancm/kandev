@@ -3,12 +3,18 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -54,15 +60,126 @@ func (r *teardownIntegrationRepo) GetTaskSession(ctx context.Context, id string)
 
 func teardownIntegrationService(t *testing.T, f *errandTeardownFixture, store errands.Store) (*errands.Service, *errandEventRecorder) {
 	t.Helper()
+	return teardownIntegrationServiceWithLogger(t, f, store, testLogger())
+}
+
+func teardownIntegrationServiceWithLogger(t *testing.T, f *errandTeardownFixture, store errands.Store, log *logger.Logger) (*errands.Service, *errandEventRecorder) {
+	t.Helper()
 	adapter := NewErrandAdapter(f.svc)
 	recorder := &errandEventRecorder{}
 	service, err := errands.New(errands.Dependencies{
 		Store: store, Launcher: adapter, Stopper: adapter, MCP: adapter,
-		Profiles: errandProfileStub{}, Events: recorder, Logger: testLogger(),
+		Profiles: errandProfileStub{}, Events: recorder, Logger: log,
 	})
 	require.NoError(t, err)
 	f.svc.SetErrandController(service)
 	return service, recorder
+}
+
+// @covers AC-TASKS-ERRAND-COMPLETION-001.4
+func TestErrandLegacyAdmissionRefusalLogsOnceAndRetriesChangedEvidence(t *testing.T) {
+	f := newErrandTeardownFixture(t)
+	now := time.Now().UTC()
+	f.row.Lifecycle, f.row.CancelSource, f.row.SettledAt = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser, &now
+	require.NoError(t, f.repo.UpdateErrand(t.Context(), f.row))
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	zapLogger := zap.New(core)
+	wrapped, err := logger.NewFromZap(zapLogger)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = zapLogger.Sync() })
+	service, _ := teardownIntegrationServiceWithLogger(t, f, f.repo, wrapped)
+
+	require.ErrorContains(t, service.Reconcile(t.Context()), "legacy errand lacks positive initial admission authority")
+	require.NoError(t, service.Reconcile(t.Context()), "unchanged evidence keeps retrying without repeating the diagnostic")
+	require.Len(t, logs.FilterMessage("errand teardown remains pending").All(), 1)
+	row, err := f.repo.GetErrand(t.Context(), f.row.ID)
+	require.NoError(t, err)
+	require.Nil(t, row.TeardownIntent, "unknown admission remains protected")
+	require.Empty(t, f.provider.stops)
+	assertChangedAdmissionRefusals(t, f, service, logs, "submission_id", "sender_session_id", "state")
+
+	require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
+		errandAdmissionTurnMetadataKey: map[string]interface{}{"submission_id": f.row.SubmissionID,
+			"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)},
+	}))
+	require.NoError(t, service.Reconcile(t.Context()), "new exact admission evidence makes the retry eligible")
+	row, err = f.repo.GetErrand(t.Context(), f.row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
+	require.Equal(t, []string{"exec-1"}, f.provider.stops)
+}
+
+func TestErrandPendingReservedAdmissionDiagnosticLogsOnceAndRetriesChangedEvidence(t *testing.T) {
+	f := newErrandTeardownFixture(t)
+	f.row = &models.Errand{ID: "reserved", TaskID: f.row.TaskID, ParentSessionID: f.row.ParentSessionID,
+		Title: "Reserved cleanup", Objective: "Recover the reserved launch", AgentProfileID: "profile",
+		FirstTurnID: "reserved-turn", SubmissionID: "prompt:reserved", Lifecycle: models.ErrandLifecycleQueued,
+		ResultState: models.ErrandResultNone}
+	require.NoError(t, f.repo.CreateErrand(t.Context(), f.row))
+	intent := f.pending(t)
+	require.Equal(t, f.row.FirstTurnID, intent.Target.FirstTurnID)
+
+	seedErrandSession(t, f.repo, f.row.TaskID, f.row.ParentSessionID, f.row.ID, models.TaskSessionStateRunning)
+	session, err := f.repo.GetTaskSession(t.Context(), f.row.ID)
+	require.NoError(t, err)
+	require.NoError(t, f.repo.CreateTurn(t.Context(), &models.Turn{ID: f.row.FirstTurnID, TaskID: f.row.TaskID,
+		TaskSessionID: f.row.ID, StartedAt: time.Now().UTC()}))
+	seedExecutorRunning(t, f.repo, f.row.ID, f.row.TaskID, "exec-reserved")
+	f.provider.mu.Lock()
+	f.provider.current = "exec-reserved"
+	f.provider.runtimes["exec-reserved"] = &agentruntime.AgentExecution{ID: "exec-reserved", TaskID: f.row.TaskID,
+		SessionID: f.row.ID, DeliveryIncarnationID: session.QueueIncarnationID}
+	f.provider.mu.Unlock()
+
+	core, logs := observer.New(zapcore.DebugLevel)
+	zapLogger := zap.New(core)
+	wrapped, err := logger.NewFromZap(zapLogger)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = zapLogger.Sync() })
+	service, _ := teardownIntegrationServiceWithLogger(t, f, f.repo, wrapped)
+
+	require.ErrorContains(t, service.Reconcile(t.Context()), "legacy errand lacks positive initial admission authority")
+	require.NoError(t, service.Reconcile(t.Context()), "unchanged persisted evidence remains retryable without repeating its warning")
+	require.Len(t, logs.FilterMessage("errand teardown remains pending").All(), 1,
+		"the per-row warning and returned sweep error share one stable refusal report")
+	row, err := f.repo.GetErrand(t.Context(), f.row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandTeardownIntentPending, row.TeardownIntent.State)
+	require.Empty(t, f.provider.stops)
+	// A different observed submission supersedes a reserved target before admission diagnostics.
+	assertChangedAdmissionRefusals(t, f, service, logs, "sender_session_id", "state")
+
+	require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
+		errandAdmissionTurnMetadataKey: map[string]interface{}{"submission_id": f.row.SubmissionID,
+			"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)},
+	}))
+	require.NoError(t, service.Reconcile(t.Context()), "changed exact authority is retried")
+	row, err = f.repo.GetErrand(t.Context(), f.row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
+	require.Equal(t, []string{"exec-reserved"}, f.provider.stops)
+}
+
+func assertChangedAdmissionRefusals(t *testing.T, f *errandTeardownFixture, service *errands.Service, logs *observer.ObservedLogs, fields ...string) {
+	t.Helper()
+	count := logs.FilterMessage("errand teardown remains pending").Len()
+	for _, field := range fields {
+		for _, value := range []interface{}{nil, "conflicting-a", "conflicting-b"} {
+			marker := map[string]interface{}{"submission_id": f.row.SubmissionID,
+				"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)}
+			marker[field] = value
+			require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID,
+				map[string]interface{}{errandAdmissionTurnMetadataKey: marker}))
+			require.ErrorContains(t, service.Reconcile(t.Context()), "legacy errand lacks positive initial admission authority",
+				"changed %s=%v evidence must be reported, including within the same refusal category", field, value)
+			count++
+			require.Len(t, logs.FilterMessage("errand teardown remains pending").All(), count)
+			require.NoError(t, service.Reconcile(t.Context()), "identical evidence remains deduplicated")
+			require.Len(t, logs.FilterMessage("errand teardown remains pending").All(), count)
+			require.Empty(t, f.provider.stops, "invalid admission must not authorize stopping")
+		}
+	}
 }
 
 // @covers AC-TASKS-ERRANDS-007.1 AC-TASKS-ERRANDS-007.6 AC-TASKS-ERRANDS-012.3
@@ -285,14 +402,34 @@ func TestErrandTeardownRecoveryWaitsForAuthenticatedInventory(t *testing.T) {
 }
 
 func TestErrandTeardownLegacyRecoveryRequiresInitialAdmissionProof(t *testing.T) {
-	for _, variant := range []string{"unknown", "initial", "later user turn"} {
+	for _, variant := range []string{
+		"unknown", "missing submission", "conflicting submission", "missing sender", "conflicting sender",
+		"missing state", "conflicting state", "initial", "later user turn",
+	} {
 		t.Run(variant, func(t *testing.T) {
 			f := newErrandTeardownFixture(t)
 			var err error
+			admission := map[string]interface{}{
+				"submission_id": f.row.SubmissionID, "sender_session_id": f.row.ParentSessionID,
+				"state": string(models.ErrandAdmissionAccepted),
+			}
+			if strings.HasPrefix(variant, "missing ") || strings.HasPrefix(variant, "conflicting ") {
+				field := strings.TrimPrefix(strings.TrimPrefix(variant, "missing "), "conflicting ")
+				switch field {
+				case "submission":
+					field = "submission_id"
+				case "sender":
+					field = "sender_session_id"
+				}
+				if strings.HasPrefix(variant, "missing ") {
+					delete(admission, field)
+				} else {
+					admission[field] = "foreign-authority"
+				}
+			}
 			if variant != "unknown" {
 				require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
-					errandAdmissionTurnMetadataKey: map[string]interface{}{"submission_id": f.row.SubmissionID,
-						"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)},
+					errandAdmissionTurnMetadataKey: admission,
 				}))
 			}
 			if variant == "later user turn" {
@@ -309,10 +446,20 @@ func TestErrandTeardownLegacyRecoveryRequiresInitialAdmissionProof(t *testing.T)
 			err = service.Reconcile(t.Context())
 			row, readErr := f.repo.GetErrand(t.Context(), f.row.ID)
 			require.NoError(t, readErr)
-			if variant == "unknown" {
-				require.Error(t, err)
+			evidenceRefusal := variant == "unknown" || strings.HasPrefix(variant, "missing ") || strings.HasPrefix(variant, "conflicting ")
+			if evidenceRefusal {
+				require.ErrorContains(t, err, "legacy errand lacks positive initial admission authority")
 				require.Nil(t, row.TeardownIntent)
 				require.Empty(t, f.provider.stops)
+				require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
+					errandAdmissionTurnMetadataKey: map[string]interface{}{"submission_id": f.row.SubmissionID,
+						"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)},
+				}))
+				require.NoError(t, service.Reconcile(t.Context()), "changed exact authority is retried")
+				row, readErr = f.repo.GetErrand(t.Context(), f.row.ID)
+				require.NoError(t, readErr)
+				require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
+				require.Equal(t, []string{"exec-1"}, f.provider.stops)
 			} else {
 				require.NoError(t, err)
 				require.NotNil(t, row.TeardownIntent)

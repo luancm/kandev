@@ -26,13 +26,15 @@ import {
   waitParentIdle,
 } from "../../helpers/errands";
 import { mockTurnGate } from "../../helpers/mock-turn-gate";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const INLINE = "errands-inline-summary";
 const CHIP = "errands-chip";
 const BACK = "errand-back-to-parent";
 const DRAWER = "errands-drawer-content";
 
-test("phone pill opens the scrolling drawer, full-screen child, Back and Stop controls", async ({
+// @covers AC-TASKS-ERRANDS-007.1 AC-TASKS-ERRANDS-010.12 AC-TASKS-ERRANDS-011.8
+test("phone panel Stop is isolated and retains the transcript beside Open", async ({
   testPage: page,
   apiClient: api,
   seedData: seed,
@@ -40,9 +42,25 @@ test("phone pill opens the scrolling drawer, full-screen child, Back and Stop co
 }, testInfo) => {
   test.setTimeout(180_000);
   const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  let gates: ReturnType<typeof mockTurnGate>[] = [];
   try {
     await page.setViewportSize({ width: 393, height: 600 });
-    const { taskId, parentId, errands } = await startErrands(api, seed, backend, { count: 5 });
+    const fixture = await startErrands(api, seed, backend, {
+      count: 5,
+    });
+    const { taskId, parentId, errands } = fixture;
+    gates = fixture.gates;
+    await expect
+      .poll(async () => {
+        const sessions = new Map(
+          (await api.listTaskSessions(taskId)).sessions.map((session) => [
+            session.id,
+            session.state,
+          ]),
+        );
+        return errands.map((errand) => sessions.get(errand.errand_id));
+      })
+      .toEqual(errands.map(() => "RUNNING"));
     await page.goto(`/t/${taskId}`);
     const chat = parentChat(page, parentId);
     // @covers AC-TASKS-ERRANDS-011.2 AC-TASKS-ERRANDS-011.7
@@ -64,22 +82,65 @@ test("phone pill opens the scrolling drawer, full-screen child, Back and Stop co
     const open = drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     await open.scrollIntoViewIfNeeded();
     await expectTouchTarget(open);
+    const panelStop = drawer.getByTestId(`errand-stop-${errands[0].errand_id}`);
+    await expectTouchTarget(panelStop);
+    await expect(chat.getByTestId(CHIP)).toContainText("5 running");
     await expectNoHorizontalOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("errands-phone-drawer.png") });
-    await open.tap();
-    const child = parentChat(page, errands[0].errand_id);
+
+    const originalTranscript = await api.listSessionMessages(errands[0].errand_id);
+    expect(originalTranscript.messages.length).toBeGreaterThan(0);
+    await panelStop.tap();
+    await expect
+      .poll(
+        async () =>
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[0].errand_id)
+            ?.status,
+      )
+      .toBe("cancelled");
+    await expect
+      .poll(
+        async () =>
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[1].errand_id)
+            ?.status,
+      )
+      .toBe("running");
+    const retainedTranscript = await api.listSessionMessages(errands[0].errand_id);
+    const retainedMessageIds = new Set(retainedTranscript.messages.map((message) => message.id));
+    expect(originalTranscript.messages.every((message) => retainedMessageIds.has(message.id))).toBe(
+      true,
+    );
+    await expect(chat.getByTestId(CHIP)).toContainText("4 running");
+
+    await drawer.getByTestId("errands-completed-toggle").tap();
+    const cancelledOpen = drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
+    await cancelledOpen.tap();
+    const cancelledChild = parentChat(page, errands[0].errand_id);
+    await expect(cancelledChild.getByTestId("errand-header")).toHaveAttribute(
+      "data-layout",
+      "phone",
+    );
+    await cancelledChild.getByTestId(BACK).tap();
+    await expect(chat).toBeVisible();
+
+    await chat.getByTestId(CHIP).tap();
+    const liveOpen = page
+      .getByTestId(DRAWER)
+      .getByTestId(`errands-panel-row-${errands[1].errand_id}`);
+    await liveOpen.tap();
+    const child = parentChat(page, errands[1].errand_id);
     await expect(child.getByTestId("errand-header")).toHaveAttribute("data-layout", "phone");
     await expect(page.locator(".chat-message-list:visible")).toHaveCount(1);
     await expectTouchTarget(child.getByTestId(BACK));
     await page.screenshot({ path: testInfo.outputPath("errands-phone-child.png") });
     await child.getByTestId("errand-actions-menu").tap();
-    const stop = page.getByRole("menuitem", { name: "Stop", exact: true });
-    await expectTouchTarget(stop);
-    await stop.tap();
+    const headerStop = page.getByRole("menuitem", { name: "Stop", exact: true });
+    await expectTouchTarget(headerStop);
+    await headerStop.tap();
     await expect
       .poll(
         async () =>
-          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[0].errand_id)
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[1].errand_id)
             ?.status,
       )
       .toBe("cancelled");
@@ -113,6 +174,7 @@ test("phone pill opens the scrolling drawer, full-screen child, Back and Stop co
     await page.keyboard.press("Escape");
     await expectNoHorizontalOverflow(page);
   } finally {
+    for (const gate of gates) await gate.release();
     await restore();
   }
 });
@@ -628,27 +690,116 @@ test("phone Threads announces only the snapped conversation and baselines a hidd
 });
 
 test.describe("narrow fine-pointer phone layout", () => {
-  test("keeps the pill, drawer Open and Stop-all targets at least 44px", async ({
+  test("keeps phone Open and Stop targets at least 44px across the breakpoint", async ({
     desktopTestPage: page,
     apiClient: api,
     seedData: seed,
     backend,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(120_000);
-    await page.setViewportSize({ width: 767, height: 850 });
     const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+    let gates: ReturnType<typeof mockTurnGate>[] = [];
     try {
-      const { taskId, parentId, errands } = await startErrands(api, seed, backend, { count: 1 });
+      const fixture = await startErrands(api, seed, backend, { count: 3 });
+      const { taskId, parentId, errands } = fixture;
+      gates = fixture.gates;
+      await expect
+        .poll(async () => {
+          const sessions = new Map(
+            (await api.listTaskSessions(taskId)).sessions.map((session) => [
+              session.id,
+              session.state,
+            ]),
+          );
+          return errands.map((errand) => sessions.get(errand.errand_id));
+        })
+        .toEqual(errands.map(() => "RUNNING"));
+      const browserSocket = await routeErrandUpdateBrowserSocket(page);
       await page.goto(`/t/${taskId}`);
       const chat = parentChat(page, parentId);
-      await expectTouchTarget(chat.getByTestId(CHIP));
-      await chat.getByTestId(CHIP).click();
-      const drawer = page.getByTestId(DRAWER);
-      await expect(drawer).toBeVisible();
-      await expectTouchTarget(drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`));
-      await expectTouchTarget(drawer.getByTestId("errands-stop-all"));
-      await expectNoHorizontalOverflow(page);
+      await expect.poll(() => browserSocket.isConnected()).toBe(true);
+      const chip = chat.getByTestId(CHIP);
+      await expect(chip).toContainText("3 running");
+      const updateBase = Date.now() + 60_000;
+      browserSocket.notifyErrandUpdated({
+        ...errands[0],
+        status: "needs_attention",
+        updated_at: new Date(updateBase).toISOString(),
+      });
+      browserSocket.notifyErrandUpdated({
+        ...errands[1],
+        status: "queued",
+        updated_at: new Date(updateBase + 1_000).toISOString(),
+      });
+      const mixedLabel = "Errands: 1 needs attention, 1 running, and 1 queued";
+      await expect(chip).toHaveText(mixedLabel);
+      await expect(chip).toHaveAttribute("aria-label", mixedLabel);
+      for (const width of [320, 393, 767, 768]) {
+        await page.setViewportSize({ width, height: 850 });
+        await expect(chip).toHaveText(mixedLabel);
+        if (width === 320) {
+          const label = chip.locator(":scope > span").last();
+          const metrics = await label.evaluate((element) => {
+            const style = window.getComputedStyle(element);
+            const fontSize = Number.parseFloat(style.fontSize);
+            const lineHeight = Number.parseFloat(style.lineHeight) || fontSize * 1.2;
+            return {
+              height: element.getBoundingClientRect().height,
+              lineHeight,
+              whiteSpace: style.whiteSpace,
+              textOverflow: style.textOverflow,
+            };
+          });
+          expect(metrics.whiteSpace).toBe("normal");
+          expect(metrics.textOverflow).not.toBe("ellipsis");
+          expect(metrics.height).toBeGreaterThan(metrics.lineHeight + 1);
+          const chipBox = await chip.boundingBox();
+          expect(chipBox).not.toBeNull();
+          expect(chipBox!.height).toBeGreaterThanOrEqual(44);
+        }
+        await chat.getByTestId(CHIP).click();
+        if (width === 768) {
+          const popover = page.getByTestId("errands-popover");
+          await expect(popover).toBeVisible();
+          await expect(popover.getByTestId(`errand-stop-${errands[2].errand_id}`)).toBeVisible();
+          await expect(page.getByTestId(DRAWER)).toHaveCount(0);
+          await expectNoHorizontalOverflow(page);
+          await page.keyboard.press("Escape");
+          continue;
+        }
+        const drawer = page.getByTestId(DRAWER);
+        const row = drawer.getByTestId(`errands-panel-row-${errands[2].errand_id}`);
+        const stop = drawer.getByTestId(`errand-stop-${errands[2].errand_id}`);
+        await expect(drawer).toBeVisible();
+        await waitForFiniteAnimations(drawer);
+        await expectTouchTarget(row);
+        await expectTouchTarget(stop);
+        const [rowBox, stopBox, surfaceBox] = await Promise.all([
+          row.boundingBox(),
+          stop.boundingBox(),
+          drawer.getByTestId(`errands-panel-row-actions-${errands[2].errand_id}`).boundingBox(),
+        ]);
+        expect(rowBox).not.toBeNull();
+        expect(stopBox).not.toBeNull();
+        expect(surfaceBox).not.toBeNull();
+        const drawerBox = await drawer.boundingBox();
+        const viewport = page.viewportSize()!;
+        expect(drawerBox).not.toBeNull();
+        expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+        expect(drawerBox!.y).toBeGreaterThanOrEqual(0);
+        expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+        expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(viewport.height + 1);
+        expect(stopBox!.x).toBeGreaterThanOrEqual(surfaceBox!.x);
+        expect(stopBox!.x + stopBox!.width).toBeLessThanOrEqual(surfaceBox!.x + surfaceBox!.width);
+        expect(rowBox!.x + rowBox!.width).toBeLessThanOrEqual(surfaceBox!.x + surfaceBox!.width);
+        if (width === 320) {
+          await page.screenshot({ path: testInfo.outputPath("errands-narrow-fine-pointer.png") });
+        }
+        await expectNoHorizontalOverflow(page);
+        await page.keyboard.press("Escape");
+      }
     } finally {
+      for (const gate of gates) await gate.release();
       await restore();
     }
   });

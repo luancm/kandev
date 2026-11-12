@@ -587,13 +587,17 @@ export async function expectMixedParentOrdering(
         ["queued", "running", "needs_attention"].includes(row.status),
       );
       const finished = current.filter((row) => !active.includes(row));
-      await expect(surface.locator('[data-testid^="errands-panel-row-"]')).toHaveCount(
-        active.length + (expanded ? finished.length : 0),
-      );
+      await expect(
+        surface.locator(
+          '[data-testid^="errands-panel-row-"]:not([data-testid^="errands-panel-row-actions-"])',
+        ),
+      ).toHaveCount(active.length + (expanded ? finished.length : 0));
       await expect
         .poll(() =>
           surface
-            .locator('[data-testid^="errands-panel-row-"]')
+            .locator(
+              '[data-testid^="errands-panel-row-"]:not([data-testid^="errands-panel-row-actions-"])',
+            )
             .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid"))),
         )
         .toEqual([...orderedErrandIds(active), ...(expanded ? orderedErrandIds(finished) : [])]);

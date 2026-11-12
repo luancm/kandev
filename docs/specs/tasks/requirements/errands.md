@@ -259,13 +259,15 @@ The [result delivery contract](errand-result-delivery.md) owns REQ-TASKS-ERRANDS
 - **AC-TASKS-ERRANDS-010.8:** The errands panel shall offer
   **Stop all errands** while any errand of the task is live.
 - **AC-TASKS-ERRANDS-010.9:** The parent's composer shall stay enabled while
-  its errands run, and the errands chip shall show the live errand count.
+  its errands run, and the errands chip shall show the live errand count. The chip shall expose each nonzero running, queued and attention count for the selected parent; only `running` errands shall be labelled running. Settled errands shall not inflate these counts.
 
 - **AC-TASKS-ERRANDS-010.10:** Superseded by criterion 010.11.
 - **AC-TASKS-ERRANDS-010.11:** The chip/panel shall own task-wide management;
   transcripts shall omit a duplicate current inventory. Start/await entries
   and delivered cards shall remain separate; finishing an errand shall not
   replace its start entry.
+
+- **AC-TASKS-ERRANDS-010.12:** Every live errand row in the parent panel shall offer individually named **Stop**, including queued and recovery-attention errands. Pending Stop shall be disabled and show progress. Failure shall keep the row available with a localized error; success shall retain its transcript and follow the authoritative cancelled status. Stopping one row shall neither open its conversation nor stop another errand. Settled rows shall omit Stop.
 
 ### REQ-TASKS-ERRANDS-011: Phone composition
 
@@ -292,6 +294,8 @@ The [result delivery contract](errand-result-delivery.md) owns REQ-TASKS-ERRANDS
   transcript inventory. Start/result entries shall fit phone width; Open shall
   show full-screen child chat with Back. Preserve one chat scroller, reading
   position and a usable composer.
+
+- **AC-TASKS-ERRANDS-011.8:** The phone Errands drawer shall expose the same individual Stop action beside a separate Open target, with no nested interactive controls. Each action shall have an accessible name and a hit target of at least 44px, including on narrow fine-pointer screens.
 
 ### REQ-TASKS-ERRANDS-012: Release toggle
 

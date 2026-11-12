@@ -44,23 +44,37 @@ func (o *errandTeardownOwner) retryCompletion(ctx context.Context, store errandT
 	if row.TeardownIntent.State != models.ErrandTeardownIntentClosed {
 		return "", errors.New("errand completion has no close receipt")
 	}
-	if _, err := o.validateCompletionAuthority(ctx, store, row, intent, nil); err != nil {
+	session, err := o.validateCompletionAuthority(ctx, store, row, intent, nil)
+	if err != nil {
 		return "", err
+	}
+	if session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateFailed {
+		if err := o.completeClosedIntent(ctx, store, row, intent); err != nil {
+			return "", err
+		}
+		return errands.TeardownCompleted, nil
 	}
 	if err := o.projectCompletedSession(ctx, row, intent); err != nil {
 		return "", err
 	}
-	latest, err := store.GetErrand(ctx, row.ID)
-	if err != nil {
-		return "", err
-	}
-	if !rowHasTeardownIntent(latest, intent) || latest.TeardownIntent.State != models.ErrandTeardownIntentClosed {
-		return "", models.ErrErrandVersionConflict
-	}
-	if _, err := store.TransitionErrandTeardownIntent(ctx, latest.ID, intent.ID, latest.Version, models.ErrandTeardownIntentCompleted); err != nil {
+	if err := o.completeClosedIntent(ctx, store, row, intent); err != nil {
 		return "", err
 	}
 	return errands.TeardownCompleted, nil
+}
+
+func (o *errandTeardownOwner) completeClosedIntent(ctx context.Context, store errandTeardownStore, row *models.Errand, intent models.ErrandTeardownIntent) error {
+	latest, err := store.GetErrand(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	if !rowHasTeardownIntent(latest, intent) || latest.TeardownIntent.State != models.ErrandTeardownIntentClosed {
+		return models.ErrErrandVersionConflict
+	}
+	if _, err := store.TransitionErrandTeardownIntent(ctx, latest.ID, intent.ID, latest.Version, models.ErrandTeardownIntentCompleted); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (o *errandTeardownOwner) closeCompletion(ctx context.Context, store errandTeardownStore, row *models.Errand, intent models.ErrandTeardownIntent) (*models.Errand, error) {
@@ -340,7 +354,8 @@ func legacyCompletionRowEligible(row *models.Errand) bool {
 	return row.Lifecycle == models.ErrandLifecycleLaunched && row.TeardownIntent == nil && row.LatestSettledTurnID != ""
 }
 func legacyCompletionSessionEligible(row *models.Errand, session *models.TaskSession) bool {
-	return errandTeardownSessionMatches(row, session) && session.QueueIncarnationID != ""
+	return errandTeardownSessionMatches(row, session) && session.QueueIncarnationID != "" &&
+		session.State != models.TaskSessionStateCancelled && session.State != models.TaskSessionStateFailed
 }
 func successfulCompletionDecision(effect *models.AgentDeliveryEffect) bool {
 	return effect != nil && effect.State == models.DeliveryEffectCompleted && strings.HasSuffix(effect.Outcome, ":done")

@@ -39,13 +39,14 @@ type Service struct {
 	clock     Clock
 	logger    *logger.Logger
 
-	taskLocks      taskLockSet
-	parentLocks    taskLockSet
-	launching      launchGuard
-	cascades       cascadeWorker
-	awaits         awaitRegistry
-	teardownMu     sync.Mutex
-	teardownCursor string
+	taskLocks                taskLockSet
+	parentLocks              taskLockSet
+	launching                launchGuard
+	cascades                 cascadeWorker
+	awaits                   awaitRegistry
+	teardownMu               sync.Mutex
+	teardownCursor           string
+	teardownEvidenceWarnings map[string]string
 
 	reconcileInterruptedDelegation func(context.Context, string) error
 

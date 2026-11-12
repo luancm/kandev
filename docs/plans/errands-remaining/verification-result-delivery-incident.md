@@ -1,0 +1,7 @@
+# Verification result delivery incident, 2026-11-12
+
+Deferred investigation at the user's request. Errand `af43466b-7a03-4633-bf05-f56f37ab138a` wrote a final verification handoff and reported completed owned processes, but the parent received `needs_attention (recovery_unresolved)` with no result. The user supplied the final message. The saved handoff is `docs/plans/errand-panel-controls/combined-browser-handoff.md`; isolated evidence remains under `/tmp/kandev-errands-combined-browser-af43466b`.
+
+The reported work outcome is desktop 19/19 and phone 14/16, with two test-harness failures and no source edits. It must not be confused with a successful implementation acceptance or with an abandoned test process. The full source manifest stayed unchanged across both runs. Parent continues the two phone-test corrections and previously accepted backend diagnostic remediation separately.
+
+A later investigation should reconstruct the final agent turn, provider terminal, exact admission/settlement evidence, completion cleanup and parent result delivery in timestamp order. Determine whether work completed but terminal attribution or delivery failed, and whether the displayed recovery state accurately describes the outstanding obligation. Do not infer provider failure, runtime residency or external side effects from the status label alone. No live database repair or reproduction is authorized by this note, and no cause is established yet.

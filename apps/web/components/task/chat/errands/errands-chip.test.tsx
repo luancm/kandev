@@ -157,8 +157,39 @@ describe("ErrandsChip visibility and label", () => {
     render(<ErrandsChip taskId={TASK_ID} />);
     const chip = screen.getByTestId(CHIP);
     expect(chip.getAttribute("data-tone")).toBe("attention");
-    expect(chip.textContent).toBe("Errands: 2 running");
-    expect(chip.getAttribute("aria-label")).toBe("Errands: 2 running, needs attention");
+    expect(chip.textContent).toBe("Errands: 1 needs attention and 1 running");
+    expect(chip.getAttribute("aria-label")).toBe("Errands: 1 needs attention and 1 running");
+  });
+
+  it("counts only nonzero running, queued, and attention statuses for the selected parent", () => {
+    mocks.errands = [
+      errand("e1", { parent_session_id: MAIN, status: "running" }),
+      errand("e2", { parent_session_id: MAIN, status: "queued" }),
+      errand("e3", { parent_session_id: MAIN, status: "needs_attention" }),
+      errand("e4", { parent_session_id: MAIN, status: "done" }),
+      errand("e5", { parent_session_id: SECOND, status: "running" }),
+      errand("e6", { parent_session_id: SECOND, status: "running" }),
+    ];
+
+    render(<ErrandsChip taskId={TASK_ID} sessionId={SECOND} />);
+
+    expect(screen.getByTestId(CHIP).textContent).toBe("Errands: 2 running");
+  });
+
+  it("shows attention, running, and queued counts in order without counting settled errands", () => {
+    mocks.errands = [
+      errand("e1", { status: "queued" }),
+      errand("e2", { status: "needs_attention" }),
+      errand("e3", { status: "running" }),
+      errand("e4", { status: "done" }),
+      errand("e5", { status: "failed" }),
+    ];
+
+    render(<ErrandsChip taskId={TASK_ID} />);
+
+    expect(screen.getByTestId(CHIP).textContent).toBe(
+      "Errands: 1 needs attention, 1 running, and 1 queued",
+    );
   });
 
   it("names recovery verification accessibly when attention has a recovery reason", () => {
@@ -171,7 +202,9 @@ describe("ErrandsChip visibility and label", () => {
     render(<ErrandsChip taskId={TASK_ID} />);
 
     const chip = screen.getByTestId(CHIP);
-    expect(chip.getAttribute("aria-label")).toBe("Errands: 1 running, recovery needs verification");
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Errands: 1 needs attention, recovery needs verification",
+    );
     expect(chip.querySelector("svg")?.getAttribute("class")).toContain("text-amber-500");
   });
 

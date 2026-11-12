@@ -699,6 +699,84 @@ test("five-live cap, parent turn cancellation and task-wide Stop remain independ
   }
 });
 
+// @covers AC-TASKS-ERRANDS-007.1 AC-TASKS-ERRANDS-010.9 AC-TASKS-ERRANDS-010.12
+test("desktop panel Stop cancels one errand and keeps its transcript and sibling", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  let gates: ReturnType<typeof mockTurnGate>[] = [];
+  try {
+    const fixture = await startErrands(api, seed, backend, { count: 2 });
+    const { taskId, parentId, errands } = fixture;
+    gates = fixture.gates;
+    await expect
+      .poll(async () => {
+        const sessions = new Map(
+          (await api.listTaskSessions(taskId)).sessions.map((session) => [
+            session.id,
+            session.state,
+          ]),
+        );
+        return errands.map((errand) => sessions.get(errand.errand_id));
+      })
+      .toEqual(errands.map(() => "RUNNING"));
+
+    const transcriptBefore = await api.listSessionMessages(errands[0].errand_id);
+    expect(transcriptBefore.messages.length).toBeGreaterThan(0);
+    await page.goto(`/t/${taskId}`);
+    const chat = parentChat(page, parentId);
+    await chat.getByTestId(CHIP).click();
+    await expect(chat.getByTestId(CHIP)).toContainText("2 running");
+    const panel = page.getByTestId(PANEL);
+    const stop = panel.getByTestId(`errand-stop-${errands[0].errand_id}`);
+    await expect(stop).toBeVisible();
+    await expect(panel.getByTestId(`errand-open-${errands[0].errand_id}`)).toBeVisible();
+    const stopBox = await stop.boundingBox();
+    expect(stopBox).not.toBeNull();
+    expect(stopBox!.height).toBeGreaterThanOrEqual(27);
+    expect(stopBox!.height).toBeLessThanOrEqual(29);
+    await page.screenshot({ path: testInfo.outputPath("errands-desktop-panel-stop.png") });
+
+    await stop.click();
+    await expect
+      .poll(
+        async () =>
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[0].errand_id)
+            ?.status,
+      )
+      .toBe("cancelled");
+    await expect
+      .poll(
+        async () =>
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[1].errand_id)
+            ?.status,
+      )
+      .toBe("running");
+    await expect(chat.getByTestId(CHIP)).toContainText("1 running");
+    const transcriptAfter = await api.listSessionMessages(errands[0].errand_id);
+    const retainedIds = new Set(transcriptAfter.messages.map((message) => message.id));
+    expect(transcriptBefore.messages.every((message) => retainedIds.has(message.id))).toBe(true);
+
+    await panel.getByTestId("errands-completed-toggle").click();
+    const cancelledRow = panel.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
+    await expect(cancelledRow).toContainText("Cancelled");
+    await expect(cancelledRow.getByTestId(`errand-stop-${errands[0].errand_id}`)).toHaveCount(0);
+    await cancelledRow.getByTestId(`errand-open-${errands[0].errand_id}`).click();
+    const child = parentChat(page, errands[0].errand_id);
+    await expect(child.getByTestId("errand-header")).toBeVisible();
+    await child.getByTestId("errand-back-to-parent").click();
+    await expect(chat).toBeVisible();
+    expect((await api.getTaskSession(errands[0].errand_id)).session.id).toBe(errands[0].errand_id);
+  } finally {
+    for (const gate of gates) await gate.release();
+    await restore();
+  }
+});
+
 test("two clients remove deleted errands and flag-off restart retains detached sessions", async ({
   testPage: page,
   apiClient: api,

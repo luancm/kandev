@@ -3,6 +3,9 @@ status: draft
 system: tasks
 requirements:
   - REQ-TASKS-ERRANDS-002
+  - REQ-TASKS-ERRANDS-007
+  - REQ-TASKS-ERRANDS-010
+  - REQ-TASKS-ERRANDS-011
 created: 2026-11-10
 owners:
   - kandev
@@ -41,3 +44,13 @@ This is content/status work within existing compositions. Shared projection/stat
 ## Verification
 
 Cover startup, active permission/reconnection, pending terminal reconciliation, idle unresolved first/follow-up work, older/newer result precedence, stale recovery identity, mixed historical receipts, cancellation and evidence-read errors. Assert status/reason agreement across DTO/MCP/parent/browser surfaces and SQL live counts. Test both conversation-receipt writers and fallback with repeated refusals and zero side effects, SQLite/PostgreSQL lock ordering, explicit user/parent continuation after proven interruption, supported missing-runtime restoration, no original replay and unchanged workflow/result revisions. PostgreSQL without a DSN is a reported skip.
+
+### Activity counts and individual panel cancellation
+
+For AC-TASKS-ERRANDS-010.9, derive running, queued and attention counts from the same selected-parent inventory in `errands-chip.tsx`. Compose localized nonzero counts in attention, running, queued order; all-settled inventories keep the existing history/idle label. Attention tone and the recovery-specific accessible explanation remain intact. Keep `isLiveErrand` and task-wide capacity/Stop-all counts unchanged: live includes queued and attention, and is not synonymous with executing. A missing attention reason retains generic attention behavior.
+
+For AC-TASKS-ERRANDS-010.12 and 011.8, `errands-panel-row.tsx` exposes Stop for `isLiveErrand` through the existing `useErrandActions().cancelErrand(errand_id)`. Reuse the header's cancellation/error conventions and existing `errand.cancel` transport; do not add a deletion endpoint or optimistic terminal state. Each row owns its pending presentation. The authoritative `errand.updated` snapshot drives history placement and chip counts. Stop never dismisses the panel or triggers Open. Settled history retains Open without Stop. Stop-all remains task-wide even when the displayed parent is scoped.
+
+Desktop rows place Open and Stop in a compact action group. Phone rows use a noninteractive card containing a summary/Open button and a separate Stop button, rather than nesting Stop inside the current whole-row button. Reuse the Errands drawer and mobile picker sheet geometry: list scrolls once, footer remains fixed, safe areas and focus return remain owned by the existing surface. Open remains the primary navigation action; Stop is visible without hover. Use 28px desktop actions and at least 44px phone/coarse-pointer targets. Show cancellation progress and a localized error without removing the recovery warning or claiming uncertain effects were resolved.
+
+Regression coverage includes attention-only, queued-only, running-only, settled-only, and mixed inventories; parent scoping; permission attention without a reason; cancellation success/failure/duplicate click; and isolation between two live errands. Desktop and phone rendered tests exercise direct panel Stop with transcript retention. No backend status, capacity, persistence or recovery-admission changes are required.
