@@ -1,7 +1,7 @@
 ---
 id: "01-completion-cleanup"
 title: "Close completed errand runtimes and preserve continuation"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -92,7 +92,11 @@ Era Sol Que Me Faltava reviewed the contract against `b2bbe9d5b7` in Errand `999
 
 Use controlled barriers for same-execution successors, replacement incarnations and delayed callbacks. Test restart and flag-off retry at settlement, intent, stop acknowledgement, receipt and projection boundaries. Mixed legacy inventory must converge eligible rows independently and preserve unknown evidence. These are implementation and verification obligations within the recorded contract, not additional product scope.
 
-## Results
+## Current acceptance
+
+Production cleanup and continuation are implemented through pushed source checkpoint `452c9d4f0d`, including upstream main `37f081a976`. Fresh desktop 21/21 and phone 19/19 acceptance passed. Final affected backend/frontend, optimized-build and delivery receipts are recorded in [the integration handoff](../errands-remaining/integration-handoff.md); affected backend/frontend checks and the normal optimized build passed in the primary session. No deployment or live historical-record repair is included. The sections below retain the earlier regression and implementation briefs as historical evidence.
+
+## Historical regression preparation
 
 The synchronization correction is accepted as a bounded RED packet by Era Sol review `4fa0283f-f14a-437c-adca-e55ef9f0b10a`: callback-entry SQLite capture, `synctest.Wait` before stop acknowledgement, and joined/quiescent successor/cancellation assertions resolve all three earlier findings. The two expected missing-COMPLETED failures remain. This does not prove future timer-driven retry behavior or production cleanup, which is still pending.
 
@@ -100,7 +104,7 @@ Implementation in progress, not accepted. Lunaldinho Errand `92617298-5bb8-4a7c-
 
 Parent lint remediation removed redundant embedded selector names only; synchronization and behavior are unchanged. Current test SHA-256: `b83d51acd269cbb8d4c6aaef364186b91b1604a78021ebdeb271344ab051aa48`. The corrected selector passed terminal-fix integration lint; the hash identifies the test before cleanup implementation.
 
-## Current bounded backend packet
+## Historical bounded backend packet
 
 Implement backend acceptance on `67b6b9ba9d` before frontend/browser changes. Ownership is the backend files above, related admission/focus guards, adjacent tests and a new `backend-handoff.md` here. Preserve the already integrated terminal identity, attention/refusal, duration and delivery contracts. Exclude frontend, E2E and public docs in this packet; the primary owns these manifests and later browser acceptance. The backend packet remains incomplete until every required backend edge below has executable coverage or an explicitly reported blocker.
 

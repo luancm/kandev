@@ -446,7 +446,13 @@ func TestSessionRemovedReachesWorkspaceViewersAndSessionSubscribers(t *testing.T
 	hub.setAuthPolicy(AuthPolicy{
 		Enforced: func() bool { return true },
 		Subscriptions: SubscriptionAccessPolicy{
-			Session: func(context.Context, string) error { return nil },
+			Session: func(ctx context.Context, sessionID string) error {
+				identity, ok := authn.IdentityFromContext(ctx)
+				require.True(t, ok)
+				require.Equal(t, "user-a", identity.UserID)
+				require.Equal(t, "session-1", sessionID)
+				return nil
+			},
 		},
 		WorkspaceReaders: func(_ context.Context, workspaceID string) ([]string, error) {
 			require.Equal(t, "workspace-a", workspaceID)
@@ -454,10 +460,13 @@ func TestSessionRemovedReachesWorkspaceViewersAndSessionSubscribers(t *testing.T
 		},
 	})
 	sessionClient := newTestClient("session-subscriber")
+	sessionClient.hub = hub
 	sessionClient.identity = authn.Identity{UserID: "user-a", Role: authn.RoleMember}
 	parentClient := newTestClient("parent-only-viewer")
+	parentClient.hub = hub
 	parentClient.identity = authn.Identity{UserID: "user-b", Role: authn.RoleMember}
 	foreignClient := newTestClient("foreign-viewer")
+	foreignClient.hub = hub
 	foreignClient.identity = authn.Identity{UserID: "user-c", Role: authn.RoleMember}
 	registerTestClient(hub, sessionClient)
 	registerTestClient(hub, parentClient)

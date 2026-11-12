@@ -1,5 +1,9 @@
 # Successful Errand runtime cleanup
 
+Current implementation is pushed through `452c9d4f0d`, after upstream main `37f081a976`. Fresh managed desktop 21/21 and phone 19/19 acceptance passed; final backend/frontend/build results and delivery are recorded in [the integration handoff](../errands-remaining/integration-handoff.md). The implementation and earlier receipts below describe historical checkpoints and do not override that current acceptance record. No live database repair or deployment was performed.
+
+## Historical implementation checkpoint
+
 The primary took over the preserved implementation after the user's 2026-11-12 instruction. Errand `6968f572` was cancelled through the supported API; no replacement worker was launched. Base commit is `67b6b9ba9d`. Implementation and focused cleanup regressions pass. The primary is preparing a local cleanup checkpoint before upstream integration; final integrated race/browser acceptance and push remain pending.
 
 The existing teardown boundary now distinguishes cancellation from successful completion. Missing purpose retains legacy cancellation semantics. Exact successful settlement and the close target are saved together before physical stop; sealed terminal recovery can reconstruct that target from its immutable execution/submission evidence. Physical close, closed receipt and completed session projection remain separate retryable stages. Current ownership is revalidated before projection, including replacement runtimes. Cancellation retains semantic precedence and stale completion cannot overwrite it. Admission first finishes pending or closed completion obligations even when projection still says waiting. Explicit follow-up uses the retained conversation; inspection does not launch a runtime. A completed Errand retains its composer while ordinary completed sessions keep their existing banner.

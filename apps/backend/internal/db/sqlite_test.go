@@ -20,6 +20,43 @@ import (
 
 type sqliteFactoryFixture struct{ writer, waiter, observer, reader *sqlx.DB }
 
+func TestSQLiteFactoriesPreserveNativePath(t *testing.T) {
+	paths := []string{"literal#fragment.db", "literal%20space.db", "literal space.db"}
+	if runtime.GOOS != "windows" {
+		paths = append(paths, "literal?mode=memory.db")
+	}
+	for _, name := range paths {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), name)
+			seed, err := sql.Open("sqlite3", "file:"+internaldb.EscapeSQLiteURIPath(filepath.ToSlash(path)))
+			require.NoError(t, err)
+			_, err = seed.Exec(`CREATE TABLE path_probe (value TEXT); INSERT INTO path_probe VALUES ('retained')`)
+			require.NoError(t, err)
+			require.NoError(t, seed.Close())
+			for _, reader := range []bool{false, true} {
+				t.Run(map[bool]string{false: "writer", true: "reader"}[reader], func(t *testing.T) {
+					open := internaldb.OpenSQLite
+					if reader {
+						open = internaldb.OpenSQLiteReader
+					}
+					database, err := open(path)
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, database.Close()) })
+					var value string
+					require.NoError(t, database.QueryRow(`SELECT value FROM path_probe`).Scan(&value))
+					require.Equal(t, "retained", value)
+					_, err = database.Exec(`UPDATE path_probe SET value = 'retained'`)
+					if reader {
+						require.ErrorContains(t, err, "readonly")
+					} else {
+						require.NoError(t, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 // @covers AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1
 func TestSQLiteWriterUsesNormalWithBarrier(t *testing.T) {
 	ctx := t.Context()

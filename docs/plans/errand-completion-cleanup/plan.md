@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: in_progress
+status: done
 requirements:
   - REQ-TASKS-ERRAND-COMPLETION-001
 system_design:
@@ -16,7 +16,7 @@ The user approved automatic runtime close after durable result capture, retained
 
 At source `18c03cc4cf591908ffb125beb7a24c50a089514c`, `settleDetachedAgentReadyTurn` publishes `WAITING_FOR_INPUT` after settlement and leaves a promptable runtime. `finishAgentCompletedTurn` schedules cleanup but leaves the same waiting state. Inspection found 81 retained errand sessions in that state, all with stopped executor records; live runtime inventory contained only the parent. Those observations demonstrate stale retained state, not 81 live runtime leaks.
 
-Current execution base is parent branch commit `67b6b9ba9d`, which integrates reviewed recovery attention/refusal/continuation, exact parent terminal repair and immutable duration. Combined backend, persistence, frontend and desktop/phone acceptance passed; the checkpoint is pushed and remote-verified. The user subsequently requested direct primary execution. The previous implementation Errand was cancelled through the supported API and its code was preserved. Production cleanup and targeted regressions are implemented; final race, desktop/phone acceptance and delivery are running in the primary session. Earlier source/runtime observations above are historical evidence, not current runtime counts.
+Cleanup is implemented in checkpoint `4becbc47a1` and subsequent upstream integration corrections through pushed `452c9d4f0d`. The branch includes upstream main `37f081a976`. Final fresh managed desktop 21/21 and phone 19/19 acceptance passed, including passive inspection, completed-child follow-up and repeated native resume. Affected backend/storage/frontend checks and the normal optimized build also passed; 228 focused frontend tests passed. The earlier runtime observations above are historical evidence, not current runtime counts. [The integration handoff](../errands-remaining/integration-handoff.md) owns the final receipt and limits.
 
 ## Scope and order
 
@@ -54,7 +54,7 @@ This changes state semantics within existing surfaces, not layout. The phone ret
 
 ## Work order and acceptance mapping
 
-- [ ] [Task 01: Close completed errand runtimes and preserve continuation](task-01-completion-cleanup.md)
+- [x] [Task 01: Close completed errand runtimes and preserve continuation](task-01-completion-cleanup.md)
 
 | Acceptance | Regression boundary |
 | --- | --- |
@@ -65,12 +65,12 @@ This changes state semantics within existing surfaces, not layout. The phone ret
 
 ## Verification and execution status
 
-The user authorized implementation after the design package. The corrected regression packet and contract review are accepted; see the work order and regression handoff. Recovery integration is complete at `67b6b9ba9d`, so the former dependency is resolved.
+The user authorized implementation after the design package, then requested direct primary execution. The primary completed durable intent ownership, exact-authority close, receipt/projection retry, conservative legacy repair, explicit retained-conversation continuation, tests and public coordination documentation. No additional agents were launched. Recovery integration was completed at `67b6b9ba9d` before cleanup integration.
 
-The primary now owns the complete work order directly: durable completion intent, exact-authority cleanup, retry/projection, explicit continuation, regressions, desktop/phone acceptance, public documentation, upstream integration and push. Earlier reviewer feedback on the regression packet remains accepted. No new delegation, independent cleanup coordinator, workflow or shared-workspace removal is introduced.
+Deterministic tests capture durable result state at stop entry, quiesce detached effects before assertions, and exercise close/receipt/projection/storage failures, cancellation precedence, stale successor/replacement protection and explicit versus passive resume. Post-upstream tests also reproduce a newer lifecycle-only row shadowing real work and continuation after removal of the old runtime row. The corrections reuse canonical conversational-turn ownership and existing exact task-bound completed-resume permission.
 
-Existing tests capture durable state at stop entry and use deterministic `synctest` quiescence to prove no premature completion and no late successor/cancellation effects. Retain those barriers. Production acceptance additionally requires the retry/crash/legacy/repeated-continuation matrix in the work order. PostgreSQL skips and mock-provider limits must remain explicit. No successful-cleanup acceptance or live deployment is claimed yet.
+Final evidence is recorded in [the integration handoff](../errands-remaining/integration-handoff.md). PostgreSQL without a DSN and mock-provider certification limits remain explicit. No live deployment or historical database repair is part of acceptance.
 
-## Risks
+## Preserved safety boundaries
 
-The existing teardown path is cancellation-specific; reusing it unchanged would overwrite successful outcome or discard results. Closing while holding completion ownership can reproduce guard re-entry deadlocks. A stale close can kill a resumed turn unless the physical effect shares admission arbitration. Marking a session completed without authorizing the existing explicit resume paths can make retained history impossible to continue. Legacy repair needs positive identity/absence evidence; old stopped rows alone are insufficient.
+Completion and cancellation have distinct effects under the existing durable teardown owner. Physical close shares admission arbitration; stale receipts cannot stop or complete a successor or replacement incarnation. Exact successful terminal authority precedes close, confirmed close precedes completed projection, and retries retain both obligations. Explicit continuation is task-bound and settlement-validated; passive inspection grants no permission. Legacy repair requires positive identity/absence evidence; old stopped rows alone remain insufficient.

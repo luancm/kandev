@@ -151,16 +151,19 @@ test("phone errand rows expose passive context through one accessible Open targe
     );
     await waitParentIdle(api, taskId, parentId);
     await expect
-      .poll(async () => {
-        const sessions = new Map(
-          (await api.listTaskSessions(taskId)).sessions.map((session) => [
-            session.id,
-            session.state,
-          ]),
-        );
-        return settledErrands.map((errand) => sessions.get(errand.errand_id));
-      })
-      .toEqual(settledErrands.map(() => "WAITING_FOR_INPUT"));
+      .poll(
+        async () => {
+          const sessions = new Map(
+            (await api.listTaskSessions(taskId)).sessions.map((session) => [
+              session.id,
+              session.state,
+            ]),
+          );
+          return settledErrands.map((errand) => sessions.get(errand.errand_id));
+        },
+        { message: "Settled child runtimes close before context seeding", timeout: 60_000 },
+      )
+      .toEqual(settledErrands.map(() => "COMPLETED"));
 
     const childWindow = (used: number) => ({
       size: 100_000,

@@ -164,9 +164,12 @@ test("desktop errand rows read each child's persisted context window passively",
           );
           return errands.map((errand) => sessions.get(errand.errand_id));
         },
-        { message: "Child sessions settle before their persisted context fixtures are updated" },
+        {
+          message: "Child sessions close before their persisted context fixtures are updated",
+          timeout: 60_000,
+        },
       )
-      .toEqual(errands.map(() => "WAITING_FOR_INPUT"));
+      .toEqual(errands.map(() => "COMPLETED"));
 
     const firstId = errands[0].errand_id;
     const unmeasuredId = errands[1].errand_id;
