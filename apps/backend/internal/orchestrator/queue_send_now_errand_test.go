@@ -47,7 +47,7 @@ func newSendNowErrandFixture(t *testing.T) *sendNowErrandFixture {
 		return &executor.PromptResult{}, nil
 	}
 	f.svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), f.manager)
-	f.svc.executor = executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{}))
 	f.svc.messageCreator = &repositoryBackedMessageCreator{mockMessageCreator: &mockMessageCreator{}, repo: repo}
 	f.svc.SetTurnService(&repoTurnService{repo: repo})
 	f.svc.SetTransientRetryMessageService(repo)
@@ -58,6 +58,9 @@ func newSendNowErrandFixture(t *testing.T) *sendNowErrandFixture {
 	f.svc.messageQueue = queue
 	f.svc.SetErrandController(&fakeErrandComposer{})
 	require.NoError(t, queue.SetAutoRun(t.Context(), "session-1", false))
+	identity, err := f.svc.parentQueueIdentity(t.Context(), "session-1")
+	require.NoError(t, err)
+	require.NoError(t, queue.SetAutoRunForSession(t.Context(), identity, false))
 	t.Cleanup(func() {
 		close(f.release)
 		f.svc.stopSendNowWorkers()
@@ -403,7 +406,7 @@ func TestSendNowErrandPersistsCanonicalProviderPrompt(t *testing.T) {
 	f := newSendNowErrandFixture(t)
 	manager := &canonicalSendNowManager{mockAgentManager: f.manager}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	f.prepared(t, "prepared-token", "deleted", "full prepared notice")
 	f.queue(t, "original ordinary input", messagequeue.QueuedByUser, nil)
 	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
@@ -450,7 +453,7 @@ func TestSendNowErrandClaimsSurviveRestartAndRefusal(t *testing.T) {
 			f.realComposer(t)
 			manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: outcome}
 			f.svc.agentManager = manager
-			f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+			f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 			f.executeWithAutoRunPaused(t)
 			reopened, queue := f.reopen(t)
 			row, err := reopened.GetErrand(t.Context(), live.ID)

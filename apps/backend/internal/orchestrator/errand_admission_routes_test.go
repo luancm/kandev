@@ -33,7 +33,7 @@ func TestErrandAdmissionNewErrandLaunchUsesReservedIdentity(t *testing.T) {
 			service, _ := newErrandServiceOnRealStack(t, f)
 			manager := &firstErrandAdmissionManager{errandLaunchManager: f.manager, durable: durable}
 			f.svc.agentManager = manager
-			f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+			f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 			started := make(chan struct{}, 1)
 			manager.startAgentProcessFunc = func(context.Context, string) error { started <- struct{}{}; return nil }
 			result := startErrand(t, service, f, "first prompt")
@@ -128,7 +128,7 @@ func TestErrandAdmissionInitialAndFallbackBindBothProtocols(t *testing.T) {
 				started := make(chan struct{}, 1)
 				manager.startAgentProcessFunc = func(context.Context, string) error { started <- struct{}{}; return nil }
 				f.svc.agentManager = manager
-				f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+				f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 				ctx := errands.WithParentPromptOrigin(t.Context(), errands.ParentPromptOrigin{SenderSessionID: f.parent, SubmissionID: "peer:initial"})
 				if route == "initial" {
 					require.NoError(t, f.repo.UpdateTaskSessionState(ctx, f.session.ID, models.TaskSessionStateCreated, ""))

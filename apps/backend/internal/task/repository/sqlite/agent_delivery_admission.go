@@ -92,7 +92,10 @@ func (r *Repository) agentDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx
 	isErrand := role == string(models.SessionRoleErrand)
 	var payload streams.AgentEvent
 	if err = json.Unmarshal(event.Payload, &payload); err != nil {
-		return "", isErrand, err
+		if isErrand {
+			return "", true, err
+		}
+		return "", false, r.validateOpaqueOrdinaryPayloadTx(ctx, tx, event, err)
 	}
 	conflict := repoerrors.ErrAgentDeliveryIdentityMismatch
 	if conflictingAdmissionEnvelope(taskID, event, payload) {
@@ -233,6 +236,19 @@ func (r *Repository) validateAdmissionNativeSessionTx(ctx context.Context, tx *s
 	}
 	if !valid {
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
+	}
+	return nil
+}
+
+// Opaque ordinary events retain their bytes without gaining turn authority.
+// Any existing admission evidence keeps malformed payloads fail-closed.
+func (r *Repository) validateOpaqueOrdinaryPayloadTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, decodeErr error) error {
+	var bound bool
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT EXISTS (SELECT 1 FROM agent_delivery_effects WHERE effect_key=? AND effect_type=?)`), promptAdmissionEffect+":"+event.SubmissionID, promptAdmissionEffect).Scan(&bound); err != nil {
+		return err
+	}
+	if bound {
+		return decodeErr
 	}
 	return nil
 }

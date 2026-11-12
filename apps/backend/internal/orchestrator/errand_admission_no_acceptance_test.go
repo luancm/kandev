@@ -31,7 +31,7 @@ func TestErrandAdmissionMissingAcceptanceCannotReturnSuccess(t *testing.T) {
 			f := newAdmissionIntegrationFixture(t, protocol)
 			manager := &admissionWithoutAcceptanceManager{retentionPromptAgentManager: f.manager}
 			f.svc.agentManager = manager
-			f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+			f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 			require.Error(t, dispatchAdmissionFixture(t, f, f.options(protocol, true)), "missing acceptance must retain uncertain work")
 			replay, err := f.repo.ReserveErrandParentAdmission(t.Context(), fixtureAdmission(f))
 			require.NoError(t, err)

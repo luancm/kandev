@@ -97,6 +97,15 @@ describe("resolvesSteeringAffordance", () => {
 
 // @covers AC-TASKS-ERRANDS-010.9, AC-TASKS-ERRANDS-011.5
 describe("deriveSessionInputMode with outstanding errands", () => {
+  it.each([
+    ["COMPLETED", "direct"],
+    ["FAILED", "unavailable"],
+    ["CANCELLED", "unavailable"],
+  ] as const)("keeps a %s errand's input mode %s", (state, expected) => {
+    const child: TaskSession = { ...session(state), role: "errand" };
+    expect(deriveSessionInputMode(child)).toBe(expected);
+  });
+
   it("keeps a parent waiting on errands directly promptable", () => {
     const parent = {
       state: "WAITING_FOR_INPUT",

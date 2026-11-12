@@ -21,7 +21,14 @@ func (*recoveryRefusalOrchestrator) ValidateErrandContinuation(context.Context, 
 
 // @covers AC-TASKS-ERRANDS-002.8
 func TestMessageAdmissionRefusesErrandBeforeConversationWrite(t *testing.T) {
-	repo := &messageAddSwitchRepo{tasks: map[string]*models.Task{"t1": {ID: "t1"}}, sessions: map[string]*models.TaskSession{"s1": {ID: "s1", TaskID: "t1", Role: models.SessionRoleErrand, State: models.TaskSessionStateWaitingForInput}}, primaryID: "s1"}
+	for _, state := range []models.TaskSessionState{models.TaskSessionStateWaitingForInput, models.TaskSessionStateCompleted} {
+		t.Run(string(state), func(t *testing.T) { assertErrandMessageRecoveryRefusal(t, state) })
+	}
+}
+
+func assertErrandMessageRecoveryRefusal(t *testing.T, state models.TaskSessionState) {
+	t.Helper()
+	repo := &messageAddSwitchRepo{tasks: map[string]*models.Task{"t1": {ID: "t1"}}, sessions: map[string]*models.TaskSession{"s1": {ID: "s1", TaskID: "t1", Role: models.SessionRoleErrand, State: state}}, primaryID: "s1"}
 	svc := service.NewService(service.Repos{Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo, GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo}, nil, logger.Default(), service.RepositoryDiscoveryConfig{})
 	h := NewMessageHandlers(svc, &recoveryRefusalOrchestrator{}, logger.Default())
 	for range 2 {

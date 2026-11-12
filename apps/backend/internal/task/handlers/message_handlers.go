@@ -120,6 +120,10 @@ type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type taskWorktreeAdoptionGuidanceResolver interface {
+	WorktreeAdoptionGuidance(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
 type promptTaskWithPromptContext interface {
 	PromptTaskWithPromptContext(
 		ctx context.Context,
@@ -285,12 +289,14 @@ func (h *MessageHandlers) injectMessageContext(
 		}
 		return content
 	}
+	includeWorktreeAdoption, _ := h.resolveWorktreeAdoptionGuidance(ctx, req.TaskID, req.TaskSessionID)
 	return sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, content, sysprompt.KandevContextOptions{
 		BuiltinPackages:                req.builtinPackages,
 		RequiresCompletionSignal:       requiresSignal,
 		IncludeCoordinatorTaskControls: !configMode,
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
+		IncludeWorktreeAdoption:        includeWorktreeAdoption,
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
@@ -307,6 +313,17 @@ func (h *MessageHandlers) resolveCanvasGuidance(
 		return false, nil
 	}
 	return resolver.TaskSessionCanvasGuidanceEnabled(ctx, taskID, sessionID)
+}
+
+func (h *MessageHandlers) resolveWorktreeAdoptionGuidance(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	resolver, ok := h.orchestrator.(taskWorktreeAdoptionGuidanceResolver)
+	if !ok {
+		return false, nil
+	}
+	return resolver.WorktreeAdoptionGuidance(ctx, taskID, sessionID)
 }
 
 func (h *MessageHandlers) prepareDirectPrompt(
@@ -881,7 +898,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	steer := h.orchestrator != nil &&
 		h.orchestrator.SteerEligible(sessionResp.Session.ID, sessionResp.Session.State)
 	if !steer {
-		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
+		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session); wsErr != nil {
 			return wsErr, nil
 		}
 	}
@@ -1441,7 +1458,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 			zap.Error(err))
 		return nil, errors.New("failed to reload submitted session after on_turn_start")
 	}
-	if reloaded.State != models.TaskSessionStateCompleted {
+	if reloaded.State != models.TaskSessionStateCompleted || models.IsErrandSession(reloaded) {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
@@ -1485,11 +1502,14 @@ func (h *MessageHandlers) enrichWorkspaceRecovery(
 	dto.EnrichWorkspaceRecovery(projection, operation, runnerLive)
 }
 
-func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
-	switch state {
+func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session dto.TaskSessionDTO) *ws.Message {
+	if session.State == models.TaskSessionStateCompleted && session.Role == models.SessionRoleErrand {
+		return nil
+	}
+	switch session.State {
 	case models.TaskSessionStateRunning:
 		if h.orchestrator != nil &&
-			h.orchestrator.ForegroundActivity(sessionID) == v1.ForegroundActivityBackground {
+			h.orchestrator.ForegroundActivity(session.ID) == v1.ForegroundActivityBackground {
 			return nil
 		}
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
@@ -1660,7 +1680,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		h.orchestrator.SteerEligible(sessionID, sessionDTO.State) {
 		return resp, nil
 	}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
+	if wsErr := h.errorForBlockedMessageSession(msg, sessionDTO); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
 		}

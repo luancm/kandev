@@ -78,7 +78,7 @@ func TestInitialSubmissionReplayCarriesErrandBlock(t *testing.T) {
 	svc := &Service{repo: rows}
 
 	got, err := svc.wrapInitialSubmissionReplayPrompt(
-		ctx, errandReplayTaskID, errandReplayErrandID, "Find the failing test", nil, session,
+		ctx, errandReplayTaskID, errandReplayErrandID, "Find the failing test", nil, session, "",
 	)
 
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestInitialSubmissionReplayErrandBlockMatchesFirstDelivery(t *testing.T) {
 	svc := &Service{repo: &errandRowRepo{sessionExecutorStore: repo, row: errandReplayRow()}}
 
 	replayed, err := svc.wrapInitialSubmissionReplayPrompt(
-		ctx, errandReplayTaskID, errandReplayErrandID, "Find the failing test", nil, session,
+		ctx, errandReplayTaskID, errandReplayErrandID, "Find the failing test", nil, session, "",
 	)
 	require.NoError(t, err)
 
@@ -126,7 +126,7 @@ func TestInitialSubmissionReplayOrdinarySessionIsUnchanged(t *testing.T) {
 	rows := &errandRowRepo{sessionExecutorStore: repo}
 	svc := &Service{repo: rows}
 
-	got, err := svc.wrapInitialSubmissionReplayPrompt(ctx, "task-ordinary", "session-ordinary", "hello", nil, session)
+	got, err := svc.wrapInitialSubmissionReplayPrompt(ctx, "task-ordinary", "session-ordinary", "hello", nil, session, "")
 
 	require.NoError(t, err)
 	assert.Zero(t, rows.calls)
@@ -161,7 +161,7 @@ func TestInitialSubmissionReplayFailsClosedWithoutTrustedErrandRow(t *testing.T)
 			svc := &Service{repo: store}
 
 			_, err := svc.wrapInitialSubmissionReplayPrompt(
-				ctx, errandReplayTaskID, errandReplayErrandID, "Find the failing test", nil, session,
+				ctx, errandReplayTaskID, errandReplayErrandID, "Find the failing test", nil, session, "",
 			)
 
 			require.Error(t, err)

@@ -172,7 +172,7 @@ func (s *Service) sendNowDeliveryClaimUpdater(claim *messagequeue.SendNowClaim) 
 			}
 		}
 		if err := s.messageQueue.SetPendingSendNowClaimDelivery(ctx, claim, protocol, submissionID, payloadHash); err != nil {
-			return err
+			return fmt.Errorf("%w: persist Send Now delivery claim: %w", errLifecyclePromptMessagePersistence, err)
 		}
 		if present {
 			if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, payload.Attachments, sendNowSourceIDs(claim)...); err != nil {

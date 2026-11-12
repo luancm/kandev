@@ -130,7 +130,7 @@ func newQueueSettlementFixture(t *testing.T, parentSource bool) *queueSettlement
 			capability:       agentruntime.DurableDeliveryCapability{},
 		}}, finished: make(chan struct{})}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	database := sqlx.NewDb(f.repo.DB(), "sqlite3")
 	queueRepo, err := messagequeue.NewSQLiteRepository(database, database)
 	require.NoError(t, err)

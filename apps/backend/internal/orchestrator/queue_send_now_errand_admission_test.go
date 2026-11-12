@@ -90,7 +90,7 @@ func installTask14CanonicalManager(t *testing.T, f *sendNowErrandFixture, protoc
 		return f.repo.UpdateTaskSessionState(ctx, "session-1", models.TaskSessionStateWaitingForInput, "")
 	}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	steps := newMockStepGetter()
 	steps.steps["step-1"] = &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf1", Name: "Task14 step"}
 	steps.workflowAgentProfileID = "profile"

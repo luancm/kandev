@@ -27,7 +27,9 @@ import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import type {
   TaskStatusSummaryErrands,
   TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
 } from "@/lib/types/task-status-summary";
+import type { TaskWaitReason } from "@/lib/ui/waiting-reason";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 import {
   resolveTaskRowPresentation,
@@ -125,6 +127,8 @@ type TaskItemProps = {
   /** Destination-resident WIP queue status, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
+  waitReason?: TaskWaitReason | null;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
@@ -426,6 +430,8 @@ export const TaskItem = memo(function TaskItem({
   agentErrorMessage,
   hasUnreadMessages,
   automaticColor,
+  quotaWait,
+  waitReason,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
 }: TaskItemProps) {
@@ -469,6 +475,9 @@ export const TaskItem = memo(function TaskItem({
         state={state}
         foregroundActivity={foregroundActivity}
         parkedOnBackgroundWork={parkedOnBackgroundWork}
+        waitReason={waitReason}
+        launchQueue={launchQueue}
+        quotaWait={quotaWait}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         isPendingRemoval={isPendingRemoval}

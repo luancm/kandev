@@ -50,7 +50,7 @@ func newAdmissionIntegrationFixture(t *testing.T, protocol string) *admissionInt
 		capability:       agentruntime.DurableDeliveryCapability{Version: journal.CurrentVersion, Durable: true},
 	}}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	f.svc.messageCreator = &repositoryBackedMessageCreator{mockMessageCreator: &mockMessageCreator{}, repo: f.repo}
 	f.svc.SetTransientRetryMessageService(f.repo)
 	return &admissionIntegrationFixture{errandLaunchFixture: f, errands: service, session: session, row: row, manager: manager}

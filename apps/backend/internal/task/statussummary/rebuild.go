@@ -82,6 +82,7 @@ type RebuildInput struct {
 	ErrandsObserved        bool
 	QueuedPromptCount      int
 	LaunchQueue            *LaunchQueueSummary
+	QuotaWait              *QuotaWaitSummary
 	CompletionGate         *CompletionGateSummary
 	CompletionGateObserved bool
 	// UnreadObserved marks Sessions' Unread ranks as authoritative. When false
@@ -111,6 +112,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 		prObserved:             input.PRObserved,
 		launchQueueObserved:    true,
 		launchQueue:            cloneLaunchQueue(input.LaunchQueue),
+		quotaWait:              cloneQuotaWait(input.QuotaWait),
 		completionGateObserved: input.CompletionGateObserved,
 		completionGate:         cloneCompletionGate(input.CompletionGate),
 		unreadObserved:         input.UnreadObserved,

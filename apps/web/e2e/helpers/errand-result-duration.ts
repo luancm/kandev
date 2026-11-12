@@ -72,11 +72,17 @@ export async function waitNewTurnSettled(
         const turns = (await api.listSessionTurns(sessionId)).turns.filter(
           (turn) => !previous.has(turn.id),
         );
-        return turns.length === 1 && Boolean(turns[0].completed_at);
+        const messages = (await api.listSessionMessages(sessionId)).messages;
+        return {
+          completed: turns.length === 1 && Boolean(turns[0].completed_at),
+          promptErrors: messages
+            .filter((message) => message.type === "error" && !previous.has(message.turn_id ?? ""))
+            .map((message) => message.metadata?.error ?? message.content),
+        };
       },
       { message: "The child follow-up turn completes", timeout: 60_000 },
     )
-    .toBe(true);
+    .toEqual({ completed: true, promptErrors: [] });
 }
 
 export function recordedElapsedDurationMs(errand: Errand): number {

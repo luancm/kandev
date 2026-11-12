@@ -95,6 +95,10 @@ type LaunchQueueLoader func(context.Context, string) (*LaunchQueueSummary, error
 // CompletionGateLoader reads the bounded current completion state for one task.
 type CompletionGateLoader func(context.Context, string) (*CompletionGateSummary, error)
 
+// QuotaWaitLoader reads the task's live limit wait. The loader returns nil when
+// no session of the task is parked on a provider limit.
+type QuotaWaitLoader func(context.Context, string) (*QuotaWaitSummary, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -125,6 +129,10 @@ type ProjectorConfig struct {
 	// LoadSessionUnreadState reads unread ranks for sessions when an event
 	// needs them. Nil keeps the stored unread aggregate as the projection.
 	LoadSessionUnreadState SessionUnreadStateLoader
+	// LoadQuotaWait projects a session parked on a provider limit. It is
+	// refreshed on session lifecycle events, which is when a routing decision
+	// can install or clear such a wait; nil disables the projection.
+	LoadQuotaWait QuotaWaitLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -168,6 +176,7 @@ type Projector struct {
 	loadCompletionGate      CompletionGateLoader
 	loadErrands             ErrandsLoader
 	loadSessionUnreadState  SessionUnreadStateLoader
+	loadQuotaWait           QuotaWaitLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
@@ -227,8 +236,10 @@ type projectionState struct {
 	errands                *ErrandsSummary
 	// unreadObserved means every session's unread ranks come from an
 	// authoritative read; otherwise unreadBaseline is the projected list.
-	unreadObserved bool
-	unreadBaseline []string
+	unreadObserved    bool
+	unreadBaseline    []string
+	quotaWait         *QuotaWaitSummary
+	quotaWaitObserved bool
 }
 
 type sessionObservation struct {
@@ -301,6 +312,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadCompletionGate:      cfg.LoadCompletionGate,
 		loadErrands:             cfg.LoadErrands,
 		loadSessionUnreadState:  cfg.LoadSessionUnreadState,
+		loadQuotaWait:           cfg.LoadQuotaWait,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
@@ -551,6 +563,23 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		state.completionGate = cloneCompletionGate(nextGate)
 		state.completionGateObserved = true
 	}
+	quotaWaitChanged := false
+	if p.loadQuotaWait != nil &&
+		(!state.quotaWaitObserved || isQuotaWaitRefreshEvent(event.Type)) {
+		nextWait, loadErr := p.loadQuotaWait(ctx, taskID)
+		if loadErr != nil {
+			p.logger.Warn("failed to refresh task quota wait",
+				zap.String("task_id", taskID),
+				zap.Error(loadErr))
+		} else {
+			// Compare with the persisted summary too: a restored observation can
+			// already match the new read while the stored row still differs.
+			quotaWaitChanged = state.current == nil || !state.quotaWaitObserved ||
+				!equalQuotaWait(state.quotaWait, nextWait) || !equalQuotaWait(state.current.QuotaWait, nextWait)
+			state.quotaWait = cloneQuotaWait(nextWait)
+			state.quotaWaitObserved = true
+		}
+	}
 
 	errandsChanged, err := p.refreshErrandsLocked(ctx, taskID, state, event.Type)
 	if err != nil {
@@ -567,7 +596,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || turnErrorChanged || launchQueueChanged || completionGateChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || turnErrorChanged || launchQueueChanged || completionGateChanged || quotaWaitChanged, event.Type, data)
 	}
 	p.refreshUnreadBeforeEventLocked(ctx, taskID, state, event.Type, data)
 	refreshPending := p.loadPendingActions != nil &&
@@ -577,14 +606,14 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged || unreadDiffersFromCurrent(state)
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged || quotaWaitChanged || unreadDiffersFromCurrent(state)
 		if changed && p.holdUnreadRiseLocked(taskID, state) {
 			return nil
 		}
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged || unreadDiffersFromCurrent(state)
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged || quotaWaitChanged || unreadDiffersFromCurrent(state)
 	if !changed || p.holdUnreadRiseLocked(taskID, state) {
 		return nil
 	}

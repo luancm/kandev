@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -333,6 +335,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreErrands(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -344,6 +349,8 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.completionGateObserved = summary.CompletionGate != nil
 	state.errands = cloneErrands(summary.Errands)
 	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
+	state.quotaWait = cloneQuotaWait(summary.QuotaWait)
+	state.quotaWaitObserved = summary.QuotaWait != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -454,6 +461,23 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restoreErrands(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreQuotaWait(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadQuotaWait == nil {
+		return nil
+	}
+	wait, err := p.loadQuotaWait(ctx, taskID)
+	if err != nil {
+		p.logger.Warn("failed to restore task quota wait", zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+	state.quotaWait = cloneQuotaWait(wait)
+	state.quotaWaitObserved = true
 	return nil
 }
 
@@ -489,6 +513,22 @@ func isLaunchQueueRefreshEvent(eventType string) bool {
 func isCompletionGateRefreshEvent(eventType string) bool {
 	switch eventType {
 	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.GitHubTaskPRUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+// isQuotaWaitRefreshEvent names the sources that can install or clear a limit
+// wait. A routing decision is recorded while a session is dispatched or torn
+// down, so the session lifecycle events bracket it; the refresh reads the
+// durable route row rather than trusting the event to carry the new deadline.
+func isQuotaWaitRefreshEvent(eventType string) bool {
+	switch eventType {
+	// A removed session can no longer own the current quota wait, so its
+	// removal re-reads the wait like a session state change does.
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged,
+		events.TaskSessionStateChanged, events.SessionRemoved:
 		return true
 	default:
 		return false

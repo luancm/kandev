@@ -80,7 +80,7 @@ func TestErrandParentDelivererRequestsReadinessForAdmittedNotification(t *testin
 		promptDone:             make(chan struct{}),
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
-	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestExecutorActor(executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.messageCreator = &mockMessageCreator{}
 	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-1", "session-1")
 	require.NoError(t, err)

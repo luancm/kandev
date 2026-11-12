@@ -5,7 +5,7 @@ Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs for task_id/session_id.
 
-{delegation_policy_section}{autopilot_section}
+{delegation_policy_section}{autopilot_section}{worktree_adoption_section}
 
 MCP DISCOVERY:
 These instructions list selected Kandev tools, not the complete MCP catalog.

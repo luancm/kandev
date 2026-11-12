@@ -107,7 +107,7 @@ func TestParentWithOutstandingErrandsAcceptsAPromptAsAnIdleSession(t *testing.T)
 	taskRepo := newMockTaskRepo()
 	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = withTestExecutorActor(executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{}))
 	svc.SetErrandController(&fakeErrandStateController{hasErrands: true, outstanding: true})
 
 	seedTaskAndSession(t, repo, "task1", "parent1", models.TaskSessionStateWaitingForInput)

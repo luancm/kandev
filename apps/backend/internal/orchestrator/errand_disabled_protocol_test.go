@@ -113,7 +113,7 @@ func TestDisabledErrandDefiniteRefusalRestoresWholeClaimBeforeReselection(t *tes
 	user := f.queue(t, "  exact ordinary input\n ", messagequeue.QueuedByUser, nil)
 	manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: "refused"}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	f.executeWithAutoRunPaused(t)
 	f.restartDelivery(t, false)
 	restored := f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries
@@ -143,7 +143,7 @@ func TestDisabledErrandGenericRecoveryPreservesOrdinaryOnlyClaimBehavior(t *test
 			source := f.queue(t, "exact ordinary input", owner, nil)
 			manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: "uncertain"}
 			f.svc.agentManager = manager
-			f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+			f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 			_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 			require.NoError(t, err)
 			waitSendNowErrandWorkers(t, f.svc)

@@ -114,6 +114,19 @@ func (s *Service) interruptedErrandResumeOptions(ctx context.Context, session *m
 	return options, nil
 }
 
+func (s *Service) errandPromptResumeOptions(ctx context.Context, session *models.TaskSession) (executor.ResumeOptions, error) {
+	options := executor.ResumeOptions{RequireExecutorActor: true}
+	if !models.IsErrandSession(session) || session.State != models.TaskSessionStateCompleted ||
+		!models.ExplicitManualCreation(ctx, session.TaskID) {
+		return options, nil
+	}
+	if err := s.ValidateErrandContinuation(ctx, session.ID); err != nil {
+		return options, err
+	}
+	options.AllowCompletedSessionResume = true
+	return options, nil
+}
+
 // Exact receipts retire only the completed prompt's cached ownership. Recovery
 // can settle through storage without a terminal callback to this orchestrator.
 func (s *Service) retireSettledErrandPrompt(ctx context.Context, sessionID string) error {

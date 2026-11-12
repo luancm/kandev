@@ -38,6 +38,7 @@ func (s *Service) wrapTaskSessionPrompt(ctx context.Context, in taskPromptInputs
 		IncludeCoordinatorTaskControls: !in.configMode,
 		IncludeTaskTitleTool:           !in.configMode && in.titleOwner,
 		IncludeCanvasGuidance:          in.includeCanvasGuidance,
+		IncludeWorktreeAdoption:        s.worktreeAdoptionGuidance(ctx, in.taskID, in.sessionID),
 		Autopilot:                      in.dbTask.Autopilot,
 		IncludeUserQuestionTool:        !in.dbTask.Autopilot && !in.session.IsPassthrough,
 		IncludeParentQuestionTool:      in.dbTask.Autopilot && in.dbTask.ParentID != "",

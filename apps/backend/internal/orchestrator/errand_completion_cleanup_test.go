@@ -106,6 +106,50 @@ func errandCompletionFixtureWithoutQueuedSuccessor(t *testing.T) *queueSettlemen
 	return f
 }
 
+// @covers AC-TASKS-ERRAND-COMPLETION-001.3
+func TestErrandCompletionCleanupPromptResumeRequiresExplicitSettledAuthority(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := errandCompletionFixtureWithoutQueuedSuccessor(t)
+		runErrandCompletionEvent(t, f, "ready")
+		synctest.Wait()
+		session, err := f.repo.GetTaskSession(t.Context(), f.child.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateCompleted, session.State)
+
+		explicit := models.WithExplicitManualCreation(t.Context(), session.TaskID)
+		options, err := f.svc.errandPromptResumeOptions(explicit, session)
+		require.NoError(t, err)
+		require.True(t, options.RequireExecutorActor)
+		require.True(t, options.AllowCompletedSessionResume)
+
+		for _, ctx := range []context.Context{t.Context(), models.WithExplicitManualCreation(t.Context(), "another-task")} {
+			options, err = f.svc.errandPromptResumeOptions(ctx, session)
+			require.NoError(t, err)
+			require.False(t, options.AllowCompletedSessionResume, "viewing cannot authorize a completed runtime")
+		}
+		for _, state := range []models.TaskSessionState{models.TaskSessionStateFailed, models.TaskSessionStateCancelled} {
+			other := *session
+			other.State = state
+			options, err = f.svc.errandPromptResumeOptions(explicit, &other)
+			require.NoError(t, err)
+			require.False(t, options.AllowCompletedSessionResume)
+		}
+		ordinary := *session
+		ordinary.Role = ""
+		options, err = f.svc.errandPromptResumeOptions(explicit, &ordinary)
+		require.NoError(t, err)
+		require.False(t, options.AllowCompletedSessionResume)
+
+		at := time.Now()
+		require.NoError(t, f.repo.CreateTurn(t.Context(), &models.Turn{
+			ID: "unresolved-follow-up", TaskID: session.TaskID, TaskSessionID: session.ID, StartedAt: at, CompletedAt: &at,
+		}))
+		options, err = f.svc.errandPromptResumeOptions(explicit, session)
+		require.Error(t, err, "new unresolved work invalidates completed resume authority")
+		require.False(t, options.AllowCompletedSessionResume)
+	})
+}
+
 func runErrandCompletionEvent(t *testing.T, f *queueSettlementFixture, event string) {
 	t.Helper()
 	switch event {

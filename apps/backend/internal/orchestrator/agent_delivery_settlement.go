@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -39,11 +41,30 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 			}
 		}
 	}
+	if sessionID != "" {
+		// Completed effects in older installations can still leave a stale
+		// coarse row. The current persisted terminal binding is the only
+		// candidate, so this never scans historical event payloads.
+		return s.convergeSettledDeliverySessionState(ctx, sessionID, nil)
+	}
+	candidates, err := settlements.ListSettledAgentDeliverySessionStateCandidates(ctx, 200)
+	if err != nil {
+		return fmt.Errorf("list settled delivery session state candidates: %w", err)
+	}
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		if err := s.convergeSettledDeliverySessionState(ctx, candidate.SessionID, candidate); err != nil {
+			s.logger.Warn("failed to converge settled delivery session state",
+				zap.String("session_id", candidate.SessionID), zap.Error(err))
+		}
+	}
 	return nil
 }
 
 func (s *Service) settleQueuedDeliveryPredecessor(ctx context.Context, taskID, sessionID string, effect *models.AgentDeliveryEffect) error {
-	ctx = context.WithoutCancel(ctx)
+	ctx = withSettledDeliverySessionStateConvergenceSkipped(context.WithoutCancel(ctx))
 	effect, err := s.repairQueuedTerminalIdentity(ctx, effect)
 	if err != nil {
 		return err
@@ -122,6 +143,11 @@ func (s *Service) settleAgentDeliveryEffect(
 		ctx, effect.SessionID, effect.IncarnationID, effect.SubmissionID, effect.HarnessGeneration,
 	); err != nil {
 		return fmt.Errorf("clear settled recovery notice for submission %q: %w", effect.SubmissionID, err)
+	}
+	if err := s.convergeSettledDeliverySessionState(
+		ctx, effect.SessionID, deliverySessionStateRequestFromEffect(effect),
+	); err != nil {
+		return fmt.Errorf("converge settled session state for submission %q: %w", effect.SubmissionID, err)
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, effect.SessionID)
 	_, err = settlements.CompleteAgentDeliveryTerminalSettlement(ctx, effect.EffectKey, time.Now().UTC())

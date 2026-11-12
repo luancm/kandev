@@ -121,6 +121,16 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if err := ctx.Err(); err != nil {
 		return summaries, err
 	}
+	quotaWaits, err := s.loadSummaryQuotaWaits(ctx, taskIDs(tasks))
+	if err != nil {
+		if s.logger != nil && !isRequestCancellationError(ctx, err) {
+			s.logger.Warn("failed to load task quota waits for status summary", zap.Error(err))
+		}
+		quotaWaits = nil
+	}
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
 	rebuildTasks := tasks
 	if len(failedTaskIDs) > 0 {
 		rebuildTasks = make([]*models.Task, 0, len(tasks)-len(failedTaskIDs))
@@ -136,10 +146,26 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	var rebuildErr error
 	summaries, rebuildErr = s.rebuildMissingSummaries(
 		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask,
-		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, errandsByTask, unread,
+		activityObserved, launchQueueByTask, completionGates, completionGatesLoaded, errandsByTask, unread, quotaWaits,
 	)
 	if err := ctx.Err(); err != nil {
 		return summaries, err
+	}
+	if quotaWaits != nil {
+		for _, task := range tasks {
+			if task == nil || summaries[task.ID] == nil {
+				continue
+			}
+			repaired, repairErr := s.reconcileSummaryQuotaWait(ctx, task, summaries[task.ID], quotaWaits[task.ID])
+			if repairErr != nil {
+				if repaired != nil {
+					summaries[task.ID] = repaired
+				}
+				s.logSummaryRepairFailure(ctx, task.ID, "quota wait", repairErr)
+				continue
+			}
+			summaries[task.ID] = repaired
+		}
 	}
 	return summaries, errors.Join(reconcileErr, rebuildErr)
 }
@@ -236,6 +262,7 @@ func (s *Service) rebuildMissingSummaries(
 	completionGatesLoaded bool,
 	errandsByTask map[string]errandsSummaryObservation,
 	unread summaryUnreadObservation,
+	quotaWaits map[string]*statussummary.QuotaWaitSummary,
 ) (map[string]*statussummary.TaskStatusSummary, error) {
 	if ctx.Err() != nil {
 		return summaries, nil
@@ -313,6 +340,7 @@ func (s *Service) rebuildMissingSummaries(
 			sessionsByTask != nil,
 			now,
 		)
+		input.QuotaWait = quotaWaits[task.ID]
 		unread.applyToRebuild(&input)
 		if err := s.rebuildMissingSummary(ctx, task, summaries, input); err != nil {
 			rebuildErr = errors.Join(rebuildErr, fmt.Errorf("reconcile missing task %s status summary: %w", task.ID, err))

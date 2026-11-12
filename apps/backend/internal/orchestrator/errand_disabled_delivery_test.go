@@ -21,7 +21,7 @@ func (f *sendNowErrandFixture) restartDelivery(t *testing.T, enabled bool) *erra
 	repo, queue := f.reopen(t)
 	f.repo, f.svc.repo, f.svc.messageQueue = repo, repo, queue
 	f.manager.repoForExecutionLookup = repo
-	f.svc.executor = executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(f.manager, repo, testLogger(), executor.ExecutorConfig{}))
 	f.svc.SetErrandsEnabled(func() bool { return enabled })
 	f.svc.SetTurnService(&repoTurnService{repo: repo})
 	f.svc.SetTransientRetryMessageService(repo)
@@ -258,7 +258,7 @@ func TestDisabledErrandUnknownMixedClaimCannotBeRestoredByGenericRecovery(t *tes
 	f.queue(t, "exact ordinary instruction", messagequeue.QueuedByUser, nil)
 	manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: "uncertain"}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 	require.NoError(t, err)
 	waitSendNowErrandWorkers(t, f.svc)

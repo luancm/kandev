@@ -191,7 +191,7 @@ func refuseLegacyPreparedErrand(t *testing.T, f *sendNowErrandFixture, path stri
 	t.Helper()
 	manager := &outcomeSendNowManager{mockAgentManager: f.manager, outcome: "refused"}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	if path == "send_now" {
 		f.executeWithAutoRunPaused(t)
 	} else {

@@ -42,7 +42,7 @@ func installLaunchAdoptionProvider(t *testing.T, f *errandLaunchFixture) <-chan 
 	admitted := make(chan error, 4)
 	manager := &firstErrandAdmissionManager{errandLaunchManager: f.manager, durable: true}
 	f.svc.agentManager = manager
-	f.svc.executor = executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{})
+	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
 	register := f.manager.launchAgentFunc
 	f.manager.launchAgentFunc = func(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 		response, err := register(ctx, req)
