@@ -16,6 +16,9 @@ func (s *Service) ValidateErrandContinuation(ctx context.Context, sessionID stri
 	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
 		return err
 	}
+	if err := s.retryErrandCompletionBeforeAdmission(ctx, sessionID); err != nil {
+		return err
+	}
 	if guard, ok := s.repo.(interface {
 		ValidateErrandContinuation(context.Context, string) error
 	}); ok {

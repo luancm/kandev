@@ -120,21 +120,23 @@ func (s *Service) cancelRows(ctx context.Context, rows []*models.Errand, source 
 }
 
 func (s *Service) cancelObserved(ctx context.Context, row *models.Errand, source models.ErrandCancelSource) (*models.Errand, bool, error) {
-	if pendingTeardown(row) {
+	if pendingCancellation(row) {
 		return row, false, s.retryTeardown(ctx, row)
 	}
 	if row.Lifecycle == models.ErrandLifecycleCancelled {
 		return row, false, nil
 	}
-	status, err := s.Project(ctx, row)
-	if err != nil {
-		return row, false, err
-	}
-	if !IsLive(status) {
-		if source == models.ErrandCancelSourceCascade {
-			err = s.discardPending(ctx, row.ID)
+	if !pendingTeardown(row) {
+		status, err := s.Project(ctx, row)
+		if err != nil {
+			return row, false, err
 		}
-		return row, false, err
+		if !IsLive(status) {
+			if source == models.ErrandCancelSourceCascade {
+				err = s.discardPending(ctx, row.ID)
+			}
+			return row, false, err
+		}
 	}
 	return s.cancelRow(ctx, row.ID, source)
 }

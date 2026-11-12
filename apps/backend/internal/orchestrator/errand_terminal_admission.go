@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/db"
@@ -22,6 +23,30 @@ func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionI
 		return err
 	}
 	return s.retireSettledErrandPrompt(ctx, sessionID)
+}
+
+func (s *Service) retryErrandCompletionBeforeAdmission(ctx context.Context, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !models.IsErrandSession(session) {
+		return nil
+	}
+	completion, ok := s.errands.(interface {
+		RetryErrandCompletion(context.Context, string) error
+	})
+	if !ok {
+		return nil
+	}
+	err = completion.RetryErrandCompletion(ctx, sessionID)
+	if !errors.Is(err, ErrCancelInFlight) {
+		return err
+	}
+	if err := s.waitForCancelInFlight(ctx, sessionID); err != nil {
+		return err
+	}
+	return completion.RetryErrandCompletion(ctx, sessionID)
 }
 
 func (s *Service) reserveErrandTerminalIntent(ctx context.Context, session *models.TaskSession, origin errands.ParentPromptOrigin, turnID, submissionID, executionID string) error {

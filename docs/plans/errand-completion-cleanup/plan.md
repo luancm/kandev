@@ -1,6 +1,6 @@
 ---
 created: 2026-11-03
-status: draft
+status: in_progress
 requirements:
   - REQ-TASKS-ERRAND-COMPLETION-001
 system_design:
@@ -16,7 +16,7 @@ The user approved automatic runtime close after durable result capture, retained
 
 At source `18c03cc4cf591908ffb125beb7a24c50a089514c`, `settleDetachedAgentReadyTurn` publishes `WAITING_FOR_INPUT` after settlement and leaves a promptable runtime. `finishAgentCompletedTurn` schedules cleanup but leaves the same waiting state. Inspection found 81 retained errand sessions in that state, all with stopped executor records; live runtime inventory contained only the parent. Those observations demonstrate stale retained state, not 81 live runtime leaks.
 
-The current parent-bound MCP endpoint was inspected read-only: initialization succeeded and `tools/list` returned 43 tools, with no `start_errand_kandev`, `await_errands_kandev` or `cancel_errand_kandev`. No implementation errand has been launched. Do not replace it with a persistent task or change the live installation/feature flag silently. The requested Errand execution can start once the current parent advertises that capability.
+Current execution base is parent branch commit `67b6b9ba9d`, which integrates reviewed recovery attention/refusal/continuation, exact parent terminal repair and immutable duration. Combined backend, persistence, frontend and desktop/phone acceptance passed; the checkpoint is pushed and remote-verified. The user subsequently requested direct primary execution. The previous implementation Errand was cancelled through the supported API and its code was preserved. Production cleanup and targeted regressions are implemented; final race, desktop/phone acceptance and delivery are running in the primary session. Earlier source/runtime observations above are historical evidence, not current runtime counts.
 
 ## Scope and order
 
@@ -65,9 +65,11 @@ This changes state semantics within existing surfaces, not layout. The phone ret
 
 ## Verification and execution status
 
-Design package only; no production or permanent test changes. Exact TDD, browser and documentation commands are in the work order. Root-cause evidence is source inspection plus the read-only runtime/database observations above; behavioral RED is required before implementation. Native Errand launch is unavailable in this parent's currently advertised tool catalog. The repository's design-package handoff applies before permanent implementation.
+The user authorized implementation after the design package. The corrected regression packet and contract review are accepted; see the work order and regression handoff. Recovery integration is complete at `67b6b9ba9d`, so the former dependency is resolved.
 
-Design validation passed on 2026-11-03: catalog validation (422 decisions, 1,864 specifications), all specification structure/size lint, whitespace checks, and full-range documentation coverage (732 changed paths, 92 reference documents, `covered`). Receipts: `/tmp/errand-completion-plan-catalog.log`, `/tmp/errand-completion-plan-lint.log`, `/tmp/errand-completion-plan-coverage.json`. Four new package/specification files and two owning-document links remain unstaged and uncommitted. These checks validate the design package only; no product acceptance is claimed.
+The primary now owns the complete work order directly: durable completion intent, exact-authority cleanup, retry/projection, explicit continuation, regressions, desktop/phone acceptance, public documentation, upstream integration and push. Earlier reviewer feedback on the regression packet remains accepted. No new delegation, independent cleanup coordinator, workflow or shared-workspace removal is introduced.
+
+Existing tests capture durable state at stop entry and use deterministic `synctest` quiescence to prove no premature completion and no late successor/cancellation effects. Retain those barriers. Production acceptance additionally requires the retry/crash/legacy/repeated-continuation matrix in the work order. PostgreSQL skips and mock-provider limits must remain explicit. No successful-cleanup acceptance or live deployment is claimed yet.
 
 ## Risks
 

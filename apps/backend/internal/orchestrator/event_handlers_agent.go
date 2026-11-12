@@ -903,6 +903,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// dispatch before acquiring it, so LIFO defer ordering releases the guard
 	// first. Keeping execution in this handler preserves the legacy ready-event
 	// completion boundary while still using the normal delivery pipeline.
+	var completionCleanupSessionID string
+	defer func() {
+		if completionCleanupSessionID != "" {
+			s.scheduleErrandCompletionRetry(ctx, completionCleanupSessionID)
+		}
+	}()
 	var deferredLifecycleDispatch *messagequeue.QueuedMessage
 	var deferredLifecycleReservation *queuedDispatchReservation
 	defer func() {
@@ -1198,6 +1204,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	outstanding := false
 	var settleErr error
 	if models.IsWorkflowDetachedSession(session) {
+		if models.IsErrandSession(session) {
+			completionCleanupSessionID = data.SessionID
+		}
 		if err := s.settleDetachedAgentReadyTurn(ctx, completionCtx, data, turnAtEventFire, session); err != nil {
 			return
 		}
@@ -2894,7 +2903,7 @@ func (s *Service) settleDetachedAgentReadyTurn(
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
 	if models.IsErrandSession(session) {
-		err := s.settleErrandTurn(completionCtx, data.SessionID, turnID, models.ErrandOutcomeDone, "", data.DeliverySubmissionID)
+		err := s.settleCompletedErrandTurn(completionCtx, data, session, turnID)
 		s.setSessionWaitingForInputWithoutTaskState(ctx, data.TaskID, data.SessionID, session)
 		return err
 	}
@@ -2983,12 +2992,24 @@ func (s *Service) finishAgentCompleted(
 	}
 
 	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
-	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+	var errandCompletionSettlementErr error
+	if workflowDetached && models.IsErrandSession(session) {
+		err := s.settleCompletedErrandTurn(completionCtx, data, session, data.TurnID)
+		errandCompletionSettlementErr = err
+	}
+	if errandCompletionSettlementErr == nil {
+		if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+			s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
+				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		}
+	} else {
 		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
-			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(errandCompletionSettlementErr))
 	}
 	transitioned, deferTaskWorkflow := s.evaluateCompletedAgentWorkflow(completionCtx, transitionCtx, data, session)
-	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
+	if errandCompletionSettlementErr != nil {
+		transitioned, deferTaskWorkflow = false, true
+	} else if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to reconcile terminal delivery after completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
@@ -3069,7 +3090,12 @@ func (s *Service) finishAgentCompletedTurn(
 	s.captureGitStatusSnapshot(ctx, data.SessionID)
 
 	// Clean up the agent execution (stop agentctl, release port)
-	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+	_, completionOwned := s.errands.(interface {
+		RetryErrandCompletion(context.Context, string) error
+	})
+	if !models.IsErrandSession(session) || !completionOwned {
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+	}
 
 	// Finalize the automation run: mark status=succeeded so the automation's
 	// concurrency slot is released. The worktree stays.
@@ -3098,6 +3124,9 @@ func (s *Service) finishAgentCompletedTurn(
 	// promptable drain instead of leaving its head parked indefinitely.
 	if !models.IsErrandSession(session) || !deferTaskWorkflow {
 		s.drainQueuedMessageForPromptableSession(context.WithoutCancel(ctx), data.SessionID)
+	}
+	if models.IsErrandSession(session) {
+		s.scheduleErrandCompletionRetry(context.WithoutCancel(ctx), data.SessionID)
 	}
 }
 

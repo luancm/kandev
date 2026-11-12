@@ -53,7 +53,7 @@ func (s *Service) cleanupAgentExecutionWithReason(ctx context.Context, execution
 			zap.String("execution_id", executionID),
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		if claimed && (reason == agentruntime.StopReasonRecoverableAgentFailure || reason == agentruntime.StopReasonAgentBootstrapFailed) {
+		if claimed && (reason == completedExecutionCleanupReason || reason == agentruntime.StopReasonRecoverableAgentFailure || reason == agentruntime.StopReasonAgentBootstrapFailed) {
 			// A failed teardown remains retryable without releasing a newer claim.
 			s.executionTeardownClaims.CompareAndDelete(claimKey, claim)
 		}

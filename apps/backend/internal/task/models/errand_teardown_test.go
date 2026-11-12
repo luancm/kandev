@@ -120,6 +120,38 @@ func TestErrandValidateAcceptsSessionAndReservedTeardownTargets(t *testing.T) {
 	}
 }
 
+func TestErrandCompletionCleanupAcceptsCompletionIntentForLaunchedErrand(t *testing.T) {
+	var intent ErrandTeardownIntent
+	encoded := `{"version":1,"id":"intent-1","state":"pending","requested_at":"2026-11-01T12:00:00Z","purpose":"completion","target":{"task_id":"task-1","session_id":"errand-1","session_incarnation":"incarnation-1","execution_id":"execution-1","turn_id":"turn-1"}}`
+	if err := json.Unmarshal([]byte(encoded), &intent); err != nil {
+		t.Fatalf("Unmarshal completion intent: %v", err)
+	}
+	err := Errand{
+		ID: "errand-1", TaskID: "task-1", ParentSessionID: "parent-1",
+		Lifecycle: ErrandLifecycleLaunched, ResultState: ErrandResultNone,
+		TeardownIntent: &intent,
+	}
+	if err := err.Validate(); err != nil {
+		t.Fatalf("launched errand with completion intent Validate() = %v", err)
+	}
+}
+
+func TestErrandCompletionCleanupRejectsMissingPurposeOnLaunchedErrand(t *testing.T) {
+	var intent ErrandTeardownIntent
+	encoded := `{"version":1,"id":"intent-1","state":"pending","requested_at":"2026-11-01T12:00:00Z","target":{"task_id":"task-1","session_id":"errand-1","session_incarnation":"incarnation-1","execution_id":"execution-1","turn_id":"turn-1"}}`
+	if err := json.Unmarshal([]byte(encoded), &intent); err != nil {
+		t.Fatalf("Unmarshal legacy intent: %v", err)
+	}
+	err := Errand{
+		ID: "errand-1", TaskID: "task-1", ParentSessionID: "parent-1",
+		Lifecycle: ErrandLifecycleLaunched, ResultState: ErrandResultNone,
+		TeardownIntent: &intent,
+	}
+	if err := err.Validate(); !errors.Is(err, ErrInvalidErrand) {
+		t.Fatalf("missing-purpose launched intent Validate() = %v, want ErrInvalidErrand", err)
+	}
+}
+
 func TestErrandJSONOmitsPrivateTeardownIntent(t *testing.T) {
 	errand := Errand{TeardownIntent: &ErrandTeardownIntent{ID: "intent-private"}}
 	encoded, err := json.Marshal(errand)

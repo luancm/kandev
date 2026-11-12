@@ -182,12 +182,18 @@ export function parentChat(page: Page, sessionId: string) {
 export async function waitParentIdle(api: ApiClient, taskId: string, sessionId: string) {
   await expect
     .poll(
-      async () =>
-        (await api.listTaskSessions(taskId)).sessions.find((session) => session.id === sessionId)
-          ?.state,
+      async () => {
+        const session = (await api.listTaskSessions(taskId)).sessions.find(
+          (row) => row.id === sessionId,
+        );
+        return (
+          session?.state === "WAITING_FOR_INPUT" ||
+          (session?.role === "errand" && session.state === "COMPLETED")
+        );
+      },
       { message: "Parent turn settles while errands remain independent", timeout: 60_000 },
     )
-    .toBe("WAITING_FOR_INPUT");
+    .toBe(true);
 }
 
 export async function startErrands(

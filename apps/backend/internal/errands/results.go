@@ -25,12 +25,13 @@ const (
 // TurnSettlement is one settled errand turn. Outcome is done or failed.
 // FailureSummary is the sanitized failure text for a failed turn.
 type TurnSettlement struct {
-	SessionID      string
-	TurnID         string
-	SubmissionID   string
-	Outcome        models.ErrandOutcome
-	FailureSummary string
-	Interrupted    bool
+	SessionID        string
+	TurnID           string
+	SubmissionID     string
+	Outcome          models.ErrandOutcome
+	FailureSummary   string
+	Interrupted      bool
+	CompletionTarget *models.ErrandTeardownTarget
 }
 
 // OnErrandTurnSettled records a settled errand turn. A session that is not an

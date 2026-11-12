@@ -49,8 +49,18 @@ func (s *fakeStopper) RetryErrandTeardown(ctx context.Context, intent ErrandTear
 	if row.TeardownIntent.State == models.ErrandTeardownIntentCompleted {
 		return TeardownCompleted, nil
 	}
-	if intent.Target.ExecutionID != "" {
-		if err := s.stopRuntime(ctx, intent.Target.SessionID, StopReasonErrandCancelled); err != nil {
+	reason := StopReasonErrandCancelled
+	if intent.Purpose == models.ErrandTeardownPurposeCompletion {
+		reason = "agent completed"
+	}
+	if intent.Target.ExecutionID != "" && row.TeardownIntent.State == models.ErrandTeardownIntentPending {
+		if err := s.stopRuntime(ctx, intent.Target.SessionID, reason); err != nil {
+			return "", err
+		}
+	}
+	if intent.Purpose == models.ErrandTeardownPurposeCompletion && row.TeardownIntent.State == models.ErrandTeardownIntentPending {
+		row, err = s.store.TransitionErrandTeardownIntent(ctx, row.ID, intent.ID, row.Version, models.ErrandTeardownIntentClosed)
+		if err != nil {
 			return "", err
 		}
 	}

@@ -274,13 +274,17 @@ export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "sessio
 export function shouldRenderStoppedSessionBanner(input: {
   isFailed: boolean;
   isCompleted: boolean;
+  sessionRole?: string;
   executorUnavailable: boolean;
   launchErrorOwned?: boolean;
   uncertainDelivery?: boolean;
 }): boolean {
+  // i18n-exempt: internal persisted session role discriminator.
+  const canContinue = input.isCompleted && input.sessionRole === "errand";
   return (
-    (input.uncertainDelivery && !input.isCompleted) ||
-    (!input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable))
+    (Boolean(input.uncertainDelivery) && (!input.isCompleted || canContinue)) ||
+    (!input.launchErrorOwned &&
+      (input.isFailed || (input.isCompleted && !canContinue) || input.executorUnavailable))
   );
 }
 

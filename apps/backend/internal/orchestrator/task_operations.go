@@ -7134,6 +7134,11 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
+	if options.claimEntryID == "" {
+		if err := s.retryErrandCompletionBeforeAdmission(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
 		return nil, err
 	}

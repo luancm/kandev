@@ -46,7 +46,7 @@ Start, wait and completion entries share a compact historical presentation. Expa
 
 Completed results show recorded elapsed time when available, from errand creation to that result, including queued and idle time. This value stays unchanged after reload or later follow-up turns. Older results without a recorded duration omit it.
 
-Regular session tabs and session pickers are for normal task conversations. Errands remain accessible from their parent's panel and through direct conversation links, without accumulating permanent tabs. Their transcripts remain available after completion.
+Regular session tabs and session pickers are for normal task conversations. Errands remain accessible from their parent's panel and through direct conversation links, without accumulating permanent tabs. Their transcripts remain available after completion. Successful errands close their runtime after the result is saved and retain a completed conversation. Opening that history does not start an agent. Use the child composer to send an explicit follow-up in the same conversation; restoration follows the selected provider's supported recovery behavior.
 
 The pill remains available after all errands finish. Its panel offers **Stop all errands** while any errand is live; this action retains task-wide scope, including errands belonging to other parent conversations.
 

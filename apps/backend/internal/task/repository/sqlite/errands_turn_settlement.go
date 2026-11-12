@@ -175,7 +175,13 @@ func (r *Repository) writeErrandTerminalRowTx(ctx context.Context, tx *sqlx.Tx, 
 	}
 	next := *row
 	preserveErrandIdentity(&next, current)
+	if err := validateErrandCompletionIntentWrite(current, &next, effect); err != nil {
+		return nil, "", err
+	}
 	next.ResultRevision, next.UpdatedAt = errandUpdateRevision(current, &next), r.nowUTC()
+	if err := next.Validate(); err != nil {
+		return nil, "", err
+	}
 	if err := writeErrandUpdate(ctx, tx, &next); err != nil {
 		return nil, "", err
 	}
@@ -184,6 +190,53 @@ func (r *Repository) writeErrandTerminalRowTx(ctx context.Context, tx *sqlx.Tx, 
 	}
 	next.Version++
 	return &next, effect.Outcome, nil
+}
+
+func validateErrandCompletionIntentWrite(current, next *models.Errand, effect *models.AgentDeliveryEffect) error {
+	intent := next.TeardownIntent
+	if intent == nil || intent.Purpose != models.ErrandTeardownPurposeCompletion {
+		return nil
+	}
+	if current.TeardownIntent != nil && *current.TeardownIntent == *intent && intent.Target.TurnID != effect.TurnID {
+		return nil
+	}
+	if !completionIntentMatchesDecision(next, intent, effect) {
+		return models.ErrInvalidErrand
+	}
+	if err := intent.ValidateFor(next); err != nil {
+		return err
+	}
+	return validateCompletionIntentReplacement(current.TeardownIntent, intent)
+}
+
+func completionIntentMatchesDecision(next *models.Errand, intent *models.ErrandTeardownIntent, effect *models.AgentDeliveryEffect) bool {
+	target := intent.Target
+	return effect.State == models.DeliveryEffectCompleted && strings.HasSuffix(effect.Outcome, ":done") && next.LatestSettledTurnID == effect.TurnID && target.TaskID == effect.TaskID && target.SessionID == effect.SessionID && target.SessionIncarnation == effect.IncarnationID && target.TurnID == effect.TurnID && target.SubmissionID == effect.SubmissionID
+}
+
+func validateCompletionIntentReplacement(previous, intent *models.ErrandTeardownIntent) error {
+	if previous == nil {
+		return nil
+	}
+	switch previous.State {
+	case models.ErrandTeardownIntentPending, models.ErrandTeardownIntentClosed:
+		return validatePendingCompletionReplacement(previous, intent)
+	default:
+		if previous.Purpose == models.ErrandTeardownPurposeCompletion && previous.Target.TurnID == intent.Target.TurnID && previous.ID != intent.ID {
+			return models.ErrErrandVersionConflict
+		}
+	}
+	return nil
+}
+
+func validatePendingCompletionReplacement(previous, intent *models.ErrandTeardownIntent) error {
+	if previous.ID == intent.ID && previous.Target == intent.Target && previous.Purpose == intent.Purpose {
+		return nil
+	}
+	if previous.Purpose == models.ErrandTeardownPurposeCompletion && previous.State == models.ErrandTeardownIntentPending && previous.Target.SessionIncarnation == intent.Target.SessionIncarnation && previous.Target.ExecutionID == intent.Target.ExecutionID && previous.Target.TurnID != intent.Target.TurnID {
+		return nil
+	}
+	return models.ErrErrandVersionConflict
 }
 
 func (r *Repository) guardObservedErrandTerminalTx(ctx context.Context, tx *sqlx.Tx, effect *models.AgentDeliveryEffect) error {
@@ -292,6 +345,12 @@ func (r *Repository) readErrandSettlementEffect(ctx context.Context, sessionID, 
 	return errandSettlementEffectTx(ctx, tx, sessionID, incarnationID, turnID)
 }
 
+// GetErrandTurnSettlementDecision returns the exact durable decision for one
+// session incarnation and turn. A missing decision is distinct from an error.
+func (r *Repository) GetErrandTurnSettlementDecision(ctx context.Context, sessionID, incarnationID, turnID string) (*models.AgentDeliveryEffect, error) {
+	return r.readErrandSettlementEffect(ctx, sessionID, incarnationID, turnID)
+}
+
 func validErrandTerminalIntent(effect *models.AgentDeliveryEffect) bool {
 	return effect != nil && effect.EffectKey != "" && effect.TurnID != "" && effect.SubmissionID != "" && effect.IncarnationID != "" &&
 		(effect.Outcome == errandTerminalParentOrigin || effect.Outcome == authorKindUser || strings.Contains(effect.Outcome, ":"))
@@ -310,6 +369,10 @@ func (r *Repository) readCompletedErrandSettlementTx(ctx context.Context, tx *sq
 	if err != nil {
 		return nil, err
 	}
+	committed, err = r.adoptExactCompletionIntentTx(ctx, tx, committed, row.TeardownIntent, effect)
+	if err != nil {
+		return nil, err
+	}
 	if err := supersedeInterruptedAssessmentTx(ctx, tx, row.TaskID, effect); err != nil {
 		return nil, err
 	}
@@ -317,4 +380,54 @@ func (r *Repository) readCompletedErrandSettlementTx(ctx context.Context, tx *sq
 		return nil, err
 	}
 	return committed, nil
+}
+
+func (r *Repository) adoptExactCompletionIntentTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	current *models.Errand,
+	candidate *models.ErrandTeardownIntent,
+	effect *models.AgentDeliveryEffect,
+) (*models.Errand, error) {
+	if !canAdoptCompletionIntent(current, candidate, effect) {
+		return current, nil
+	}
+	if current.TeardownIntent != nil && *current.TeardownIntent == *candidate {
+		return current, nil
+	}
+	decision, err := errandSettlementEffectTx(ctx, tx, effect.SessionID, effect.IncarnationID, effect.TurnID)
+	if err != nil {
+		return nil, err
+	}
+	if decision == nil || decision.Outcome != effect.Outcome || !matchingErrandTerminalReceipt(decision, effect) {
+		return current, nil
+	}
+	if err := r.guardObservedErrandTerminalTx(ctx, tx, effect); err != nil {
+		if errors.Is(err, db.ErrErrandSettlementPending) {
+			return current, nil
+		}
+		return nil, err
+	}
+	next := *current
+	next.TeardownIntent = candidate
+	next.UpdatedAt = r.nowUTC()
+	decision.TaskID = current.TaskID
+	if err := validateErrandCompletionIntentWrite(current, &next, decision); err != nil {
+		return nil, err
+	}
+	if err := next.Validate(); err != nil {
+		return nil, err
+	}
+	if err := writeErrandUpdate(ctx, tx, &next); err != nil {
+		return nil, err
+	}
+	if err := readWrittenErrandDeliveryState(ctx, tx, &next); err != nil {
+		return nil, err
+	}
+	next.Version++
+	return &next, nil
+}
+
+func canAdoptCompletionIntent(current *models.Errand, candidate *models.ErrandTeardownIntent, effect *models.AgentDeliveryEffect) bool {
+	return candidate != nil && candidate.Purpose == models.ErrandTeardownPurposeCompletion && current.Lifecycle != models.ErrandLifecycleCancelled && current.LatestSettledTurnID == effect.TurnID && effect.State == models.DeliveryEffectCompleted && strings.HasSuffix(effect.Outcome, ":done")
 }

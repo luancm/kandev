@@ -123,7 +123,9 @@ func (s *Service) settleAgentDeliveryEffect(
 	); err != nil {
 		return fmt.Errorf("clear settled recovery notice for submission %q: %w", effect.SubmissionID, err)
 	}
-	if _, err := settlements.CompleteAgentDeliveryTerminalSettlement(ctx, effect.EffectKey, time.Now().UTC()); err != nil {
+	s.publishAgentDeliveryRecoveryState(ctx, effect.SessionID)
+	_, err = settlements.CompleteAgentDeliveryTerminalSettlement(ctx, effect.EffectKey, time.Now().UTC())
+	if err != nil {
 		return fmt.Errorf("complete delivery terminal outbox %q: %w", effect.EffectKey, err)
 	}
 	return nil

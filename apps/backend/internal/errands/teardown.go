@@ -16,7 +16,15 @@ import (
 const maxTeardownRetriesPerSweep = 32
 
 func pendingTeardown(row *models.Errand) bool {
-	return row.TeardownIntent != nil && row.TeardownIntent.State == models.ErrandTeardownIntentPending
+	if row.TeardownIntent == nil {
+		return false
+	}
+	return row.TeardownIntent.State == models.ErrandTeardownIntentPending ||
+		(row.TeardownIntent.Purpose == models.ErrandTeardownPurposeCompletion && row.TeardownIntent.State == models.ErrandTeardownIntentClosed)
+}
+
+func pendingCancellation(row *models.Errand) bool {
+	return pendingTeardown(row) && row.TeardownIntent.Purpose != models.ErrandTeardownPurposeCompletion
 }
 
 // cancelRow publishes a committed decision after the adapter releases ownership,
@@ -27,15 +35,17 @@ func (s *Service) cancelRow(ctx context.Context, id string, source models.Errand
 		if err != nil {
 			return nil, false, err
 		}
-		if pendingTeardown(row) {
+		if pendingCancellation(row) {
 			return row, false, s.retryTeardown(ctx, row)
 		}
 		if row.Lifecycle == models.ErrandLifecycleCancelled {
 			return row, false, nil
 		}
-		status, err := s.Project(ctx, row)
-		if err != nil || status == models.ErrandStatusDone {
-			return row, false, err
+		if !pendingTeardown(row) {
+			status, err := s.Project(ctx, row)
+			if err != nil || status == models.ErrandStatusDone {
+				return row, false, err
+			}
 		}
 		next, changed, err := s.cancelCaptured(ctx, row, source)
 		if !changed && errors.Is(err, models.ErrErrandVersionConflict) {
@@ -56,7 +66,8 @@ func (s *Service) cancelCaptured(ctx context.Context, row *models.Errand, source
 		}
 		s.applyCancel(&next, source)
 		next.TeardownIntent = &models.ErrandTeardownIntent{Version: models.ErrandTeardownIntentVersion,
-			ID: intentID, State: models.ErrandTeardownIntentPending, RequestedAt: requestedAt, Target: target}
+			ID: intentID, State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCancellation,
+			RequestedAt: requestedAt, Target: target}
 		if err := s.store.UpdateErrand(ctx, &next); err != nil {
 			return err
 		}
@@ -76,11 +87,52 @@ func (s *Service) retryTeardown(ctx context.Context, row *models.Errand) error {
 	if !pendingTeardown(row) {
 		return nil
 	}
-	outcome, err := s.stopper.RetryErrandTeardown(ctx, *row.TeardownIntent)
+	intent := *row.TeardownIntent
+	outcome, err := s.stopper.RetryErrandTeardown(ctx, intent)
 	if err == nil && outcome != TeardownCompleted && outcome != TeardownSuperseded {
 		err = errors.New("errands: teardown returned no confirmed outcome")
 	}
+	if err == nil && outcome == TeardownCompleted && intent.Purpose == models.ErrandTeardownPurposeCompletion {
+		latest, readErr := s.store.GetErrand(ctx, row.ID)
+		if readErr != nil {
+			return readErr
+		}
+		status, projectErr := s.Project(ctx, latest)
+		if projectErr != nil {
+			return projectErr
+		}
+		if s.events != nil {
+			s.events.PublishErrandUpdated(ctx, latest, status)
+		}
+	}
 	return err
+}
+
+// RetryErrandCompletion resumes one durable success-close obligation. It is
+// independent of the new-errand admission flag and safe for explicit admission.
+func (s *Service) RetryErrandCompletion(ctx context.Context, id string) error {
+	row, err := s.store.GetErrand(ctx, id)
+	if errors.Is(err, models.ErrErrandNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if row.TeardownIntent == nil {
+		if !legacyCompletionCandidate(row) {
+			return nil
+		}
+		if repair, ok := s.stopper.(interface {
+			RepairLegacyErrandCompletion(context.Context, *models.Errand) error
+		}); ok {
+			return repair.RepairLegacyErrandCompletion(ctx, row)
+		}
+		return nil
+	}
+	if row.TeardownIntent.Purpose != models.ErrandTeardownPurposeCompletion {
+		return nil
+	}
+	return s.retryTeardown(ctx, row)
 }
 
 // retryPendingTeardowns runs on startup and the existing sweep even when new
@@ -96,7 +148,7 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 	}
 	candidates := rows[:0]
 	for _, row := range rows {
-		if pendingTeardown(row) || legacyTeardown(row) {
+		if pendingTeardown(row) || legacyTeardown(row) || legacyCompletionCandidate(row) {
 			candidates = append(candidates, row)
 		}
 	}
@@ -111,9 +163,16 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 		s.teardownCursor = row.ID
 		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		var err error
-		if legacyTeardown(row) {
+		switch {
+		case legacyTeardown(row):
 			_, _, err = s.cancelCaptured(attemptCtx, row, row.CancelSource)
-		} else {
+		case legacyCompletionCandidate(row):
+			if repair, ok := s.stopper.(interface {
+				RepairLegacyErrandCompletion(context.Context, *models.Errand) error
+			}); ok {
+				err = repair.RepairLegacyErrandCompletion(attemptCtx, row)
+			}
+		default:
 			err = s.retryTeardown(attemptCtx, row)
 		}
 		cancel()
@@ -127,4 +186,8 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 
 func legacyTeardown(row *models.Errand) bool {
 	return row.Lifecycle == models.ErrandLifecycleCancelled && row.TeardownIntent == nil
+}
+
+func legacyCompletionCandidate(row *models.Errand) bool {
+	return row != nil && row.Lifecycle == models.ErrandLifecycleLaunched && row.TeardownIntent == nil && row.LatestSettledTurnID != ""
 }

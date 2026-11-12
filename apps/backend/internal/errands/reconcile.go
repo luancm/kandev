@@ -21,9 +21,9 @@ const reconcileActionReleasedDelivery = "orphaned_delivery_claim_released"
 // Order: recover durable owner cascades before launched results, orphaned
 // claims or notifications. Unreadable owners exclude only their task.
 func (s *Service) Reconcile(ctx context.Context) (err error) {
-	teardownErr := s.retryPendingTeardowns(ctx)
 	owners, lifecycleErr := s.reconcileLifecycle(ctx)
-	defer func() { err = errors.Join(teardownErr, lifecycleErr, err) }()
+	// Terminal reconciliation may persist new close obligations in this pass.
+	defer func() { err = errors.Join(s.retryPendingTeardowns(ctx), lifecycleErr, err) }()
 	if owners == nil {
 		return nil
 	}

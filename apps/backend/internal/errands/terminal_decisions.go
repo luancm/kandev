@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -107,7 +109,8 @@ func (s *Service) commitTerminalDecision(ctx context.Context, effect *models.Age
 		return db.ErrErrandSettlementPending
 	}
 	settlement := TurnSettlement{SessionID: effect.SessionID, TurnID: effect.TurnID, SubmissionID: effect.SubmissionID,
-		Outcome: models.ErrandOutcomeDone, FailureSummary: observed.FailureSummary, Interrupted: cause == terminalInterruptedCause}
+		Outcome: models.ErrandOutcomeDone, FailureSummary: observed.FailureSummary, Interrupted: cause == terminalInterruptedCause,
+		CompletionTarget: observed.CompletionTarget}
 	if cause == "failed" || cause == terminalInterruptedCause {
 		settlement.Outcome = models.ErrandOutcomeFailed
 	}
@@ -121,6 +124,10 @@ func (s *Service) commitTerminalDecision(ctx context.Context, effect *models.Age
 		alreadyCaptured := row.ResultTurnID == effect.TurnID && resultAlreadyCaptured(row.ResultState)
 		next := *row
 		changed := applySettlement(&next, settlement, origin == terminalParentOrigin, text, truncated, kind, s.clock.Now())
+		if err := s.prepareCompletionIntent(&next, settlement, effect); err != nil {
+			unlock()
+			return err
+		}
 		decision := *effect
 		at := s.clock.Now()
 		decision.State, decision.CompletedAt = models.DeliveryEffectCompleted, &at
@@ -144,6 +151,70 @@ func (s *Service) commitTerminalDecision(ctx context.Context, effect *models.Age
 		}
 	}
 	return models.ErrErrandVersionConflict
+}
+
+func (s *Service) setCompletionIntent(row *models.Errand, settlement TurnSettlement, effect *models.AgentDeliveryEffect) error {
+	if !eligibleCompletionSettlement(row, settlement, effect) {
+		return nil
+	}
+	target := *settlement.CompletionTarget
+	if err := validateCompletionTarget(row, target, effect); err != nil {
+		return err
+	}
+	target.SubmissionID = effect.SubmissionID
+	reuse, err := reuseCompletionIntent(row.TeardownIntent, target)
+	if err != nil || reuse {
+		return err
+	}
+	intent := &models.ErrandTeardownIntent{Version: models.ErrandTeardownIntentVersion, ID: uuid.NewString(), State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCompletion, RequestedAt: s.clock.Now(), Target: target}
+	if err := intent.ValidateFor(row); err != nil {
+		return err
+	}
+	row.TeardownIntent = intent
+	return nil
+}
+
+func (s *Service) prepareCompletionIntent(row *models.Errand, settlement TurnSettlement, effect *models.AgentDeliveryEffect) error {
+	if settlement.CompletionTarget == nil && settlement.Outcome == models.ErrandOutcomeDone && !settlement.Interrupted && effect.StreamID != "" {
+		settlement.CompletionTarget = &models.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID, SessionIncarnation: effect.IncarnationID, ExecutionID: effect.StreamID, TurnID: effect.TurnID, SubmissionID: effect.SubmissionID}
+	}
+	return s.setCompletionIntent(row, settlement, effect)
+}
+
+func eligibleCompletionSettlement(row *models.Errand, settlement TurnSettlement, effect *models.AgentDeliveryEffect) bool {
+	return settlement.CompletionTarget != nil && row.Lifecycle != models.ErrandLifecycleCancelled && !settlement.Interrupted && settlement.Outcome == models.ErrandOutcomeDone && strings.HasSuffix(effect.Outcome, ":done")
+}
+
+func validateCompletionTarget(row *models.Errand, target models.ErrandTeardownTarget, effect *models.AgentDeliveryEffect) error {
+	if target.TaskID != row.TaskID || target.SessionID != row.ID || target.SessionIncarnation != effect.IncarnationID || target.ExecutionID == "" || target.TurnID != effect.TurnID || (target.SubmissionID != "" && target.SubmissionID != effect.SubmissionID) {
+		return models.ErrInvalidErrand
+	}
+	if row.LatestSettledTurnID != effect.TurnID {
+		return models.ErrErrandVersionConflict
+	}
+	return nil
+}
+
+func reuseCompletionIntent(current *models.ErrandTeardownIntent, target models.ErrandTeardownTarget) (bool, error) {
+	if current == nil {
+		return false, nil
+	}
+	if current.Purpose == models.ErrandTeardownPurposeCompletion && current.Target == target {
+		return true, nil
+	}
+	switch current.State {
+	case models.ErrandTeardownIntentPending:
+		if !newerCompletionOnSameExecution(current, target) {
+			return false, models.ErrErrandVersionConflict
+		}
+	case models.ErrandTeardownIntentClosed:
+		return false, models.ErrErrandVersionConflict
+	}
+	return current.Purpose == models.ErrandTeardownPurposeCompletion && current.Target.TurnID == target.TurnID, nil
+}
+
+func newerCompletionOnSameExecution(current *models.ErrandTeardownIntent, target models.ErrandTeardownTarget) bool {
+	return current.Purpose == models.ErrandTeardownPurposeCompletion && current.Target.SessionIncarnation == target.SessionIncarnation && current.Target.ExecutionID == target.ExecutionID && current.Target.TurnID != target.TurnID
 }
 
 func (s *Service) recordTerminalSettlement(row *models.Errand, settlement TurnSettlement, parentInitiated, alreadyCaptured bool) {

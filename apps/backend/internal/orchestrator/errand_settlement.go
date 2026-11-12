@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -57,6 +58,43 @@ func (s *Service) settleErrandTurn(
 	return err
 }
 
+func (s *Service) settleCompletedErrandTurn(ctx context.Context, data watcher.AgentEventData, session *models.TaskSession, turnID string) error {
+	settler, ok := s.errandSettler()
+	if !ok || session == nil || !models.IsErrandSession(session) || session.ID == "" || turnID == "" {
+		return nil
+	}
+	target := models.ErrandTeardownTarget{
+		TaskID: session.TaskID, SessionID: session.ID, SessionIncarnation: session.QueueIncarnationID,
+		ExecutionID: data.AgentExecutionID, TurnID: turnID, PromptGeneration: data.PromptGeneration,
+	}
+	err := settler.OnErrandTurnSettled(ctx, errands.TurnSettlement{
+		SessionID: session.ID, TurnID: turnID, SubmissionID: data.DeliverySubmissionID,
+		Outcome: models.ErrandOutcomeDone, CompletionTarget: &target,
+	})
+	if err != nil {
+		s.logger.Warn("failed to record successful errand completion",
+			zap.String("session_id", session.ID), zap.String("turn_id", turnID), zap.Error(err))
+	}
+	return err
+}
+
+func (s *Service) scheduleErrandCompletionRetry(ctx context.Context, sessionID string) {
+	controller, ok := s.errands.(interface {
+		RetryErrandCompletion(context.Context, string) error
+	})
+	if !ok || sessionID == "" {
+		return
+	}
+	go func() {
+		attemptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := controller.RetryErrandCompletion(attemptCtx, sessionID); err != nil {
+			s.logger.Warn("errand completion cleanup remains pending",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}()
+}
+
 func (s *Service) settleCancelledErrandTurn(ctx context.Context, sessionID, turnID, submissionID string) {
 	canceller, ok := s.errands.(errandTurnCanceller)
 	if !ok || sessionID == "" || turnID == "" {
@@ -105,9 +143,7 @@ func (s *Service) evaluateCompletedAgentWorkflow(
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 		}
 		if models.IsErrandSession(session) {
-			if err := s.settleErrandTurn(completionCtx, data.SessionID, data.TurnID, models.ErrandOutcomeDone, "", data.DeliverySubmissionID); err != nil {
-				return false, true
-			}
+			return false, false
 		}
 		return false, false
 	}

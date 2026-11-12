@@ -16,6 +16,8 @@ type errandTeardownStore interface {
 	errands.TeardownIntentStore
 	GetLatestTurnBySessionID(context.Context, string) (*models.Turn, error)
 	ListAgentDeliverySubmissions(context.Context, string) ([]*models.AgentDeliverySubmission, error)
+	GetErrandTurnSettlementDecision(context.Context, string, string, string) (*models.AgentDeliveryEffect, error)
+	CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error)
 }
 
 type errandTeardownOwner struct {
@@ -37,6 +39,9 @@ func (a *ErrandAdapter) CancelErrandWithTarget(ctx context.Context, row *models.
 	if row == nil || row.ID == "" || commit == nil {
 		return models.ErrInvalidErrand
 	}
+	if handled, err := a.cancelPendingCompletion(ctx, row, commit); handled {
+		return err
+	}
 	_, err := a.withErrandTeardownOwner(ctx, row.ID, func(ctx context.Context, owner *errandTeardownOwner, store errandTeardownStore) (errands.TeardownOutcome, error) {
 		return owner.cancel(ctx, store, row, commit)
 	})
@@ -48,11 +53,11 @@ func (o *errandTeardownOwner) cancel(ctx context.Context, store errandTeardownSt
 	if err != nil {
 		return "", err
 	}
-	if current.Version != row.Version || current.TaskID != row.TaskID || current.ParentSessionID != row.ParentSessionID {
+	if !sameObservedErrand(current, row) {
 		return "", models.ErrErrandVersionConflict
 	}
-	if current.TeardownIntent != nil {
-		return o.retry(ctx, store, *current.TeardownIntent)
+	if intent := current.TeardownIntent; intent != nil && intent.Purpose != models.ErrandTeardownPurposeCompletion {
+		return o.retry(ctx, store, *intent)
 	}
 	var target models.ErrandTeardownTarget
 	if current.Lifecycle == models.ErrandLifecycleCancelled {
@@ -186,7 +191,7 @@ func (o *errandTeardownOwner) captureTarget(ctx context.Context, store errandTea
 	if executionID != identity.executionID {
 		return target, errors.New("errand prompt and execution inventories disagree")
 	}
-	turn, err := o.currentTurn(ctx, store, row.ID)
+	turn, err := o.svc.currentErrandTurn(ctx, store, row.ID)
 	if err != nil {
 		return target, err
 	}
@@ -252,13 +257,13 @@ func (o *errandTeardownOwner) confirmRuntimeAbsence(ctx context.Context, session
 	return nil
 }
 
-func (o *errandTeardownOwner) currentTurn(ctx context.Context, store errandTeardownStore, sessionID string) (*models.Turn, error) {
-	turnID, err := o.svc.peekActiveTurnID(ctx, sessionID)
+func (s *Service) currentErrandTurn(ctx context.Context, store errandTeardownStore, sessionID string) (*models.Turn, error) {
+	turnID, err := s.peekActiveTurnID(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	if turnID != "" {
-		return o.svc.turnService.GetTurn(ctx, turnID)
+		return s.turnService.GetTurn(ctx, turnID)
 	}
 	turn, err := store.GetLatestTurnBySessionID(ctx, sessionID)
 	if turn != nil && turn.Metadata[models.TurnMetaKeyLifecycleOnly] == true {
@@ -348,11 +353,14 @@ func (o *errandTeardownOwner) retry(ctx context.Context, store errandTeardownSto
 	if err != nil {
 		return "", err
 	}
-	if row.TeardownIntent == nil || !sameTeardownIntent(*row.TeardownIntent, intent) {
+	if !rowHasTeardownIntent(row, intent) {
 		return "", models.ErrErrandVersionConflict
 	}
 	if err := intent.ValidateFor(row); err != nil {
 		return "", err
+	}
+	if intent.Purpose == models.ErrandTeardownPurposeCompletion {
+		return o.retryCompletion(ctx, store, row, intent)
 	}
 	switch row.TeardownIntent.State {
 	case models.ErrandTeardownIntentCompleted:
@@ -369,6 +377,10 @@ func (o *errandTeardownOwner) retry(ctx context.Context, store errandTeardownSto
 			return "", err
 		}
 		outcome = errands.TeardownCompleted
+	} else if session != nil {
+		if err := o.cancelSession(ctx, session); err != nil {
+			return "", err
+		}
 	}
 	state := models.ErrandTeardownIntentCompleted
 	if outcome == errands.TeardownSuperseded {
@@ -384,7 +396,7 @@ func (o *errandTeardownOwner) retry(ctx context.Context, store errandTeardownSto
 }
 
 func sameTeardownIntent(a, b models.ErrandTeardownIntent) bool {
-	return a.ID == b.ID && a.Version == b.Version && a.RequestedAt.Equal(b.RequestedAt) && a.Target == b.Target
+	return a.ID == b.ID && a.Version == b.Version && a.Purpose == b.Purpose && a.RequestedAt.Equal(b.RequestedAt) && a.Target == b.Target
 }
 
 func (o *errandTeardownOwner) classify(ctx context.Context, store errandTeardownStore, row *models.Errand, target models.ErrandTeardownTarget) (*models.TaskSession, string, errands.TeardownOutcome, error) {
@@ -423,7 +435,7 @@ func (o *errandTeardownOwner) classifyMissingSession(ctx context.Context, target
 }
 
 func (o *errandTeardownOwner) classifyObservedPrompt(ctx context.Context, store errandTeardownStore, row *models.Errand, target models.ErrandTeardownTarget, session *models.TaskSession, executionID string, absent bool) (*models.TaskSession, string, errands.TeardownOutcome, error) {
-	turn, err := o.currentTurn(ctx, store, target.SessionID)
+	turn, err := o.svc.currentErrandTurn(ctx, store, target.SessionID)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -502,6 +514,9 @@ func (o *errandTeardownOwner) stop(ctx context.Context, session *models.TaskSess
 	claim, claimed := o.svc.claimExecutionTeardownWithToken(sessionID, executionID, executionTeardownIntentGraceful)
 	if !claimed {
 		if prior, ok := o.svc.executionTeardownClaimFor(sessionID, executionID); ok && prior.cleanupCompleted {
+			if session != nil {
+				return o.cancelSession(ctx, session)
+			}
 			return nil
 		}
 		return errors.New("exact errand execution teardown is already owned")

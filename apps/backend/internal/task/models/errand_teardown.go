@@ -7,13 +7,20 @@ import (
 )
 
 type ErrandTeardownIntentState string
+type ErrandTeardownPurpose string
 
 const ErrandTeardownIntentVersion = 1
 
 const (
 	ErrandTeardownIntentPending    ErrandTeardownIntentState = "pending"
+	ErrandTeardownIntentClosed     ErrandTeardownIntentState = "closed"
 	ErrandTeardownIntentCompleted  ErrandTeardownIntentState = "completed"
 	ErrandTeardownIntentSuperseded ErrandTeardownIntentState = "superseded"
+)
+
+const (
+	ErrandTeardownPurposeCancellation ErrandTeardownPurpose = "cancellation"
+	ErrandTeardownPurposeCompletion   ErrandTeardownPurpose = "completion"
 )
 
 type ErrandTeardownTarget struct {
@@ -33,6 +40,7 @@ type ErrandTeardownIntent struct {
 	Version     int                       `json:"version"`
 	ID          string                    `json:"id"`
 	State       ErrandTeardownIntentState `json:"state"`
+	Purpose     ErrandTeardownPurpose     `json:"purpose,omitempty"`
 	RequestedAt time.Time                 `json:"requested_at"`
 	Target      ErrandTeardownTarget      `json:"target"`
 }
@@ -51,10 +59,12 @@ func (i *ErrandTeardownIntent) validateFor(errand *Errand) error {
 		return invalid("id is required")
 	case i.RequestedAt.IsZero():
 		return invalid("request time is required")
-	case i.State != ErrandTeardownIntentPending && i.State != ErrandTeardownIntentCompleted && i.State != ErrandTeardownIntentSuperseded:
+	case i.State != ErrandTeardownIntentPending && i.State != ErrandTeardownIntentClosed &&
+		i.State != ErrandTeardownIntentCompleted && i.State != ErrandTeardownIntentSuperseded:
 		return invalid("state is invalid")
-	case errand.Lifecycle != ErrandLifecycleCancelled || errand.CancelSource == "":
-		return invalid("requires a cancelled errand with a cancellation source")
+	}
+	if err := i.validatePurpose(errand); err != nil {
+		return err
 	}
 	return i.Target.validateFor(errand)
 }
@@ -123,4 +133,21 @@ func (target ErrandTeardownTarget) validateSessionTarget() error {
 
 func invalidErrandTeardownTarget(reason string) error {
 	return fmt.Errorf("%w: teardown target %s", ErrInvalidErrand, reason)
+}
+
+func (i *ErrandTeardownIntent) validatePurpose(errand *Errand) error {
+	invalid := func(reason string) error { return fmt.Errorf("%w: teardown intent %s", ErrInvalidErrand, reason) }
+	switch i.Purpose {
+	case "", ErrandTeardownPurposeCancellation:
+		if errand.Lifecycle != ErrandLifecycleCancelled || errand.CancelSource == "" || i.State == ErrandTeardownIntentClosed {
+			return invalid("legacy cancellation requires a cancelled errand with a cancellation source")
+		}
+	case ErrandTeardownPurposeCompletion:
+		if errand.Lifecycle == ErrandLifecycleCancelled || errand.CancelSource != "" || i.Target.TurnID == "" || i.Target.NoTurn || i.Target.FirstTurnID != "" {
+			return invalid("completion requires an uncancelled errand with an exact turn target")
+		}
+	default:
+		return invalid("purpose is invalid")
+	}
+	return nil
 }

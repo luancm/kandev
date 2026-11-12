@@ -211,7 +211,7 @@ func (r *Repository) TransitionErrandTeardownIntent(
 	state models.ErrandTeardownIntentState,
 ) (*models.Errand, error) {
 	if errandID == "" || expectedIntentID == "" || expectedVersion < 1 ||
-		(state != models.ErrandTeardownIntentCompleted && state != models.ErrandTeardownIntentSuperseded) {
+		(state != models.ErrandTeardownIntentClosed && state != models.ErrandTeardownIntentCompleted && state != models.ErrandTeardownIntentSuperseded) {
 		return nil, models.ErrInvalidErrand
 	}
 	taskID, err := r.errandTaskID(ctx, errandID)
@@ -245,8 +245,8 @@ func (r *Repository) transitionErrandTeardownIntent(
 	if err != nil {
 		return nil, err
 	}
-	if current.Version != expectedVersion || current.TeardownIntent == nil ||
-		current.TeardownIntent.ID != expectedIntentID || current.TeardownIntent.State != models.ErrandTeardownIntentPending {
+	if current.Version != expectedVersion || current.TeardownIntent == nil || current.TeardownIntent.ID != expectedIntentID ||
+		!validErrandTeardownTransition(current.TeardownIntent, state) {
 		return nil, models.ErrErrandVersionConflict
 	}
 	row := *current
@@ -270,21 +270,72 @@ func (r *Repository) transitionErrandTeardownIntent(
 func validateErrandTeardownUpdate(current, next *models.Errand) error {
 	before, after := current.TeardownIntent, next.TeardownIntent
 	if before == nil {
-		if after == nil || after.State == models.ErrandTeardownIntentPending {
+		if after == nil || after.State == models.ErrandTeardownIntentPending && teardownPurpose(after.Purpose) == models.ErrandTeardownPurposeCancellation {
 			return nil
 		}
 		return models.ErrInvalidErrand
 	}
-	if after == nil || before.ID != after.ID {
+	if after == nil {
 		return models.ErrErrandVersionConflict
 	}
-	if before.Version != after.Version || !before.RequestedAt.Equal(after.RequestedAt) || before.Target != after.Target {
+	if before.ID == after.ID {
+		return validateSameTeardownIntent(before, after)
+	}
+	if cancellationReplacesCompletion(before, after, next) {
+		return nil
+	}
+	return validateResolvedTeardownReplacement(before, after, next)
+}
+
+func validateSameTeardownIntent(before, after *models.ErrandTeardownIntent) error {
+	if before.Version != after.Version || !before.RequestedAt.Equal(after.RequestedAt) || before.Target != after.Target || teardownPurpose(before.Purpose) != teardownPurpose(after.Purpose) {
 		return models.ErrInvalidErrand
 	}
 	if before.State != after.State {
 		return models.ErrErrandVersionConflict
 	}
 	return nil
+}
+
+func cancellationReplacesCompletion(before, after *models.ErrandTeardownIntent, next *models.Errand) bool {
+	return (before.Purpose == models.ErrandTeardownPurposeCompletion || before.Purpose == "" && after.Target == before.Target) && (before.State == models.ErrandTeardownIntentPending || before.State == models.ErrandTeardownIntentClosed) && after.Purpose == models.ErrandTeardownPurposeCancellation && after.State == models.ErrandTeardownIntentPending && next.Lifecycle == models.ErrandLifecycleCancelled && next.CancelSource != ""
+}
+
+func validateResolvedTeardownReplacement(before, after *models.ErrandTeardownIntent, next *models.Errand) error {
+	if before.State != models.ErrandTeardownIntentCompleted && before.State != models.ErrandTeardownIntentSuperseded {
+		return models.ErrErrandVersionConflict
+	}
+	if after.State != models.ErrandTeardownIntentPending || (after.Purpose != models.ErrandTeardownPurposeCancellation && after.Purpose != models.ErrandTeardownPurposeCompletion) {
+		return models.ErrInvalidErrand
+	}
+	if after.Purpose == models.ErrandTeardownPurposeCompletion && (next.Lifecycle != models.ErrandLifecycleLaunched || before.Target.TurnID == after.Target.TurnID) {
+		return models.ErrInvalidErrand
+	}
+	if after.Purpose == models.ErrandTeardownPurposeCancellation && (next.Lifecycle != models.ErrandLifecycleCancelled || next.CancelSource == "") {
+		return models.ErrInvalidErrand
+	}
+	return nil
+}
+
+func teardownPurpose(purpose models.ErrandTeardownPurpose) models.ErrandTeardownPurpose {
+	if purpose == "" {
+		return models.ErrandTeardownPurposeCancellation
+	}
+	return purpose
+}
+
+func validErrandTeardownTransition(intent *models.ErrandTeardownIntent, state models.ErrandTeardownIntentState) bool {
+	if intent.State == models.ErrandTeardownIntentPending {
+		if state == models.ErrandTeardownIntentSuperseded {
+			return true
+		}
+		if teardownPurpose(intent.Purpose) == models.ErrandTeardownPurposeCompletion {
+			return state == models.ErrandTeardownIntentClosed
+		}
+		return state == models.ErrandTeardownIntentCompleted
+	}
+	return intent.Purpose == models.ErrandTeardownPurposeCompletion &&
+		intent.State == models.ErrandTeardownIntentClosed && state == models.ErrandTeardownIntentCompleted
 }
 
 func writeErrandUpdate(ctx context.Context, tx *sqlx.Tx, errand *models.Errand) error {

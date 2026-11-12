@@ -16,7 +16,6 @@ import {
   startErrands,
   waitDelivered,
   waitNewParentTurnSettled,
-  waitParentIdle,
 } from "../../helpers/errands";
 import { mockTurnGate } from "../../helpers/mock-turn-gate";
 import { dwell } from "../../helpers/causal-waits";
@@ -87,12 +86,23 @@ test("phone finished result duration survives reload and long history fits aroun
     await expect(composer).toContainText("phone duration composer remains usable");
     await composer.fill("");
 
+    // Inspecting the retained child must leave its completed runtime closed.
+    expect((await api.getTaskSession(errand.errand_id)).session.state).toBe("COMPLETED");
     const childTurnsBeforeFollowup = (await api.listSessionTurns(errand.errand_id)).turns.map(
       (turn) => turn.id,
     );
-    await api.addUserMessage(taskId, errand.errand_id, 'e2e:message("DURATION_FOLLOWUP_RESULT")');
+    await open.tap();
+    const childComposer = child.locator('.tiptap.ProseMirror[contenteditable="true"]');
+    await expect(childComposer).toBeVisible();
+    await expect(childComposer).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("completed-errand-child-phone.png") });
+    await childComposer.fill('e2e:message("DURATION_FOLLOWUP_RESULT")');
+    await child.getByTestId("submit-message-button").tap();
     await waitNewTurnSettled(api, errand.errand_id, childTurnsBeforeFollowup);
-    await waitParentIdle(api, taskId, errand.errand_id);
+    await expect
+      .poll(async () => (await api.getTaskSession(errand.errand_id)).session.state)
+      .toBe("COMPLETED");
+    await child.getByTestId("errand-back-to-parent").tap();
     await open.tap();
     const followedUpErrand = (await listErrands(api, taskId)).find(
       (row) => row.errand_id === errand.errand_id,
