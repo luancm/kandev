@@ -14,7 +14,7 @@ import (
 
 type errandTeardownStore interface {
 	errands.TeardownIntentStore
-	GetLatestTurnBySessionID(context.Context, string) (*models.Turn, error)
+	CurrentClarificationTurnID(context.Context, string) (string, error)
 	ListAgentDeliverySubmissions(context.Context, string) ([]*models.AgentDeliverySubmission, error)
 	GetErrandTurnSettlementDecision(context.Context, string, string, string) (*models.AgentDeliveryEffect, error)
 	CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error)
@@ -258,18 +258,11 @@ func (o *errandTeardownOwner) confirmRuntimeAbsence(ctx context.Context, session
 }
 
 func (s *Service) currentErrandTurn(ctx context.Context, store errandTeardownStore, sessionID string) (*models.Turn, error) {
-	turnID, err := s.peekActiveTurnID(ctx, sessionID)
-	if err != nil {
+	turnID, err := store.CurrentClarificationTurnID(ctx, sessionID)
+	if err != nil || turnID == "" {
 		return nil, err
 	}
-	if turnID != "" {
-		return s.turnService.GetTurn(ctx, turnID)
-	}
-	turn, err := store.GetLatestTurnBySessionID(ctx, sessionID)
-	if turn != nil && turn.Metadata[models.TurnMetaKeyLifecycleOnly] == true {
-		return nil, errors.New("latest errand turn has only lifecycle authority")
-	}
-	return turn, err
+	return s.turnService.GetTurn(ctx, turnID)
 }
 
 func teardownSubmission(ctx context.Context, store errandTeardownStore, row *models.Errand, session *models.TaskSession, turn *models.Turn) (string, error) {

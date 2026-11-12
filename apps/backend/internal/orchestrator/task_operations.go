@@ -4797,11 +4797,15 @@ func (s *Service) attemptColdResume(
 		return false, errOfficeTaskResumeRequiresScheduler
 	}
 
+	resumeOptions, optionsErr := s.errandPromptResumeOptions(ctx, session)
+	if optionsErr != nil {
+		return false, optionsErr
+	}
 	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if lookupErr != nil && !errors.Is(lookupErr, models.ErrExecutorRunningNotFound) {
 		return false, fmt.Errorf("get executor running row: %w", lookupErr)
 	}
-	if running == nil {
+	if running == nil && !resumeOptions.AllowCompletedSessionResume {
 		return false, fmt.Errorf("%w (state: %s)", errSessionAwaitingRuntimeLaunch, session.State)
 	}
 
@@ -4825,11 +4829,6 @@ func (s *Service) attemptColdResume(
 	)
 	if err != nil {
 		return false, err
-	}
-	resumeOptions, optionsErr := s.errandPromptResumeOptions(dispatchCtx, session)
-	if optionsErr != nil {
-		releaseCeilingDispatch()
-		return false, optionsErr
 	}
 	execution, launchErr := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, resumeOptions)
 	releaseCeilingDispatch()

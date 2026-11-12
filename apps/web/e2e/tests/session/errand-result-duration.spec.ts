@@ -137,10 +137,29 @@ test("desktop finished result duration is keyboard accessible and stays immutabl
     await expect(childComposer).toBeVisible();
     await childComposer.fill('e2e:message("DURATION_FOLLOWUP_RESULT")');
     await child.getByTestId("submit-message-button").click();
-    await waitNewTurnSettled(api, errand.errand_id, childTurnsBeforeFollowup);
-    await expect
-      .poll(async () => (await api.getTaskSession(errand.errand_id)).session.state)
-      .toBe("COMPLETED");
+    try {
+      await waitNewTurnSettled(api, errand.errand_id, childTurnsBeforeFollowup);
+      await expect
+        .poll(async () => (await api.getTaskSession(errand.errand_id)).session.state, {
+          message: "Durable cleanup closes the completed child after its retry sweep",
+          timeout: 60_000,
+        })
+        .toBe("COMPLETED");
+    } catch (error) {
+      await testInfo.attach("child-followup-state", {
+        body: JSON.stringify({
+          session: await api.getTaskSession(errand.errand_id),
+          turns: await api.listSessionTurns(errand.errand_id),
+          messages: await api.listSessionMessages(errand.errand_id),
+        }),
+        contentType: "application/json",
+      });
+      await testInfo.attach("child-followup-backend-log", {
+        path: backend.logPath,
+        contentType: "text/plain",
+      });
+      throw error;
+    }
     await child.getByTestId("errand-back-to-parent").click();
     await actualCard.getByTestId(`errand-open-${errand.errand_id}`).click();
     const followedUpErrand = (await listErrands(api, taskId)).find(

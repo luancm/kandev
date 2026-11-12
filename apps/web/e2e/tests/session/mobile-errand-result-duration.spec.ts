@@ -100,7 +100,10 @@ test("phone finished result duration survives reload and long history fits aroun
     await child.getByTestId("submit-message-button").tap();
     await waitNewTurnSettled(api, errand.errand_id, childTurnsBeforeFollowup);
     await expect
-      .poll(async () => (await api.getTaskSession(errand.errand_id)).session.state)
+      .poll(async () => (await api.getTaskSession(errand.errand_id)).session.state, {
+        message: "Durable cleanup closes the completed child after its retry sweep",
+        timeout: 60_000,
+      })
       .toBe("COMPLETED");
     await child.getByTestId("errand-back-to-parent").tap();
     await open.tap();

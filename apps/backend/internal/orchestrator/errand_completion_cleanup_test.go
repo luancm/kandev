@@ -206,6 +206,68 @@ func requireSuccessfulErrandSettlement(t *testing.T, f *queueSettlementFixture) 
 	return requireSuccessfulErrandSettlementRow(t, row)
 }
 
+// @covers AC-TASKS-ERRAND-COMPLETION-001.1 AC-TASKS-ERRAND-COMPLETION-001.3
+func TestErrandCompletionCleanupAfterNewerLifecycleTurn(t *testing.T) {
+	for _, event := range []string{"ready", "process exit"} {
+		t.Run(event, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := errandCompletionFixtureWithoutQueuedSuccessor(t)
+				at := time.Now().Add(time.Second)
+				require.NoError(t, f.repo.CreateTurn(t.Context(), &models.Turn{
+					ID: "later-resume-lifecycle", TaskID: f.taskID, TaskSessionID: f.child.ID,
+					StartedAt: at, CompletedAt: &at, Metadata: map[string]interface{}{models.TurnMetaKeyLifecycleOnly: true},
+				}))
+				runErrandCompletionEvent(t, f, event)
+				synctest.Wait()
+				session, err := f.repo.GetTaskSession(t.Context(), f.child.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.TaskSessionStateCompleted, session.State)
+				row := requireSuccessfulErrandSettlement(t, f)
+				require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
+				require.Equal(t, "settlement-A", row.TeardownIntent.Target.TurnID)
+			})
+		})
+	}
+}
+
+// @covers AC-TASKS-ERRAND-COMPLETION-001.3 AC-TASKS-ERRAND-COMPLETION-001.4
+func TestErrandCompletionCleanupColdResumeWithoutRuntimeRow(t *testing.T) {
+	for _, name := range []string{"retained runtime row", "removed runtime row", "passive inspection"} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := errandCompletionFixtureWithoutQueuedSuccessor(t)
+				runErrandCompletionEvent(t, f, "ready")
+				synctest.Wait()
+				session, err := f.repo.GetTaskSession(t.Context(), f.child.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.TaskSessionStateCompleted, session.State)
+				if name != "retained runtime row" {
+					require.NoError(t, f.repo.DeleteExecutorRunningBySessionID(t.Context(), session.ID))
+				}
+				admissionErr := errors.New("executor admission reached")
+				admissions := 0
+				f.svc.SetExecutorAdmission(func(ctx context.Context, id, _, _ string) (context.Context, error) {
+					require.Equal(t, session.ID, id)
+					admissions++
+					return ctx, admissionErr
+				})
+				ctx := t.Context()
+				if name != "passive inspection" {
+					ctx = models.WithExplicitManualCreation(ctx, session.TaskID)
+				}
+				_, err = f.svc.attemptColdResume(ctx, session.ID, session, false, nil)
+				if name == "passive inspection" {
+					require.ErrorIs(t, err, errSessionAwaitingRuntimeLaunch)
+					require.Zero(t, admissions)
+				} else {
+					require.ErrorIs(t, err, admissionErr)
+					require.Equal(t, 1, admissions)
+				}
+			})
+		})
+	}
+}
+
 // @covers AC-TASKS-ERRAND-COMPLETION-001.1 AC-TASKS-ERRAND-COMPLETION-001.2
 func TestErrandCompletionCleanupClosesAfterDurableSettlement(t *testing.T) {
 	for _, event := range []string{"ready", "process exit"} {

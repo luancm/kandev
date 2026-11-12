@@ -70,8 +70,11 @@ export async function waitNewTurnSettled(
     .poll(
       async () => {
         const turns = (await api.listSessionTurns(sessionId)).turns.filter(
-          (turn) => !previous.has(turn.id),
+          (turn) => !previous.has(turn.id) && turn.metadata?.lifecycle_only !== true,
         );
+        if (turns.length > 1) {
+          throw new Error(`Expected one child follow-up turn; observed ${JSON.stringify(turns)}`);
+        }
         const messages = (await api.listSessionMessages(sessionId)).messages;
         return {
           completed: turns.length === 1 && Boolean(turns[0].completed_at),
