@@ -223,6 +223,28 @@ continue to produce their existing explicit blocked outcome. Pending remote
 ownership goes to its existing retry mechanism rather than consuming a global
 readiness gate. Do not weaken process-tree liveness proofs.
 
+## Recovery failure isolation
+
+Per-session and per-operation reconciliation is an independent recovery domain,
+not a global readiness prerequisite. Retain ambiguous evidence and report the
+owning session or operation, then continue independent records. Required-store
+initialization and unreadable installation-wide ownership inventory remain
+readiness prerequisites: isolation must not authorize unsafe launches or writes.
+
+The orchestrator's durable terminal sweep must distinguish a legacy completion
+without retained turn attribution from contradictory ownership evidence. Neither
+case authorizes a fabricated turn, workflow transition, successful receipt, or
+prompt replay. Session-scoped settlement must address the exact operation needed
+by its caller and allow independently attributable later completions to progress;
+an older unresolved row must not make the entire session permanently unusable.
+
+This policy requires acceptance at both boundaries: startup with mixed recoverable
+and unresolved records, and a later proven completion in the same session as an
+unattributed historical record. Preserve transcripts, unresolved receipts and
+queue ownership; storage failures must not be silently classified as identity
+refusals. Implementation scope and acceptance evidence are tracked in the
+[parent terminal identity work order](../../../plans/errands-remaining/task-02-parent-terminal-identity.md).
+
 ## Bounded inventory and completion snapshots
 
 Background native restore inventory retains one bounded page at a time and drains

@@ -100,7 +100,7 @@ func (s *Service) settleCancelledErrandTurn(ctx context.Context, sessionID, turn
 	if !ok || sessionID == "" || turnID == "" {
 		return
 	}
-	if err := s.reconcileAgentDeliverySettlements(withSettledDeliverySessionStateConvergenceSkipped(ctx), sessionID); err != nil {
+	if err := s.reconcileAgentDeliverySubmissionSettlements(withSettledDeliverySessionStateConvergenceSkipped(ctx), sessionID, submissionID); err != nil {
 		s.logger.Warn("skipping interrupted errand settlement while durable terminal evidence is unresolved",
 			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
 		return

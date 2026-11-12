@@ -1221,9 +1221,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
 	}
 	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
-	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
+	if err := s.reconcileAgentDeliverySubmissionSettlements(settlementCtx, data.SessionID, data.DeliverySubmissionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		s.setSessionWaitingForInputWithoutTaskState(completionCtx, data.TaskID, data.SessionID, session)
+		return
 	}
 
 	if settleErr != nil {

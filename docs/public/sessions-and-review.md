@@ -237,6 +237,13 @@ from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
 
+A historical completion that cannot be matched to its original turn is retained
+with a diagnostic warning. That record alone does not prevent Kandev from starting
+or stop a later completion in the same session when its own evidence can be
+verified. Saved messages remain available. Actions that depend on the unresolved
+record can still be blocked; Kandev does not declare it recovered or resend the
+old prompt.
+
 After a restart, confirmed evidence that the exact Remote Docker or Sprites
 instance is absent ends attachment so the existing recovery actions can check
 the saved state. An unreachable host or control endpoint does not prove that

@@ -290,7 +290,7 @@ func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *mod
 	response := sessionDeliveryRecoveryResponse(session.TaskID, session.ID, attempt.outcome,
 		attempt.reason, recovery.Revision, identity)
 	if attempt.outcome == SessionDeliveryRecoverySettled {
-		if err := s.reconcileAgentDeliverySettlements(retryCtx, session.ID); err != nil {
+		if err := s.reconcileAgentDeliverySubmissionSettlements(retryCtx, session.ID, recovery.SubmissionID); err != nil {
 			response.Outcome = SessionDeliveryRecoveryBlocked
 			response.Reason = "terminal_settlement_pending"
 		}
@@ -461,7 +461,7 @@ func (s *Service) retryTerminalSessionDelivery(ctx context.Context, session *mod
 	currentGeneration := recovery.HarnessGeneration
 	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if err := s.reconcileAgentDeliverySettlements(retryCtx, session.ID); err != nil {
+	if err := s.reconcileAgentDeliverySubmissionSettlements(retryCtx, session.ID, recovery.SubmissionID); err != nil {
 		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
 			"terminal_settlement_pending", recovery.Revision, identity), nil
 	}

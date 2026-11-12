@@ -8,17 +8,33 @@ plan: "plan.md"
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-TASKS-ERRANDS-004
+  - REQ-PLATFORM-STARTUP-HOUSEKEEPING-001
 acceptance_criteria:
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.2
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.3
   - AC-TASKS-ERRANDS-004.9
   - AC-TASKS-ERRANDS-004.11
+  - AC-PLATFORM-STARTUP-HOUSEKEEPING-001.6
+  - AC-PLATFORM-STARTUP-HOUSEKEEPING-001.7
 system_design:
   - ../../specs/platform/system-design/durable-agent-delivery.md
   - ../../specs/tasks/system-design/errands.md
+  - ../../specs/platform/system-design/startup-housekeeping.md
 ---
 
 # Task 02: Restore exact ordinary-session terminal identity
+
+## Session compatibility correction (2026-11-12)
+
+The startup correction `c888081cc3` prevents the supplied legacy terminal from blocking global readiness. This follow-up also isolates that historical record from later, independently attributable work in the same session. Submission-owned queue, recovery-retry and cancellation paths reconcile only their exact submission. A full-session inventory continues settling independent effects while returning unresolved identity errors to its caller. The original historical receipt, raw terminal payload and saved conversation remain intact; no missing attribution is invented and no old prompt is replayed.
+
+The real ready-handler regression additionally exposed a fallback queue drain that could reach the provider after current terminal settlement failed. The handler now stops at that failure and leaves the session waiting for input, with its queued message retained. This preserves refusal for a conflict or storage failure in the current operation while removing unrelated historical records from that operation's dependency set. Production changes are limited to four existing orchestrator files; one adjacent test file adds the regression packet. No live database or runtime was modified.
+
+Five top-level RED tests reproduced same-session inventory starvation, blocked public retry/cancellation, provider dispatch before exact settlement, and fallback dispatch after current identity/storage refusal. The final race-enabled selector passed 104 top-level tests, zero failures or skips, including both missing and conflicting historical attribution, repeated public retry, cancellation, real provider-boundary dispatch, transcript retention and quiescent negative handler cases. The `fts5` backend application build passed. Initial scoped lint found one cyclomatic-complexity violation; the existing session-state convergence step was extracted into a helper, then all 104 race tests and the backend build passed again. Final scoped lint passed with zero issues. Normal-hook commit and push receipts are recorded in the parent task plan.
+
+Race command: `go -C apps/backend test -race -trimpath -p 1 -parallel 1 ./internal/orchestrator -run '^(TestDelivery|TestParentTerminalIdentity|TestHousekeeping|TestRetry.*Delivery|TestErrand.*(Cancel|Settlement)|TestSettle.*Errand|TestErrandParentDeliverer|TestSendNow.*Errand|TestAgentReady)' -count=1 -json`. Build command: `go -C apps/backend build -tags fts5 -trimpath -p 1 ./internal/backendapp`. Lint uses `bash scripts/lint-go-changed` with the four modified production files and `agent_delivery_session_isolation_test.go`. Heavy checks use the shared `/tmp/kandev-errands-repair-build.lock` and the bounded private-cache environment recorded below. Receipts: `/tmp/kandev-session-isolation-red.log`, `/tmp/kandev-session-isolation-final-green.jsonl`, `/tmp/kandev-session-isolation-final-build.log`, `/tmp/kandev-session-isolation-lint.log` (initial complexity finding) and `/tmp/kandev-session-isolation-final-lint.log`.
+
+AC-PLATFORM-STARTUP-HOUSEKEEPING-001.6/.7 and the owning design record the isolation policy. The explanation in `docs/public/sessions-and-review.md` describes retained history and independently verified work. Public documentation checks passed: 63 validator tests and 55 published pages. Catalog validation (453 decisions and 2012 specifications), specification lint and whitespace checks passed. Required-store and installation-wide ownership failures remain distinct from local attribution refusals. This acceptance uses real local SQLite and controlled provider boundaries; it does not establish PostgreSQL behavior or a live restart/continuation of the user's Mac session. An operation that actually depends on the unresolved historical identity remains blocked. Earlier implementation/review entries below are historical; this section describes the current follow-up.
 
 ## Startup compatibility follow-up (2026-11-12)
 

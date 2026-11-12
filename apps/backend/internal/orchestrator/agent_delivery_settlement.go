@@ -23,6 +23,17 @@ type queuedTerminalIdentityRepairer interface {
 }
 
 func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, sessionID string) error {
+	return s.reconcileAgentDeliverySettlementScope(ctx, sessionID, "")
+}
+
+func (s *Service) reconcileAgentDeliverySubmissionSettlements(ctx context.Context, sessionID, submissionID string) error {
+	if submissionID == "" {
+		return nil
+	}
+	return s.reconcileAgentDeliverySettlementScope(ctx, sessionID, submissionID)
+}
+
+func (s *Service) reconcileAgentDeliverySettlementScope(ctx context.Context, sessionID, submissionID string) error {
 	settlements, ok := s.repo.(repository.AgentDeliverySettlementRepository)
 	if !ok {
 		return nil
@@ -35,23 +46,34 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 	if !ok && len(effects) > 0 {
 		return errors.New("agent delivery submission repository is unavailable")
 	}
+	var identityErr error
 	for _, effect := range effects {
-		if effect == nil {
+		if effect == nil || submissionID != "" && effect.SubmissionID != submissionID {
 			continue
 		}
 		err := s.settleAgentDeliveryEffect(ctx, settlements, submissions, effect)
 		if err == nil {
 			continue
 		}
-		// Startup can retain an unattributed terminal without granting settlement
-		// authority. Session-scoped callers still require exact identity.
-		if sessionID != "" || !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityMismatch) {
+		if !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityMismatch) {
 			return err
 		}
-		s.logger.Warn("retaining delivery terminal with unresolved identity during startup",
+		// Independent submissions can settle while unresolved identities remain
+		// visible to session-scoped callers. No refused effect gains authority.
+		if sessionID != "" {
+			identityErr = errors.Join(identityErr, err)
+		}
+		s.logger.Warn("retaining delivery terminal with unresolved identity",
 			zap.String("effect_key", effect.EffectKey), zap.String("session_id", effect.SessionID),
 			zap.Error(err))
 	}
+	if identityErr != nil {
+		return identityErr
+	}
+	return s.convergeSettledDeliverySessionStates(ctx, settlements, sessionID)
+}
+
+func (s *Service) convergeSettledDeliverySessionStates(ctx context.Context, settlements repository.AgentDeliverySettlementRepository, sessionID string) error {
 	if sessionID != "" {
 		// Completed effects in older installations can still leave a stale
 		// coarse row. The current persisted terminal binding is the only
@@ -87,7 +109,7 @@ func (s *Service) settleQueuedDeliveryPredecessor(ctx context.Context, taskID, s
 	if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
 		return err
 	}
-	return s.reconcileAgentDeliverySettlements(ctx, sessionID)
+	return s.reconcileAgentDeliverySubmissionSettlements(ctx, sessionID, effect.SubmissionID)
 }
 
 func (s *Service) repairQueuedTerminalIdentity(
