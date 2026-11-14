@@ -1,7 +1,7 @@
 ---
 id: "04-acceptance"
 title: "Prove ordinary compatibility and measured bounded history"
-status: in_progress
+status: done
 wave: 5
 depends_on:
   - "03-demand-ui"
@@ -23,6 +23,14 @@ system_design:
 ---
 
 # Prove ordinary compatibility and measured bounded history
+
+## Final acceptance
+
+Completed at production source `ee0f077cb9`, incorporating upstream main `585824a5d0`. The final matching-main cohort passed 28/28 scenarios with unchanged source/artifacts, and all eight latency measures stayed within the unchanged variance warning boundaries. Fresh candidate desktop and phone smoke checks passed 3/3 each, including ordinary navigation, demand history and full child-cache release. The [final comparison and disposition](summary-followup-handoff.md) records every metric, request count, source identity and limitation; [integration evidence](../errands-remaining/final-integration-handoff.md) records backend, persistence, frontend, lint and hook checks.
+
+The first-delivery disposition explicitly accepts the roughly one-MiB fixed heap cost and two small strict-limit misses retained from the earlier history matrix: desktop low-history cold p95 +56.316 ms over its limit and phone heap +94,448 bytes over its limit. Their numerical results remain failures; no samples or thresholds were rewritten. All 100/1000-history limits and structural bounds passed. The user agreed to prioritize dependable bounded work and assess reasonable fixed overhead. Phone first-switch median remains +76.2 ms against main, within this cohort's variance boundary, and remains visible in the pilot roadmap. No universal no-regression, physical-phone or provider certification is claimed.
+
+The original work-order scope and chronological receipts below preserve the implementation history. Earlier pending decisions and failed intermediate candidates have their final disposition above. This work order owns implementation acceptance; the parent owns final documentation, push and remote verification.
 
 ## Scope, implementation acceptance and exclusions
 
@@ -101,10 +109,9 @@ flock /tmp/kandev-errands-repair-build.lock env GOMAXPROCS=2 KANDEV_HISTORY_MEAS
 
 The two measurement specs are created by task00; their candidate mode only labels evidence. Compare raw output with the fixed task00 budgets and retain both manifests. No new production instrumentation export is assumed.
 
-## Results
+## Historical execution receipts
 
 Parent acceptance work started after Task03 remediation. Existing demand-history desktop/phone checks pass; the candidate performance and ordinary compatibility matrix is running sequentially. The shared baseline helper now accepts both the old completed-toggle test ID and the candidate parent-specific history-toggle ID. This changes selector compatibility only: workload, timing endpoints, child identities, GC points and frozen budgets remain unchanged. No performance acceptance or delivery is claimed.
-
 
 ### First candidate measurement checkpoint
 
@@ -112,11 +119,9 @@ Desktop completed 21/21 browser scenarios against one unchanged backend/fixture/
 
 The additional desktop/phone retry-refresh specs and affected existing Errands selectors now follow parent-specific history disclosures. Reconnect and settlement ordering tests explicitly refresh stale chains, as required by the approved design. Those new/adapted tests remain unverified until their queued static checks and managed runs finish. The public coordination how-to explains explicit history loading, range/retry/refresh, and unchanged ordinary conversations; its 55-page validator and 63-test validator suite pass.
 
-
 The complete first candidate produced 42/42 scenario passes, with five failed frozen budgets recorded in [candidate-results.json](candidate-results.json). The parent reproduced and fixed two additional state-repair cases: stale running events against newer retained history and missed terminal events corrected by an authoritative compact summary (RED 2 failed/4 passed; GREEN focused suite 179/179). Explicit complete-list compatibility inventories are excluded from operational pruning.
 
 A temporary deferred history-component import was measured and removed: zero-history heap remained 64,508,488 desktop / 50,376,596 phone, above their caps and without a meaningful improvement over the eager candidate. It is not part of the final implementation. During that experiment the rebuilt desktop and phone smoke sets passed 3/3 each, including new real-browser failure/retry/refresh/reload controls (`/tmp/kandev-run.e2e.mOtWOycy.log`, `/tmp/kandev-run.e2e.sV2FeoeD.log`). These are limited experiment receipts; the final eager build still needs its combined compatibility runs. Frozen tolerances remain unchanged.
-
 
 ### Ordinary compatibility and recovered-child remediation
 
@@ -126,11 +131,9 @@ RED evidence: preview/session-event regressions failed in `/tmp/kandev-history-c
 
 An isolated, temporary backend diagnostic measured ordinary-row reads below 1 ms while the complete selected-task boot path spent hundreds of milliseconds in existing unread and sidebar projections. Its profile is diagnostic evidence, not proof of the candidate timing regression's cause. The temporary test source was removed; no live instance or database was changed. Frozen performance caps remain unchanged and the first candidate's five failures remain open. No commit or push has occurred.
 
-
 A second, temporary experiment deferred the entire management panel module until disclosure. Its 26 focused component tests and rebuilt desktop zero-history/retry controls passed (2/2, `/tmp/kandev-run.e2e.XYk2TunZ.log`), but the zero-history retained heap was 64,476,600 bytes, still above the frozen 64,345,340-byte cap and essentially unchanged from the eager candidate. The experiment was removed. The detached temporary control checkout at the original source commit completed its diagnostic measurements using the common test-only harness. These controls do not replace the frozen budgets.
 
-
-### Current acceptance boundary
+### Earlier acceptance boundary
 
 Functional remediation is complete for the exercised paths. The final combined component run recorded 310 passes and one failure in the strengthened Threads tab-navigation test. That test incorrectly sent click rather than the mouse-down used by the existing tab tests. After correcting the event, the focused test passes; no additional production change was needed. Typecheck and scoped lint pass. Exact receipts and the outstanding gate are summarized in [task-04-compatibility-handoff.md](task-04-compatibility-handoff.md).
 
@@ -138,9 +141,7 @@ Fresh original-build controls are retained in [baseline-control-results.json](ba
 
 The parent requested the user's decision between retaining the original absolute limits and using a fresh paired baseline/candidate comparison for acceptance. That decision remains pending. All original caps, raw samples and five candidate failures remain unchanged. Task04 stays in progress. No commit or push was made. All owned verification processes ended; approximately 20 GiB remains free. The temporary control checkout is retained for possible paired reuse. Main-worktree artifacts were last built during the removed panel-import experiment: any subsequent candidate browser run must rebuild the restored eager source before using those artifacts.
 
-
 The user authorized the fresh paired comparison on 2026-11-14. The [paired protocol](paired-performance-protocol.md) fixes interleaving, samples, unchanged threshold formula and structural gates before collection. Earlier references to a pending user decision are historical; Task04 remains in progress until this matrix passes.
-
 
 ### Paired comparison and full-detail retention remediation
 
@@ -150,14 +151,13 @@ The parent then extended retention coverage beyond compact rows/subscriptions. T
 
 Focused GREEN receipts: 115 tests in six files, then 95 tests in four handler/ownership files; typecheck passes. A fresh managed desktop run passed 4/4 (`/tmp/kandev-run.e2e.shx7VfIZ.log`), including repeated child inspection, bounded history, ordinary tabs and real recovery refusal. Phone on the same build passed 3/3 (`/tmp/kandev-run.e2e.YDaaNh35.log`), including repeated child inspection and both Threads navigation cases. Both platforms measured zero retained child session rows, transcripts and turn caches after Back; [retention-browser-results.json](retention-browser-results.json) preserves hashes and artifacts. The function-length warning was resolved by extracting the existing starting-configuration invalidation; its 92-test handler/retention rerun and scoped lint pass. No commit or push. CPU profiling of the remaining warm-switch issue is diagnostic work, not replacement performance evidence.
 
-
 The final deferred-fetch RED demonstrated loading metadata reappearing after reader release. Its fix passes the 355-test combined slice/hook/handler suite, typecheck and full web lint. [The retention handoff](retention-handoff.md) records exact boundaries, source fingerprints and browser evidence limitations. The separate 28-sample zero-history diagnostic preserves all samples and still fails three of ten limits; it does not replace the first paired matrix or close Task04. The fixed-memory allowance question is pending, with strict thresholds unchanged. HTTP route timing is under focused diagnosis.
 
 ### Parent status projection performance correction
 
 The paired candidate measurements exposed history-dependent work in ordinary session serialization. An isolated CPU profile traced it to `ParentErrandState`, which lists finished children and calls `ProjectSnapshot` for each child to compute existence and outstanding-work booleans. A 1000-child ordinary HTTP read took approximately 378–411 ms despite returning only 2250 bytes. Replace that production read with one scalar repository query reusing the authoritative recovery/outstanding predicate; preserve feature-off behavior, parent scoping, pending results and recovery uncertainty. Verify service dispatch avoids child materialization, differential SQLite/PostgreSQL semantics and persistence checks, then rerun performance acceptance without relaxing frozen limits. This correction implements the existing ordinary-loading boundary; it adds no lifecycle transition or new recovery authority.
 
-### Second paired cohort: acceptance still open
+### Second paired cohort checkpoint
 
 The complete second cohort passed 84/84 scenarios with no retry/skip and unchanged production source. All structural bounds pass; 28/30 strict numeric limits pass. Every 100/1000-history limit and every separate no-Errand warm-switch control passes. Remaining gates are low-history desktop cold start (2540.976 ms versus 2484.660 ms limit) and low-history phone retained heap (50,357,064 bytes versus 50,262,616 limit). Low-history here means zero finished children plus two outstanding controls. Full evidence: [paired-performance-v2-handoff.md](paired-performance-v2-handoff.md) and [complete metrics](paired-performance-v2-results.json). No threshold relaxation or sample replacement is authorized; the optional fixed-memory tolerance question remains unanswered. Work order stays in progress. The bounded cold-start diagnosis completed without isolating another actionable defect: generic rendering/GC time increased, while both builds recorded 117 commits in the separate render-count check. Temporary instrumentation is restored, no owned process remains, and no new production edit, commit or push is claimed.
 

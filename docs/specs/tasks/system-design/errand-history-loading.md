@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 created: 2026-11-12
 owners:
@@ -22,13 +22,13 @@ Source inspection at requested base `6e4c5ca9bc`: `internal/errands/list.go` cal
 
 ## Browser read contracts
 
-Add separate typed WS actions `errand.browser_summary`, `errand.history_page` and `errand.inspect`. Names here are proposed new contracts, not existing symbols. Preserve complete `errand.list`, `Service.List`, repository inventories and MCP responses. New actions authorize task workspace read before returning any rows, counts, cursor or parent identity. They are read-only and bypass only the feature-enabled gate, never authorization; cancellation/send-result/new work remain gated. Missing/denied tasks and foreign child IDs use the existing not-found policy. Malformed cursor/limit returns validation error; backend failure preserves a retryable error rather than an empty-success response. Unsupported actions fail explicitly; never fall back to downloading the complete legacy list. An old client continues using unchanged legacy actions, while the new bundled browser requires these new actions.
+The separate typed WS actions are `errand.browser_summary`, `errand.history_page` and `errand.inspect`. Preserve complete `errand.list`, `Service.List`, repository inventories and MCP responses. New actions authorize task workspace read before returning any rows, counts, cursor or parent identity. They are read-only and bypass only the feature-enabled gate, never authorization; cancellation/send-result/new work remain gated. Missing/denied tasks and foreign child IDs use the existing not-found policy. Malformed cursor/limit returns validation error; backend failure preserves a retryable error rather than an empty-success response. Unsupported actions fail explicitly; never fall back to downloading the complete legacy list. An old client continues using unchanged legacy actions, while the new bundled browser requires these new actions.
 
-| Action | Request | Response |
-| --- | --- | --- |
-| browser_summary | task_id | scope, compact outstanding rows, authoritative task totals and parent totals |
-| history_page | task_id, parent_session_id, limit (default/max 25), cursor optional | scope, compact finished rows, total_finished, has_more, next_cursor or null |
-| inspect | task_id, child_session_id | verified immutable role/parent identity, compact errand, minimal parent id/title/role/environment or unavailable |
+| Action          | Request                                                             | Response                                                                                                         |
+| --------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| browser_summary | task_id                                                             | scope, compact outstanding rows, authoritative task totals and parent totals                                     |
+| history_page    | task_id, parent_session_id, limit (default/max 25), cursor optional | scope, compact finished rows, total_finished, has_more, next_cursor or null                                      |
+| inspect         | task_id, child_session_id                                           | verified immutable role/parent identity, compact errand, minimal parent id/title/role/environment or unavailable |
 
 Summary rows include id/task/parent, title, profile identity, created time, projected status/attention, live/outstanding classification, unread boolean, result-state/reception indicator, and existing measured context counts. Omit objective bodies, result text, MCP attachment state and transcript. Counts include live capacity usage and configured cap separately from queued count, outstanding count, finished count, pending result count and unread count; parent aggregates use the same predicates. Never derive totals or capacity from loaded pages. A terminal pending result retains its terminal status with a pending-result indicator in the outstanding section; it is not relabeled running. Overlap is forbidden: history is the complement of outstanding eligibility.
 
@@ -72,13 +72,13 @@ Phone entry remains the Errands pill, opening the existing inset bottom drawer f
 
 ## Traceability and evidence
 
-| Criteria | Design boundary | Verification owner |
-| --- | --- | --- |
-| .1, .5 | ordinary queries and pre-materialization allowlist | tasks 02, 04 |
-| .2, .6 | SQL eligibility, totals, observation guards | tasks 01, 02, 03 |
-| .3, .7 | bounded cache and responsive disclosure | tasks 03, 04 |
-| .4, .8 | inspect and existing transcript ownership | tasks 02, 03, 04 |
-| .9 | reproducible performance protocol | tasks 00, 04 |
+| Criteria | Design boundary                                    | Verification owner |
+| -------- | -------------------------------------------------- | ------------------ |
+| .1, .5   | ordinary queries and pre-materialization allowlist | tasks 02, 04       |
+| .2, .6   | SQL eligibility, totals, observation guards        | tasks 01, 02, 03   |
+| .3, .7   | bounded cache and responsive disclosure            | tasks 03, 04       |
+| .4, .8   | inspect and existing transcript ownership          | tasks 02, 03, 04   |
+| .9       | reproducible performance protocol                  | tasks 00, 04       |
 
 All criterion suffixes refer to AC-TASKS-ERRAND-HISTORY-001. Existing tests include backend `service_session_summary_projection_test.go`, `errand_ws_handlers_test.go`, repository summary scenarios, web `use-task-errands.test.ts`, `errands-slice.test.ts`, `lib/ws/handlers/errands.test.ts`, `dockview-layout-restore.test.ts`, `dockview-layout-restore-maximize-session.test.ts` and desktop/mobile `e2e/tests/session/*errands.spec.ts`.
 
@@ -88,4 +88,4 @@ No numeric timing or memory tolerance is invented: task00 must record baseline v
 
 ## Implementation plans
 
-[Bounded history package](../../../plans/errand-history-loading/plan.md), pending explicit implementation request.
+[Bounded history package](../../../plans/errand-history-loading/plan.md) records the completed implementation, source identity, verification and explicit first-delivery performance disposition. The measured results retain the original thresholds and disclose fixed costs separately from history-growth bounds.

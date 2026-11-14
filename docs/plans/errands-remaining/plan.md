@@ -1,6 +1,6 @@
 ---
 created: 2026-11-10
-status: in_progress
+status: done
 requirements:
   - REQ-TASKS-ERRANDS-002
   - REQ-TASKS-ERRANDS-004
@@ -21,19 +21,21 @@ legacy_specs: []
 
 ## Outcome and current state
 
+The finishing source checkpoint is `ee0f077cb9d8061cf17437021f087326978aed05`, incorporating upstream main `585824a5d0`. It adds bounded history, child-cache release, exact late-tool replay and shared-summary publication to the earlier delivered startup, cleanup, duration and panel fixes. The final upstream checks passed 605 top-level Go cases with three opt-in fixture skips; existing 459-test web evidence, typecheck/localization, affected-package lint and rebuilt desktop/phone checks pass. The matching-main cohort passed 28/28 scenarios with all eight latency measures within their unchanged warning boundaries. Fixed heap overhead and the earlier two strict-limit misses are explicitly dispositioned in the [final performance report](../errand-history-loading/summary-followup-handoff.md). [Final integration evidence](final-integration-handoff.md) records the checks; the Kandev plan owns the remote push receipt. The [bounded-use roadmap](bounded-use-roadmap.md) is the next phase after updating the running instance.
+
+### Earlier delivery receipts
+
 All four implementation groups are on `feature/plan-errands-first-d-424`: exact parent notification delivery, truthful recovery attention and safe continuation, immutable historical elapsed time, and durable successful runtime cleanup with retained conversations. The user requested direct primary execution on 2026-11-12; no additional agents were launched. Source checkpoint `452c9d4f0d3bc763ccfc43661ee91f7282425de0` is pushed and remote-verified. It includes `kdlbs/kandev` main through `37f081a976526de1a6967f8714e72e247ec0b386`, merged at `e35b7f6e23` after the earlier 80-commit upstream integration at `0067adc210`.
 
 Fresh managed browser acceptance passed all 21 desktop and 19 phone cases. Follow-up verification corrected lifecycle-only turn selection and exact-authorized cold resume without a retained runtime row. Old browser fixture expectations now require completed child state. The gateway fixture now supplies its real Hub and verifies authenticated subscription identity; its full race suite passed. A failing lifecycle case also exposed literal native filenames being interpreted as URI syntax; both SQLite factories now reuse the existing escaping helper, with independent writer/reader regressions and a passing lifecycle rerun. Affected backend race suites, SQL guard, store conformance, frontend typecheck and 228 tests, translation/wait guards and the normal optimized build passed. Final delivery evidence belongs in [the integration handoff](integration-handoff.md), which owns exact commands, counts, limits and checkpoint history.
 
-The latest delivered checkpoint is `6e4c5ca9bce14b952d8cbaa52dc0282af870d835`, which also includes startup resilience, cancellation/legacy cleanup compatibility, truthful status counts and individual Stop. The historical receipts above remain accepted. Checkpoint `dcc3de55a2` now preserves history loading and the verified exact-tool replay repair. Upstream `037c376196` is merged in the working tree with conflicts resolved; final integration checks, matching-main comparison, acceptance and delivery remain open. The [bounded-use roadmap](bounded-use-roadmap.md) explains the intended first delivery and subsequent pilot.
-
 No deployment, live database repair, transcript deletion, worktree removal or universal provider certification is included.
 
-## Current follow-up: load finished Errands on demand
+## Completed: load finished Errands on demand
 
 Keep ordinary task loading approximately constant as completed Errands accumulate. This work addresses the Errands regression, with general asset compression, bundle splitting and unrelated optimization excluded. The [investigation](loading-performance-investigation.md) records the supplied HAR: 107 Errands account for about 243 KB of the parent's 250 KB session list, compared with 7.2 KB for its three ordinary sessions, and historical children enter boot and normal session reconciliation. This is payload/workload evidence, not a before/after latency or memory benchmark.
 
-Planned outcomes:
+Implemented outcomes:
 
 - Load compact active, queued and needs-attention summaries immediately. Preserve truthful counts, capacity, unread/result indicators and Stop/Stop-all semantics without enumerating finished child sessions.
 - Fetch finished-history summaries asynchronously when the user opens history and paginate larger histories. An eager background fetch of all completed Errands does not satisfy this outcome.
@@ -42,24 +44,24 @@ Planned outcomes:
 - Render existing result cards from saved content, preserving immutable duration and legacy omissions without fetching the child conversation.
 - Reuse the desktop popover and phone drawer/full-screen child composition. Provide localized loading, empty, retry and next-page states; preserve internal scrolling, safe areas, touch targets and Back navigation. Coalesce duplicate reads and discard stale task/parent/page responses.
 
-The user approved proceeding after reviewing [the impact walkthrough](loading-impact.html). In the [history package](../errand-history-loading/plan.md), Tasks00–03 are implemented and accepted; Task04 performance acceptance remains open. Those changes are committed in checkpoint `dcc3de55a2`; delivery awaits the integrated checks. Ordinary sessions keep their existing loading behavior; finished history and child details load on demand. Structural bounds and the large-history performance checks pass. The [second paired cohort](../errand-history-loading/paired-performance-v2-handoff.md) and [upstream-main comparison](../errand-history-loading/main-comparison-handoff.md) retain the remaining low-history timing, fixed-memory and navigation-tail findings. No earlier failed measurement has been removed or relabelled as passing.
+The user approved proceeding after reviewing [the impact walkthrough](loading-impact.html). The [history package](../errand-history-loading/plan.md) Tasks00–04 are implemented and accepted, with source preserved in `dcc3de55a2` and integrated through `ee0f077cb9`. Ordinary sessions retain their existing loading behavior; finished history and child details load on demand. The [second paired cohort](../errand-history-loading/paired-performance-v2-handoff.md), [original main comparison](../errand-history-loading/main-comparison-handoff.md) and [final main comparison](../errand-history-loading/summary-followup-handoff.md) preserve all observations. The final report explicitly dispositions the fixed costs and earlier strict-limit misses. No failed measurement has been removed or relabelled as passing.
 
 The [late-tool replay work order](../errand-tool-terminal-replay/task-01-exact-tool-replay.md) is implemented and verified, with [exact evidence](../errand-tool-terminal-replay/implementation-handoff.md). The observed completed review was blocked behind a missing-identity tool cancellation. Repair requires exact retained source evidence and an independent real terminal; historical records without that proof remain unresolved. Further Errand launches remain held until the running instance includes the verified repair.
 
-Acceptance remains pending:
+History acceptance is complete with the disclosed fixed-cost exceptions in the final performance report:
 
-- [ ] Compare the same isolated task with zero, 100 and a larger completed-Errand history, holding ordinary sessions, build, network and cache conditions fixed. Measure boot/list bytes and request counts, session reconciliation work, panel creation/removal, time to usable parent conversation, and retained subscriptions/memory after repeated navigation.
-- [ ] Keep ordinary reload/task-switch work bounded independently of finished-history size, with history requests following explicit demand and pagination. Establish timing/memory tolerances from the controlled baseline before accepting the implementation; no unmeasured performance claim counts as completion.
-- [ ] Prove desktop/phone reload, warm switching, history loading/pagination/retry, direct historical links, self-contained result cards, live status and Stop, stale-response isolation and absence of temporary Errand tabs. Validate runtime cleanup separately from retained-history UI loading.
+- [x] Compare the same isolated task with zero, 100 and a larger completed-Errand history, holding ordinary sessions, build, network and cache conditions fixed. Measure boot/list bytes and request counts, session reconciliation work, panel creation/removal, time to usable parent conversation, and retained subscriptions/memory after repeated navigation.
+- [x] Keep ordinary reload/task-switch work bounded independently of finished-history size, with history requests following explicit demand and pagination. Establish timing/memory tolerances from the controlled baseline before accepting the implementation; no unmeasured performance claim counts as completion.
+- [x] Prove desktop/phone reload, warm switching, history loading/pagination/retry, direct historical links, self-contained result cards, live status and Stop, stale-response isolation and absence of temporary Errand tabs. Validate runtime cleanup separately from retained-history UI loading.
 
 ## Delivery and acceptance
 
-| Deliverable | Implemented behavior | Work order and checkpoint |
-| --- | --- | --- |
-| Parent terminal identity | Exact admission attributes a terminal missing its turn ID; eligible stored effects reconcile without guessing, and Auto-run composes and dispatches the empty server notification once | [Terminal identity](task-02-parent-terminal-identity.md), `a96adeec38` |
-| Recovery attention and continuation | Unresolved recovery remains visible and consumes capacity; unsafe input is refused without side effects; explicit follow-up requires exact settlement | [Recovery settlement](../errand-orphan-settlement/task-01-recovery-settlement.md), `f71b9e09d4`, integrated at `67b6b9ba9d` |
-| Successful completion cleanup | Result and exact completion intent precede physical stop; close, receipt and completed projection retry independently; cancellation and newer work retain ownership | [Completion cleanup](../errand-completion-cleanup/task-01-completion-cleanup.md), `4becbc47a1` plus integration corrections |
-| Historical result duration | Optional measured elapsed time is frozen in delivered metadata, including zero; legacy or invalid measurements are omitted; collapsed and expanded history retain it after reload and continuation | [Result duration](task-01-result-duration.md), `8ed56d94ef` |
+| Deliverable                         | Implemented behavior                                                                                                                                                                               | Work order and checkpoint                                                                                                   |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Parent terminal identity            | Exact admission attributes a terminal missing its turn ID; eligible stored effects reconcile without guessing, and Auto-run composes and dispatches the empty server notification once             | [Terminal identity](task-02-parent-terminal-identity.md), `a96adeec38`                                                      |
+| Recovery attention and continuation | Unresolved recovery remains visible and consumes capacity; unsafe input is refused without side effects; explicit follow-up requires exact settlement                                              | [Recovery settlement](../errand-orphan-settlement/task-01-recovery-settlement.md), `f71b9e09d4`, integrated at `67b6b9ba9d` |
+| Successful completion cleanup       | Result and exact completion intent precede physical stop; close, receipt and completed projection retry independently; cancellation and newer work retain ownership                                | [Completion cleanup](../errand-completion-cleanup/task-01-completion-cleanup.md), `4becbc47a1` plus integration corrections |
+| Historical result duration          | Optional measured elapsed time is frozen in delivered metadata, including zero; legacy or invalid measurements are omitted; collapsed and expanded history retain it after reload and continuation | [Result duration](task-01-result-duration.md), `8ed56d94ef`                                                                 |
 
 The completed source also preserves normal picker/handoff exclusion, phone navigation, parent conversation ownership, flag-off retention, Send Now accounting and native-resume behavior from upstream. Ordinary completed, failed and cancelled sessions do not gain Errand continuation permission.
 

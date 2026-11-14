@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-11-12
 owners:
@@ -26,4 +26,4 @@ Users can inspect any retained Errand without paying the cost of every finished 
 
 ## Exclusions and delivery
 
-No general asset compression, bundle splitting, settings-page repair, provider rewrite, normal-session loading redesign, runtime cleanup replacement, or changes to delivery/settlement authority. Existing successful-runtime cleanup is verified separately. [Design](../system-design/errand-history-loading.md) and [implementation package](../../../plans/errand-history-loading/plan.md) define the bounded follow-up; no implementation is claimed.
+No general asset compression, bundle splitting, settings-page repair, provider rewrite, normal-session loading redesign, runtime cleanup replacement, or changes to delivery/settlement authority. Existing successful-runtime cleanup is verified separately. [Design](../system-design/errand-history-loading.md) and [implementation package](../../../plans/errand-history-loading/plan.md) define the accepted contract and implementation. Delivery evidence, measured costs and explicit first-delivery exceptions belong to the implementation package.

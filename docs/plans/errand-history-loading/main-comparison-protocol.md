@@ -27,3 +27,7 @@ The parent's finishing pass identified that consumers share one summary request 
 Before follow-up timing began, upstream advanced by two further commits to `585824a5d066d22785814c0394b88dd57f6c5ded`. The final control and candidate incorporate that same revision. The `037c376196` build checks remain separate smoke evidence: main 1/1, candidate desktop 3/3 and phone 3/3, plus twenty focused admission/replay cases. No timed follow-up sample was collected against that superseded reference. The final comparison is frozen at `585824a5d0`; later upstream changes do not silently change its reference.
 
 This follow-up measures the merged candidate after the diagnosed state-publication correction; it is not a replacement for the earlier history-growth workload or a causal experiment attributing every timing difference to that correction. Report all five metrics and the existing variance warning formula. The user agreed to assess roughly one MiB of fixed browser cost as a proportionate tradeoff; fixed cost and historical growth remain separate findings, and no earlier numeric result is rewritten.
+
+## Final follow-up receipt
+
+The frozen `585824a5d0` main / `ee0f077cb9` candidate comparison completed 28/28 scenarios, without retries or source/artifact drift. All eight latency measures are within the original warning boundaries; the two fixed-heap warnings remain explicit. See [full measurements and first-delivery disposition](summary-followup-handoff.md). The original four-arm and history-growth cohorts remain unchanged.
