@@ -36,7 +36,6 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
-  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -121,6 +120,7 @@ export type AppState = KanbanSlice & {
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
   installJobs: (typeof defaultSettingsState)["installJobs"];
   updateJobs: (typeof defaultSettingsState)["updateJobs"];
+  runtimeUpdateBatch: (typeof defaultSettingsState)["runtimeUpdateBatch"];
   agentRuntimeUpdates: (typeof defaultSettingsState)["agentRuntimeUpdates"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
@@ -197,10 +197,6 @@ export type AppState = KanbanSlice & {
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
   taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
-
-  // Azure DevOps slice
-  azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
-  azureDevOpsTaskWorkItems: (typeof defaultAzureDevOpsState)["azureDevOpsTaskWorkItems"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -315,6 +311,7 @@ export type AppState = KanbanSlice & {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
+  setRuntimeUpdateBatch: SettingsSliceTypes.SettingsSliceActions["setRuntimeUpdateBatch"];
   setSSHReachability: (record: SSHReachabilityRecord) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   upsertRepository: (workspaceId: string, repository: Repository) => void;

@@ -10,7 +10,10 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const errandTurnSourceUser = "user"
+const (
+	errandTurnSourceUser   = "user"
+	errandTurnSourceParent = "parent"
+)
 
 func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionID string) error {
 	controller, ok := s.errands.(interface {
@@ -66,7 +69,7 @@ func (s *Service) reserveErrandTerminalIntent(ctx context.Context, session *mode
 	}
 	source := errandTurnSourceUser
 	if origin.SenderSessionID == session.ParentSessionID {
-		source = "parent"
+		source = errandTurnSourceParent
 	}
 	submissionID = normalizeDeliverySubmissionID(submissionID)
 	return store.ReserveErrandTurnSettlement(ctx, session.TaskID, &models.AgentDeliveryEffect{

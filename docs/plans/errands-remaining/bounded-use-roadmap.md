@@ -2,7 +2,7 @@
 
 Errands should make a focused piece of delegated work easy to inspect, stop and receive while the parent conversation continues. The first delivery should earn trust for investigations, reviews and small implementations. Further orchestration features are deferred until those everyday uses are dependable.
 
-The delivery branch is `feature/plan-errands-first-d-424`. The current checkout contains accepted history-loading changes that remain uncommitted, with final performance acceptance and branch integration still open. The late-tool replay repair is implemented and verified locally. The Kandev task plan is the current execution queue; the links below retain detailed evidence.
+The delivery branch is `feature/plan-errands-first-d-424`. Checkpoint `dcc3de55a2` preserves the accepted history-loading changes. Integration with upstream `037c376196` and final performance acceptance are being completed. The late-tool replay repair is implemented and verified locally. The Kandev task plan is the current execution queue; the links below retain detailed evidence.
 
 ## Finish the current delivery
 
@@ -45,6 +45,18 @@ Bounded means a clear question and scope, not an arbitrary time limit that inter
 ## Prove everyday reliability before expanding scope
 
 After the current fixes are integrated, run a small recorded pilot using real bounded investigations, reviews and implementations. Cover normal completion, explicit cancellation, parent activity during completion, completed-conversation inspection, follow-up and an interrupted/restarted case. Confirm that result delivery and displayed state agree with the actual work and that completed runtimes are released. Keep provider-specific evidence separate; one provider's success is not universal certification.
+
+The pilot starts only after the running instance includes the repair. These are follow-up packets, not work already executed:
+
+| Order | Bounded packet | Exit condition |
+| --- | --- | --- |
+| 1 | Investigate one reproducible issue in one subsystem, read-only, while the parent continues ordinary work. | A useful answer reaches the parent once; the child transcript remains inspectable; displayed status and runtime cleanup agree with completion. |
+| 2 | Review one frozen patch against its named requirements, using a second compatible profile. | Findings identify a concrete defect and evidence, or explicitly report no findings within scope; a parent follow-up works without replaying the original result. |
+| 3 | Implement one small approved work order with exclusive file ownership, then have the parent integrate it. | Changed paths and checks are reported; the parent can accept or reject the result without reconstructing the entire conversation. |
+| 4 | Exercise cancellation and one controlled interruption/restart in a disposable instance. | Cancellation is truthful; exact evidence recovers safely; uncertain work is surfaced without duplicate execution or a blocked application startup. |
+| 5 | Inspect the four receipts and decide whether to broaden automatic routing. | Every observed delivery/lifecycle failure is explained and addressed; performance findings and provider limitations remain visible. |
+
+The parent owns acceptance and the short pilot ledger. A failure creates one focused investigation of that failure, rather than restarting a review of the entire feature. Known test commands remain direct process jobs with retained handles.
 
 Record completion/delivery failures and retained-resource behavior as well as successful runs. For performance, preserve ordinary cold load, reload, first switch and repeated navigation controls against upstream main. Track fixed browser cost separately from growth with finished history. A fixed cost needs an explicit justified budget; a cost that grows without bound with routine use is a release blocker.
 
