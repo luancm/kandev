@@ -31,6 +31,7 @@ type upgradeFixture struct {
 	Engine               testconformance.EngineName `json:"engine"`
 	File                 string                     `json:"file"`
 	SHA256               string                     `json:"sha256"`
+	PostUpgradeIndexes   []string                   `json:"post_upgrade_indexes"`
 	Sentinels            map[string]string          `json:"sentinels"`
 	OwnerRows            []ownerRowSentinel         `json:"owner_rows"`
 	PostUpgradeOwnerRows []ownerRowSentinel         `json:"post_upgrade_owner_rows"`
@@ -82,6 +83,20 @@ func TestUpgradeFixtureManifest(t *testing.T) {
 		}
 		if len(fixture.OwnerRows) == 0 {
 			t.Errorf("fixture %s has no owner row sentinels", fixture.File)
+		}
+		if fixture.Engine == testconformance.EngineSQLite || fixture.Engine == testconformance.EnginePostgres {
+			foundErrandHistoryIndex := false
+			for _, index := range fixture.PostUpgradeIndexes {
+				if !validUpgradeIdentifier(index) {
+					t.Errorf("fixture %s has invalid post-upgrade index %q", fixture.File, index)
+				}
+				if index == "idx_task_session_errands_browser_history_normalized_v3" {
+					foundErrandHistoryIndex = true
+				}
+			}
+			if !foundErrandHistoryIndex {
+				t.Errorf("fixture %s omits the post-upgrade Errand history index", fixture.File)
+			}
 		}
 		if err := validateOwnerRowCoverage(fixture, manifest.KnownMissingRequiredStore); err != nil {
 			t.Errorf("fixture %s owner row coverage: %v", fixture.File, err)
@@ -181,6 +196,11 @@ func TestPreviousStableUpgrade(t *testing.T) {
 			}
 			if exists, err := db.ColumnExistsContext(t.Context(), database.DB, "task_session_errands", "teardown_intent"); err != nil || !exists {
 				t.Fatalf("upgraded task_session_errands.teardown_intent exists = %v, err = %v", exists, err)
+			}
+			for _, index := range fixture.PostUpgradeIndexes {
+				if exists, err := db.IndexExistsContext(t.Context(), database.DB, index); err != nil || !exists {
+					t.Fatalf("upgraded index %s exists = %v, err = %v", index, exists, err)
+				}
 			}
 			fixture.OwnerRows = append(fixture.OwnerRows, fixture.PostUpgradeOwnerRows...)
 			if err := checkSentinels(database, fixture); err != nil {

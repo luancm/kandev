@@ -40,11 +40,11 @@ import { limitSessionName, useSessionRenameCommitter } from "./use-session-renam
 import {
   buildAgentLabelsById,
   isSessionActive,
-  pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
 import { useTranslation } from "react-i18next";
+import { usePreviewConversation } from "./use-preview-conversation";
 
 const LABEL_SEPARATOR = " \u2022 ";
 const PLAN_TAB_ID = "plan";
@@ -296,14 +296,8 @@ export function PreviewSessionTabs({
     [primarySessionId],
   );
 
-  const activeSessionId = useMemo(
-    () => pickActiveSessionId(sortedSessions, sessionId),
-    [sortedSessions, sessionId],
-  );
-  const activeSession = useMemo(
-    () => sortedSessions.find((s) => s.id === activeSessionId) ?? null,
-    [sortedSessions, activeSessionId],
-  );
+  const activeSession = usePreviewConversation(taskId, sessionId, sortedSessions);
+  const activeSessionId = activeSession?.id ?? null;
   const taskStatusSummaryDetail = useAppStore(
     (state) =>
       (
@@ -349,7 +343,7 @@ export function PreviewSessionTabs({
   // Do not force the Plan view while the session list is still loading. The
   // first render can have zero sessions before the list arrives, and treating
   // that transient state as sessionless would mark an unseen plan as seen.
-  const hasNoSessions = isLoaded && sortedSessions.length === 0;
+  const hasNoSessions = isLoaded && sortedSessions.length === 0 && !activeSession;
   const planTabState = usePreviewPlanTab(taskId, hasNoSessions, onSessionChange);
   const { viewMode, planTab, hasPlan } = planTabState;
 
@@ -415,7 +409,12 @@ export function PreviewSessionTabs({
               activeTab={
                 viewMode === "plan"
                   ? PLAN_TAB_ID
-                  : (conversationTabSessionId(activeSessionId, sortedSessions) ?? "")
+                  : (conversationTabSessionId(
+                      activeSessionId,
+                      sortedSessions,
+                      {},
+                      activeSession ?? undefined,
+                    ) ?? "")
               }
               onTabChange={planTabState.handleTabChange}
               listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"

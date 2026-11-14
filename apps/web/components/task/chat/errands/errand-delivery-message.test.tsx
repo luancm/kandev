@@ -120,11 +120,14 @@ describe("Errand finished cards", () => {
 
     fireEvent.click(screen.getByRole("button", { expanded: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open errand Schema review" }));
-    expect(openSession).toHaveBeenCalledWith({
-      taskId: "task-1",
-      sessionId: "e-1",
-      title: SCHEMA_TITLE,
-    });
+    expect(openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        sessionId: "e-1",
+        title: SCHEMA_TITLE,
+        isErrand: true,
+      }),
+    );
   });
 
   it("renders untrusted preview markup as text", () => {

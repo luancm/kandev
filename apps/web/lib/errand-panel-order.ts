@@ -1,14 +1,21 @@
-import { isLiveErrand, type Errand } from "./types/errands";
+import { isLiveErrand, type ErrandStatus } from "./types/errands";
 
-type Group = { parentId: string; errands: Errand[] };
+type PanelErrand = {
+  errand_id: string;
+  parent_session_id: string;
+  created_at: string;
+  status: ErrandStatus;
+  outstanding?: boolean;
+};
+type Group<T extends PanelErrand> = { parentId: string; errands: T[] };
 
-function timestamp(errand: Errand): number {
+function timestamp(errand: PanelErrand): number {
   const value = Date.parse(errand.created_at);
   return Number.isNaN(value) ? -Infinity : value;
 }
 
-function groupErrands(errands: Errand[]): Group[] {
-  const groups = new Map<string, Errand[]>();
+function groupErrands<T extends PanelErrand>(errands: T[]): Group<T>[] {
+  const groups = new Map<string, T[]>();
   for (const errand of errands) {
     const group = groups.get(errand.parent_session_id) ?? [];
     group.push(errand);
@@ -25,9 +32,13 @@ function groupErrands(errands: Errand[]): Group[] {
   );
 }
 
-export function orderErrandPanel(errands: Errand[]): { active: Group[]; finished: Group[] } {
+export function orderErrandPanel<T extends PanelErrand>(
+  errands: T[],
+): { active: Group<T>[]; finished: Group<T>[] } {
+  const isOutstanding = (item: T) =>
+    typeof item.outstanding === "boolean" ? item.outstanding : isLiveErrand(item);
   return {
-    active: groupErrands(errands.filter(isLiveErrand)),
-    finished: groupErrands(errands.filter((item) => !isLiveErrand(item))),
+    active: groupErrands(errands.filter(isOutstanding)),
+    finished: groupErrands(errands.filter((item) => !isOutstanding(item))),
   };
 }

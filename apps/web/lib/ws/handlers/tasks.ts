@@ -431,6 +431,27 @@ function evictDeletedTaskSessions(state: AppState, taskId: string, sessionIds: s
   state.removeTaskErrands?.(taskId);
 }
 
+type TaskStatusSummaryMessage = Parameters<
+  NonNullable<WsHandlers["task.status_summary.updated"]>
+>[0];
+
+function handleTaskStatusSummaryUpdated(
+  store: StoreApi<AppState>,
+  message: TaskStatusSummaryMessage,
+): void {
+  const { task_id: taskId, status_summary: summary, workspace_id: workspaceId } = message.payload;
+  const unreadSessionIds = summary.unread_session_ids;
+  if (Array.isArray(unreadSessionIds)) {
+    store.getState().markErrandBrowserUnread(taskId, unreadSessionIds);
+  }
+  store.setState((state) =>
+    updateTaskStatusSummaryInBothKanbans(
+      applyTaskOverviewPatch(state, taskId, { id: taskId, statusSummary: summary }, workspaceId),
+      message,
+    ),
+  );
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -525,21 +546,6 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.state_changed": (message) => {
       handleTaskUpsert("task.state_changed", store, message);
     },
-    "task.status_summary.updated": (message) => {
-      store.setState((state) =>
-        updateTaskStatusSummaryInBothKanbans(
-          applyTaskOverviewPatch(
-            state,
-            message.payload.task_id,
-            {
-              id: message.payload.task_id,
-              statusSummary: message.payload.status_summary,
-            },
-            message.payload.workspace_id,
-          ),
-          message,
-        ),
-      );
-    },
+    "task.status_summary.updated": (message) => handleTaskStatusSummaryUpdated(store, message),
   };
 }

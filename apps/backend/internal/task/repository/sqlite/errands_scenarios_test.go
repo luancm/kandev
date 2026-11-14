@@ -103,6 +103,7 @@ func assertErrandSchema(t *testing.T, repo *Repository) {
 		"idx_task_sessions_parent_session_id",
 		"idx_task_session_errands_task_lifecycle",
 		"idx_task_session_errands_parent",
+		errBrowserHistoryIndexName,
 	} {
 		if exists, err := db.IndexExistsContext(ctx, repo.db, index); err != nil || !exists {
 			t.Fatalf("index %s exists = %v, err = %v", index, exists, err)

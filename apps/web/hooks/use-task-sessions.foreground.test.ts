@@ -4,7 +4,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/ids";
 
 const apiMock = vi.hoisted(() => ({
-  listTaskSessions: vi.fn(),
+  listOrdinaryTaskSessions: vi.fn(),
 }));
 
 type MockTaskSessionsState = {
@@ -85,7 +85,7 @@ function resetMockState() {
 beforeEach(() => {
   resetMockState();
   setDocumentVisibility("visible");
-  apiMock.listTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
+  apiMock.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
 });
 
 afterEach(() => {
@@ -98,16 +98,18 @@ describe("useTaskSessions foreground refreshes", () => {
   it("refetches a loaded session list when a suspended tab becomes visible again", async () => {
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
     mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
-    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+    apiMock.listOrdinaryTaskSessions.mockResolvedValueOnce({
+      sessions: [session("old", "COMPLETED")],
+    });
 
     renderHook(() => useTaskSessions(TASK_ID));
     await act(async () => {});
-    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+    expect(apiMock.listOrdinaryTaskSessions).not.toHaveBeenCalled();
 
     document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() =>
-      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(
+      expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledWith(
         TASK_ID,
         expect.objectContaining({
           cache: "no-store",
@@ -125,13 +127,15 @@ describe("useTaskSessions foreground refreshes", () => {
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
     mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
     mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = true;
-    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+    apiMock.listOrdinaryTaskSessions.mockResolvedValueOnce({
+      sessions: [session("old", "COMPLETED")],
+    });
 
     const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
     await act(async () => {});
     document.dispatchEvent(new Event("visibilitychange"));
     await act(async () => {});
-    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+    expect(apiMock.listOrdinaryTaskSessions).not.toHaveBeenCalled();
 
     mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = false;
     await act(async () => {
@@ -139,7 +143,7 @@ describe("useTaskSessions foreground refreshes", () => {
     });
 
     await waitFor(() =>
-      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(
+      expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledWith(
         TASK_ID,
         expect.objectContaining({
           cache: "no-store",
@@ -155,13 +159,15 @@ describe("useTaskSessions foreground refreshes", () => {
 
   it("queues a foreground refetch while the initial load is running", async () => {
     mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = true;
-    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+    apiMock.listOrdinaryTaskSessions.mockResolvedValueOnce({
+      sessions: [session("old", "COMPLETED")],
+    });
 
     const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
     await act(async () => {});
     document.dispatchEvent(new Event("visibilitychange"));
     await act(async () => {});
-    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+    expect(apiMock.listOrdinaryTaskSessions).not.toHaveBeenCalled();
 
     mockState.taskSessionsByTask.loadingByTaskId[TASK_ID] = false;
     mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
@@ -170,7 +176,7 @@ describe("useTaskSessions foreground refreshes", () => {
     });
 
     await waitFor(() =>
-      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(
+      expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledWith(
         TASK_ID,
         expect.objectContaining({
           cache: "no-store",
@@ -190,14 +196,16 @@ describe("useTaskSessions disconnected foreground refresh", () => {
     mockState.connection.status = "disconnected";
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
     mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
-    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+    apiMock.listOrdinaryTaskSessions.mockResolvedValueOnce({
+      sessions: [session("old", "COMPLETED")],
+    });
 
     renderHook(() => useTaskSessions(TASK_ID));
     await act(async () => {});
     document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() =>
-      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(
+      expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledWith(
         TASK_ID,
         expect.objectContaining({
           cache: "no-store",

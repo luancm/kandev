@@ -2,7 +2,11 @@ import { isTaskDetailPath } from "./links";
 import type { Errand } from "@/lib/types/errands";
 import type { TaskSession } from "@/lib/types/http";
 
-type ConversationSession = Pick<TaskSession, "id" | "role" | "parent_session_id">;
+type ConversationSession = {
+  id: string;
+  role?: TaskSession["role"];
+  parent_session_id?: string;
+};
 type ErrandParents = Record<string, Pick<Errand, "parent_session_id">>;
 
 export function isErrandConversation(
@@ -17,8 +21,18 @@ export function errandParentSessionId(
   selectedId: string | null,
   sessions: readonly ConversationSession[],
   errands: ErrandParents = {},
+  selectedDetail?: ConversationSession,
 ): string | null {
-  const selected = sessions.find((session) => session.id === selectedId);
+  const selected =
+    sessions.find((session) => session.id === selectedId) ??
+    (selectedDetail?.id === selectedId ? selectedDetail : undefined) ??
+    (selectedId && errands[selectedId]
+      ? {
+          id: selectedId,
+          role: "errand" as const,
+          parent_session_id: errands[selectedId].parent_session_id,
+        }
+      : undefined);
   if (!selected || !isErrandConversation(selected, errands)) return null;
   const parentId = selected.parent_session_id || errands[selected.id]?.parent_session_id;
   const parent = sessions.find((session) => session.id === parentId);
@@ -30,12 +44,22 @@ export function conversationTabSessionId(
   selectedId: string | null,
   sessions: readonly ConversationSession[],
   errands: ErrandParents = {},
+  selectedDetail?: ConversationSession,
 ): string | null {
   if (!selectedId) return null;
-  const selected = sessions.find((session) => session.id === selectedId);
-  if (!selected || !isErrandConversation(selected, errands)) return selectedId;
-  const normal = sessions.filter((session) => !isErrandConversation(session, errands));
-  return errandParentSessionId(selectedId, sessions, errands) ?? normal[0]?.id ?? null;
+  const selected =
+    sessions.find((session) => session.id === selectedId) ??
+    (selectedDetail?.id === selectedId ? selectedDetail : undefined) ??
+    (errands[selectedId]
+      ? {
+          id: selectedId,
+          role: "errand" as const,
+          parent_session_id: errands[selectedId].parent_session_id,
+        }
+      : undefined);
+  if (!selected) return null;
+  if (!isErrandConversation(selected, errands)) return selectedId;
+  return errandParentSessionId(selectedId, sessions, errands, selected);
 }
 
 /** Only the owning normal tab may show the currently selected child. */
@@ -44,12 +68,22 @@ export function panelConversationSessionId(
   selectedId: string | null,
   sessions: readonly ConversationSession[],
   errands: ErrandParents = {},
+  selectedDetail?: ConversationSession,
 ): string | null {
-  const selected = sessions.find((session) => session.id === selectedId);
+  const selected =
+    sessions.find((session) => session.id === selectedId) ??
+    (selectedDetail?.id === selectedId ? selectedDetail : undefined) ??
+    (selectedId && errands[selectedId]
+      ? {
+          id: selectedId,
+          role: "errand" as const,
+          parent_session_id: errands[selectedId].parent_session_id,
+        }
+      : undefined);
   if (
     selected &&
     isErrandConversation(selected, errands) &&
-    conversationTabSessionId(selectedId, sessions, errands) === hostId
+    conversationTabSessionId(selectedId, sessions, errands, selected) === hostId
   ) {
     return selectedId;
   }

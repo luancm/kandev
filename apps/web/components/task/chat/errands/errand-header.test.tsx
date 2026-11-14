@@ -1,7 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Errand } from "@/lib/types/errands";
+import type {
+  Errand,
+  ErrandBrowserCounts,
+  ErrandBrowserRow,
+  ErrandInspection,
+} from "@/lib/types/errands";
+import { makeBrowserErrandRow } from "@/lib/state/slices/errands/errands.test-helpers";
 import { ErrandHeader } from "./errand-header";
 import { ErrandStatusAnnouncer } from "./errand-status-announcer";
 
@@ -29,6 +35,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => mocks.state, subscribe: () => () => {} }),
   useAppStore: <T,>(selector: (state: Record<string, unknown>) => T) =>
     useSyncExternalStore(
       (listener) => {
@@ -72,11 +79,57 @@ function errand(overrides: Partial<Errand> = {}): Errand {
   };
 }
 
+function browserRow(row: Errand): ErrandBrowserRow {
+  const live = ["queued", "running", "needs_attention"].includes(row.status);
+  return makeBrowserErrandRow({
+    errand_id: row.errand_id,
+    task_id: row.task_id,
+    parent_session_id: row.parent_session_id,
+    title: row.title,
+    agent_profile_id: row.agent_profile_id,
+    status: row.status,
+    attention_reason: row.attention_reason,
+    result_state: row.result_state,
+    result_truncated: row.result_truncated,
+    delivery_state: row.delivery_state,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    settled_at: row.settled_at,
+    live,
+    outstanding: live || row.result_state === "pending" || row.can_send_result === true,
+    can_send_result: row.can_send_result ?? false,
+  });
+}
+
+function makeHeaderInspection(compact: ErrandBrowserRow | null): ErrandInspection | undefined {
+  if (!compact) return undefined;
+  return {
+    scope: { task_id: TASK_ID, child_session_id: ERRAND_ID },
+    errand: compact,
+    child_session_exists: true,
+    parent: { available: true, id: PARENT_ID, title: "Main", role: "primary" },
+  };
+}
+
+function makeHeaderCounts(compact: ErrandBrowserRow | null): ErrandBrowserCounts {
+  return {
+    live: compact?.live ? 1 : 0,
+    capacity: 4,
+    queued: compact?.status === "queued" ? 1 : 0,
+    outstanding: compact?.outstanding ? 1 : 0,
+    finished: compact && !compact.outstanding ? 1 : 0,
+    pending_results: compact?.result_state === "pending" ? 1 : 0,
+    unread: 0,
+  };
+}
+
 function setState({
   enabled = true,
   row = errand(),
   role = "errand" as string | undefined,
 }: { enabled?: boolean; row?: Errand | null; role?: string } = {}) {
+  const compact = row ? browserRow(row) : null;
+  const inspection = makeHeaderInspection(compact);
   mocks.state = {
     features: { errands: enabled },
     tasks: { activeTaskId: TASK_ID },
@@ -93,7 +146,27 @@ function setState({
         [PARENT_ID]: { id: PARENT_ID, task_id: TASK_ID, name: "Main" },
       },
     },
-    errands: { byTaskId: { [TASK_ID]: row ? { [ERRAND_ID]: row } : {} } },
+    errands: {
+      byTaskId: { [TASK_ID]: row ? { [ERRAND_ID]: row } : {} },
+      browserSummaryByTaskId: {
+        [TASK_ID]: {
+          scope: { task_id: TASK_ID },
+          errands: compact ? [compact] : [],
+          counts: makeHeaderCounts(compact),
+          parent_counts: [],
+        },
+      },
+      browserRevisionByTaskId: {},
+      resetEpochByTaskId: {},
+      historyByOwnerId: {},
+      detailBySessionId: inspection ? { [ERRAND_ID]: inspection } : {},
+      detailOwnersBySessionId: inspection ? { [ERRAND_ID]: { "header-test": true } } : {},
+      removedSessionIdsByTaskId: {},
+    },
+    retainErrandDetail: vi.fn(),
+    retainErrandInspection: vi.fn(),
+    releaseErrandInspection: vi.fn(),
+    connection: { status: "connected", generation: 1 },
     agentProfiles: {
       items: [
         { id: "profile-1", label: "Codex • Deep review", agent_name: "codex", model: "gpt-5.6" },

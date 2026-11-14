@@ -1,0 +1,20 @@
+# Child detail retention remediation
+
+Task04 uncovered retained data that the compact history/subscription counters did not measure. The first store RED retained 100 child session rows after inspection and created 100 unseen rows from background events. A real handler RED also retained 100 context entries. The parent added final-reader eviction for child session, transcript, turn and runtime caches; ordinary sessions and shared environments remain owned. A layout-phase detail lease protects handoff from the opener to the reader. Background events for uninspected children still invalidate observations and publish failure/Office notifications without materializing full detail.
+
+A later deferred-fetch regression reproduced loading metadata being recreated after the last child reader left. Clearing an absent loading flag now leaves that entry absent. The change preserves overlapping-fetch accounting and ordinary transcript behavior. RED: `/tmp/kandev-errand-late-loading-red.log` (one expected failure). GREEN: `/tmp/kandev-errand-late-loading-green.log` (36 tests). Final combined slice/hook/handler suite passes 355 tests across 21 files in `/tmp/kandev-errand-history-retention-combined.log`; typecheck and full web lint pass in the adjacent `-combined-typecheck.log` and `-web-lint.log` receipts. Catalog validation (453 decisions, 2014 specifications) and spec lint pass.
+
+Rebuilt desktop acceptance passed 4/4 and phone 3/3 before the final loading-metadata guard, including repeated child navigation, ordinary tabs, recovery refusal and Threads. Both platforms measured zero child session rows, transcripts and turn caches after Back, recorded in [retention-browser-results.json](retention-browser-results.json). A later rebuild smoke passed 1/1 in `/tmp/kandev-run.e2e.tiZcFgpx.log`. The final two-line loading guard is covered by the deferred unit regression and combined suite; no browser acceptance claim for that exact later artifact is made. Global shared hydration bookkeeping was not exhaustively audited; these receipts prove the named cache boundaries.
+
+The original 84-sample performance matrix predates this remediation. The additional [28 zero-history diagnostic controls](zero-history-diagnostic-results.json) preserve seven alternating pairs per platform and are not replacements for failed acceptance samples. Seven of ten diagnostic limits pass. The earlier desktop warm-switch failure did not recur; desktop cold p95, phone ordinary-switch p95 and phone zero-history heap exceed their diagnostic limits. Median latency differences are small (desktop cold +17 ms, phone cold +16 ms, phone return +32 ms); seven observations do not establish a formal confidence interval. The small fixed phone heap increase is distinct from history-growth retention. The user has been asked whether a 1% fixed heap allowance is acceptable; no threshold change is applied without an answer. Latency acceptance stays open.
+
+## Source fingerprints
+
+- `apps/web/lib/state/slices/errands/errand-conversation-cache.ts`: `c921e5ba998b55bd4a3e7202033a485ef0b6272cc5023751de37c5ab6114dce1`
+- `apps/web/lib/state/slices/errands/errands-slice.ts`: `bc9578fb45bd0f2265b30d34683bf2714b6bd061851b286f2149c2a74d1d48d9`
+- `apps/web/lib/state/slices/errands/types.ts`: `8c17364e45eea61f7f32db8f127476d421c573dbd9e15543f39bee14cfedb064`
+- `apps/web/lib/state/slices/session/session-slice.ts`: `7f3d1906d323813f984b841ac1f91e68570c6469c3fc2b43be8145149d40d0e8`
+- `apps/web/lib/ws/handlers/agent-session.ts`: `77d82c11dfb8a781408f1f24023454b5d9dff0da01df4e18f1213eb81688e9dd`
+- `apps/web/components/task/chat/errands/use-errand-view-model.ts`: `959e847c40ed388e59f578b0915bed2983e0bb7841ba1609e43d6bd2724a288e`
+- `apps/web/lib/state/slices/errands/errand-detail-retention.test.ts`: `7dfac1b4947d326685c92c9a132df39b24ab112c2ae1a9c5c74dd5369b4bcf92`
+- `apps/web/hooks/domains/session/use-session-message-fetch.test.ts`: `80dd00315bdc7b896da5d69b4811f8dd927d7d9502b4f0196e9ed7b9c8ae1575`

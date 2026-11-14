@@ -579,7 +579,12 @@ export async function expectMixedParentOrdering(
       await activate(parentChat(page, parentId).getByTestId("errands-chip"));
       await expect(surface).toBeVisible();
     };
+    const refreshHistory = async (parentId: string) => {
+      const refresh = surface.getByTestId(`errands-history-refresh-${parentId}`);
+      if (await refresh.isVisible()) await activate(refresh);
+    };
     const assertOrder = async (parentId: string, expanded: boolean) => {
+      if (expanded) await refreshHistory(parentId);
       const current = (await listErrands(api, first.taskId)).filter(
         (row) => row.parent_session_id === parentId,
       );
@@ -587,11 +592,26 @@ export async function expectMixedParentOrdering(
         ["queued", "running", "needs_attention"].includes(row.status),
       );
       const finished = current.filter((row) => !active.includes(row));
-      await expect(
-        surface.locator(
-          '[data-testid^="errands-panel-row-"]:not([data-testid^="errands-panel-row-actions-"])',
-        ),
-      ).toHaveCount(active.length + (expanded ? finished.length : 0));
+      await expect
+        .poll(async () => {
+          // Settlement can invalidate a refresh that was already in flight. Once that
+          // read ends, exercise the newly offered explicit Refresh action again.
+          if (
+            expanded &&
+            !(await surface
+              .getByRole("status")
+              .filter({ hasText: "Loading finished errands" })
+              .isVisible())
+          ) {
+            await refreshHistory(parentId);
+          }
+          return surface
+            .locator(
+              '[data-testid^="errands-panel-row-"]:not([data-testid^="errands-panel-row-actions-"])',
+            )
+            .count();
+        })
+        .toBe(active.length + (expanded ? finished.length : 0));
       await expect
         .poll(() =>
           surface
@@ -623,12 +643,12 @@ export async function expectMixedParentOrdering(
     );
     await waitParentIdle(api, first.taskId, first.parentId);
     await waitParentIdle(api, first.taskId, second.session_id);
-    await expect(surface.getByTestId("errands-completed-toggle")).toHaveAttribute(
+    await expect(surface.getByTestId(/^errands-history-toggle-/)).toHaveAttribute(
       "aria-expanded",
       "false",
     );
     await assertOrder(first.parentId, false);
-    await activate(surface.getByTestId("errands-completed-toggle"));
+    await activate(surface.getByTestId(/^errands-history-toggle-/));
     await assertOrder(first.parentId, true);
     await first.gates[2].release();
     await waitDelivered(api, first.taskId, [rowFor(first.gates[2]).errand_id]);
@@ -641,6 +661,8 @@ export async function expectMixedParentOrdering(
       efficiency: 0.68,
       source: "acp",
     });
+    await expect(surface.getByTestId(`errands-history-refresh-${first.parentId}`)).toBeVisible();
+    await refreshHistory(first.parentId);
     await expect(surface.getByTestId(`errands-panel-row-${firstDone[0].errand_id}`)).toContainText(
       "68.0K",
     );
@@ -668,12 +690,12 @@ export async function expectMixedParentOrdering(
       await expectNoHorizontalOverflow(page);
     }
     await switchParent(second.session_id);
-    await expect(surface.getByTestId("errands-completed-toggle")).toHaveAttribute(
+    await expect(surface.getByTestId(/^errands-history-toggle-/)).toHaveAttribute(
       "aria-expanded",
       "false",
     );
     await assertOrder(second.session_id, false);
-    await activate(surface.getByTestId("errands-completed-toggle"));
+    await activate(surface.getByTestId(/^errands-history-toggle-/));
     await assertOrder(second.session_id, true);
     const child = secondRows[0];
     const target = surface.getByTestId(
@@ -685,7 +707,7 @@ export async function expectMixedParentOrdering(
     await activate(parentChat(page, child.errand_id).getByTestId("errand-back-to-parent"));
     await page.reload();
     await open(second.session_id);
-    await activate(surface.getByTestId("errands-completed-toggle"));
+    await activate(surface.getByTestId(/^errands-history-toggle-/));
     await assertOrder(second.session_id, true);
     await socket.setOfflineAndClose();
     const reconnected = socket.waitForReconnect();
@@ -697,7 +719,7 @@ export async function expectMixedParentOrdering(
     await assertOrder(second.session_id, true);
     await expect(surface.getByTestId("errands-stop-all")).toHaveCount(0);
     await switchParent(first.parentId);
-    const toggle = surface.getByTestId("errands-completed-toggle");
+    const toggle = surface.getByTestId(/^errands-history-toggle-/);
     if ((await toggle.getAttribute("aria-expanded")) === "false") await activate(toggle);
     await assertOrder(first.parentId, true);
     await expect(surface.getByTestId("errands-stop-all")).toHaveCount(0);
@@ -762,7 +784,7 @@ export async function expectDurableAwaitRecovery(
       await openDefaultErrandParent(page, api, taskId, parentId, true);
       await expect(parentChat(page, parentId)).toBeVisible();
       await activate(parentChat(page, parentId).getByTestId("errands-chip"));
-      await activate(surface.getByTestId("errands-completed-toggle"));
+      await activate(surface.getByTestId(/^errands-history-toggle-/));
       await expect(row).toBeVisible();
     };
     await open();
@@ -799,7 +821,7 @@ export async function expectDurableAwaitRecovery(
     await expect(row.getByTestId("errand-delivery-uncertain")).toHaveCount(0);
     await page.reload();
     await activate(parentChat(page, parentId).getByTestId("errands-chip"));
-    await activate(surface.getByTestId("errands-completed-toggle"));
+    await activate(surface.getByTestId(/^errands-history-toggle-/));
     await expect(row).toBeVisible();
     await expect(row.getByTestId("errand-delivery-uncertain")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);

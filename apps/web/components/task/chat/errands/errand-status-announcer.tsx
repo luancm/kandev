@@ -4,12 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { selectTaskErrands } from "@/lib/state/slices/errands/selectors";
-import type { Errand } from "@/lib/types/errands";
+import { selectErrandBrowserRows } from "@/lib/state/slices/errands/selectors";
+import type { ErrandBrowserRow } from "@/lib/types/errands";
 import { errandStatusLabelKey } from "./errand-status";
 
 /** Errands a chat view reports on: the errand it shows, or the errands its session started. */
-export function errandsForView(errands: readonly Errand[], sessionId: string | null): Errand[] {
+export function errandsForView(
+  errands: readonly ErrandBrowserRow[],
+  sessionId: string | null,
+): ErrandBrowserRow[] {
   if (!sessionId) return [];
   return errands.filter(
     (errand) => errand.errand_id === sessionId || errand.parent_session_id === sessionId,
@@ -21,7 +24,10 @@ export function errandsForView(errands: readonly Errand[], sessionId: string | n
  * baseline, and an errand that newly appears is not announced (its start card
  * shows it), so loading a transcript never reads out every errand.
  */
-function useStatusChangeAnnouncement(errands: readonly Errand[], active: boolean): string {
+function useStatusChangeAnnouncement(
+  errands: readonly ErrandBrowserRow[],
+  active: boolean,
+): string {
   const { t } = useTranslation();
   const baseline = useRef<Map<string, string> | null>(null);
   const [message, setMessage] = useState("");
@@ -69,7 +75,9 @@ export function ErrandStatusAnnouncer({
   active: boolean;
 }) {
   const enabled = useFeature("errands");
-  const taskErrands = useAppStore((state) => selectTaskErrands(state, enabled ? taskId : null));
+  const taskErrands = useAppStore((state) =>
+    selectErrandBrowserRows(state, enabled ? taskId : null),
+  );
   const viewErrands = useMemo(
     () => errandsForView(taskErrands, sessionId),
     [taskErrands, sessionId],

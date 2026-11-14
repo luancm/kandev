@@ -67,10 +67,10 @@ describe("temporary errand conversations", () => {
     const orphan = [{ id: "child", role: "errand", parent_session_id: "gone" }] as TaskSession[];
     expect(conversationTabSessionId("child", orphan)).toBeNull();
     expect(panelConversationSessionId(null, "child", orphan)).toBe("child");
-    expect(conversationTabSessionId("child", [...orphan, ...sessions.slice(0, 2)])).toBe("main");
+    expect(conversationTabSessionId("child", [...orphan, ...sessions.slice(0, 2)])).toBeNull();
   });
   it("does not pick another conversation before the selected row has loaded", () => {
-    expect(conversationTabSessionId("loading", [])).toBe("loading");
+    expect(conversationTabSessionId("loading", [])).toBeNull();
     expect(conversationTabSessionId(null, sessions)).toBeNull();
   });
 });

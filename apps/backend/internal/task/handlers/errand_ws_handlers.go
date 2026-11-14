@@ -17,6 +17,9 @@ import (
 // ErrandService is the errands.Service surface the WebSocket requests use.
 type ErrandService interface {
 	List(ctx context.Context, taskID string) ([]errands.Snapshot, error)
+	BrowserSummary(ctx context.Context, taskID string) (models.ErrandBrowserSummary, error)
+	HistoryPage(ctx context.Context, request models.ErrandHistoryPageRequest, cursor string) (models.ErrandHistoryPage, string, error)
+	Inspect(ctx context.Context, taskID, childSessionID string) (models.ErrandBrowserInspection, error)
 	Lookup(ctx context.Context, errandID string) (*models.Errand, error)
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	CancelAll(ctx context.Context, taskID string) (int, error)
@@ -32,6 +35,9 @@ func (h *TaskHandlers) SetErrands(service ErrandService, enabled bool) {
 
 func (h *TaskHandlers) registerErrandWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionErrandList, h.wsListErrands)
+	dispatcher.RegisterFunc(ws.ActionErrandBrowserSummary, h.wsErrandBrowserSummary)
+	dispatcher.RegisterFunc(ws.ActionErrandHistoryPage, h.wsErrandHistoryPage)
+	dispatcher.RegisterFunc(ws.ActionErrandInspect, h.wsErrandInspect)
 	dispatcher.RegisterFunc(ws.ActionErrandCancel, h.wsCancelErrand)
 	dispatcher.RegisterFunc(ws.ActionErrandCancelAll, h.wsCancelAllErrands)
 	dispatcher.RegisterFunc(ws.ActionErrandSendResult, h.wsSendErrandResult)
@@ -60,6 +66,15 @@ func (h *TaskHandlers) errandGuard(msg *ws.Message) *ws.Message {
 	if !h.errandsEnabled {
 		return errandError(msg, errands.ReasonFeatureDisabled, "errands are disabled")
 	}
+	if h.errands == nil {
+		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "errands are unavailable", nil)
+		return response
+	}
+	return nil
+}
+
+// browserErrandGuard wires retained inspection without applying the mutation gate.
+func (h *TaskHandlers) browserErrandGuard(msg *ws.Message) *ws.Message {
 	if h.errands == nil {
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "errands are unavailable", nil)
 		return response
@@ -105,6 +120,104 @@ func (h *TaskHandlers) wsListErrands(ctx context.Context, msg *ws.Message) (*ws.
 		items = append(items, dto.FromErrand(snapshot.Errand, snapshot.Status, snapshot.AttentionReason))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, errandListResponse{Errands: items})
+}
+
+func (h *TaskHandlers) wsErrandBrowserSummary(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.browserErrandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	taskID := strings.TrimSpace(req.TaskID)
+	if taskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if err := h.authorizeErrandTask(ctx, taskID, authz.ScopeWorkspaceRead); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, errandTaskNotFound, nil)
+	}
+	summary, err := h.errands.BrowserSummary(ctx, taskID)
+	if err != nil {
+		return h.errandFailure(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.FromErrandBrowserSummary(summary))
+}
+
+func (h *TaskHandlers) wsErrandHistoryPage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.browserErrandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var req struct {
+		TaskID          string `json:"task_id"`
+		ParentSessionID string `json:"parent_session_id"`
+		Limit           int    `json:"limit"`
+		Cursor          string `json:"cursor"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	req.TaskID, req.ParentSessionID = strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ParentSessionID)
+	if req.TaskID == "" || req.ParentSessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and parent_session_id are required", nil)
+	}
+	if err := h.authorizeErrandTask(ctx, req.TaskID, authz.ScopeWorkspaceRead); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, errandTaskNotFound, nil)
+	}
+	page, nextCursor, err := h.errands.HistoryPage(ctx, models.ErrandHistoryPageRequest{
+		TaskID: req.TaskID, ParentSessionID: req.ParentSessionID, Limit: req.Limit,
+	}, req.Cursor)
+	if err != nil {
+		return h.errandFailure(msg, err)
+	}
+	rows := make([]dto.ErrandBrowserRowDTO, 0, len(page.Errands))
+	for _, row := range page.Errands {
+		rows = append(rows, dto.FromErrandBrowserObservation(row))
+	}
+	var next *string
+	if nextCursor != "" {
+		next = &nextCursor
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.ErrandHistoryPageDTO{
+		Scope:   dto.ErrandBrowserScopeDTO{TaskID: req.TaskID, ParentSessionID: req.ParentSessionID},
+		Errands: rows, TotalFinished: page.TotalFinished, HasMore: page.HasMore, NextCursor: next,
+	})
+}
+
+func (h *TaskHandlers) wsErrandInspect(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.browserErrandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var req struct {
+		TaskID         string `json:"task_id"`
+		ChildSessionID string `json:"child_session_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	req.TaskID, req.ChildSessionID = strings.TrimSpace(req.TaskID), strings.TrimSpace(req.ChildSessionID)
+	if req.TaskID == "" || req.ChildSessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and child_session_id are required", nil)
+	}
+	if err := h.authorizeErrandTask(ctx, req.TaskID, authz.ScopeWorkspaceRead); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, errandTaskNotFound, nil)
+	}
+	inspection, err := h.errands.Inspect(ctx, req.TaskID, req.ChildSessionID)
+	if err != nil {
+		return h.errandFailure(msg, err)
+	}
+	parent := dto.ErrandBrowserParentDTO{
+		Available: inspection.Parent.Available, ID: inspection.Parent.ID, Title: inspection.Parent.Title,
+		Role: inspection.Parent.Role, EnvironmentID: inspection.Parent.EnvironmentID,
+		TaskEnvironmentID: inspection.Parent.TaskEnvironmentID,
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.ErrandInspectionDTO{
+		Scope:  dto.ErrandBrowserScopeDTO{TaskID: req.TaskID, ChildSessionID: req.ChildSessionID},
+		Errand: dto.FromErrandBrowserObservation(inspection.Errand), ChildSessionExists: inspection.ChildSessionExists,
+		Parent: parent,
+	})
 }
 
 // wsCancelErrand stops one errand for the user. The request names the errand

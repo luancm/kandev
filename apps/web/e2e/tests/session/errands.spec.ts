@@ -27,6 +27,7 @@ import {
   waitParentIdle,
 } from "../../helpers/errands";
 import { mockTurnGate } from "../../helpers/mock-turn-gate";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const INLINE = "errands-inline-summary";
 const CHIP = "errands-chip";
@@ -200,7 +201,7 @@ test("desktop errand rows read each child's persisted context window passively",
     await parent.getByTestId("errands-chip").click();
 
     const panel = page.getByTestId("errands-popover");
-    await panel.getByTestId("errands-completed-toggle").click();
+    await panel.getByTestId(/^errands-history-toggle-/).click();
     const measuredRow = panel.getByTestId(`errands-panel-row-${firstId}`);
     const unmeasuredRow = panel.getByTestId(`errands-panel-row-${unmeasuredId}`);
     const unknownRow = panel.getByTestId(`errands-panel-row-${unknownId}`);
@@ -225,7 +226,7 @@ test("desktop errand rows read each child's persisted context window passively",
     const reloadedParent = parentChat(page, parentId);
     await reloadedParent.getByTestId("errands-chip").click();
     const reloadedPanel = page.getByTestId("errands-popover");
-    await reloadedPanel.getByTestId("errands-completed-toggle").click();
+    await reloadedPanel.getByTestId(/^errands-history-toggle-/).click();
     await expect(reloadedPanel.getByTestId(`errands-panel-row-${firstId}`)).toContainText(
       "Context window: 82.0K of 100.0K tokens",
     );
@@ -240,7 +241,7 @@ test("desktop errand rows read each child's persisted context window passively",
     await page.reload();
     await parentChat(page, parentId).getByTestId("errands-chip").click();
     const finalPanel = page.getByTestId("errands-popover");
-    await finalPanel.getByTestId("errands-completed-toggle").click();
+    await finalPanel.getByTestId(/^errands-history-toggle-/).click();
     const clearedRow = finalPanel.getByTestId(`errands-panel-row-${firstId}`);
     await expect(clearedRow).toBeVisible();
     await expect(clearedRow).not.toContainText("Context window");
@@ -264,7 +265,7 @@ test("desktop errand rows read each child's persisted context window passively",
     await browserSocket.waitForInitialConnection();
     await parentChat(page, parentId).getByTestId("errands-chip").click();
     const missedEventPanel = page.getByTestId("errands-popover");
-    await missedEventPanel.getByTestId("errands-completed-toggle").click();
+    await missedEventPanel.getByTestId(/^errands-history-toggle-/).click();
     const missedClearRow = missedEventPanel.getByTestId(`errands-panel-row-${firstId}`);
     const missedSiblingRow = missedEventPanel.getByTestId(`errands-panel-row-${siblingId}`);
     await expect(missedClearRow).toContainText("Context window: 68.0K of 100.0K tokens");
@@ -312,7 +313,7 @@ test("desktop errand rows read each child's persisted context window passively",
     await page.reload();
     await parentChat(page, parentId).getByTestId("errands-chip").click();
     const reconnectedPanel = page.getByTestId("errands-popover");
-    await reconnectedPanel.getByTestId("errands-completed-toggle").click();
+    await reconnectedPanel.getByTestId(/^errands-history-toggle-/).click();
     await expect(reconnectedPanel.getByTestId(`errands-panel-row-${firstId}`)).not.toContainText(
       "Context window",
     );
@@ -368,7 +369,7 @@ test("desktop errand panel shows only explicit await delivery uncertainty", asyn
     const historicalAwaitText = await historicalAwait.innerText();
     await chat.getByTestId(CHIP).click();
     const panel = page.getByTestId(PANEL);
-    await panel.getByTestId("errands-completed-toggle").click();
+    await panel.getByTestId(/^errands-history-toggle-/).click();
     const row = panel.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     const sibling = panel.getByTestId(`errands-panel-row-${errands[1].errand_id}`);
     const currentRows = await listErrands(api, taskId);
@@ -474,7 +475,10 @@ test("conversational parent, explicit Open, follow-up and immutable delivered ca
     await expect(parentChat(page, parentId).getByTestId("errand-start-card")).toHaveCount(2);
     await parentChat(page, parentId).getByTestId(CHIP).click();
     await expect(page.getByTestId(PANEL).getByTestId("errands-stop-all")).toHaveCount(0);
-    await page.getByTestId(PANEL).getByTestId("errands-completed-toggle").click();
+    await page
+      .getByTestId(PANEL)
+      .getByTestId(/^errands-history-toggle-/)
+      .click();
     for (const row of errands)
       await expect(
         page.getByTestId(PANEL).getByTestId(`errands-panel-row-${row.errand_id}`),
@@ -735,6 +739,7 @@ test("desktop panel Stop cancels one errand and keeps its transcript and sibling
     const stop = panel.getByTestId(`errand-stop-${errands[0].errand_id}`);
     await expect(stop).toBeVisible();
     await expect(panel.getByTestId(`errand-open-${errands[0].errand_id}`)).toBeVisible();
+    await waitForFiniteAnimations(panel);
     const stopBox = await stop.boundingBox();
     expect(stopBox).not.toBeNull();
     expect(stopBox!.height).toBeGreaterThanOrEqual(27);
@@ -761,7 +766,7 @@ test("desktop panel Stop cancels one errand and keeps its transcript and sibling
     const retainedIds = new Set(transcriptAfter.messages.map((message) => message.id));
     expect(transcriptBefore.messages.every((message) => retainedIds.has(message.id))).toBe(true);
 
-    await panel.getByTestId("errands-completed-toggle").click();
+    await panel.getByTestId(/^errands-history-toggle-/).click();
     const cancelledRow = panel.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     await expect(cancelledRow).toContainText("Cancelled");
     await expect(cancelledRow.getByTestId(`errand-stop-${errands[0].errand_id}`)).toHaveCount(0);
@@ -968,7 +973,7 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     await expect(finished).toContainText("ERRAND_RESULT_");
     await chat.getByTestId(CHIP).click();
     let panel = page.getByTestId(PANEL);
-    await expect(panel.getByTestId("errands-completed-toggle")).toHaveAttribute(
+    await expect(panel.getByTestId(/^errands-history-toggle-/)).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -976,7 +981,7 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     await expect(panel.getByTestId(`errands-panel-row-${secondErrands[0].errand_id}`)).toHaveCount(
       0,
     );
-    await panel.getByTestId("errands-completed-toggle").click();
+    await panel.getByTestId(/^errands-history-toggle-/).click();
     await expect(panel.getByTestId("errands-panel-row-" + errands[4].errand_id)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("task29-desktop-history.png") });
     await panel.getByTestId(`errand-open-${errands[0].errand_id}`).click();

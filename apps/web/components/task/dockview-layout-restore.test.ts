@@ -353,7 +353,10 @@ describe("tryRestoreLayout - env restore", () => {
     vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
 
     const api = makeFakeRestoreApi();
-    const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set(["phantom"]));
+    const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set(["phantom"]), {
+      activeSessionId: "alive-1",
+      currentSessionIds: ["alive-1"],
+    });
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
   });
@@ -587,12 +590,7 @@ describe("tryRestoreLayout — retired panel compatibility", () => {
     const appliedLayout = vi.mocked(api.fromJSON).mock.calls.at(-1)?.[0];
     expect(appliedLayout?.panels).toHaveProperty("chat");
     expect(appliedLayout?.panels).not.toHaveProperty("files");
-    expect(persistLayout).toHaveBeenCalledWith(
-      "env-stale-before-max",
-      expect.objectContaining({
-        panels: expect.not.objectContaining({ files: expect.anything() }),
-      }),
-    );
+    expect(persistLayout).not.toHaveBeenCalled();
     expect(useDockviewStore.getState().maximizedGroupId).toBeNull();
   });
 });
@@ -612,7 +610,12 @@ describe("tryRestoreLayout — phantom sessions and fallback durability", () => 
     });
     const api = makeFakeRestoreApi();
 
-    expect(tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]))).toBe(true);
+    expect(
+      tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]), {
+        activeSessionId: "alive-1",
+        currentSessionIds: ["alive-1"],
+      }),
+    ).toBe(true);
 
     const applied = vi.mocked(api.fromJSON).mock.calls[0][0];
     expect(applied.panels).not.toHaveProperty(PHANTOM_PANEL_ID);
@@ -628,7 +631,12 @@ describe("tryRestoreLayout — phantom sessions and fallback durability", () => 
     const persistLayout = vi.spyOn(localStorage, "setEnvLayout");
     const api = makeFakeRestoreApi();
 
-    expect(tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]))).toBe(true);
+    expect(
+      tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]), {
+        activeSessionId: "alive-1",
+        currentSessionIds: ["alive-1"],
+      }),
+    ).toBe(true);
 
     const applied = vi.mocked(api.fromJSON).mock.calls.at(-1)?.[0];
     expect(applied?.panels).not.toHaveProperty(PHANTOM_PANEL_ID);
@@ -647,7 +655,12 @@ describe("tryRestoreLayout — phantom sessions and fallback durability", () => 
     });
     const api = makeFakeRestoreApi();
 
-    expect(tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]))).toBe(true);
+    expect(
+      tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]), {
+        activeSessionId: "alive-1",
+        currentSessionIds: ["alive-1"],
+      }),
+    ).toBe(true);
 
     const applied = vi.mocked(api.fromJSON).mock.calls.at(-1)?.[0];
     expect(applied?.panels).not.toHaveProperty(PHANTOM_PANEL_ID);
@@ -666,7 +679,12 @@ describe("tryRestoreLayout — phantom sessions and fallback durability", () => 
     vi.spyOn(localStorage, "setEnvLayout").mockReturnValue(true);
     const api = makeFakeRestoreApi();
 
-    expect(tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]))).toBe(true);
+    expect(
+      tryRestoreLayout(api, "env-live", VALID_COMPONENTS, new Set(["phantom"]), {
+        activeSessionId: "alive-1",
+        currentSessionIds: ["alive-1"],
+      }),
+    ).toBe(true);
 
     const applied = vi.mocked(api.fromJSON).mock.calls.at(-1)?.[0];
     expect(applied?.panels).not.toHaveProperty(PHANTOM_PANEL_ID);

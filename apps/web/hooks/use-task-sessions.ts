@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { listTaskSessions } from "@/lib/api";
+import { listOrdinaryTaskSessions } from "@/lib/api";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
@@ -47,7 +47,7 @@ async function hydrateTaskSessions({
     const response = await reads.read(
       taskId,
       (signal) =>
-        listTaskSessions(taskId, {
+        listOrdinaryTaskSessions(taskId, {
           cache: "no-store",
           init: { signal },
         }),

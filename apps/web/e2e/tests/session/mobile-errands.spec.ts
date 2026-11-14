@@ -112,7 +112,7 @@ test("phone panel Stop is isolated and retains the transcript beside Open", asyn
     );
     await expect(chat.getByTestId(CHIP)).toContainText("4 running");
 
-    await drawer.getByTestId("errands-completed-toggle").tap();
+    await drawer.getByTestId(/^errands-history-toggle-/).tap();
     const cancelledOpen = drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     await cancelledOpen.tap();
     const cancelledChild = parentChat(page, errands[0].errand_id);
@@ -253,7 +253,7 @@ test("phone errand rows expose passive context through one accessible Open targe
     const chat = parentChat(page, parentId);
     await chat.getByTestId(CHIP).tap();
     const drawer = page.getByTestId(DRAWER);
-    await drawer.getByTestId("errands-completed-toggle").tap();
+    await drawer.getByTestId(/^errands-history-toggle-/).tap();
     const measured = drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     const unmeasured = drawer.getByTestId(`errands-panel-row-${errands[1].errand_id}`);
     const unknown = drawer.getByTestId(`errands-panel-row-${errands[2].errand_id}`);
@@ -299,7 +299,7 @@ test("phone errand rows expose passive context through one accessible Open targe
     await page.reload();
     await parentChat(page, parentId).getByTestId(CHIP).tap();
     const reloadedDrawer = page.getByTestId(DRAWER);
-    await reloadedDrawer.getByTestId("errands-completed-toggle").tap();
+    await reloadedDrawer.getByTestId(/^errands-history-toggle-/).tap();
     const reloadedMeasured = reloadedDrawer.getByTestId(
       `errands-panel-row-${errands[0].errand_id}`,
     );
@@ -312,7 +312,7 @@ test("phone errand rows expose passive context through one accessible Open targe
     await page.reload();
     await parentChat(page, parentId).getByTestId(CHIP).tap();
     const finalDrawer = page.getByTestId(DRAWER);
-    await finalDrawer.getByTestId("errands-completed-toggle").tap();
+    await finalDrawer.getByTestId(/^errands-history-toggle-/).tap();
     await expect(
       finalDrawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`),
     ).not.toContainText("Context window");
@@ -324,7 +324,7 @@ test("phone errand rows expose passive context through one accessible Open targe
     await browserSocket.waitForInitialConnection();
     await parentChat(page, parentId).getByTestId(CHIP).tap();
     const missedEventDrawer = page.getByTestId(DRAWER);
-    await missedEventDrawer.getByTestId("errands-completed-toggle").tap();
+    await missedEventDrawer.getByTestId(/^errands-history-toggle-/).tap();
     const missedClearRow = missedEventDrawer.getByTestId(`errands-panel-row-${firstId}`);
     const siblingRow = missedEventDrawer.getByTestId(`errands-panel-row-${siblingId}`);
     await expect(missedClearRow).toContainText("Context window: 68.0K of 100.0K tokens");
@@ -369,7 +369,7 @@ test("phone errand rows expose passive context through one accessible Open targe
     await page.reload();
     await parentChat(page, parentId).getByTestId(CHIP).tap();
     const reconnectedDrawer = page.getByTestId(DRAWER);
-    await reconnectedDrawer.getByTestId("errands-completed-toggle").tap();
+    await reconnectedDrawer.getByTestId(/^errands-history-toggle-/).tap();
     await expect(reconnectedDrawer.getByTestId(`errands-panel-row-${firstId}`)).not.toContainText(
       "Context window",
     );
@@ -470,7 +470,7 @@ test("phone errand drawer shows uncertainty and keeps transcript recovery reacha
     await expect.poll(deliveryEvents.isConnected, { timeout: 15_000 }).toBe(true);
     await chat.getByTestId(CHIP).tap();
     const drawer = page.getByTestId(DRAWER);
-    await drawer.getByTestId("errands-completed-toggle").tap();
+    await drawer.getByTestId(/^errands-history-toggle-/).tap();
     const row = drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     const current = (await listErrands(api, taskId)).find(
       (errand) => errand.errand_id === errands[0].errand_id,
@@ -904,7 +904,7 @@ test("phone retains start and result history, completed drawer access and reader
     const drawer = page.getByTestId(DRAWER);
     await expect(drawer).toBeVisible();
     await expect(drawer.getByTestId("errands-stop-all")).toHaveCount(0);
-    await drawer.getByTestId("errands-completed-toggle").tap();
+    await drawer.getByTestId(/^errands-history-toggle-/).tap();
     for (const row of errands)
       await expect(drawer.getByTestId(`errands-panel-row-${row.errand_id}`)).toBeVisible();
     await drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`).tap();
@@ -1089,7 +1089,7 @@ test("task29 phone separates normal conversations and parent errands with tempor
     await expect(finished).toContainText("ERRAND_RESULT_");
     await chat.getByTestId(CHIP).tap();
     let drawer = page.getByTestId(DRAWER);
-    const completed = drawer.getByTestId("errands-completed-toggle");
+    const completed = drawer.getByTestId(/^errands-history-toggle-/);
     await expectTouchTarget(completed);
     await expect(completed).toHaveAttribute("aria-expanded", "false");
     await expect(drawer.getByTestId(`errands-panel-row-${errands[0].errand_id}`)).toHaveCount(0);

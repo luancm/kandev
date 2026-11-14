@@ -17,6 +17,7 @@ import { Button } from "@kandev/ui/button";
 import type { ActiveThread } from "@/lib/threads/active-threads";
 import type { TaskSession } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { useInspectedErrandSession } from "@/hooks/domains/session/use-inspected-errand-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { selectThreadSessionId } from "@/lib/threads/thread-session-selection";
 import { resolveThreadColumnStatus, type ThreadStatus } from "@/lib/threads/thread-session-status";
@@ -156,10 +157,14 @@ function ThreadSessionMembership({
   const { sessions, isLoading, isLoaded, error, loadSessions } = useTaskSessions(taskId);
   const invalidRequestReportedRef = useRef<string | null>(null);
 
-  const resolvedSessionId = selectThreadSessionId(sessions, {
-    requestedSessionId,
-    currentSessionId: selectedSessionId,
-  });
+  const inspectedChild = useInspectedErrandSession(taskId, requestedSessionId ?? selectedSessionId);
+  const resolvedSessionId = selectThreadSessionId(
+    inspectedChild ? [...sessions, inspectedChild] : sessions,
+    {
+      requestedSessionId,
+      currentSessionId: selectedSessionId,
+    },
+  );
 
   useEffect(() => {
     onSessions(sessions, isLoaded);
@@ -173,12 +178,17 @@ function ThreadSessionMembership({
   useEffect(() => {
     if (!isLoaded || !requestedSessionId) return;
     onRequestedSessionResolved();
-    if (sessions.some((session) => session.id === requestedSessionId)) return;
+    if (
+      inspectedChild?.id === requestedSessionId ||
+      sessions.some((session) => session.id === requestedSessionId)
+    )
+      return;
     if (invalidRequestReportedRef.current === requestedSessionId) return;
     invalidRequestReportedRef.current = requestedSessionId;
     onInvalidRequestedSession?.(taskId, requestedSessionId);
   }, [
     isLoaded,
+    inspectedChild,
     onInvalidRequestedSession,
     onRequestedSessionResolved,
     requestedSessionId,
@@ -454,7 +464,9 @@ export function ThreadColumn({
     () => !requestedSessionId,
   );
   const requestedSessionRef = useRef(requestedSessionId);
-  const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const inspectedChild = useInspectedErrandSession(thread.taskId, selectedSessionId);
+  const selectedSession =
+    inspectedChild ?? sessions.find((session) => session.id === selectedSessionId) ?? null;
   const statusSession = statusSessionForThread(thread, selectedSession);
   const status = resolveThreadColumnStatus({
     taskState: thread.taskState,

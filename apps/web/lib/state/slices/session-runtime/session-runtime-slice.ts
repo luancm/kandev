@@ -2,6 +2,7 @@ import type { SliceCreator, SliceSet } from "@/lib/state/slice-creator";
 
 import type { ContextWindowEntry, SessionRuntimeSlice, SessionRuntimeSliceState } from "./types";
 import type { TaskSession } from "@/lib/types/http";
+import type { ErrandsSliceState } from "@/lib/state/slices/errands/types";
 import { updateContextWindowMetadata } from "./context-window";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
@@ -53,6 +54,7 @@ type ContextWindowSessionState = {
     contextWindowEpochBySession?: Record<string, number>;
   };
   taskSessionsByTask?: { itemsByTaskId: Record<string, TaskSession[]> };
+  errands?: ErrandsSliceState["errands"];
 };
 
 type ContextWindowSessionTarget = {
@@ -104,6 +106,16 @@ function incrementContextWindowEpoch(state: ContextWindowSessionState, sessionId
   if (!state.taskSessions) return;
   const epochs = (state.taskSessions.contextWindowEpochBySession ??= {});
   epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+}
+
+function advanceErrandBrowserContextRevision(state: ContextWindowSessionState, sessionId: string) {
+  const session = state.taskSessions?.items[sessionId];
+  if (!session || session.role !== "errand" || !state.errands) return;
+  const revisions = (state.errands.browserRevisionByTaskId ??= {});
+  revisions[session.task_id] = (revisions[session.task_id] ?? 0) + 1;
+  for (const chain of Object.values(state.errands.historyByOwnerId ?? {})) {
+    if (chain.taskId === session.task_id) chain.stale = true;
+  }
 }
 
 /** Per-session runtime maps (keyed directly by sessionId). */
@@ -427,6 +439,7 @@ function buildContextWindowActions(set: ImmerSet) {
         incrementContextWindowEpoch(sessionState, sessionId);
         draft.contextWindow.bySessionId[sessionId] = contextWindow;
         updateSessionContextMetadata(sessionState, sessionId, contextWindow);
+        advanceErrandBrowserContextRevision(sessionState, sessionId);
       }),
     clearContextWindow: (sessionId: string) =>
       set((draft) => {
@@ -434,6 +447,7 @@ function buildContextWindowActions(set: ImmerSet) {
         incrementContextWindowEpoch(sessionState, sessionId);
         delete draft.contextWindow.bySessionId[sessionId];
         updateSessionContextMetadata(sessionState, sessionId, null);
+        advanceErrandBrowserContextRevision(sessionState, sessionId);
       }),
   };
 }

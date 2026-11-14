@@ -87,6 +87,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
 
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
+import { releaseDockviewSessionRestore } from "./dockview-session-restore-gate";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
 import {
   applyLayout,
@@ -526,6 +527,45 @@ describe("toggleRightPanels", () => {
 });
 
 describe("applyCustomLayout — session panel normalization", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("holds unresolved custom session panels and avoids persisting the temporary layout", async () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+
+    useDockviewStore
+      .getState()
+      .applyCustomLayout(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
+        activeSessionId: NEW_SESSION_ID,
+        sessionIds: [NEW_SESSION_ID],
+        envId: CUSTOM_ENV_ID,
+        sessionListRestoreState: {
+          loaded: false,
+          knownForeignSessionIds: new Set(),
+        },
+      });
+    const filteredState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    const filteredPanelIds =
+      filteredState?.columns.flatMap((column) =>
+        column.groups.flatMap((group) => group.panels.map((panel) => panel.id)),
+      ) ?? [];
+    expect(filteredPanelIds.some((id) => id.startsWith("session:"))).toBe(false);
+    await flushRaf();
+    expect(setEnvLayout).not.toHaveBeenCalled();
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+
+    expect(releaseDockviewSessionRestore(api, [NEW_SESSION_ID])).toBe(true);
+    const restoredState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(restoredState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toContain(
+      NEW_SESSION_PANEL_ID,
+    );
+    await flushRaf();
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+    expect(setEnvLayout).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("applyCustomLayout — saved session retargeting", () => {
   beforeEach(resetStoreForIntegration);
 
   it("retargets saved session chat panels to the active session", async () => {

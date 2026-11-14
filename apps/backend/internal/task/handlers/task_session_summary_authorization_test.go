@@ -32,6 +32,12 @@ func newSessionSummaryAuthorizationHandlers(t *testing.T, narrow bool) *TaskHand
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "private-session", TaskID: "private-task", State: models.TaskSessionStateCreated}); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "private-errand", TaskID: "private-task", Role: models.SessionRoleErrand,
+		ParentSessionID: "private-session", State: models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var sessions repository.SessionRepository = repo
 	if !narrow {
 		sessions = authorizationSessionFallback{SessionRepository: repo}
@@ -97,8 +103,50 @@ func TestTaskSessionSummaryTransportsPreserveAuthorization(t *testing.T) {
 						if err := json.Unmarshal(response.Payload, &result); err != nil {
 							t.Fatal(err)
 						}
+						if len(result.Sessions) != 2 {
+							t.Fatalf("complete WS list did not return both owned sessions: %s", response.Payload)
+						}
+					}
+
+					ordinaryRecorder := httptest.NewRecorder()
+					ordinaryContext, _ := gin.CreateTestContext(ordinaryRecorder)
+					ordinaryContext.Request = httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+tc.taskID+"/sessions/ordinary", nil).WithContext(ctx)
+					ordinaryContext.Params = gin.Params{{Key: "id", Value: tc.taskID}}
+					h.httpListOrdinaryTaskSessions(ordinaryContext)
+					if ordinaryRecorder.Code != wantHTTP {
+						t.Errorf("ordinary HTTP status=%d want=%d body=%s", ordinaryRecorder.Code, wantHTTP, ordinaryRecorder.Body.String())
+					}
+					ordinaryResponse, err := h.wsListOrdinaryTaskSessions(ctx, &ws.Message{
+						ID: "ordinary-list", Action: ws.ActionTaskSessionListOrdinary, Payload: payload,
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if tc.allowed == (ordinaryResponse.Type == ws.MessageTypeError) {
+						t.Errorf("ordinary WS authorization allowed=%v type=%s payload=%s", tc.allowed, ordinaryResponse.Type, ordinaryResponse.Payload)
+					}
+					if tc.allowed {
+						var result struct {
+							Sessions []struct {
+								ID string `json:"id"`
+							} `json:"sessions"`
+						}
+						if err := json.Unmarshal(ordinaryResponse.Payload, &result); err != nil {
+							t.Fatal(err)
+						}
 						if len(result.Sessions) != 1 || result.Sessions[0].ID != "private-session" {
-							t.Fatalf("authorized WS did not return owned session: %s", response.Payload)
+							t.Fatalf("ordinary WS list included children or omitted owner session: %s", ordinaryResponse.Payload)
+						}
+						var httpResult struct {
+							Sessions []struct {
+								ID string `json:"id"`
+							} `json:"sessions"`
+						}
+						if err := json.Unmarshal(ordinaryRecorder.Body.Bytes(), &httpResult); err != nil {
+							t.Fatal(err)
+						}
+						if len(httpResult.Sessions) != 1 || httpResult.Sessions[0].ID != "private-session" {
+							t.Fatalf("ordinary HTTP list included children or omitted owner session: %s", ordinaryRecorder.Body.String())
 						}
 					}
 				})

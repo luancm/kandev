@@ -379,8 +379,14 @@ function SidebarRightActions() {
         const sessionIds = (nextState.taskSessionsByTask.itemsByTaskId[task.id] ?? []).map(
           (session) => session.id,
         );
-        if (!sessionIds.includes(taskSessionId)) sessionIds.unshift(taskSessionId);
-        if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, taskSessionId, sessionIds);
+        if (newEnvId) {
+          performLayoutSwitch(oldEnvId, newEnvId, taskSessionId, sessionIds, {
+            sessionListRestoreState: {
+              loaded: nextState.taskSessionsByTask.loadedByTaskId[task.id] ?? false,
+              knownForeignSessionIds: new Set(),
+            },
+          });
+        }
       }
       replaceTaskUrl(task.id);
     },

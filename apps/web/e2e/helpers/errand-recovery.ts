@@ -102,7 +102,7 @@ export async function exerciseErrandRecoveryRefusal({
 
     const watcher = watchWs(page);
     await openErrandParent(page, fixture, seed.workspaceId, mobile);
-    const reloadList = watcher.waitForResponse("errand.list", {
+    const reloadList = watcher.waitForResponse("errand.browser_summary", {
       requestWhere: (payload) => payload.task_id === fixture.taskId,
     });
     await page.reload();

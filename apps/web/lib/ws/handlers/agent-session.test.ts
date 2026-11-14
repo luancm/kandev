@@ -6,7 +6,7 @@ import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
 import { getSessionRestartStore } from "@/lib/session/session-restart-state";
-import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
+import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import { makeErrand } from "@/lib/state/slices/errands/errands.test-helpers";
 import type {
   TaskSessionActivityChangedPayload,
@@ -940,6 +940,15 @@ describe("session.state_changed errand fields", () => {
   it("keeps a known errand role through a later event that omits it", () => {
     const store = createAppStore();
     const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+    store.getState().setTaskSession({
+      id: toSessionId("s-errand"),
+      task_id: toTaskId("t-1"),
+      role: "errand",
+      parent_session_id: toSessionId("s-parent"),
+      state: "RUNNING",
+      started_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
 
     handler(
       makeMessage({

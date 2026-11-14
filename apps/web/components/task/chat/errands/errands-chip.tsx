@@ -9,10 +9,10 @@ import {
 } from "react";
 import { IconAlertTriangle, IconShieldQuestion } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Drawer, DrawerContent, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useAppStore } from "@/components/state-provider";
-import { isLiveErrand } from "@/lib/types/errands";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskErrands } from "@/hooks/domains/session/use-task-errands";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -101,27 +101,117 @@ const ErrandsTrigger = forwardRef<HTMLButtonElement, ErrandsTriggerProps>(functi
 
 type ErrandsChipBodyProps = { taskId: string; sessionId?: string | null };
 
+function scopedCounts(
+  parentId: string | null,
+  summary: ReturnType<typeof useTaskErrands>["summary"],
+  parentCounts: ReturnType<typeof useTaskErrands>["parentCounts"],
+  taskCounts: ReturnType<typeof useTaskErrands>["counts"],
+) {
+  if (!parentId) return taskCounts;
+  return (
+    summary?.parent_counts.find((item) => item.parent_session_id === parentId)?.counts ??
+    parentCounts
+  );
+}
+
+function chipLabel(args: {
+  t: TFunction;
+  i18n: ReturnType<typeof useTranslation>["i18n"];
+  statusCounts: string[];
+  summaryStatus: string;
+  total: number;
+}) {
+  const { t, i18n, statusCounts, summaryStatus, total } = args;
+  if (statusCounts.length > 0) {
+    const locale =
+      i18n.resolvedLanguage === "pseudo" ? "en" : (i18n.resolvedLanguage ?? i18n.language);
+    return t("task:errandsChipStatus", {
+      counts: new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format(
+        statusCounts,
+      ),
+    });
+  }
+  if (summaryStatus === "error" || summaryStatus === "loading") return t("task:errandsPanelTitle");
+  return t("task:errandsChipIdle", { count: total });
+}
+
+function ErrandsChipSurface({
+  detailsId,
+  trigger,
+  panel,
+  open,
+  onOpenChange,
+  usesDrawer,
+}: {
+  detailsId: string;
+  trigger: React.ReactNode;
+  panel: React.ReactNode;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  usesDrawer: boolean;
+}) {
+  if (usesDrawer) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent
+          id={detailsId}
+          data-testid="errands-drawer-content"
+          className="flex max-h-[min(80dvh,calc(100dvh-env(safe-area-inset-bottom)))] min-h-0 flex-col"
+        >
+          {panel}
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent
+        id={detailsId}
+        data-testid="errands-popover"
+        side="top"
+        align="start"
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
+        {panel}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
   const { t, i18n } = useTranslation();
   const {
-    errands: allErrands,
-    errandsByParent,
-    liveCount: taskLiveCount,
-    isLoaded,
+    outstanding,
+    counts: taskCounts,
+    parentCounts,
+    summary,
+    summaryStatus,
+    retrySummary,
   } = useTaskErrands(taskId);
   const parentId = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.parent_session_id || sessionId : null,
   );
-  const errands = parentId ? (errandsByParent[parentId] ?? []) : allErrands;
-  const liveCount = errands.filter(isLiveErrand).length;
+  const errands = parentId
+    ? outstanding.filter((errand) => errand.parent_session_id === parentId)
+    : outstanding;
+  const counts = scopedCounts(parentId, summary, parentCounts, taskCounts);
+  const liveCount = counts.live;
   const runningCount = errands.filter((errand) => errand.status === "running").length;
-  const queuedCount = errands.filter((errand) => errand.status === "queued").length;
+  const queuedCount = counts.queued;
   const attentionCount = errands.filter((errand) => errand.status === "needs_attention").length;
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const usesDrawer = !isFinePointer || isMobile;
   const [open, setOpen] = useState(false);
   const detailsId = `errands-details-${useId()}`;
-  if (errands.length === 0) return null;
+  if (
+    counts.outstanding + counts.finished === 0 &&
+    summaryStatus !== "loading" &&
+    summaryStatus !== "error"
+  ) {
+    return null;
+  }
 
   const recoveryNeedsAttention = errands.some(
     (errand) =>
@@ -137,18 +227,8 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
     queuedCount,
     (key, count) => t(key, { count }),
   );
-  const label =
-    statusCounts.length > 0
-      ? t("task:errandsChipStatus", {
-          counts: new Intl.ListFormat(
-            i18n.resolvedLanguage === "pseudo" ? "en" : (i18n.resolvedLanguage ?? i18n.language),
-            {
-              style: "long",
-              type: "conjunction",
-            },
-          ).format(statusCounts),
-        })
-      : t("task:errandsChipIdle", { count: errands.length });
+  const total = counts.outstanding + counts.finished;
+  const label = chipLabel({ t, i18n, statusCounts, summaryStatus, total });
   let ariaLabel = label;
   if (recoveryNeedsAttention) ariaLabel = t("task:errandsChipRecoveryAria", { label });
   const trigger = (
@@ -165,42 +245,27 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
   const panel = (
     <ErrandsPanel
       taskId={taskId}
-      errands={errands}
-      errandsByParent={errandsByParent}
-      liveCount={taskLiveCount}
-      isLoaded={isLoaded}
+      outstanding={errands}
+      summary={summary}
+      counts={counts}
+      taskCounts={taskCounts}
+      parentSessionId={parentId}
+      summaryStatus={summaryStatus}
+      onRetrySummary={retrySummary}
       drawer={usesDrawer}
       onClose={() => setOpen(false)}
     />
   );
 
-  if (usesDrawer) {
-    return (
-      <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent
-          id={detailsId}
-          data-testid="errands-drawer-content"
-          className="max-h-[min(80dvh,calc(100dvh-env(safe-area-inset-bottom)))]"
-        >
-          {panel}
-        </DrawerContent>
-      </Drawer>
-    );
-  }
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent
-        id={detailsId}
-        data-testid="errands-popover"
-        side="top"
-        align="start"
-        className="w-80 max-w-[calc(100vw-1rem)] p-3"
-      >
-        {panel}
-      </PopoverContent>
-    </Popover>
+    <ErrandsChipSurface
+      detailsId={detailsId}
+      trigger={trigger}
+      panel={panel}
+      open={open}
+      onOpenChange={setOpen}
+      usesDrawer={usesDrawer}
+    />
   );
 }
 

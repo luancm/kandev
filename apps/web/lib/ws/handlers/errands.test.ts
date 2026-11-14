@@ -25,14 +25,18 @@ describe("errand.updated", () => {
   it("applies updates in timestamp order regardless of arrival order", () => {
     const store = createAppStore();
     const handle = registerErrandsHandlers(store)["errand.updated"]!;
-    handle(
-      errandUpdated(
-        withDeliveryState(
-          makeErrand({ status: "done", updated_at: "2026-10-26T10:00:09Z" }),
-          "uncertain",
-        ),
-      ),
-    );
+    store
+      .getState()
+      .setTaskErrands(
+        ERRAND_TASK_ID,
+        [
+          withDeliveryState(
+            makeErrand({ status: "done", updated_at: "2026-10-26T10:00:09Z" }),
+            "uncertain",
+          ),
+        ],
+        0,
+      );
     handle(errandUpdated(makeErrand({ status: "running", updated_at: "2026-10-26T10:00:01Z" })));
 
     expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0].status).toBe("done");

@@ -22,6 +22,10 @@ func (s unreadableParentQueueStore) ListErrandsByParent(context.Context, string)
 	return nil, errors.New("parent inventory unreadable")
 }
 
+func (s unreadableParentQueueStore) GetParentErrandState(context.Context, string) (bool, bool, error) {
+	return false, false, errors.New("parent inventory unreadable")
+}
+
 func TestParentOutstandingQueueDrainUnreadableInventoryDoesNotWriteReview(t *testing.T) {
 	f := newQueueSettlementFixture(t, false)
 	adapter := NewErrandAdapter(f.svc)

@@ -78,6 +78,57 @@ func (r *Repository) ListTaskSessionSummaryObservations(
 	return observations, nil
 }
 
+// ListOrdinaryTaskSessionSummaryObservations reads task navigation rows while
+// excluding Errand children before scanning or enriching their projections.
+func (r *Repository) ListOrdinaryTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	if taskID == "" {
+		return []*models.TaskSessionSummaryObservation{}, nil
+	}
+	query := `SELECT ` + taskSessionSummarySelectCols(r.ro.DriverName()) + ` ` + taskSessionSummaryFromClause(r.ro.DriverName()) +
+		` LEFT JOIN executors e ON e.id = ts.executor_id` +
+		` WHERE ts.task_id = ? AND (ts.role IS NULL OR ts.role <> ?)` +
+		` ORDER BY ts.started_at DESC`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), taskID, models.SessionRoleErrand)
+	if err != nil {
+		return nil, fmt.Errorf("query ordinary task session summaries: %w", err)
+	}
+	observations := make([]*models.TaskSessionSummaryObservation, 0)
+	for rows.Next() {
+		observation, err := scanTaskSessionSummaryObservation(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan ordinary task session summary: %w", err)
+		}
+		observations = append(observations, observation)
+	}
+	rowsErr := rows.Err()
+	closeErr := rows.Close()
+	if rowsErr != nil {
+		return nil, fmt.Errorf("iterate ordinary task session summaries: %w", rowsErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close ordinary task session summaries: %w", closeErr)
+	}
+	if len(observations) == 0 {
+		return observations, nil
+	}
+	sessions := make([]*models.TaskSession, len(observations))
+	for index, observation := range observations {
+		sessions[index] = observation.ToTaskSession()
+	}
+	loaded, err := r.loadWorktreesBatch(ctx, sessions)
+	if err != nil {
+		return nil, err
+	}
+	for index := range observations {
+		observations[index].Worktrees = loaded[index].Worktrees
+	}
+	return observations, nil
+}
+
 func uniqueSessionSummaryTaskIDs(taskIDs []string) []string {
 	seen := make(map[string]struct{}, len(taskIDs))
 	ids := make([]string, 0, len(taskIDs))

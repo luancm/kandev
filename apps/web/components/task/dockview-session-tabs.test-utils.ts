@@ -106,6 +106,9 @@ export function makeErrandTabAppStore(args: {
       itemsByTaskId: { [args.taskId]: args.sessions },
       loadedByTaskId: { [args.taskId]: true },
     },
+    taskSessions: {
+      items: Object.fromEntries(args.sessions.map((session) => [session.id, session])),
+    },
     features: { errands: args.errandsEnabled },
     errands: { byTaskId: { [args.taskId]: errandRows } },
     setActiveSessionAuto,

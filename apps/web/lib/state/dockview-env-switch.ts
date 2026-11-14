@@ -169,23 +169,9 @@ export function replaceStaleSessionPanels(
   sessionListRestoreState?: SessionListRestoreState,
   envId: string | null = null,
 ): void {
-  keepSessionId = resolveVisibleSessionId(
-    keepSessionId,
-    currentSessionIds,
-    envId ? getEnvHiddenSessions(envId) : [],
-  );
-  const keepId = keepSessionId ? `session:${keepSessionId}` : null;
-  const sessionListLoaded = sessionListRestoreState?.loaded ?? true;
-  const knownForeignSessionIds = sessionListRestoreState?.knownForeignSessionIds;
-  // Until the task list is authoritative, only remove sessions proven to
-  // belong to another environment.
-  const stale = api.panels.filter((panel) => {
-    if (panel.api.component !== "chat" || !panel.id.startsWith("session:") || panel.id === keepId) {
-      return false;
-    }
-    const sessionId = panel.id.slice("session:".length);
-    return sessionListLoaded || knownForeignSessionIds?.has(sessionId) === true;
-  });
+  const validSessionIds = currentOrdinarySessionIds(currentSessionIds, sessionListRestoreState);
+  const visibleKeepSessionId = resolveKeepSessionId(keepSessionId, validSessionIds, envId);
+  const stale = staleSessionPanels(api, visibleKeepSessionId, validSessionIds);
   // Anchor the active session to the first stale's (group, index) so co-tabbed
   // siblings (pr-detail etc.) stay grouped with the agent tab. Skipped when:
   //   - no keepSessionId (sessionless task)
@@ -197,18 +183,11 @@ export function replaceStaleSessionPanels(
   // only the first stale's group keeps its siblings. Sessions in other
   // groups still close, orphaning anything co-tabbed with them. One active
   // session can only re-anchor one group.
-  if (keepSessionId && !api.getPanel(`session:${keepSessionId}`) && stale.length > 0) {
-    const first = stale[0];
-    const groupId = first.group.id;
-    if (api.groups.some((g) => g.id === groupId)) {
-      const idx = first.group.panels.findIndex((p) => p.id === first.id);
-      addIncomingSessionPanel(api, keepSessionId, groupId, idx);
-    }
-  }
+  anchorKeptSession(api, visibleKeepSessionId, stale);
 
   if (isDebug()) {
     debug("replaceStaleSessionPanels", {
-      keepSessionId,
+      keepSessionId: visibleKeepSessionId,
       livePanelIds: api.panels.map((p) => p.id),
       removingIds: stale.map((p) => p.id),
     });
@@ -221,7 +200,59 @@ export function replaceStaleSessionPanels(
     }
   }
 
-  addCurrentSessionSiblings(api, keepSessionId, currentSessionIds, envId);
+  addCurrentSessionSiblings(api, visibleKeepSessionId, [...validSessionIds], envId);
+}
+
+function currentOrdinarySessionIds(
+  currentSessionIds: readonly string[],
+  restoreState?: SessionListRestoreState,
+): Set<string> {
+  const validIds = new Set(restoreState?.loaded === false ? [] : currentSessionIds);
+  for (const foreignId of restoreState?.knownForeignSessionIds ?? []) validIds.delete(foreignId);
+  return validIds;
+}
+
+function resolveKeepSessionId(
+  keepSessionId: string | null,
+  validSessionIds: Set<string>,
+  envId: string | null,
+): string | null {
+  if (!keepSessionId || !validSessionIds.has(keepSessionId)) return null;
+  return resolveVisibleSessionId(
+    keepSessionId,
+    [...validSessionIds],
+    envId ? getEnvHiddenSessions(envId) : [],
+  );
+}
+
+function staleSessionPanels(
+  api: DockviewApi,
+  keepSessionId: string | null,
+  validSessionIds: Set<string>,
+) {
+  const keepPanelId = keepSessionId ? `session:${keepSessionId}` : null;
+  return api.panels.filter((panel) => {
+    if (
+      panel.api.component !== "chat" ||
+      !panel.id.startsWith("session:") ||
+      panel.id === keepPanelId
+    ) {
+      return false;
+    }
+    return !validSessionIds.has(panel.id.slice("session:".length));
+  });
+}
+
+function anchorKeptSession(
+  api: DockviewApi,
+  keepSessionId: string | null,
+  stale: DockviewApi["panels"],
+): void {
+  if (!keepSessionId || api.getPanel(`session:${keepSessionId}`) || stale.length === 0) return;
+  const first = stale[0];
+  if (!api.groups.some((group) => group.id === first.group.id)) return;
+  const index = first.group.panels.findIndex((panel) => panel.id === first.id);
+  addIncomingSessionPanel(api, keepSessionId, first.group.id, index);
 }
 
 const RESTORED_SESSION_ANCHOR_IDS = ["plan"];
@@ -323,11 +354,16 @@ function findOutgoingSessionPanel(api: DockviewApi): DockviewApi["panels"][numbe
  * or null if a full rebuild is needed.
  */
 function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
-  const { api, newEnvId, activeSessionId, currentSessionIds = [] } = params;
-  const currentLayout = fromDockviewApi(api);
+  const { api, newEnvId } = params;
+  if (params.sessionListRestoreState?.loaded === false) return null;
   const saved = getHealthyEnvLayout(newEnvId);
 
-  if (!canUseFastEnvSwitch(params, currentLayout, saved)) return null;
+  if (!canUseFastEnvSwitch(params, fromDockviewApi(api), saved)) return null;
+  return applyFastEnvSwitch(params, saved);
+}
+
+function applyFastEnvSwitch(params: EnvSwitchParams, saved: object | null): LayoutGroupIds {
+  const { api, newEnvId, activeSessionId, currentSessionIds = [] } = params;
   if (isDebug()) {
     debug("tryFastEnvSwitch: taking fast path", {
       newEnvId,
@@ -595,16 +631,8 @@ export function performEnvSwitch({
   currentSessionIds = [],
   ...input
 }: EnvSwitchParams): LayoutGroupIds {
-  const params = {
-    ...input,
-    currentSessionIds,
-    activeSessionId: resolveVisibleSessionId(
-      input.activeSessionId,
-      currentSessionIds,
-      getEnvHiddenSessions(input.newEnvId),
-    ),
-  };
-  const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
+  const params = normalizeEnvSwitchParams({ ...input, currentSessionIds });
+  const { api, oldEnvId, newEnvId, activeSessionId } = params;
   if (isDebug()) {
     debug("performEnvSwitch: entry", {
       oldEnvId,
@@ -613,87 +641,116 @@ export function performEnvSwitch({
       livePanelIdsBefore: api.panels.map((p) => p.id),
     });
   }
-
-  // A task route can render before its session's environment id has hydrated.
-  // In that window onReady applies the explicit route intent (for example,
-  // ?layout=plan) to a temporary global layout. First adoption must replay the
-  // intent instead of restoring the env's saved/default layout over it.
-  // Later env switches intentionally ignore this one-shot route override.
   const initialRouteLayout = applyInitialRouteLayout(params);
   if (initialRouteLayout) return initialRouteLayout;
 
   const fastResult = tryFastEnvSwitch(params);
   if (fastResult) {
-    if (isDebug()) {
-      debug("performEnvSwitch: completed via fast path", {
-        newEnvId,
-        livePanelIdsAfter: api.panels.map((p) => p.id),
-      });
-    }
+    logFastEnvSwitchComplete(params);
     return fastResult;
   }
 
-  const saved = sanitizeSerializedLayout(getHealthyEnvLayout(newEnvId));
-  if (saved) {
-    try {
-      if (isDebug()) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const savedPanelIds = Object.keys((saved as any).panels ?? {});
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const savedShape = snapshotGridShape((saved as any).grid?.root);
-        debug("performEnvSwitch: slow path - calling api.fromJSON", {
-          newEnvId,
-          savedPanelIds,
-          savedShape,
-        });
-        debugWidths(
-          `slow-path-load env=${newEnvId} savedSizes=${formatJsonRootSizes(saved)} ` +
-            `savedRight=${savedRightColumnWidth(saved as SerializedDockview) ?? "-"}`,
-        );
-      }
-      restoreSerializedDockview(api, saved as SerializedDockview);
-      // Saved layout may carry a stale session panel from a previously-deleted
-      // task (phantom). Replace stale session panels with the incoming active
-      // session in the same (group, tab-index), then close the stale ones —
-      // preserves grouping with co-tabbed siblings (pr-detail, dragged file
-      // editors, etc.). File editors/diffs/etc. on their own are legitimately
-      // part of this env's saved state and must NOT be touched.
-      // useAutoSessionTab will still no-op if the panel was just added here.
-      replaceStaleSessionPanels(
-        api,
-        activeSessionId,
-        currentSessionIds,
-        params.sessionListRestoreState,
-        params.newEnvId,
-      );
-      if (activeSessionId) restoreMissingSessionPanel(api, activeSessionId);
-      restoreSavedActiveViews(api, saved as SerializedDockview, activeSessionId);
-      api.layout(safeWidth, safeHeight);
-      if (isDebug()) {
-        debug("performEnvSwitch: completed via slow path (fromJSON)", {
-          newEnvId,
-          livePanelIdsAfter: api.panels.map((p) => p.id),
-        });
-      }
-      return applyLayoutFixups(
-        api,
-        savedRightColumnWidth(saved as SerializedDockview),
-        getManualRightWidth(newEnvId),
-      );
-    } catch (err) {
-      console.warn("performEnvSwitch: fromJSON threw", err);
-      debug("performEnvSwitch: fromJSON threw, falling through to default", { newEnvId, err });
-      /* fall through to default layout build */
-    }
+  const restored = tryRestoreSavedEnvironmentLayout(params);
+  if (restored) return restored;
+  return buildDefaultEnvironmentLayout(params);
+}
+
+function normalizeEnvSwitchParams(input: EnvSwitchParams): EnvSwitchParams {
+  const validSessionIds = currentOrdinarySessionIds(
+    input.currentSessionIds ?? [],
+    input.sessionListRestoreState,
+  );
+  return {
+    ...input,
+    currentSessionIds: [...validSessionIds],
+    activeSessionId:
+      input.activeSessionId && validSessionIds.has(input.activeSessionId)
+        ? resolveVisibleSessionId(
+            input.activeSessionId,
+            [...validSessionIds],
+            getEnvHiddenSessions(input.newEnvId),
+          )
+        : null,
+  };
+}
+
+function logFastEnvSwitchComplete(params: EnvSwitchParams): void {
+  if (!isDebug()) return;
+  debug("performEnvSwitch: completed via fast path", {
+    newEnvId: params.newEnvId,
+    livePanelIdsAfter: params.api.panels.map((panel) => panel.id),
+  });
+}
+
+function tryRestoreSavedEnvironmentLayout(params: EnvSwitchParams): LayoutGroupIds | null {
+  const { api, newEnvId, activeSessionId, currentSessionIds = [] } = params;
+  const saved = sanitizeSerializedLayout(getHealthyEnvLayout(newEnvId), undefined, {
+    validSessionIds: new Set(currentSessionIds),
+  });
+  if (!saved) return null;
+  try {
+    logSavedLayoutRestore(newEnvId, saved);
+    restoreSerializedDockview(api, saved as SerializedDockview);
+    replaceStaleSessionPanels(
+      api,
+      activeSessionId,
+      currentSessionIds,
+      params.sessionListRestoreState,
+      newEnvId,
+    );
+    if (activeSessionId) restoreMissingSessionPanel(api, activeSessionId);
+    restoreSavedActiveViews(api, saved as SerializedDockview, activeSessionId);
+    api.layout(params.safeWidth, params.safeHeight);
+    logSavedLayoutRestoreComplete(params);
+    return applyLayoutFixups(
+      api,
+      savedRightColumnWidth(saved as SerializedDockview),
+      getManualRightWidth(newEnvId),
+    );
+  } catch (error) {
+    console.warn("performEnvSwitch: fromJSON threw", error);
+    debug("performEnvSwitch: fromJSON threw, falling through to default", { newEnvId, error });
+    return null;
   }
-  debug("performEnvSwitch: building default layout", { newEnvId, hasSaved: !!saved });
-  buildDefault(api);
-  api.layout(safeWidth, safeHeight);
+}
+
+function logSavedLayoutRestore(newEnvId: string, saved: object): void {
+  if (!isDebug()) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const savedPanelIds = Object.keys((saved as any).panels ?? {});
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const savedShape = snapshotGridShape((saved as any).grid?.root);
+  debug("performEnvSwitch: slow path - calling api.fromJSON", {
+    newEnvId,
+    savedPanelIds,
+    savedShape,
+  });
+  debugWidths(
+    `slow-path-load env=${newEnvId} savedSizes=${formatJsonRootSizes(saved)} ` +
+      `savedRight=${savedRightColumnWidth(saved as SerializedDockview) ?? "-"}`,
+  );
+}
+
+function logSavedLayoutRestoreComplete(params: EnvSwitchParams): void {
+  if (!isDebug()) return;
+  debug("performEnvSwitch: completed via slow path (fromJSON)", {
+    newEnvId: params.newEnvId,
+    livePanelIdsAfter: params.api.panels.map((panel) => panel.id),
+  });
+}
+
+function buildDefaultEnvironmentLayout(params: EnvSwitchParams): LayoutGroupIds {
+  debug("performEnvSwitch: building default layout", {
+    newEnvId: params.newEnvId,
+    hasSaved: !!getHealthyEnvLayout(params.newEnvId),
+  });
+  params.buildDefault(params.api);
+  params.api.layout(params.safeWidth, params.safeHeight);
   if (isDebug()) {
     debug("performEnvSwitch: completed via default build", {
-      newEnvId,
-      livePanelIdsAfter: api.panels.map((p) => p.id),
+      newEnvId: params.newEnvId,
+      livePanelIdsAfter: params.api.panels.map((panel) => panel.id),
     });
   }
-  return applyLayoutFixups(api);
+  return applyLayoutFixups(params.api);
 }

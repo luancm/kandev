@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { isTemporaryReadError } from "@/lib/api/temporary-read-error";
-import { fetchTask, listTaskSessions } from "@/lib/api";
+import { fetchTask, listOrdinaryTaskSessions } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
@@ -17,12 +17,14 @@ import {
 } from "@/lib/state/task-navigation-attempt";
 import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
+import type { ErrandInspection } from "@/lib/types/errands";
 import type { AppState } from "./store";
 
 export type TaskNavigationIdentity = {
   task: Task;
   allSessionsResponse: TaskSessionsResponse;
   sessionListUnavailable?: boolean;
+  selectedErrandInspection?: ErrandInspection;
 };
 
 export type TaskNavigationContext = {
@@ -454,7 +456,7 @@ async function fetchTaskNavigationIdentity(
     const release = sessionReads.retain(taskId);
     const sessionList = raceAbort(
       sessionReads.read(taskId, (readSignal) =>
-        listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+        listOrdinaryTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
       ),
       signal,
     ).finally(release);

@@ -6,7 +6,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/ids";
 
 const apiMock = vi.hoisted(() => ({
-  listTaskSessions: vi.fn(),
+  listOrdinaryTaskSessions: vi.fn(),
 }));
 const storeProviderRef = vi.hoisted(() => ({ current: null as unknown }));
 
@@ -102,10 +102,10 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
-  apiMock.listTaskSessions.mockReset();
+  apiMock.listOrdinaryTaskSessions.mockReset();
   resetMockState();
   setDocumentVisibility("visible");
-  apiMock.listTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
+  apiMock.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session("sess-1")] });
 });
 
 afterEach(() => {
@@ -121,16 +121,16 @@ describe("useTaskSessions read retirement", () => {
     async (change) => {
       const oldResponse = deferred<{ sessions: TaskSession[] }>();
       const newResponse = deferred<{ sessions: TaskSession[] }>();
-      apiMock.listTaskSessions
+      apiMock.listOrdinaryTaskSessions
         .mockReturnValueOnce(oldResponse.promise)
         .mockReturnValueOnce(newResponse.promise);
       const oldHook = renderHook(() => useTaskSessions(TASK_ID));
-      await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
       if (change === "user") mockState.auth.user = { id: "new-user" };
       else mockState.workspaceContextGeneration++;
       oldHook.unmount();
       const newHook = renderHook(() => useTaskSessions(TASK_ID));
-      await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(2));
       mockState.setTaskSessionsLoading.mockClear();
       await act(async () => oldResponse.resolve({ sessions: [session("obsolete")] }));
       expect(mockState.setTaskSessionsForTask).not.toHaveBeenCalled();
@@ -149,20 +149,20 @@ describe("useTaskSessions read retirement", () => {
   it("releases retired loading ownership so a still-mounted hook can start in the new scope", async () => {
     const oldResponse = deferred<{ sessions: TaskSession[] }>();
     const newResponse = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions
+    apiMock.listOrdinaryTaskSessions
       .mockReturnValueOnce(oldResponse.promise)
       .mockReturnValueOnce(newResponse.promise);
     mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
       mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
     });
     const hook = renderHook(() => useTaskSessions(TASK_ID));
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
     expect(mockState.taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
     mockState.workspaceContextGeneration++;
     hook.rerender();
     expect(mockState.taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(false);
     hook.rerender();
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(2));
     mockState.setTaskSessionsLoading.mockClear();
     await act(async () => oldResponse.resolve({ sessions: [session("retired")] }));
     expect(mockState.setTaskSessionsForTask).not.toHaveBeenCalled();
@@ -180,9 +180,9 @@ describe("useTaskSessions read retirement", () => {
 
   it("does not commit a response after the final consumer unmounts", async () => {
     const response = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    apiMock.listOrdinaryTaskSessions.mockReturnValueOnce(response.promise);
     const hook = renderHook(() => useTaskSessions(TASK_ID));
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
     hook.unmount();
     mockState.setTaskSessionsLoading.mockClear();
     await act(async () => response.resolve({ sessions: [session("obsolete")] }));
@@ -196,15 +196,15 @@ describe("useTaskSessions retained and successor consumers", () => {
   it("does not publish a retired transport error or settle a successor read", async () => {
     const oldResponse = deferred<{ sessions: TaskSession[] }>();
     const newResponse = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions
+    apiMock.listOrdinaryTaskSessions
       .mockReturnValueOnce(oldResponse.promise)
       .mockReturnValueOnce(newResponse.promise);
     const oldHook = renderHook(() => useTaskSessions(TASK_ID));
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
     mockState.workspaceContextGeneration++;
     oldHook.unmount();
     const successor = renderHook(() => useTaskSessions(TASK_ID));
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(2));
     mockState.setTaskSessionsLoading.mockClear();
     await act(async () => oldResponse.reject(new Error(SERVICE_UNAVAILABLE)));
     expect(mockState.setTaskSessionsError).not.toHaveBeenCalled();
@@ -222,7 +222,7 @@ describe("useTaskSessions retained and successor consumers", () => {
     "settles a retained load after the initiator leaves (%s)",
     async (outcome) => {
       const response = deferred<{ sessions: TaskSession[] }>();
-      apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+      apiMock.listOrdinaryTaskSessions.mockReturnValueOnce(response.promise);
       mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
         mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
       });
@@ -233,7 +233,7 @@ describe("useTaskSessions retained and successor consumers", () => {
         mockState.taskSessionsByTask.errorByTaskId[id] = error;
       });
       const first = renderHook(() => useTaskSessions(TASK_ID));
-      await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
       const survivor = renderHook(() => useTaskSessions(TASK_ID));
       first.unmount();
       expect(mockState.taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
@@ -253,20 +253,20 @@ describe("useTaskSessions retained and successor consumers", () => {
       }
       survivor.rerender();
       await act(async () => survivor.result.current.loadSessions(true));
-      expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2);
+      expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(2);
       survivor.unmount();
     },
   );
 
   it("keeps the shared read live after only one consumer unmounts", async () => {
     const response = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    apiMock.listOrdinaryTaskSessions.mockReturnValueOnce(response.promise);
     mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
       mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
     });
     const first = renderHook(() => useTaskSessions(TASK_ID));
     const second = renderHook(() => useTaskSessions(TASK_ID));
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
     first.unmount();
     await act(async () => response.resolve({ sessions: [session("retained")] }));
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledTimes(1);
@@ -318,7 +318,7 @@ describe("useTaskSessions connection-generation ownership", () => {
     const oldResponse = deferred<{ sessions: TaskSession[] }>();
     const newResponse = deferred<{ sessions: TaskSession[] }>();
     const replacementResponse = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions
+    apiMock.listOrdinaryTaskSessions
       .mockReturnValueOnce(oldResponse.promise)
       .mockReturnValueOnce(newResponse.promise)
       .mockReturnValueOnce(replacementResponse.promise);
@@ -328,7 +328,7 @@ describe("useTaskSessions connection-generation ownership", () => {
     act(() => {
       oldLoad = result.current.loadSessions(true);
     });
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
 
     const generationBeforeReconnect = store.getState().connection.generation;
     act(() => {
@@ -336,7 +336,7 @@ describe("useTaskSessions connection-generation ownership", () => {
       store.getState().setConnectionStatus("connected");
     });
 
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(2));
     expect(store.getState().connection.generation).toBe(generationBeforeReconnect + 2);
     expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
 
@@ -353,7 +353,7 @@ describe("useTaskSessions connection-generation ownership", () => {
     act(() => {
       replacementLoad = result.current.loadSessions(true);
     });
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(3));
     expect(store.getState().taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
 
     await act(async () => {
@@ -379,14 +379,14 @@ describe("useTaskSessions connection-generation ownership", () => {
   it("accepts a pending same-session response after an unrelated state rerender", async () => {
     const store = createReadOwnerStore();
     const response = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    apiMock.listOrdinaryTaskSessions.mockReturnValueOnce(response.promise);
     const { result, unmount } = renderHook(() => useTaskSessions(TASK_ID));
 
     let load!: Promise<void>;
     act(() => {
       load = result.current.loadSessions(true);
     });
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
     act(() => store.getState().setRightPanelActiveTab("child-1", "files"));
 
     await act(async () => {
@@ -404,7 +404,7 @@ describe("useTaskSessions connection-generation ownership", () => {
   it("keeps a shared read live when its initiating hook releases one consumer", async () => {
     const store = createReadOwnerStore();
     const response = deferred<{ sessions: TaskSession[] }>();
-    apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    apiMock.listOrdinaryTaskSessions.mockReturnValueOnce(response.promise);
     const first = renderHook(() => useTaskSessions(TASK_ID));
     const second = renderHook(() => useTaskSessions(TASK_ID));
 
@@ -412,7 +412,7 @@ describe("useTaskSessions connection-generation ownership", () => {
     act(() => {
       load = first.result.current.loadSessions(true);
     });
-    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1));
     first.unmount();
 
     await act(async () => {

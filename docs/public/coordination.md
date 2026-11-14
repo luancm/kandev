@@ -44,6 +44,8 @@ Errands are opt-in child conversations within one task. Ask the task's agent to 
 
 Start, wait and completion entries share a compact historical presentation. Expand an entry for its recorded titles, outcomes and available result text. A completed wait shows how long it waited and why it ended when that information is available; older entries may omit these details. Historical entries do not animate as running or change when an errand later finishes. Use the Errands panel for current progress.
 
+Finished history loads when you expand it. Use **Load more** to browse older entries; the panel shows the retained range and offers **Start again** after earlier pages leave the view. If the list changes while you browse, use **Refresh** before continuing. A failed history request offers **Retry** while live actions remain available. Regular task conversations keep their existing tabs and loading behavior.
+
 Completed results show recorded elapsed time when available, from errand creation to that result, including queued and idle time. This value stays unchanged after reload or later follow-up turns. Older results without a recorded duration omit it.
 
 Regular session tabs and session pickers are for normal task conversations. Errands remain accessible from their parent's panel and through direct conversation links, without accumulating permanent tabs. Their transcripts remain available after completion. Successful errands close their runtime after the result is saved and retain a completed conversation. Opening that history does not start an agent. Use the child composer to send an explicit follow-up in the same conversation; restoration follows the selected provider's supported recovery behavior.

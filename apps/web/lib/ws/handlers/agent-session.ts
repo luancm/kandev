@@ -1031,6 +1031,21 @@ function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: stri
   state.clearLaunchWarning?.(sessionId);
 }
 
+function invalidateStartingConfig(store: StoreApi<AppState>, sessionId: SessionId): void {
+  const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
+  store
+    .getState()
+    .invalidateConfirmedConfigOptions(
+      sessionId,
+      agentctl?.startingExecutionId ??
+        (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
+    );
+  if (agentctl?.startingExecutionId) {
+    const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
+    store.getState().setSessionAgentctlStatus(sessionId, status);
+  }
+}
+
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -1074,6 +1089,25 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState: newState ?? "-",
       });
 
+      if (
+        !existingSession &&
+        isAutoSelectionExcludedErrand(store.getState(), taskId, {
+          id: sessionId,
+          role: payload.role,
+        })
+      ) {
+        upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+        maybeNotifySessionFailure(store, {
+          taskId,
+          sessionId,
+          newState,
+          payload,
+          previousState: undefined,
+        });
+        maybeFanOutOfficeRefetch(store, newState, undefined);
+        return;
+      }
+
       maybeMarkQuickChatUnseenIdle(store, sessionId, {
         previousState: existingSession?.state,
         fallbackPreviousState: payload.old_state as TaskSessionState | undefined,
@@ -1090,18 +1124,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
       if (newState === "STARTING") {
-        const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
-        store
-          .getState()
-          .invalidateConfirmedConfigOptions(
-            sessionId,
-            agentctl?.startingExecutionId ??
-              (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
-          );
-        if (agentctl?.startingExecutionId) {
-          const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
-          store.getState().setSessionAgentctlStatus(sessionId, status);
-        }
+        invalidateStartingConfig(store, sessionId);
       }
 
       // A confirmed RUNNING transition clears the resume-skipped marker

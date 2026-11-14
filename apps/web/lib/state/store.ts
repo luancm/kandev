@@ -10,6 +10,7 @@ import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { createTaskOverviewSlice } from "./slices/task-overview";
 import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
 import { observeSettingsAgentRemovals } from "./settings-agent-removals";
+import { observeErrandReadScope } from "./slices/errands/errand-browser-scope";
 import { observeAnswerDraftAuthority } from "@/lib/clarification/answer-draft-cache";
 
 import {
@@ -87,6 +88,7 @@ export function createAppStore(initialState?: HydrationState) {
       })),
     ),
   );
+  observeErrandReadScope(store);
   observeSettingsAgentRemovals(store);
   observeAnswerDraftAuthority(store);
   let previousAuth = store.getState().auth;

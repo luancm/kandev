@@ -95,6 +95,7 @@ function ChatContent({
         storeSessionId,
         taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
         taskId ? state.errands.byTaskId[taskId] : undefined,
+        storeSessionId ? state.taskSessions.items[storeSessionId] : undefined,
       ),
     ) ?? (paramSessionId ? null : storeSessionId);
   const isVisible = usePanelActive(panelId);

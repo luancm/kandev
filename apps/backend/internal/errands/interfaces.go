@@ -45,6 +45,21 @@ type Store interface {
 	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 }
 
+// ParentStateReader computes parent waiting state without loading child sessions.
+// Stores without this capability retain the complete projection path.
+type ParentStateReader interface {
+	GetParentErrandState(context.Context, string) (hasErrands, outstanding bool, err error)
+}
+
+// BrowserReadStore is the optional bounded read capability used by the new
+// browser actions. It is separate from Store so lifecycle fakes and legacy
+// integrations do not silently acquire a partial-list interpretation.
+type BrowserReadStore interface {
+	GetErrandBrowserSummary(context.Context, string) (models.ErrandBrowserSummary, error)
+	GetErrandHistoryPage(context.Context, models.ErrandHistoryPageRequest) (models.ErrandHistoryPage, error)
+	GetErrandInspection(context.Context, string, string) (models.ErrandBrowserInspection, error)
+}
+
 // LaunchRequest carries everything a launcher needs to start one errand
 // session. The identity fields are the errand's reserved identity.
 type LaunchRequest struct {

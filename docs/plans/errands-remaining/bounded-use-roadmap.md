@@ -1,0 +1,55 @@
+# Errands: dependable bounded delegation
+
+Errands should make a focused piece of delegated work easy to inspect, stop and receive while the parent conversation continues. The first delivery should earn trust for investigations, reviews and small implementations. Further orchestration features are deferred until those everyday uses are dependable.
+
+The delivery branch is `feature/plan-errands-first-d-424`. The current checkout contains accepted history-loading changes that remain uncommitted, with final performance acceptance and branch integration still open. The late-tool replay repair is implemented and verified locally. The Kandev task plan is the current execution queue; the links below retain detailed evidence.
+
+## Finish the current delivery
+
+| Work                                                 | Completion evidence                                                                                                                                                                   | Current state                                                                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Result delivery after late tool events               | Initially terminal tools are not cancelled again; exact retained sources unblock replay; a real terminal produces one parent result; conflicting or missing evidence stays fenced     | [Replay evidence](../errand-tool-terminal-replay/implementation-handoff.md), verified; awaiting branch integration                    |
+| History that does not slow ordinary work as it grows | Ordinary membership stays unchanged; history loads on demand in pages; child detail/subscriptions are released after Back; zero/100/1000-history controls pass                        | [History plan](../errand-history-loading/plan.md), implementation accepted; final performance gate open                         |
+| Proportionate fixed feature cost                     | Compare feature off/on with matched and current upstream main; distinguish fixed overhead from growth with history and report both                                                    | [Main comparison](../errand-history-loading/main-comparison-handoff.md), measured; first-switch and fixed-cost disposition open |
+| Integrated branch delivery                           | Required checks pass, ordinary sessions retain their behavior, normal commit hooks pass, branch is pushed and its remote SHA verified, latest upstream main is integrated and checked | Pending the preceding gates                                                                                                     |
+
+Existing accepted recovery, cleanup, duration and individual Stop behavior is retained. Do not reopen those packages merely to repeat a review. New failures or changed shared boundaries justify focused regressions.
+
+## Routing that users and agents can understand
+
+| Need                                                                               | Route                                                | Reason                                                                                                 |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Run two known commands and collect their output                                    | Direct background process handles                    | No additional reasoning agent is needed.                                                               |
+| Investigate a bounded question, compare approaches or review a fixed patch         | Errand when available and compatible                 | A separate context, visible conversation and concise result are useful.                                |
+| Make a small independent change in the shared workspace                            | Errand with explicit file ownership and verification | The parent remains responsible for integration.                                                        |
+| Maintain two bodies of work with separate branches, workflows or ongoing direction | Persistent subtasks when requested                   | Each needs independent ownership and lifecycle.                                                        |
+| Brief lookup or a required harness capability that Errands do not provide          | Native helper within the session's delegation rules  | Choose by the actual capability needed, rather than claiming either mechanism is universally superior. |
+
+Interaction alone does not require a subtask: users can inspect and converse with an Errand. Errands share the workspace, so concurrent writers still require coordination. The parent supplies the necessary context; Errands do not automatically inherit the complete conversation.
+
+## Bounded work packets
+
+Each packet has one question or outcome, an explicit scope, an owner, a completion condition and a short result. A result states what was established, what changed if applicable, how it was checked, limitations and any concrete follow-up. Logs and transcripts remain available by reference.
+
+| Packet                 | Good starting brief                                                                                                 | Required result                                                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Investigation          | “Determine why this specific failure occurs. Inspect these paths and this evidence; do not change production code.” | Supported cause or narrowed hypotheses, affected boundary, evidence links and smallest justified next step.                   |
+| Review                 | “Review this fixed commit/diff against these requirements, concentrating on ownership and recovery.”                | Actionable findings with severity and locations, or no findings within the stated scope; validation limits stated explicitly. |
+| Focused implementation | “Implement this approved work order. Own these files; preserve concurrent changes; run these checks.”               | Changed paths, behavioral regression evidence, check results and unresolved integration needs.                                |
+| Verification           | “Verify this frozen build against these named scenarios, with a retained process handle and artifact paths.”        | Pass/fail counts, exact build/source identity, failure evidence and confirmation that owned processes ended.                  |
+
+An Errand should not absorb an entire release checklist or become a long-running coordinator of other work. Split work when the outcome, ownership or evidence boundary changes. The parent receives each result, makes the integration decision and advances the task plan.
+
+Bounded means a clear question and scope, not an arbitrary time limit that interrupts a valid build. Run a known set of test commands directly with retained process handles. Delegate verification when it needs investigation or judgement. Use one review of a frozen packet, fix concrete findings, and revisit only the affected boundary instead of repeatedly reopening the whole feature.
+
+## Prove everyday reliability before expanding scope
+
+After the current fixes are integrated, run a small recorded pilot using real bounded investigations, reviews and implementations. Cover normal completion, explicit cancellation, parent activity during completion, completed-conversation inspection, follow-up and an interrupted/restarted case. Confirm that result delivery and displayed state agree with the actual work and that completed runtimes are released. Keep provider-specific evidence separate; one provider's success is not universal certification.
+
+Record completion/delivery failures and retained-resource behavior as well as successful runs. For performance, preserve ordinary cold load, reload, first switch and repeated navigation controls against upstream main. Track fixed browser cost separately from growth with finished history. A fixed cost needs an explicit justified budget; a cost that grows without bound with routine use is a release blocker.
+
+Only after that evidence is satisfactory should guidance encourage more autonomous Errand selection. Start with bounded investigations and reviews, then focused implementations with clear ownership. Use the existing routing and prompt surfaces before adding more configuration. Do not force known commands or every tiny lookup through a separate session.
+
+## Deferred improvements
+
+Provider startup/token-cost comparisons, broader autonomous routing, new orchestration controls and additional convenience UI are follow-up candidates, not hidden prerequisites for the current release. Prioritize them from pilot evidence. Each accepted follow-up needs one bounded work order with a measurable outcome; avoid reopening the entire initiative for every finding.

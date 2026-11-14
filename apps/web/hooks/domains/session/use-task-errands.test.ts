@@ -1,17 +1,69 @@
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, type ReactNode } from "react";
 import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
-import { makeErrand } from "@/lib/state/slices/errands/errands.test-helpers";
-import type { Errand } from "@/lib/types/errands";
+import {
+  ERRAND_PARENT_ID,
+  ERRAND_TASK_ID,
+  makeBrowserErrandRow,
+  makeBrowserSummary,
+  makeHistoryPage,
+} from "@/lib/state/slices/errands/errands.test-helpers";
 
-const api = vi.hoisted(() => ({ listErrands: vi.fn() }));
+const api = vi.hoisted(() => ({
+  getErrandBrowserSummary: vi.fn(),
+  getErrandHistoryPage: vi.fn(),
+  listErrands: vi.fn(),
+}));
 vi.mock("@/lib/api/domains/errand-api", () => api);
 
 import { useTaskErrands } from "./use-task-errands";
 
-const TASK_ID = "task-1";
+const TASK_ID = ERRAND_TASK_ID;
+const PARENT_ID = ERRAND_PARENT_ID;
+const SECOND_PARENT_ID = "errand-parent-2";
+
+function useSharedOwnerParentConsumers() {
+  return {
+    store: useAppStoreApi(),
+    first: useTaskErrands(TASK_ID, {
+      parentSessionId: PARENT_ID,
+      historyOwnerId: "shared-panel-history",
+    }),
+    second: useTaskErrands(TASK_ID, {
+      parentSessionId: SECOND_PARENT_ID,
+      historyOwnerId: "shared-panel-history",
+    }),
+  };
+}
+
+function mockPendingParentHistoryReads() {
+  const firstPage = deferred<ReturnType<typeof makeHistoryPage>>();
+  const secondPage = deferred<ReturnType<typeof makeHistoryPage>>();
+  let firstSignal: AbortSignal | undefined;
+  api.getErrandHistoryPage.mockImplementation(
+    (_taskId: string, parentSessionId: string, _options: unknown, signal: AbortSignal) => {
+      if (parentSessionId === PARENT_ID) {
+        firstSignal = signal;
+        return firstPage.promise;
+      }
+      return secondPage.promise;
+    },
+  );
+  return { firstPage, secondPage, firstSignal: () => firstSignal };
+}
+
+function historyPageForParent(parentSessionId: string, rowId: string) {
+  const row = makeBrowserErrandRow({ errand_id: rowId, parent_session_id: parentSessionId });
+  return {
+    row,
+    page: {
+      ...makeHistoryPage([row]),
+      scope: { task_id: TASK_ID, parent_session_id: parentSessionId },
+    },
+  };
+}
 
 function wrapperFor(errandsEnabled: boolean) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -22,499 +74,279 @@ function wrapperFor(errandsEnabled: boolean) {
   };
 }
 
-function useConsumers() {
+function useConsumer(taskId: string | null = TASK_ID, owner = "history-owner") {
   return {
     store: useAppStoreApi(),
-    first: useTaskErrands(TASK_ID),
-    second: useTaskErrands(TASK_ID),
+    value: useTaskErrands(taskId, { parentSessionId: PARENT_ID, historyOwnerId: owner }),
   };
-}
-
-type ErrandsConsumerProbeProps = {
-  onStore?: (store: ReturnType<typeof useAppStoreApi>) => void;
-  onValue?: (value: ReturnType<typeof useTaskErrands>) => void;
-};
-
-function ErrandsConsumerProbe({ onStore, onValue }: ErrandsConsumerProbeProps) {
-  const store = useAppStoreApi();
-  const value = useTaskErrands(TASK_ID);
-  onStore?.(store);
-  onValue?.(value);
-  return null;
 }
 
 function connect(store: ReturnType<typeof useAppStoreApi>) {
   act(() => store.getState().setConnectionStatus("connected"));
 }
 
-function authFor(userId: string) {
-  return {
-    mode: "enabled" as const,
-    authenticated: true,
-    user: {
-      id: userId,
-      email: `${userId}@example.test`,
-      display_name: userId,
-      role: "user",
-      status: "active",
-    },
-  };
-}
-
-afterEach(cleanup);
-
-describe("useTaskErrands", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    api.listErrands.mockResolvedValue([
-      makeErrand({ errand_id: "b", created_at: "2026-10-26T10:00:02Z", status: "done" }),
-      makeErrand({ errand_id: "a", created_at: "2026-10-26T10:00:01Z" }),
-    ]);
-  });
-
-  it("loads errand.list once for every consumer of a task", async () => {
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-
-    await waitFor(() => expect(result.current.first.isLoaded).toBe(true));
-    expect(api.listErrands).toHaveBeenCalledExactlyOnceWith(TASK_ID);
-    expect(result.current.first.errands.map((errand) => errand.errand_id)).toEqual(["a", "b"]);
-    expect(result.current.first.liveCount).toBe(1);
-    expect(Object.keys(result.current.first.errandsByParent)).toEqual(["session-parent"]);
-    expect(result.current.second.errands).toBe(result.current.first.errands);
-  });
-
-  it("neither loads nor exposes errands while the flag is off", async () => {
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(false) });
-    act(() => result.current.store.getState().upsertErrand(makeErrand()));
-    connect(result.current.store);
-
-    expect(api.listErrands).not.toHaveBeenCalled();
-    expect(result.current.first).toEqual({
-      errands: [],
-      errandsByParent: {},
-      liveCount: 0,
-      isLoaded: false,
-    });
-  });
-
-  it("refreshes the task's errands after a reconnect", async () => {
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    await waitFor(() => expect(result.current.first.isLoaded).toBe(true));
-
-    api.listErrands.mockResolvedValue([makeErrand({ errand_id: "a", status: "cancelled" })]);
-    act(() => result.current.store.getState().setConnectionStatus("disconnected"));
-    connect(result.current.store);
-
-    await waitFor(() => expect(result.current.first.errands).toHaveLength(1));
-    expect(api.listErrands).toHaveBeenCalledTimes(2);
-    expect(result.current.first.liveCount).toBe(0);
-  });
-
-  it("keeps an errand that started live while the list request was in flight", async () => {
-    let resolveList: (errands: Errand[]) => void = () => {};
-    api.listErrands.mockReturnValue(
-      new Promise<Errand[]>((resolve) => {
-        resolveList = resolve;
-      }),
-    );
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    expect(api.listErrands).toHaveBeenCalledTimes(1);
-
-    act(() => result.current.store.getState().upsertErrand(makeErrand({ errand_id: "live" })));
-    await act(async () => resolveList([makeErrand({ errand_id: "listed" })]));
-
-    expect(result.current.first.errands.map((errand) => errand.errand_id).sort()).toEqual([
-      "listed",
-      "live",
-    ]);
-  });
-
-  it("stays unloaded after a failed load so the next reconnect retries", async () => {
-    api.listErrands.mockRejectedValueOnce(new Error("feature_disabled"));
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    await waitFor(() => expect(api.listErrands).toHaveBeenCalledTimes(1));
-
-    expect(result.current.first.isLoaded).toBe(false);
-    act(() => result.current.store.getState().setConnectionStatus("disconnected"));
-    connect(result.current.store);
-    await waitFor(() => expect(result.current.first.isLoaded).toBe(true));
-  });
-});
-
-function deferredList() {
-  let resolve!: (rows: Errand[]) => void;
-  let reject!: (error: Error) => void;
-  const promise = new Promise<Errand[]>((yes, no) => {
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => {
     resolve = yes;
     reject = no;
   });
   return { promise, resolve, reject };
 }
 
-function useSelectedTask(taskId: string | null) {
-  return { store: useAppStoreApi(), value: useTaskErrands(taskId) };
-}
+afterEach(cleanup);
 
-// @covers AC-TASKS-ERRANDS-002.1, AC-TASKS-ERRANDS-010.4
-// @covers AC-TASKS-ERRANDS-010.7, AC-TASKS-ERRANDS-010.11
-describe("task errand snapshot ownership", () => {
-  beforeEach(() => {
-    api.listErrands.mockReset();
-    api.listErrands.mockResolvedValue([makeErrand()]);
-  });
-
-  it("refreshes cached A after reconnect while B was selected", async () => {
-    api.listErrands
-      .mockResolvedValueOnce([makeErrand({ errand_id: "a-before" })])
-      .mockResolvedValueOnce([makeErrand({ task_id: "task-b", errand_id: "b-before" })])
-      .mockResolvedValueOnce([makeErrand({ task_id: "task-b", errand_id: "b-after" })])
-      .mockResolvedValueOnce([makeErrand({ errand_id: "a-after" })]);
-    const hook = renderHook(useSelectedTask, { initialProps: TASK_ID, wrapper: wrapperFor(true) });
-    connect(hook.result.current.store);
-    await waitFor(() =>
-      expect(hook.result.current.value.errands.map((row) => row.errand_id)).toEqual(["a-before"]),
-    );
-    hook.rerender("task-b");
-    await waitFor(() => expect(api.listErrands).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(hook.result.current.value.errands.map((row) => row.errand_id)).toEqual(["b-before"]),
-    );
-    act(() => {
-      hook.result.current.store.getState().setConnectionStatus("disconnected");
-      hook.result.current.store.getState().setConnectionStatus("connected");
-    });
-    await waitFor(() => expect(api.listErrands).toHaveBeenCalledTimes(3));
-    await waitFor(() =>
-      expect(hook.result.current.value.errands.map((row) => row.errand_id)).toEqual(["b-after"]),
-    );
-    hook.rerender(TASK_ID);
-    await waitFor(() =>
-      expect(hook.result.current.value.errands.map((row) => row.errand_id)).toEqual(["a-after"]),
-    );
-    expect(api.listErrands).toHaveBeenCalledTimes(4);
-  });
-
-  it("starts a replacement read at reconnect and rejects the previous transport response", async () => {
-    const old = deferredList();
-    const fresh = deferredList();
-    api.listErrands.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    act(() => {
-      result.current.store.getState().setConnectionStatus("disconnected");
-      result.current.store.getState().setConnectionStatus("connected");
-    });
-    expect(api.listErrands).toHaveBeenCalledTimes(2);
-    await act(async () => fresh.resolve([makeErrand({ errand_id: "fresh" })]));
-    await act(async () => old.resolve([makeErrand({ errand_id: "obsolete" })]));
-    expect(result.current.first.errands.map((row) => row.errand_id)).toEqual(["fresh"]);
-    const state = result.current.store.getState();
-    expect(state.errands.loadedConnectionGenerationByTaskId[TASK_ID]).toBe(
-      state.connection.generation,
-    );
-    expect(state.errands.loadedReadScopeByTaskId[TASK_ID]).toBeDefined();
-  });
-
-  it("does not stamp or publish a response after disconnect", async () => {
-    const request = deferredList();
-    api.listErrands.mockReturnValueOnce(request.promise);
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    act(() => result.current.store.getState().setConnectionStatus("disconnected"));
-    await act(async () => request.resolve([makeErrand()]));
-    expect(result.current.first.isLoaded).toBe(false);
-    expect(result.current.first.errands).toEqual([]);
-    connect(result.current.store);
-    await waitFor(() => expect(result.current.first.isLoaded).toBe(true));
-  });
-
-  it("prevents a task reset from reviving an admitted snapshot", async () => {
-    const request = deferredList();
-    api.listErrands.mockReturnValueOnce(request.promise);
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    act(() => result.current.store.getState().removeTaskErrands(TASK_ID));
-    await act(async () => request.resolve([makeErrand()]));
-    expect(result.current.first.isLoaded).toBe(false);
-    expect(result.current.first.errands).toEqual([]);
-  });
+beforeEach(() => {
+  vi.clearAllMocks();
+  api.getErrandBrowserSummary.mockResolvedValue(makeBrowserSummary());
+  api.getErrandHistoryPage.mockResolvedValue(makeHistoryPage([]));
 });
 
-describe("task errand admitted reads", () => {
-  beforeEach(() => {
-    api.listErrands.mockReset();
-  });
-
-  it("does not publish a deferred response after feature disable", async () => {
-    const request = deferredList();
-    api.listErrands.mockReturnValueOnce(request.promise);
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    act(() =>
-      result.current.store.getState().setFeatures({ ...defaultState.features, errands: false }),
-    );
-    await act(async () => request.resolve([makeErrand()]));
-    expect(result.current.first.errands).toEqual([]);
-    expect(result.current.store.getState().errands.byTaskId[TASK_ID]).toBeUndefined();
-  });
-
-  it("rejects an old scope response before another consumer renders", async () => {
-    const request = deferredList();
-    const next = deferredList();
-    api.listErrands.mockReturnValueOnce(request.promise).mockReturnValueOnce(next.promise);
-    const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-    connect(result.current.store);
-    await act(async () => {
-      result.current.store.getState().setActiveWorkspace("workspace-b");
-      request.resolve([makeErrand({ errand_id: "old-scope" })]);
-    });
-    expect(result.current.first.errands).toEqual([]);
-    expect(api.listErrands).toHaveBeenCalledTimes(2);
-    await act(async () => next.resolve([makeErrand({ errand_id: "new-scope" })]));
-    expect(result.current.first.errands.map((row) => row.errand_id)).toEqual(["new-scope"]);
-  });
-
-  it("keeps stores independent and admits completion after consumer task switch", async () => {
-    const request = deferredList();
-    const other = deferredList();
-    const nextTask = deferredList();
-    api.listErrands
-      .mockReturnValueOnce(request.promise)
-      .mockReturnValueOnce(other.promise)
-      .mockReturnValueOnce(nextTask.promise);
-    const first = renderHook(useSelectedTask, {
-      initialProps: TASK_ID as string | null,
-      wrapper: wrapperFor(true),
-    });
-    const second = renderHook(useSelectedTask, {
-      initialProps: TASK_ID as string | null,
-      wrapper: wrapperFor(true),
-    });
-    connect(first.result.current.store);
-    connect(second.result.current.store);
-    first.rerender("task-b");
-    expect(api.listErrands).toHaveBeenCalledTimes(3);
-    await act(async () => request.resolve([makeErrand({ errand_id: "first-store" })]));
-    expect(first.result.current.store.getState().errands.loadedByTaskId[TASK_ID]).toBe(true);
-    expect(first.result.current.value.errands).toEqual([]);
-    await act(async () =>
-      nextTask.resolve([makeErrand({ task_id: "task-b", errand_id: "task-b-row" })]),
-    );
-    await act(async () => other.resolve([makeErrand({ errand_id: "second-store" })]));
-    expect(first.result.current.value.errands[0].errand_id).toBe("task-b-row");
-    expect(
-      first.result.current.store.getState().errands.byTaskId[TASK_ID]?.["first-store"],
-    ).toBeDefined();
-    expect(second.result.current.value.errands[0].errand_id).toBe("second-store");
-  });
-
-  it("does not let an obsolete finally remove a pending replacement", async () => {
-    const old = deferredList();
-    const fresh = deferredList();
-    api.listErrands.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
-    const hook = renderHook(useSelectedTask, {
-      initialProps: TASK_ID as string | null,
-      wrapper: wrapperFor(true),
-    });
-    connect(hook.result.current.store);
-    act(() => {
-      hook.result.current.store.getState().setConnectionStatus("disconnected");
-      hook.result.current.store.getState().setConnectionStatus("connected");
-    });
-    await act(async () => old.reject(new Error("old transport failed")));
-    hook.rerender(null);
-    hook.rerender(TASK_ID);
-    expect(api.listErrands).toHaveBeenCalledTimes(2);
-    await act(async () => fresh.resolve([makeErrand()]));
-    expect(hook.result.current.value.isLoaded).toBe(true);
-  });
-});
-
-// @covers AC-TASKS-ERRANDS-010.4, AC-TASKS-ERRANDS-010.11
-describe("task errand delivery projection races", () => {
-  beforeEach(() => {
-    api.listErrands.mockReset();
-  });
-
-  it.each([
-    { listedState: "received", liveState: "uncertain" },
-    { listedState: "uncertain", liveState: "received" },
-    { listedState: "uncertain", liveState: undefined },
-  ] as const)(
-    "keeps live $liveState after an equal-timestamp $listedState list resolves",
-    async ({ listedState, liveState }) => {
-      const request = deferredList();
-      const listed = makeErrand({ status: "done", delivery_state: listedState });
-      const live = makeErrand({ status: "done", delivery_state: liveState });
-      api.listErrands.mockReturnValueOnce(request.promise);
-      const hook = renderHook(useSelectedTask, {
-        initialProps: TASK_ID as string | null,
-        wrapper: wrapperFor(true),
-      });
-      act(() => hook.result.current.store.getState().upsertErrand(listed));
-      connect(hook.result.current.store);
-      act(() => hook.result.current.store.getState().upsertErrand(live));
-      await act(async () => request.resolve([listed]));
-
-      expect(hook.result.current.value.errands).toEqual([live]);
-      expect(hook.result.current.value.isLoaded).toBe(true);
-      hook.rerender(null);
-      hook.rerender(TASK_ID);
-      expect(hook.result.current.value.errands).toEqual([live]);
-      expect(api.listErrands).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it.each([
-    { cachedState: "received", listedState: "uncertain" },
-    { cachedState: "uncertain", listedState: "received" },
-    { cachedState: "uncertain", listedState: undefined },
-  ] as const)(
-    "applies row B's equal-timestamp $listedState list update after a live event for row A",
-    async ({ cachedState, listedState }) => {
-      const request = deferredList();
-      const rowA = makeErrand({ status: "done", delivery_state: "received" });
-      const cachedB = makeErrand({
-        errand_id: "errand-b",
-        status: "done",
-        delivery_state: cachedState,
-      });
-      const listedB = { ...cachedB, delivery_state: listedState };
-      api.listErrands.mockReturnValueOnce(request.promise);
-      const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
-      act(() => {
-        result.current.store.getState().upsertErrand(rowA);
-        result.current.store.getState().upsertErrand(cachedB);
-      });
-      connect(result.current.store);
-      act(() =>
-        result.current.store.getState().upsertErrand({ ...rowA, delivery_state: "uncertain" }),
-      );
-      await act(async () => request.resolve([rowA, listedB]));
-
-      expect(result.current.first.errands.find((row) => row.errand_id === "errand-b")).toEqual(
-        listedB,
-      );
-      expect(result.current.second.errands).toBe(result.current.first.errands);
-    },
-  );
-});
-
-describe("task errand scope transitions", () => {
-  beforeEach(() => {
-    api.listErrands.mockReset();
-    api.listErrands.mockResolvedValue([makeErrand()]);
-  });
-
-  it("refreshes a cached task after reconnect with all consumers unmounted", async () => {
-    api.listErrands
-      .mockResolvedValueOnce([makeErrand({ errand_id: "before-reconnect" })])
-      .mockResolvedValueOnce([makeErrand({ errand_id: "after-reconnect" })]);
-    let store!: ReturnType<typeof useAppStoreApi>;
-    function Harness({ showConsumer }: { showConsumer: boolean }) {
-      return createElement(StateProvider, {
-        initialState: { features: { ...defaultState.features, errands: true } },
-        children: showConsumer
-          ? createElement(ErrandsConsumerProbe, { onStore: (current) => (store = current) })
-          : null,
-      });
-    }
-    const view = render(createElement(Harness, { showConsumer: true }));
-    connect(store);
-    await waitFor(() =>
-      expect(store.getState().errands.byTaskId[TASK_ID]?.["before-reconnect"]).toBeDefined(),
-    );
-    view.rerender(createElement(Harness, { showConsumer: false }));
-    act(() => {
-      store.getState().setConnectionStatus("disconnected");
-      store.getState().setConnectionStatus("connected");
-    });
-    view.rerender(createElement(Harness, { showConsumer: true }));
-    await waitFor(() => expect(api.listErrands).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(store.getState().errands.byTaskId[TASK_ID]?.["after-reconnect"]).toBeDefined(),
-    );
-  });
-
-  it("rejects a deferred response after the authenticated read scope changes", async () => {
-    const old = deferredList();
-    const fresh = deferredList();
-    api.listErrands.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
-    const hook = renderHook(useSelectedTask, {
-      initialProps: TASK_ID as string | null,
-      wrapper: wrapperFor(true),
-    });
-    connect(hook.result.current.store);
-    expect(api.listErrands).toHaveBeenCalledTimes(1);
-    act(() => hook.result.current.store.getState().setAuthState(authFor("user-b")));
-    await waitFor(() => expect(api.listErrands).toHaveBeenCalledTimes(2));
-    await act(async () => fresh.resolve([makeErrand({ errand_id: "current-user" })]));
-    await act(async () => old.resolve([makeErrand({ errand_id: "previous-user" })]));
-    expect(
-      Object.keys(hook.result.current.store.getState().errands.byTaskId[TASK_ID] ?? {}),
-    ).toEqual(["current-user"]);
-  });
-});
-
-it("publishes a shared read when the initiating consumer unmounts", async () => {
-  api.listErrands.mockReset();
-  const request = deferredList();
-  api.listErrands.mockReturnValueOnce(request.promise);
-  let store!: ReturnType<typeof useAppStoreApi>;
-  let remaining!: ReturnType<typeof useTaskErrands>;
-  function Harness({ showInitiator }: { showInitiator: boolean }) {
-    return createElement(StateProvider, {
-      initialState: { features: { ...defaultState.features, errands: true } },
-      children: [
-        showInitiator
-          ? createElement(ErrandsConsumerProbe, {
-              key: "first",
-              onStore: (current) => (store = current),
-            })
-          : null,
-        createElement(ErrandsConsumerProbe, {
-          key: "remaining",
-          onValue: (current) => (remaining = current),
-        }),
-      ],
-    });
+it("coalesces summary reads and does not request finished history on mount", async () => {
+  function useTwoConsumers() {
+    return {
+      store: useAppStoreApi(),
+      first: useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwnerId: "first" }),
+      second: useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwnerId: "second" }),
+    };
   }
-  const view = render(createElement(Harness, { showInitiator: true }));
-  connect(store);
-  view.rerender(createElement(Harness, { showInitiator: false }));
-  await act(async () => request.resolve([makeErrand({ status: "done" })]));
-  expect(remaining.isLoaded).toBe(true);
-  expect(remaining.errands[0].status).toBe("done");
-  expect(api.listErrands).toHaveBeenCalledTimes(1);
+  const { result } = renderHook(useTwoConsumers, { wrapper: wrapperFor(true) });
+  connect(result.current.store);
+
+  await waitFor(() => expect(result.current.first.isSummaryLoaded).toBe(true));
+  expect(api.getErrandBrowserSummary).toHaveBeenCalledExactlyOnceWith(
+    TASK_ID,
+    expect.any(AbortSignal),
+  );
+  expect(api.getErrandHistoryPage).not.toHaveBeenCalled();
+  expect(api.listErrands).not.toHaveBeenCalled();
+  expect(result.current.first.outstanding).toEqual([]);
+  expect(result.current.second.counts).toEqual(makeBrowserSummary().counts);
 });
 
-it("retains cached data after refresh failure and repairs it on next connect", async () => {
-  api.listErrands.mockReset();
-  api.listErrands.mockResolvedValueOnce([makeErrand()]);
-  const { result } = renderHook(useConsumers, { wrapper: wrapperFor(true) });
+it("does not load or expose browser errands while the feature is off", () => {
+  const { result } = renderHook(() => useConsumer(), { wrapper: wrapperFor(false) });
   connect(result.current.store);
-  await waitFor(() => expect(result.current.first.isLoaded).toBe(true));
-  const priorGeneration = result.current.store.getState().connection.generation;
-  const refresh = deferredList();
-  api.listErrands.mockReturnValueOnce(refresh.promise);
-  act(() => {
-    result.current.store.getState().setConnectionStatus("disconnected");
-    result.current.store.getState().setConnectionStatus("connected");
+
+  expect(api.getErrandBrowserSummary).not.toHaveBeenCalled();
+  expect(api.getErrandHistoryPage).not.toHaveBeenCalled();
+  expect(result.current.value.outstanding).toEqual([]);
+  expect(result.current.value.isSummaryLoaded).toBe(false);
+});
+
+it("loads the first history page only after its disclosure opens", async () => {
+  const historical = makeBrowserErrandRow({
+    errand_id: "history-1",
+    status: "done",
+    created_at: "2026-10-26T10:00:00Z",
   });
-  await act(async () => refresh.reject(new Error("unavailable")));
-  expect(result.current.first.errands).toHaveLength(1);
-  expect(result.current.store.getState().errands.loadedConnectionGenerationByTaskId[TASK_ID]).toBe(
-    priorGeneration,
+  api.getErrandHistoryPage.mockResolvedValue(makeHistoryPage([historical], { total: 1 }));
+  const { result } = renderHook(() => useConsumer(), { wrapper: wrapperFor(true) });
+  connect(result.current.store);
+  await waitFor(() => expect(result.current.value.isSummaryLoaded).toBe(true));
+
+  expect(api.getErrandHistoryPage).not.toHaveBeenCalled();
+  act(() => result.current.value.openHistory());
+  await waitFor(() => expect(result.current.value.historyRows).toEqual([historical]));
+
+  expect(api.getErrandHistoryPage).toHaveBeenCalledExactlyOnceWith(
+    TASK_ID,
+    PARENT_ID,
+    { limit: 25 },
+    expect.any(AbortSignal),
   );
-  api.listErrands.mockResolvedValueOnce([]);
-  act(() => {
-    result.current.store.getState().setConnectionStatus("disconnected");
-    result.current.store.getState().setConnectionStatus("connected");
+});
+
+it("refreshes only the summary after reconnect and leaves open history stale", async () => {
+  api.getErrandBrowserSummary.mockResolvedValue(makeBrowserSummary([], { finished: 1 }));
+  api.getErrandHistoryPage.mockResolvedValue(makeHistoryPage([makeBrowserErrandRow()]));
+  const { result } = renderHook(() => useConsumer(), { wrapper: wrapperFor(true) });
+  connect(result.current.store);
+  await waitFor(() => expect(result.current.value.isSummaryLoaded).toBe(true));
+  act(() => result.current.value.openHistory());
+  await waitFor(() => expect(result.current.value.historyRows).toHaveLength(1));
+
+  act(() => result.current.store.getState().setConnectionStatus("disconnected"));
+  act(() => result.current.store.getState().setConnectionStatus("connected"));
+  await waitFor(() => expect(api.getErrandBrowserSummary).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(result.current.value.history?.stale).toBe(true));
+
+  expect(api.getErrandHistoryPage).toHaveBeenCalledTimes(1);
+});
+
+it("replaces an A read after an A-to-B-to-A switch and rejects its late response", async () => {
+  const oldA = deferred<ReturnType<typeof makeBrowserSummary>>();
+  const taskB = deferred<ReturnType<typeof makeBrowserSummary>>();
+  const freshA = deferred<ReturnType<typeof makeBrowserSummary>>();
+  api.getErrandBrowserSummary
+    .mockReturnValueOnce(oldA.promise)
+    .mockReturnValueOnce(taskB.promise)
+    .mockReturnValueOnce(freshA.promise);
+  const { result, rerender } = renderHook(({ taskId }) => useConsumer(taskId), {
+    initialProps: { taskId: TASK_ID as string | null },
+    wrapper: wrapperFor(true),
   });
-  await waitFor(() => expect(result.current.first.errands).toEqual([]));
-  expect(api.listErrands).toHaveBeenCalledTimes(3);
+  connect(result.current.store);
+  await waitFor(() => expect(api.getErrandBrowserSummary).toHaveBeenCalledTimes(1));
+  rerender({ taskId: "task-b" });
+  await waitFor(() => expect(api.getErrandBrowserSummary).toHaveBeenCalledTimes(2));
+  rerender({ taskId: TASK_ID });
+  await waitFor(() => expect(api.getErrandBrowserSummary).toHaveBeenCalledTimes(3));
+
+  freshA.resolve(
+    makeBrowserSummary([makeBrowserErrandRow({ errand_id: "fresh-a", outstanding: true })], {
+      outstanding: 1,
+    }),
+  );
+  await waitFor(() => expect(result.current.value.outstanding[0]?.errand_id).toBe("fresh-a"));
+  oldA.resolve(
+    makeBrowserSummary([makeBrowserErrandRow({ errand_id: "old-a", outstanding: true })], {
+      outstanding: 1,
+    }),
+  );
+  taskB.resolve(
+    makeBrowserSummary(
+      [makeBrowserErrandRow({ task_id: "task-b", errand_id: "b", outstanding: true })],
+      { outstanding: 1 },
+    ),
+  );
+  await act(async () => Promise.resolve());
+
+  expect(result.current.value.outstanding.map((row) => row.errand_id)).toEqual(["fresh-a"]);
+});
+
+it("retries a failed summary explicitly", async () => {
+  api.getErrandBrowserSummary
+    .mockRejectedValueOnce(new Error("read failed"))
+    .mockResolvedValueOnce(makeBrowserSummary());
+  const { result } = renderHook(() => useConsumer(), { wrapper: wrapperFor(true) });
+  connect(result.current.store);
+  await waitFor(() => expect(result.current.value.summaryStatus).toBe("error"));
+  act(() => result.current.value.retrySummary());
+  await waitFor(() => expect(result.current.value.isSummaryLoaded).toBe(true));
+  expect(api.getErrandBrowserSummary).toHaveBeenCalledTimes(2);
+  expect(api.listErrands).not.toHaveBeenCalled();
+});
+describe("shared history read ownership", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    api.getErrandBrowserSummary.mockResolvedValue(makeBrowserSummary());
+  });
+
+  it("keeps a coalesced history request alive when its initiating panel unmounts", async () => {
+    const pending = deferred<ReturnType<typeof makeHistoryPage>>();
+    let signal: AbortSignal | undefined;
+    api.getErrandHistoryPage.mockImplementation(
+      (_taskId: string, _parent: string, _options: unknown, nextSignal: AbortSignal) => {
+        signal = nextSignal;
+        return pending.promise;
+      },
+    );
+    let firstValue: ReturnType<typeof useTaskErrands> | undefined;
+    let secondValue: ReturnType<typeof useTaskErrands> | undefined;
+    let store: ReturnType<typeof useAppStoreApi> | undefined;
+    function Consumer({
+      owner,
+      onValue,
+    }: {
+      owner: string;
+      onValue: (value: ReturnType<typeof useTaskErrands>) => void;
+    }) {
+      const value = useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwnerId: owner });
+      useEffect(() => onValue(value), [onValue, value]);
+      return null;
+    }
+    function Consumers({ showFirst }: { showFirst: boolean }) {
+      store = useAppStoreApi();
+      return createElement(
+        "div",
+        null,
+        showFirst &&
+          createElement(Consumer, {
+            owner: "panel-first",
+            onValue: (value) => {
+              firstValue = value;
+            },
+          }),
+        createElement(Consumer, {
+          owner: "panel-second",
+          onValue: (value) => {
+            secondValue = value;
+          },
+        }),
+      );
+    }
+    const renderTree = (showFirst: boolean) =>
+      render(
+        createElement(StateProvider, {
+          initialState: { features: { ...defaultState.features, errands: true } },
+          children: createElement(Consumers, { showFirst }),
+        }),
+      );
+    const view = renderTree(true);
+    connect(store!);
+    await waitFor(() => expect(api.getErrandBrowserSummary).toHaveBeenCalledTimes(1));
+    act(() => {
+      firstValue?.openHistory();
+      secondValue?.openHistory();
+    });
+    await waitFor(() => expect(api.getErrandHistoryPage).toHaveBeenCalledTimes(1));
+    view.rerender(
+      createElement(StateProvider, {
+        initialState: { features: { ...defaultState.features, errands: true } },
+        children: createElement(Consumers, { showFirst: false }),
+      }),
+    );
+
+    expect(signal?.aborted).toBe(false);
+    pending.resolve(makeHistoryPage([makeBrowserErrandRow({ errand_id: "shared-history" })]));
+    await waitFor(() =>
+      expect(secondValue?.historyRows.map((row) => row.errand_id)).toEqual(["shared-history"]),
+    );
+    view.unmount();
+  });
+
+  it("releases the previous parent page and scopes a shared owner to its active group", async () => {
+    const pending = mockPendingParentHistoryReads();
+    const { result } = renderHook(useSharedOwnerParentConsumers, { wrapper: wrapperFor(true) });
+    connect(result.current.store);
+    await waitFor(() => expect(result.current.first.isSummaryLoaded).toBe(true));
+
+    act(() => result.current.first.openHistory());
+    await waitFor(() => expect(api.getErrandHistoryPage).toHaveBeenCalledTimes(1));
+    act(() => result.current.second.openHistory());
+    await waitFor(() => expect(api.getErrandHistoryPage).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(pending.firstSignal()?.aborted).toBe(true));
+
+    const active = historyPageForParent(SECOND_PARENT_ID, "second-parent-row");
+    pending.secondPage.resolve(active.page);
+    await waitFor(() => expect(result.current.second.historyRows).toEqual([active.row]));
+
+    pending.firstPage.resolve(
+      makeHistoryPage([makeBrowserErrandRow({ errand_id: "late-first-parent-row" })]),
+    );
+    await act(async () => Promise.resolve());
+
+    expect(result.current.first.history).toBeUndefined();
+    expect(result.current.first.historyRows).toEqual([]);
+    expect(result.current.second.historyRows).toEqual([active.row]);
+  });
+});
+
+// @covers AC-TASKS-ERRAND-HISTORY-001.6
+it("drops loaded history when a new authority is denied access", async () => {
+  api.getErrandHistoryPage.mockResolvedValue(makeHistoryPage([makeBrowserErrandRow()]));
+  const { result } = renderHook(() => useConsumer(), { wrapper: wrapperFor(true) });
+  connect(result.current.store);
+  await waitFor(() => expect(result.current.value.isSummaryLoaded).toBe(true));
+  act(() => result.current.value.openHistory());
+  await waitFor(() => expect(result.current.value.historyRows).toHaveLength(1));
+  api.getErrandBrowserSummary.mockRejectedValue(new Error("Forbidden"));
+  act(() => result.current.store.setState({ workspaceContextGeneration: 1 }));
+  await waitFor(() => expect(result.current.value.summaryStatus).toBe("error"));
+  expect(result.current.value.historyRows).toEqual([]);
+  expect(result.current.value.history).toBeUndefined();
+  expect(result.current.value.summary).toBeUndefined();
+  expect(api.getErrandHistoryPage).toHaveBeenCalledTimes(1);
 });

@@ -118,9 +118,10 @@ const (
 	// coordinator's workspace subscribers.
 	ActionCoordinatorUpdated = "coordinator.updated"
 
-	ActionTaskSessionList   = "task.session.list"
-	ActionTaskSessionStatus = "task.session.status"
-	ActionTaskLaunchRecover = "task.launch.recover"
+	ActionTaskSessionList         = "task.session.list"
+	ActionTaskSessionListOrdinary = "task.session.list_ordinary"
+	ActionTaskSessionStatus       = "task.session.status"
+	ActionTaskLaunchRecover       = "task.launch.recover"
 
 	// Unified session launch
 	ActionSessionLaunch                   = "session.launch"
@@ -408,11 +409,14 @@ const (
 	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
 	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
 	// Errand actions
-	ActionErrandList       = "errand.list"
-	ActionErrandCancel     = "errand.cancel"
-	ActionErrandCancelAll  = "errand.cancel_all"
-	ActionErrandSendResult = "errand.send_result"
-	ActionErrandUpdated    = "errand.updated"
+	ActionErrandList           = "errand.list"
+	ActionErrandCancel         = "errand.cancel"
+	ActionErrandCancelAll      = "errand.cancel_all"
+	ActionErrandSendResult     = "errand.send_result"
+	ActionErrandUpdated        = "errand.updated"
+	ActionErrandBrowserSummary = "errand.browser_summary"
+	ActionErrandHistoryPage    = "errand.history_page"
+	ActionErrandInspect        = "errand.inspect"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote

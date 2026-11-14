@@ -1,0 +1,4357 @@
+{
+  "complete": true,
+  "sampleCount": 42,
+  "cohorts": [
+    {
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "metrics": {
+        "coldParentInputAcceptedMs": {
+          "n": 7,
+          "median": 2230.4326960000003,
+          "p95": 2303.8313679999997,
+          "frozenUpperLimit": 5368.666618000001,
+          "passes": true
+        },
+        "coldReloadInputAcceptedMs": {
+          "n": 7,
+          "median": 1524.1172900000001,
+          "p95": 1615.3365750000003,
+          "frozenUpperLimit": 2751.4202620000015,
+          "passes": true
+        },
+        "postGcHeapAfterRepeatedNavigationBytes": {
+          "n": 7,
+          "median": 64473556,
+          "p95": 68111980,
+          "frozenUpperLimit": 64345340.0,
+          "passes": false
+        },
+        "warmSwitchBackToHistoryTaskMs": {
+          "n": 7,
+          "median": 972.3182570000008,
+          "p95": 1013.2650630000007,
+          "frozenUpperLimit": 1429.5556790000046,
+          "passes": true
+        },
+        "warmSwitchToZeroErrandTaskMs": {
+          "n": 7,
+          "median": 1384.0187080000005,
+          "p95": 1450.8777150000005,
+          "frozenUpperLimit": 1559.298992,
+          "passes": true
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "metrics": {
+        "coldParentInputAcceptedMs": {
+          "n": 7,
+          "median": 2413.5998550000004,
+          "p95": 2522.687163999999,
+          "frozenUpperLimit": 2918.1387309999973,
+          "passes": true
+        },
+        "coldReloadInputAcceptedMs": {
+          "n": 7,
+          "median": 1706.3500630000017,
+          "p95": 1881.059997000002,
+          "frozenUpperLimit": 2019.5922109999992,
+          "passes": true
+        },
+        "postGcHeapAfterRepeatedNavigationBytes": {
+          "n": 7,
+          "median": 70010740,
+          "p95": 70405596,
+          "frozenUpperLimit": 73582236.0,
+          "passes": true
+        },
+        "warmSwitchBackToHistoryTaskMs": {
+          "n": 7,
+          "median": 830.4448049999992,
+          "p95": 985.5804150000004,
+          "frozenUpperLimit": 1143.4723820000036,
+          "passes": true
+        },
+        "warmSwitchToZeroErrandTaskMs": {
+          "n": 7,
+          "median": 1250.038478999999,
+          "p95": 1411.7502270000005,
+          "frozenUpperLimit": 1718.3290169999927,
+          "passes": true
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "metrics": {
+        "coldParentInputAcceptedMs": {
+          "n": 7,
+          "median": 3135.7435190000033,
+          "p95": 3275.542551000006,
+          "frozenUpperLimit": 4072.5775569999823,
+          "passes": true
+        },
+        "coldReloadInputAcceptedMs": {
+          "n": 7,
+          "median": 3887.1784689999986,
+          "p95": 4746.913868000003,
+          "frozenUpperLimit": 3828.614576,
+          "passes": false
+        },
+        "postGcHeapAfterRepeatedNavigationBytes": {
+          "n": 7,
+          "median": 71886908,
+          "p95": 73607140,
+          "frozenUpperLimit": 142838352.0,
+          "passes": true
+        },
+        "warmSwitchBackToHistoryTaskMs": {
+          "n": 7,
+          "median": 1258.5715419999979,
+          "p95": 1525.6748420000004,
+          "frozenUpperLimit": 1583.3240559999977,
+          "passes": true
+        },
+        "warmSwitchToZeroErrandTaskMs": {
+          "n": 7,
+          "median": 2288.021983999999,
+          "p95": 2484.500957000004,
+          "frozenUpperLimit": 2798.403999000002,
+          "passes": true
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "metrics": {
+        "coldParentInputAcceptedMs": {
+          "n": 7,
+          "median": 1847.5952390000002,
+          "p95": 1992.1413679999996,
+          "frozenUpperLimit": 6325.550358,
+          "passes": true
+        },
+        "coldReloadInputAcceptedMs": {
+          "n": 7,
+          "median": 1253.5385379999998,
+          "p95": 1291.6516589999992,
+          "frozenUpperLimit": 1649.6519020000005,
+          "passes": true
+        },
+        "postGcHeapAfterRepeatedNavigationBytes": {
+          "n": 7,
+          "median": 50313292,
+          "p95": 50345028,
+          "frozenUpperLimit": 49778260.0,
+          "passes": false
+        },
+        "warmSwitchBackToHistoryTaskMs": {
+          "n": 7,
+          "median": 1314.7687840000008,
+          "p95": 1370.1345380000002,
+          "frozenUpperLimit": 1572.3067019999944,
+          "passes": true
+        },
+        "warmSwitchToZeroErrandTaskMs": {
+          "n": 7,
+          "median": 1331.6888230000004,
+          "p95": 1395.8309689999996,
+          "frozenUpperLimit": 1649.6441490000007,
+          "passes": true
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "metrics": {
+        "coldParentInputAcceptedMs": {
+          "n": 7,
+          "median": 1907.9782950000008,
+          "p95": 1959.3476859999992,
+          "frozenUpperLimit": 2284.044565000004,
+          "passes": true
+        },
+        "coldReloadInputAcceptedMs": {
+          "n": 7,
+          "median": 1373.469536999999,
+          "p95": 1448.585138999999,
+          "frozenUpperLimit": 1793.0451410000023,
+          "passes": true
+        },
+        "postGcHeapAfterRepeatedNavigationBytes": {
+          "n": 7,
+          "median": 53205948,
+          "p95": 55140024,
+          "frozenUpperLimit": 54995904.0,
+          "passes": false
+        },
+        "warmSwitchBackToHistoryTaskMs": {
+          "n": 7,
+          "median": 1315.6791900000026,
+          "p95": 1376.5764849999978,
+          "frozenUpperLimit": 1484.672152999996,
+          "passes": true
+        },
+        "warmSwitchToZeroErrandTaskMs": {
+          "n": 7,
+          "median": 1303.0196269999979,
+          "p95": 1399.6130049999992,
+          "frozenUpperLimit": 1514.2059369999988,
+          "passes": true
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "metrics": {
+        "coldParentInputAcceptedMs": {
+          "n": 7,
+          "median": 2711.799463999996,
+          "p95": 2791.2053149999992,
+          "frozenUpperLimit": 6174.418872999999,
+          "passes": true
+        },
+        "coldReloadInputAcceptedMs": {
+          "n": 7,
+          "median": 3040.861474999998,
+          "p95": 3301.7289509999973,
+          "frozenUpperLimit": 3806.034216000001,
+          "passes": true
+        },
+        "postGcHeapAfterRepeatedNavigationBytes": {
+          "n": 7,
+          "median": 53560852,
+          "p95": 53600540,
+          "frozenUpperLimit": 105153636.0,
+          "passes": true
+        },
+        "warmSwitchBackToHistoryTaskMs": {
+          "n": 7,
+          "median": 1229.3433589999986,
+          "p95": 1290.5902260000003,
+          "frozenUpperLimit": 1532.6584450000028,
+          "passes": true
+        },
+        "warmSwitchToZeroErrandTaskMs": {
+          "n": 7,
+          "median": 2345.191242000001,
+          "p95": 2411.1946860000025,
+          "frozenUpperLimit": 2330.992909000004,
+          "passes": false
+        }
+      }
+    }
+  ],
+  "samples": [
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium-repeat1/errand-history-sample.json",
+      "sha256": "fa1e7a0a4a07b6ce68ac670266020edb9d7a73e83ffc0feaff5e181649463690",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "5acc7fe3ac0ca97fa37f920b937dcd2b394bcc002db9a43544cc1c988f461880",
+        "timestamp": "2026-11-14T01:55:54.113Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3083.5581500000044,
+        "coldReloadInputAcceptedMs": 3790.1870419999977,
+        "warmSwitchToZeroErrandTaskMs": 2136.424727000005,
+        "warmSwitchBackToHistoryTaskMs": 1258.5715419999979,
+        "postGcHeapAfterRepeatedNavigationBytes": 71886908
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-f13bd36b-6749-465e-af8a-9dfcd701d2f3",
+          "history-ordinary-b-11e21aa5-f421-42bf-b355-f58b8c34694d",
+          "history-parent-8494e865-e4c8-4526-a2fe-2fa2e45aa53d"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f13bd36b-6749-465e-af8a-9dfcd701d2f3",
+            "history-ordinary-b-11e21aa5-f421-42bf-b355-f58b8c34694d",
+            "history-parent-8494e865-e4c8-4526-a2fe-2fa2e45aa53d"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f13bd36b-6749-465e-af8a-9dfcd701d2f3",
+            "history-ordinary-b-11e21aa5-f421-42bf-b355-f58b8c34694d",
+            "history-parent-8494e865-e4c8-4526-a2fe-2fa2e45aa53d"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f13bd36b-6749-465e-af8a-9dfcd701d2f3",
+            "history-ordinary-b-11e21aa5-f421-42bf-b355-f58b8c34694d",
+            "history-parent-8494e865-e4c8-4526-a2fe-2fa2e45aa53d"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium-repeat2/errand-history-sample.json",
+      "sha256": "b4142a45c5d0d8300c5af6fcc0619698f8a8fdf38f62fb62da48dce308102497",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "5bfe1286859c3782ef11229478df7caa63f8cc3d1d9c489ce0f3517461a7e783",
+        "timestamp": "2026-11-14T01:57:00.805Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3158.263991,
+        "coldReloadInputAcceptedMs": 4746.913868000003,
+        "warmSwitchToZeroErrandTaskMs": 2479.940920000001,
+        "warmSwitchBackToHistoryTaskMs": 1197.198805,
+        "postGcHeapAfterRepeatedNavigationBytes": 71962552
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-1648dd7e-900e-402e-964d-6526370e8045",
+          "history-ordinary-b-8369a192-35bd-44e6-9217-7f158ee3fe8d",
+          "history-parent-b8b41cbb-b4c4-48f4-a28d-4b89252e8c82"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-1648dd7e-900e-402e-964d-6526370e8045",
+            "history-ordinary-b-8369a192-35bd-44e6-9217-7f158ee3fe8d",
+            "history-parent-b8b41cbb-b4c4-48f4-a28d-4b89252e8c82"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-1648dd7e-900e-402e-964d-6526370e8045",
+            "history-ordinary-b-8369a192-35bd-44e6-9217-7f158ee3fe8d",
+            "history-parent-b8b41cbb-b4c4-48f4-a28d-4b89252e8c82"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-1648dd7e-900e-402e-964d-6526370e8045",
+            "history-ordinary-b-8369a192-35bd-44e6-9217-7f158ee3fe8d",
+            "history-parent-b8b41cbb-b4c4-48f4-a28d-4b89252e8c82"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium-repeat3/errand-history-sample.json",
+      "sha256": "bae92b10fcd1b88839f02b4d3d2e1f07bb562db5be480840cfcb606657533dc1",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "7e0bc5b0bb1238beb351ed5ecb6fe4fd84e00a7723d393311a7670bcddb5eb3e",
+        "timestamp": "2026-11-14T01:58:07.407Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3072.5585189999983,
+        "coldReloadInputAcceptedMs": 3887.1784689999986,
+        "warmSwitchToZeroErrandTaskMs": 2404.5474190000023,
+        "warmSwitchBackToHistoryTaskMs": 1273.6733460000032,
+        "postGcHeapAfterRepeatedNavigationBytes": 71895420
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-0e7ef135-3381-41e1-8aec-133dfb60dcb0",
+          "history-ordinary-b-df03962f-31ab-40f0-9557-8242827b2921",
+          "history-parent-b15a059e-9c7e-46df-8813-37ccf562f113"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0e7ef135-3381-41e1-8aec-133dfb60dcb0",
+            "history-ordinary-b-df03962f-31ab-40f0-9557-8242827b2921",
+            "history-parent-b15a059e-9c7e-46df-8813-37ccf562f113"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0e7ef135-3381-41e1-8aec-133dfb60dcb0",
+            "history-ordinary-b-df03962f-31ab-40f0-9557-8242827b2921",
+            "history-parent-b15a059e-9c7e-46df-8813-37ccf562f113"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0e7ef135-3381-41e1-8aec-133dfb60dcb0",
+            "history-ordinary-b-df03962f-31ab-40f0-9557-8242827b2921",
+            "history-parent-b15a059e-9c7e-46df-8813-37ccf562f113"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium-repeat4/errand-history-sample.json",
+      "sha256": "0fcabc9fec863d114ff5c933b59b723981db82a72df78399bd1e94052b9e25fa",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "ce8738eda10657fd29ef1883b5f9d672829521b19adbccb922775f68245fb853",
+        "timestamp": "2026-11-14T01:59:15.756Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3275.542551000006,
+        "coldReloadInputAcceptedMs": 3701.664761,
+        "warmSwitchToZeroErrandTaskMs": 2288.021983999999,
+        "warmSwitchBackToHistoryTaskMs": 1251.8391619999966,
+        "postGcHeapAfterRepeatedNavigationBytes": 71101472
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-7b0fdd17-79a9-4249-804b-4bc9fd906857",
+          "history-ordinary-b-0617eca5-9bbf-442b-aa0d-01cf6bb47e14",
+          "history-parent-d8d81496-f44d-4bb2-9c0d-b89e6aad0b93"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-7b0fdd17-79a9-4249-804b-4bc9fd906857",
+            "history-ordinary-b-0617eca5-9bbf-442b-aa0d-01cf6bb47e14",
+            "history-parent-d8d81496-f44d-4bb2-9c0d-b89e6aad0b93"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-7b0fdd17-79a9-4249-804b-4bc9fd906857",
+            "history-ordinary-b-0617eca5-9bbf-442b-aa0d-01cf6bb47e14",
+            "history-parent-d8d81496-f44d-4bb2-9c0d-b89e6aad0b93"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-7b0fdd17-79a9-4249-804b-4bc9fd906857",
+            "history-ordinary-b-0617eca5-9bbf-442b-aa0d-01cf6bb47e14",
+            "history-parent-d8d81496-f44d-4bb2-9c0d-b89e6aad0b93"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium-repeat5/errand-history-sample.json",
+      "sha256": "4cf3d2c514466459e14b4b428ad6d6a9bd7786f8dd9b69837648dba5ac8809cd",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "b4c911b6791afa9d068a8b9116f739cc44747c0f46698cd1f2bd4066afca1556",
+        "timestamp": "2026-11-14T02:00:21.128Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3127.1779959999985,
+        "coldReloadInputAcceptedMs": 4000.2605939999994,
+        "warmSwitchToZeroErrandTaskMs": 2484.500957000004,
+        "warmSwitchBackToHistoryTaskMs": 1346.8003240000035,
+        "postGcHeapAfterRepeatedNavigationBytes": 73607140
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-0b204ae9-ba4c-4cbe-8ca2-84aff537bfea",
+          "history-ordinary-b-d12bb720-0730-488b-95da-12928711d9cc",
+          "history-parent-2b7b8f59-870d-4c1b-a29e-c5ba8fa0970f"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0b204ae9-ba4c-4cbe-8ca2-84aff537bfea",
+            "history-ordinary-b-d12bb720-0730-488b-95da-12928711d9cc",
+            "history-parent-2b7b8f59-870d-4c1b-a29e-c5ba8fa0970f"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0b204ae9-ba4c-4cbe-8ca2-84aff537bfea",
+            "history-ordinary-b-d12bb720-0730-488b-95da-12928711d9cc",
+            "history-parent-2b7b8f59-870d-4c1b-a29e-c5ba8fa0970f"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0b204ae9-ba4c-4cbe-8ca2-84aff537bfea",
+            "history-ordinary-b-d12bb720-0730-488b-95da-12928711d9cc",
+            "history-parent-2b7b8f59-870d-4c1b-a29e-c5ba8fa0970f"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium-repeat6/errand-history-sample.json",
+      "sha256": "e4fab2dd48d878b6b64f1c288c5ce5b41f27336e0dcf522b0f577e84c5ec0c90",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "9ec0957214dd996e9b703e1e6900778132d2afaea42f6aa24bd6734623ef4f79",
+        "timestamp": "2026-11-14T02:01:26.904Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3209.685983999996,
+        "coldReloadInputAcceptedMs": 4582.272865999999,
+        "warmSwitchToZeroErrandTaskMs": 2244.997942000002,
+        "warmSwitchBackToHistoryTaskMs": 1525.6748420000004,
+        "postGcHeapAfterRepeatedNavigationBytes": 70761996
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-6dd4ae16-53ee-44e8-a4ef-b93d1f37afd2",
+          "history-ordinary-b-796982fe-065c-48ab-ad23-491573754fe8",
+          "history-parent-98c39d36-d122-4b95-8b81-7ef384abf774"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-6dd4ae16-53ee-44e8-a4ef-b93d1f37afd2",
+            "history-ordinary-b-796982fe-065c-48ab-ad23-491573754fe8",
+            "history-parent-98c39d36-d122-4b95-8b81-7ef384abf774"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-6dd4ae16-53ee-44e8-a4ef-b93d1f37afd2",
+            "history-ordinary-b-796982fe-065c-48ab-ad23-491573754fe8",
+            "history-parent-98c39d36-d122-4b95-8b81-7ef384abf774"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-6dd4ae16-53ee-44e8-a4ef-b93d1f37afd2",
+            "history-ordinary-b-796982fe-065c-48ab-ad23-491573754fe8",
+            "history-parent-98c39d36-d122-4b95-8b81-7ef384abf774"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium/errand-history-sample.json",
+      "sha256": "68293cdc41f7fcc237f79a19621aa51edd4cc733c780aba582e5f8bb70c66cab",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "07e98ae8341007139feeab8197aef924a5010207f599d9e6d022dcba2bd64023",
+        "timestamp": "2026-11-14T01:54:49.693Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 3135.7435190000033,
+        "coldReloadInputAcceptedMs": 3716.096319999997,
+        "warmSwitchToZeroErrandTaskMs": 2165.9658750000017,
+        "warmSwitchBackToHistoryTaskMs": 905.7645919999995,
+        "postGcHeapAfterRepeatedNavigationBytes": 70271304
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-f288c0ab-4cbd-4634-b61e-c19f9c0a82cd",
+          "history-ordinary-b-8c3a6715-e762-49bd-b6d2-a34530331851",
+          "history-parent-5dbd313f-f60b-4a75-a4ce-1ca2790bf10b"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f288c0ab-4cbd-4634-b61e-c19f9c0a82cd",
+            "history-ordinary-b-8c3a6715-e762-49bd-b6d2-a34530331851",
+            "history-parent-5dbd313f-f60b-4a75-a4ce-1ca2790bf10b"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f288c0ab-4cbd-4634-b61e-c19f9c0a82cd",
+            "history-ordinary-b-8c3a6715-e762-49bd-b6d2-a34530331851",
+            "history-parent-5dbd313f-f60b-4a75-a4ce-1ca2790bf10b"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f288c0ab-4cbd-4634-b61e-c19f9c0a82cd",
+            "history-ordinary-b-8c3a6715-e762-49bd-b6d2-a34530331851",
+            "history-parent-5dbd313f-f60b-4a75-a4ce-1ca2790bf10b"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium-repeat1/errand-history-sample.json",
+      "sha256": "17fd11aef3b16da2c794c6593845b58ccf79eebff12044d82d04f47af6d00e8a",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "ebde9c831fadb73808e93fcb736e54b57d66496e66f41455c8728b708083b361",
+        "timestamp": "2026-11-14T01:55:23.270Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2230.4326960000003,
+        "coldReloadInputAcceptedMs": 1564.3085840000003,
+        "warmSwitchToZeroErrandTaskMs": 1372.905498,
+        "warmSwitchBackToHistoryTaskMs": 998.8148779999992,
+        "postGcHeapAfterRepeatedNavigationBytes": 64457736
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-f86508c4-fa9e-4ba8-89e0-29bb181dd937",
+          "history-ordinary-b-719d304e-d6b1-4541-998b-7b9455d321fd",
+          "history-parent-e4eba5a7-3a73-4a83-b7a7-8ff1af379aa0"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f86508c4-fa9e-4ba8-89e0-29bb181dd937",
+            "history-ordinary-b-719d304e-d6b1-4541-998b-7b9455d321fd",
+            "history-parent-e4eba5a7-3a73-4a83-b7a7-8ff1af379aa0"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f86508c4-fa9e-4ba8-89e0-29bb181dd937",
+            "history-ordinary-b-719d304e-d6b1-4541-998b-7b9455d321fd",
+            "history-parent-e4eba5a7-3a73-4a83-b7a7-8ff1af379aa0"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f86508c4-fa9e-4ba8-89e0-29bb181dd937",
+            "history-ordinary-b-719d304e-d6b1-4541-998b-7b9455d321fd",
+            "history-parent-e4eba5a7-3a73-4a83-b7a7-8ff1af379aa0"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium-repeat2/errand-history-sample.json",
+      "sha256": "1d377d59f11cb88e9174004d5a62f52c2afd4a92a1f6197bb0510dfca1dfe968",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "a1b1eb57a8b869e159702e13b87eb921c697ea9bfe61446b88dfc64cb5feba3f",
+        "timestamp": "2026-11-14T01:56:28.371Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2303.8313679999997,
+        "coldReloadInputAcceptedMs": 1615.3365750000003,
+        "warmSwitchToZeroErrandTaskMs": 1450.8777150000005,
+        "warmSwitchBackToHistoryTaskMs": 1013.2650630000007,
+        "postGcHeapAfterRepeatedNavigationBytes": 64473556
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-d27f1f67-55d4-49b4-ab3e-54901542a15e",
+          "history-ordinary-b-b74372a7-7a86-4673-ae75-59b990c2e4ca",
+          "history-parent-0f6c6ae2-a186-4958-a871-401668a9c84c"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-d27f1f67-55d4-49b4-ab3e-54901542a15e",
+            "history-ordinary-b-b74372a7-7a86-4673-ae75-59b990c2e4ca",
+            "history-parent-0f6c6ae2-a186-4958-a871-401668a9c84c"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-d27f1f67-55d4-49b4-ab3e-54901542a15e",
+            "history-ordinary-b-b74372a7-7a86-4673-ae75-59b990c2e4ca",
+            "history-parent-0f6c6ae2-a186-4958-a871-401668a9c84c"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-d27f1f67-55d4-49b4-ab3e-54901542a15e",
+            "history-ordinary-b-b74372a7-7a86-4673-ae75-59b990c2e4ca",
+            "history-parent-0f6c6ae2-a186-4958-a871-401668a9c84c"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium-repeat3/errand-history-sample.json",
+      "sha256": "b38c095875e6494653b79ca1d9fbd8464506dba194e74e7bd8f557791f816303",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "1db77bb17d3867bee3872d372c8c1a83af1f22cc237b4377d005d627ba445e33",
+        "timestamp": "2026-11-14T01:57:36.196Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2197.6848059999998,
+        "coldReloadInputAcceptedMs": 1501.804881,
+        "warmSwitchToZeroErrandTaskMs": 1432.3652240000001,
+        "warmSwitchBackToHistoryTaskMs": 845.1521670000002,
+        "postGcHeapAfterRepeatedNavigationBytes": 64440884
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-2357ff88-847d-486d-94af-a8583e151152",
+          "history-ordinary-b-d0d81e28-2d80-4f97-a905-ea48a04337eb",
+          "history-parent-c4af4e10-b736-4670-aecf-b0ec1b84e605"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-2357ff88-847d-486d-94af-a8583e151152",
+            "history-ordinary-b-d0d81e28-2d80-4f97-a905-ea48a04337eb",
+            "history-parent-c4af4e10-b736-4670-aecf-b0ec1b84e605"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-2357ff88-847d-486d-94af-a8583e151152",
+            "history-ordinary-b-d0d81e28-2d80-4f97-a905-ea48a04337eb",
+            "history-parent-c4af4e10-b736-4670-aecf-b0ec1b84e605"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-2357ff88-847d-486d-94af-a8583e151152",
+            "history-ordinary-b-d0d81e28-2d80-4f97-a905-ea48a04337eb",
+            "history-parent-c4af4e10-b736-4670-aecf-b0ec1b84e605"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium-repeat4/errand-history-sample.json",
+      "sha256": "95bf076f9da656234eaa2460e6d3e04789ccd68db8501e276e013d3af1ab7f83",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "8e5ef80f7b79bc23f8117f32d769db793b70be707cc282f265f63661103634da",
+        "timestamp": "2026-11-14T01:58:44.427Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2216.274145,
+        "coldReloadInputAcceptedMs": 1524.1172900000001,
+        "warmSwitchToZeroErrandTaskMs": 1179.6328649999996,
+        "warmSwitchBackToHistoryTaskMs": 840.6721830000006,
+        "postGcHeapAfterRepeatedNavigationBytes": 64641224
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-88ac4057-57c9-460c-8d54-d8514a51ccb6",
+          "history-ordinary-b-08680055-dbf1-4638-88e1-8de2a819a28d",
+          "history-parent-b4fa4c06-68d1-4bba-bac8-ee15e7dea4f7"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-88ac4057-57c9-460c-8d54-d8514a51ccb6",
+            "history-ordinary-b-08680055-dbf1-4638-88e1-8de2a819a28d",
+            "history-parent-b4fa4c06-68d1-4bba-bac8-ee15e7dea4f7"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-88ac4057-57c9-460c-8d54-d8514a51ccb6",
+            "history-ordinary-b-08680055-dbf1-4638-88e1-8de2a819a28d",
+            "history-parent-b4fa4c06-68d1-4bba-bac8-ee15e7dea4f7"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-88ac4057-57c9-460c-8d54-d8514a51ccb6",
+            "history-ordinary-b-08680055-dbf1-4638-88e1-8de2a819a28d",
+            "history-parent-b4fa4c06-68d1-4bba-bac8-ee15e7dea4f7"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium-repeat5/errand-history-sample.json",
+      "sha256": "a873db660a3ce1e1fed46cd62ba3a26770ba743abb4e814143c1a5ac4bd94cfe",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "91149f7828fa1ff1c48b3dd464064a34023f955a7c5ce8434e89b8b24ffeea4c",
+        "timestamp": "2026-11-14T01:59:50.172Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2250.8604399999995,
+        "coldReloadInputAcceptedMs": 1467.8604070000001,
+        "warmSwitchToZeroErrandTaskMs": 1119.7466029999996,
+        "warmSwitchBackToHistoryTaskMs": 820.841633,
+        "postGcHeapAfterRepeatedNavigationBytes": 68111980
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-a0004c4b-1ab1-437b-b685-cbd265c105ec",
+          "history-ordinary-b-5d69a2fe-bf78-4efa-8207-a4dbd99c5579",
+          "history-parent-708a7a4b-9af6-4fbe-a399-3077a01b23df"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a0004c4b-1ab1-437b-b685-cbd265c105ec",
+            "history-ordinary-b-5d69a2fe-bf78-4efa-8207-a4dbd99c5579",
+            "history-parent-708a7a4b-9af6-4fbe-a399-3077a01b23df"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a0004c4b-1ab1-437b-b685-cbd265c105ec",
+            "history-ordinary-b-5d69a2fe-bf78-4efa-8207-a4dbd99c5579",
+            "history-parent-708a7a4b-9af6-4fbe-a399-3077a01b23df"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a0004c4b-1ab1-437b-b685-cbd265c105ec",
+            "history-ordinary-b-5d69a2fe-bf78-4efa-8207-a4dbd99c5579",
+            "history-parent-708a7a4b-9af6-4fbe-a399-3077a01b23df"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium-repeat6/errand-history-sample.json",
+      "sha256": "436153bf7cc47b9b5a496779ee35444f50744608811c3aa7bec924a646304f08",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "116fedc9c023af4bd0a637e540b597627817772eea61cef8cc0a8ff4fafb754e",
+        "timestamp": "2026-11-14T02:00:56.413Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2254.358564,
+        "coldReloadInputAcceptedMs": 1581.2978990000001,
+        "warmSwitchToZeroErrandTaskMs": 1417.3737720000008,
+        "warmSwitchBackToHistoryTaskMs": 977.621704000001,
+        "postGcHeapAfterRepeatedNavigationBytes": 64449060
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-5a9d6e63-41eb-47d6-bcf3-053723c54f10",
+          "history-ordinary-b-cafc3ad3-7525-48dd-9ffd-0e00592d0fdc",
+          "history-parent-42a1c147-ecb1-48be-967b-183675547915"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-5a9d6e63-41eb-47d6-bcf3-053723c54f10",
+            "history-ordinary-b-cafc3ad3-7525-48dd-9ffd-0e00592d0fdc",
+            "history-parent-42a1c147-ecb1-48be-967b-183675547915"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-5a9d6e63-41eb-47d6-bcf3-053723c54f10",
+            "history-ordinary-b-cafc3ad3-7525-48dd-9ffd-0e00592d0fdc",
+            "history-parent-42a1c147-ecb1-48be-967b-183675547915"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-5a9d6e63-41eb-47d6-bcf3-053723c54f10",
+            "history-ordinary-b-cafc3ad3-7525-48dd-9ffd-0e00592d0fdc",
+            "history-parent-42a1c147-ecb1-48be-967b-183675547915"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium/errand-history-sample.json",
+      "sha256": "22541d6b3582f6787888a7ad74919ba1430340d5c418803d93a689d236476225",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "ce1d7410c035e42206f2f597453fc9830deca67a29da942cf781230795a7e483",
+        "timestamp": "2026-11-14T01:54:19.263Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2222.8690680000004,
+        "coldReloadInputAcceptedMs": 1478.5736349999997,
+        "warmSwitchToZeroErrandTaskMs": 1384.0187080000005,
+        "warmSwitchBackToHistoryTaskMs": 972.3182570000008,
+        "postGcHeapAfterRepeatedNavigationBytes": 64625584
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-88c615bf-8213-4917-bc76-dd4f77977ab2",
+          "history-ordinary-b-13ee57ee-14ce-4213-8a2a-96ac713dfdc9",
+          "history-parent-e3b4c298-7a42-4c3e-923b-f9990687c952"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-88c615bf-8213-4917-bc76-dd4f77977ab2",
+            "history-ordinary-b-13ee57ee-14ce-4213-8a2a-96ac713dfdc9",
+            "history-parent-e3b4c298-7a42-4c3e-923b-f9990687c952"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-88c615bf-8213-4917-bc76-dd4f77977ab2",
+            "history-ordinary-b-13ee57ee-14ce-4213-8a2a-96ac713dfdc9",
+            "history-parent-e3b4c298-7a42-4c3e-923b-f9990687c952"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-88c615bf-8213-4917-bc76-dd4f77977ab2",
+            "history-ordinary-b-13ee57ee-14ce-4213-8a2a-96ac713dfdc9",
+            "history-parent-e3b4c298-7a42-4c3e-923b-f9990687c952"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium-repeat1/errand-history-sample.json",
+      "sha256": "f2b013f7370c8c1c6603119442bfa6b5180e372269212dbf87c37e84921365b1",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "4925b821911c6b29c9567ceeabf1dc89deb44e6f4191a91fa62db0fe2d62012c",
+        "timestamp": "2026-11-14T01:55:32.745Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2420.7277890000005,
+        "coldReloadInputAcceptedMs": 1681.0287739999985,
+        "warmSwitchToZeroErrandTaskMs": 1151.909972999998,
+        "warmSwitchBackToHistoryTaskMs": 806.5601040000001,
+        "postGcHeapAfterRepeatedNavigationBytes": 70057380
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-a1321745-1504-4657-b73e-edfe9cf18ec6",
+          "history-ordinary-b-a245adc1-5562-4dc5-b6b7-952abe16de66",
+          "history-parent-b40b411a-bb44-452e-af2d-5e4cb2e44f45"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a1321745-1504-4657-b73e-edfe9cf18ec6",
+            "history-ordinary-b-a245adc1-5562-4dc5-b6b7-952abe16de66",
+            "history-parent-b40b411a-bb44-452e-af2d-5e4cb2e44f45"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a1321745-1504-4657-b73e-edfe9cf18ec6",
+            "history-ordinary-b-a245adc1-5562-4dc5-b6b7-952abe16de66",
+            "history-parent-b40b411a-bb44-452e-af2d-5e4cb2e44f45"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a1321745-1504-4657-b73e-edfe9cf18ec6",
+            "history-ordinary-b-a245adc1-5562-4dc5-b6b7-952abe16de66",
+            "history-parent-b40b411a-bb44-452e-af2d-5e4cb2e44f45"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium-repeat2/errand-history-sample.json",
+      "sha256": "a38bc8ec55818ca7d43800304d94f0bc704f1e8c14955f8d4f4a8b4142638ae1",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "83b31ca6734735fddde361414ae74a02777075d7bd730255f9a2d88c692e4bdb",
+        "timestamp": "2026-11-14T01:56:38.271Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2522.687163999999,
+        "coldReloadInputAcceptedMs": 1722.9564459999983,
+        "warmSwitchToZeroErrandTaskMs": 1237.0382790000003,
+        "warmSwitchBackToHistoryTaskMs": 985.5804150000004,
+        "postGcHeapAfterRepeatedNavigationBytes": 70010740
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-e2942246-67fd-464a-8d2a-e1042193ec8b",
+          "history-ordinary-b-5bfd65f9-ddc3-433e-ad41-7d7f57d76e43",
+          "history-parent-0aa48a9d-9ed2-4f2d-839a-32918e285c44"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-e2942246-67fd-464a-8d2a-e1042193ec8b",
+            "history-ordinary-b-5bfd65f9-ddc3-433e-ad41-7d7f57d76e43",
+            "history-parent-0aa48a9d-9ed2-4f2d-839a-32918e285c44"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-e2942246-67fd-464a-8d2a-e1042193ec8b",
+            "history-ordinary-b-5bfd65f9-ddc3-433e-ad41-7d7f57d76e43",
+            "history-parent-0aa48a9d-9ed2-4f2d-839a-32918e285c44"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-e2942246-67fd-464a-8d2a-e1042193ec8b",
+            "history-ordinary-b-5bfd65f9-ddc3-433e-ad41-7d7f57d76e43",
+            "history-parent-0aa48a9d-9ed2-4f2d-839a-32918e285c44"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium-repeat3/errand-history-sample.json",
+      "sha256": "feabdf0f7731030a3cf6ac8d7deea478934d3901a23d51331ac8661f62ebeaa9",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "c725ed5b22a3c1e60a73834f42f8f1415edf0162e1a4a733fa485b27e5979c97",
+        "timestamp": "2026-11-14T01:57:45.696Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2367.3177720000003,
+        "coldReloadInputAcceptedMs": 1881.059997000002,
+        "warmSwitchToZeroErrandTaskMs": 1169.6927319999995,
+        "warmSwitchBackToHistoryTaskMs": 894.5729089999986,
+        "postGcHeapAfterRepeatedNavigationBytes": 70404184
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-76b5bbb5-186a-4cc1-968a-bef2bebfe65c",
+          "history-ordinary-b-342448d6-c1ab-4399-9637-384075690772",
+          "history-parent-ebf4d8a0-18ea-4753-8ac0-a1982c54bea5"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-76b5bbb5-186a-4cc1-968a-bef2bebfe65c",
+            "history-ordinary-b-342448d6-c1ab-4399-9637-384075690772",
+            "history-parent-ebf4d8a0-18ea-4753-8ac0-a1982c54bea5"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-76b5bbb5-186a-4cc1-968a-bef2bebfe65c",
+            "history-ordinary-b-342448d6-c1ab-4399-9637-384075690772",
+            "history-parent-ebf4d8a0-18ea-4753-8ac0-a1982c54bea5"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-76b5bbb5-186a-4cc1-968a-bef2bebfe65c",
+            "history-ordinary-b-342448d6-c1ab-4399-9637-384075690772",
+            "history-parent-ebf4d8a0-18ea-4753-8ac0-a1982c54bea5"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium-repeat4/errand-history-sample.json",
+      "sha256": "3dd5e57b23b2ce831ba1d6ed97dd9ba1d526fa059ef3f1591ed07d8ca2abecda",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "6cd07057ae93df89b6dd6f6ee5448bb251543df7162ca7c241c683929284f2ca",
+        "timestamp": "2026-11-14T01:58:53.844Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2431.906316999999,
+        "coldReloadInputAcceptedMs": 1725.3007400000006,
+        "warmSwitchToZeroErrandTaskMs": 1250.038478999999,
+        "warmSwitchBackToHistoryTaskMs": 949.0584459999991,
+        "postGcHeapAfterRepeatedNavigationBytes": 70405596
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-fddf20c8-00fb-4b8b-891a-834c93e1d4bb",
+          "history-ordinary-b-5fe33d69-0e81-47f5-9938-55a26d8121ec",
+          "history-parent-9b75c07c-38c1-4db2-994e-44eb9910b0b6"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-fddf20c8-00fb-4b8b-891a-834c93e1d4bb",
+            "history-ordinary-b-5fe33d69-0e81-47f5-9938-55a26d8121ec",
+            "history-parent-9b75c07c-38c1-4db2-994e-44eb9910b0b6"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-fddf20c8-00fb-4b8b-891a-834c93e1d4bb",
+            "history-ordinary-b-5fe33d69-0e81-47f5-9938-55a26d8121ec",
+            "history-parent-9b75c07c-38c1-4db2-994e-44eb9910b0b6"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-fddf20c8-00fb-4b8b-891a-834c93e1d4bb",
+            "history-ordinary-b-5fe33d69-0e81-47f5-9938-55a26d8121ec",
+            "history-parent-9b75c07c-38c1-4db2-994e-44eb9910b0b6"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium-repeat5/errand-history-sample.json",
+      "sha256": "074f2d88f06276567c374b6a20fb03758cbfb29a6238dfc684f69582a4090720",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "cb4b7e3a001f0366909c6be4d41e66051cd544b55fcb41cec535622dad570299",
+        "timestamp": "2026-11-14T01:59:59.368Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2413.5998550000004,
+        "coldReloadInputAcceptedMs": 1706.3500630000017,
+        "warmSwitchToZeroErrandTaskMs": 1399.1970220000003,
+        "warmSwitchBackToHistoryTaskMs": 827.8263999999981,
+        "postGcHeapAfterRepeatedNavigationBytes": 70001384
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-3b36a8e4-8056-4af4-b592-02676a4c79e9",
+          "history-ordinary-b-875ffb5c-de3d-4fe6-bf10-ef94e9c2ba60",
+          "history-parent-42f6a59c-07d8-4fe7-baa4-f80f7a39c406"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3b36a8e4-8056-4af4-b592-02676a4c79e9",
+            "history-ordinary-b-875ffb5c-de3d-4fe6-bf10-ef94e9c2ba60",
+            "history-parent-42f6a59c-07d8-4fe7-baa4-f80f7a39c406"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3b36a8e4-8056-4af4-b592-02676a4c79e9",
+            "history-ordinary-b-875ffb5c-de3d-4fe6-bf10-ef94e9c2ba60",
+            "history-parent-42f6a59c-07d8-4fe7-baa4-f80f7a39c406"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3b36a8e4-8056-4af4-b592-02676a4c79e9",
+            "history-ordinary-b-875ffb5c-de3d-4fe6-bf10-ef94e9c2ba60",
+            "history-parent-42f6a59c-07d8-4fe7-baa4-f80f7a39c406"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium-repeat6/errand-history-sample.json",
+      "sha256": "2ebc40fa2b35ae7580552f13361784c46d6bb70f17f1704f47f2e7e0683bd17e",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "7514c143aedd996d0fdec431a5c87d4a90aaa31f6b169b8789a954b33875fa03",
+        "timestamp": "2026-11-14T02:01:05.934Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2263.7255700000005,
+        "coldReloadInputAcceptedMs": 1685.7127629999995,
+        "warmSwitchToZeroErrandTaskMs": 1319.1253739999993,
+        "warmSwitchBackToHistoryTaskMs": 791.7035340000002,
+        "postGcHeapAfterRepeatedNavigationBytes": 69958192
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-dd25cfab-7847-4945-9565-bfcc2cdbd57c",
+          "history-ordinary-b-6fdce8fe-737f-49d0-a0b6-6cd4167b544b",
+          "history-parent-12b1b2ba-0b7b-43ec-800b-a09547cea8ed"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-dd25cfab-7847-4945-9565-bfcc2cdbd57c",
+            "history-ordinary-b-6fdce8fe-737f-49d0-a0b6-6cd4167b544b",
+            "history-parent-12b1b2ba-0b7b-43ec-800b-a09547cea8ed"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-dd25cfab-7847-4945-9565-bfcc2cdbd57c",
+            "history-ordinary-b-6fdce8fe-737f-49d0-a0b6-6cd4167b544b",
+            "history-parent-12b1b2ba-0b7b-43ec-800b-a09547cea8ed"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-dd25cfab-7847-4945-9565-bfcc2cdbd57c",
+            "history-ordinary-b-6fdce8fe-737f-49d0-a0b6-6cd4167b544b",
+            "history-parent-12b1b2ba-0b7b-43ec-800b-a09547cea8ed"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-desktop/session-errand-history-bas-fa645-seline-100-finished-Errands-chromium/errand-history-sample.json",
+      "sha256": "e6b60add9bf58a769867717739957b3715e6ab89a2b6cbde44f2e110cd619fd1",
+      "platform": "desktop",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "cce0b67550ef50f0ae18174a214b0b859fe4eb614cc2ab1e3493c7d4a6d873e0",
+        "timestamp": "2026-11-14T01:54:28.560Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2406.962660000001,
+        "coldReloadInputAcceptedMs": 1631.6413159999993,
+        "warmSwitchToZeroErrandTaskMs": 1411.7502270000005,
+        "warmSwitchBackToHistoryTaskMs": 830.4448049999992,
+        "postGcHeapAfterRepeatedNavigationBytes": 69950692
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-1609a067-a63c-49e1-8ed5-859e2c064c98",
+          "history-ordinary-b-657ec9ea-9766-4802-89cb-a59042e3f3c9",
+          "history-parent-b9f9e7f5-67fe-44dc-94ff-a7ec73458c00"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-1609a067-a63c-49e1-8ed5-859e2c064c98",
+            "history-ordinary-b-657ec9ea-9766-4802-89cb-a59042e3f3c9",
+            "history-parent-b9f9e7f5-67fe-44dc-94ff-a7ec73458c00"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-1609a067-a63c-49e1-8ed5-859e2c064c98",
+            "history-ordinary-b-657ec9ea-9766-4802-89cb-a59042e3f3c9",
+            "history-parent-b9f9e7f5-67fe-44dc-94ff-a7ec73458c00"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-1609a067-a63c-49e1-8ed5-859e2c064c98",
+            "history-ordinary-b-657ec9ea-9766-4802-89cb-a59042e3f3c9",
+            "history-parent-b9f9e7f5-67fe-44dc-94ff-a7ec73458c00"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat1/errand-history-sample.json",
+      "sha256": "61b9fa376ecad6f3136aa8d82125706e929c043ab1a349df4dfd4282620595ba",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "ea96d56f43b1cdfce156b66d388ac0858c5721bfedf8971943beea75cb93883a",
+        "timestamp": "2026-11-14T02:03:44.832Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1767.3627830000005,
+        "coldReloadInputAcceptedMs": 1160.9526910000004,
+        "warmSwitchToZeroErrandTaskMs": 1350.5529309999993,
+        "warmSwitchBackToHistoryTaskMs": 1341.6720560000003,
+        "postGcHeapAfterRepeatedNavigationBytes": 50313292
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-64ea8574-3738-4bfb-92ca-a0db08fd937a",
+          "history-ordinary-b-d083d45f-2576-4bb4-9ace-f8fb75a45cee",
+          "history-parent-c1bcb710-c1f8-4c27-88af-d2e11a356c8b"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-64ea8574-3738-4bfb-92ca-a0db08fd937a",
+            "history-ordinary-b-d083d45f-2576-4bb4-9ace-f8fb75a45cee",
+            "history-parent-c1bcb710-c1f8-4c27-88af-d2e11a356c8b"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-64ea8574-3738-4bfb-92ca-a0db08fd937a",
+            "history-ordinary-b-d083d45f-2576-4bb4-9ace-f8fb75a45cee",
+            "history-parent-c1bcb710-c1f8-4c27-88af-d2e11a356c8b"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-64ea8574-3738-4bfb-92ca-a0db08fd937a",
+            "history-ordinary-b-d083d45f-2576-4bb4-9ace-f8fb75a45cee",
+            "history-parent-c1bcb710-c1f8-4c27-88af-d2e11a356c8b"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat2/errand-history-sample.json",
+      "sha256": "71dc4b9cdcff4d83f5ab6f13cadf553356358cbea817a5b39fdb3f7cf98c6023",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "7e50ee814fa80ab233a5eabed4098bf18acbafa29dd1abc07620d2774c077806",
+        "timestamp": "2026-11-14T02:04:48.063Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1976.9461569999994,
+        "coldReloadInputAcceptedMs": 1275.6957469999998,
+        "warmSwitchToZeroErrandTaskMs": 1344.8922109999994,
+        "warmSwitchBackToHistoryTaskMs": 1313.0780730000006,
+        "postGcHeapAfterRepeatedNavigationBytes": 50325412
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-85ee982d-19e0-4534-9c67-fbfea2d6b52b",
+          "history-ordinary-b-12aaafab-96d2-429b-b87d-fdcd6e01976e",
+          "history-parent-688b70fe-64b1-4084-a806-0405b0ef1442"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-85ee982d-19e0-4534-9c67-fbfea2d6b52b",
+            "history-ordinary-b-12aaafab-96d2-429b-b87d-fdcd6e01976e",
+            "history-parent-688b70fe-64b1-4084-a806-0405b0ef1442"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-85ee982d-19e0-4534-9c67-fbfea2d6b52b",
+            "history-ordinary-b-12aaafab-96d2-429b-b87d-fdcd6e01976e",
+            "history-parent-688b70fe-64b1-4084-a806-0405b0ef1442"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-85ee982d-19e0-4534-9c67-fbfea2d6b52b",
+            "history-ordinary-b-12aaafab-96d2-429b-b87d-fdcd6e01976e",
+            "history-parent-688b70fe-64b1-4084-a806-0405b0ef1442"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat3/errand-history-sample.json",
+      "sha256": "09ddeac773f26842937cfa7feeda0bd0284d98a114866b37c392350a3f1df719",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "51d4a60e303e3af2d91e9680548acf5d6dd03c4b0634ce1d98704e4620d61d0a",
+        "timestamp": "2026-11-14T02:05:52.698Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1992.1413679999996,
+        "coldReloadInputAcceptedMs": 1260.9101970000002,
+        "warmSwitchToZeroErrandTaskMs": 1276.2093999999997,
+        "warmSwitchBackToHistoryTaskMs": 1314.7687840000008,
+        "postGcHeapAfterRepeatedNavigationBytes": 50269208
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-9de1da25-03b5-49d9-a237-9c218df3cdce",
+          "history-ordinary-b-5ee50e0b-5413-4b54-a5fd-05fa14f67fba",
+          "history-parent-c630725d-c49a-42f5-bea2-3784501440a3"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-9de1da25-03b5-49d9-a237-9c218df3cdce",
+            "history-ordinary-b-5ee50e0b-5413-4b54-a5fd-05fa14f67fba",
+            "history-parent-c630725d-c49a-42f5-bea2-3784501440a3"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-9de1da25-03b5-49d9-a237-9c218df3cdce",
+            "history-ordinary-b-5ee50e0b-5413-4b54-a5fd-05fa14f67fba",
+            "history-parent-c630725d-c49a-42f5-bea2-3784501440a3"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-9de1da25-03b5-49d9-a237-9c218df3cdce",
+            "history-ordinary-b-5ee50e0b-5413-4b54-a5fd-05fa14f67fba",
+            "history-parent-c630725d-c49a-42f5-bea2-3784501440a3"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat4/errand-history-sample.json",
+      "sha256": "92ac2faac2e4c22dfda656851f8ef30c4701b32d5f2e8fb0879abb671ce6f781",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "f604e43b49f2ebfa7e66705d08773d0ed6371f60f79ec9722d4706d2d0a36e48",
+        "timestamp": "2026-11-14T02:06:57.211Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1847.5952390000002,
+        "coldReloadInputAcceptedMs": 1291.6516589999992,
+        "warmSwitchToZeroErrandTaskMs": 1331.6888230000004,
+        "warmSwitchBackToHistoryTaskMs": 1304.9879059999994,
+        "postGcHeapAfterRepeatedNavigationBytes": 50345028
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-82cf7d6c-3b31-42cc-8278-981afe7b931b",
+          "history-ordinary-b-8a8f94c9-1d44-43f4-9e86-87d112f148e5",
+          "history-parent-53abc554-d3cb-4c18-b21f-e5f7216b1155"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-82cf7d6c-3b31-42cc-8278-981afe7b931b",
+            "history-ordinary-b-8a8f94c9-1d44-43f4-9e86-87d112f148e5",
+            "history-parent-53abc554-d3cb-4c18-b21f-e5f7216b1155"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-82cf7d6c-3b31-42cc-8278-981afe7b931b",
+            "history-ordinary-b-8a8f94c9-1d44-43f4-9e86-87d112f148e5",
+            "history-parent-53abc554-d3cb-4c18-b21f-e5f7216b1155"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-82cf7d6c-3b31-42cc-8278-981afe7b931b",
+            "history-ordinary-b-8a8f94c9-1d44-43f4-9e86-87d112f148e5",
+            "history-parent-53abc554-d3cb-4c18-b21f-e5f7216b1155"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat5/errand-history-sample.json",
+      "sha256": "caa39ec0d46b1daedbfbabd513fc8dada7b92a7fab2dc8f8cba66ec55fcf2c48",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "7a82404f6821bc3ccc634e19d8d9abd0303888b2b1df45f84f3543df35c5229b",
+        "timestamp": "2026-11-14T02:08:01.942Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1886.111579,
+        "coldReloadInputAcceptedMs": 1213.4090580000002,
+        "warmSwitchToZeroErrandTaskMs": 1328.516866,
+        "warmSwitchBackToHistoryTaskMs": 1260.2234089999993,
+        "postGcHeapAfterRepeatedNavigationBytes": 50288832
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-709357ac-b939-4457-8ffe-7bbfd641a1d4",
+          "history-ordinary-b-c5ad5731-889a-453d-83bc-69363e64d053",
+          "history-parent-3b1ea98c-0e5b-42a9-88e9-1fc41d6bd60b"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-709357ac-b939-4457-8ffe-7bbfd641a1d4",
+            "history-ordinary-b-c5ad5731-889a-453d-83bc-69363e64d053",
+            "history-parent-3b1ea98c-0e5b-42a9-88e9-1fc41d6bd60b"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-709357ac-b939-4457-8ffe-7bbfd641a1d4",
+            "history-ordinary-b-c5ad5731-889a-453d-83bc-69363e64d053",
+            "history-parent-3b1ea98c-0e5b-42a9-88e9-1fc41d6bd60b"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-709357ac-b939-4457-8ffe-7bbfd641a1d4",
+            "history-ordinary-b-c5ad5731-889a-453d-83bc-69363e64d053",
+            "history-parent-3b1ea98c-0e5b-42a9-88e9-1fc41d6bd60b"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat6/errand-history-sample.json",
+      "sha256": "fa5f1ad32be7ed1570b2ec23deea8d72bfe44856e3241dbd93164b71b05f1494",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "570637829e82bedc88d20da7c5222749f3fd9d878e342dc8732962663a53e8da",
+        "timestamp": "2026-11-14T02:09:05.232Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1769.9495709999997,
+        "coldReloadInputAcceptedMs": 1253.5385379999998,
+        "warmSwitchToZeroErrandTaskMs": 1395.8309689999996,
+        "warmSwitchBackToHistoryTaskMs": 1325.786344,
+        "postGcHeapAfterRepeatedNavigationBytes": 50287396
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-0630ebdd-0a48-47a8-b0e3-6cf791d6c202",
+          "history-ordinary-b-6844461f-9201-46d3-bc47-a50e4638e394",
+          "history-parent-56d53cea-1c56-4a9f-b1e5-bff958924d78"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0630ebdd-0a48-47a8-b0e3-6cf791d6c202",
+            "history-ordinary-b-6844461f-9201-46d3-bc47-a50e4638e394",
+            "history-parent-56d53cea-1c56-4a9f-b1e5-bff958924d78"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0630ebdd-0a48-47a8-b0e3-6cf791d6c202",
+            "history-ordinary-b-6844461f-9201-46d3-bc47-a50e4638e394",
+            "history-parent-56d53cea-1c56-4a9f-b1e5-bff958924d78"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0630ebdd-0a48-47a8-b0e3-6cf791d6c202",
+            "history-ordinary-b-6844461f-9201-46d3-bc47-a50e4638e394",
+            "history-parent-56d53cea-1c56-4a9f-b1e5-bff958924d78"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome/errand-history-sample.json",
+      "sha256": "6e36e9e81f5a71a55cbd679a707b453dcce28ba2083a215635179ccb9b78202e",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "fa56196837498fd06e8d433bc953db6bac4c5a2dc42eb96da004288b995cb55e",
+        "timestamp": "2026-11-14T02:02:41.435Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1767.5034850000002,
+        "coldReloadInputAcceptedMs": 1132.1760800000002,
+        "warmSwitchToZeroErrandTaskMs": 1329.4825840000003,
+        "warmSwitchBackToHistoryTaskMs": 1370.1345380000002,
+        "postGcHeapAfterRepeatedNavigationBytes": 50325108
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-a3fb0511-7a43-41f1-881b-db4667927894",
+          "history-ordinary-b-2ec62750-a9d2-4bd5-9208-ec582a4c6ca8",
+          "history-parent-96821958-af60-4b00-86bf-de59797ebf66"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a3fb0511-7a43-41f1-881b-db4667927894",
+            "history-ordinary-b-2ec62750-a9d2-4bd5-9208-ec582a4c6ca8",
+            "history-parent-96821958-af60-4b00-86bf-de59797ebf66"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a3fb0511-7a43-41f1-881b-db4667927894",
+            "history-ordinary-b-2ec62750-a9d2-4bd5-9208-ec582a4c6ca8",
+            "history-parent-96821958-af60-4b00-86bf-de59797ebf66"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-a3fb0511-7a43-41f1-881b-db4667927894",
+            "history-ordinary-b-2ec62750-a9d2-4bd5-9208-ec582a4c6ca8",
+            "history-parent-96821958-af60-4b00-86bf-de59797ebf66"
+          ]
+        }
+      },
+      "maxHistoryRows": 0,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [],
+        "afterRepeatedChildNavigation": [],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome-repeat1/errand-history-sample.json",
+      "sha256": "eaccd5def05b795e048116941cb238f4f20c682006dff54e4452a5cc62f42fb5",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "df3ab3c7328dffdff2702d95bc59a1312dd8f6d51de63a209202127b0a88d3c0",
+        "timestamp": "2026-11-14T02:03:53.725Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1903.9422480000012,
+        "coldReloadInputAcceptedMs": 1293.8581709999999,
+        "warmSwitchToZeroErrandTaskMs": 1315.2782039999984,
+        "warmSwitchBackToHistoryTaskMs": 1314.717660000002,
+        "postGcHeapAfterRepeatedNavigationBytes": 53184028
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-3ef25434-12b1-43db-ab66-52efe3dd34d3",
+          "history-ordinary-b-c27958d4-e247-4e8a-b365-db9fb382df98",
+          "history-parent-a95f2a90-18a0-4ae9-951e-a9608d8c6b9c"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3ef25434-12b1-43db-ab66-52efe3dd34d3",
+            "history-ordinary-b-c27958d4-e247-4e8a-b365-db9fb382df98",
+            "history-parent-a95f2a90-18a0-4ae9-951e-a9608d8c6b9c"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3ef25434-12b1-43db-ab66-52efe3dd34d3",
+            "history-ordinary-b-c27958d4-e247-4e8a-b365-db9fb382df98",
+            "history-parent-a95f2a90-18a0-4ae9-951e-a9608d8c6b9c"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3ef25434-12b1-43db-ab66-52efe3dd34d3",
+            "history-ordinary-b-c27958d4-e247-4e8a-b365-db9fb382df98",
+            "history-parent-a95f2a90-18a0-4ae9-951e-a9608d8c6b9c"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome-repeat2/errand-history-sample.json",
+      "sha256": "d66155a97bc45feb472c62db0d29f53a8a5df7eb4556e736039afccd94db7341",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "14efbbff5c0907dddf13cf9d67a350b7d338b35904979ab98037d6d08104634c",
+        "timestamp": "2026-11-14T02:04:57.287Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1904.699643,
+        "coldReloadInputAcceptedMs": 1448.585138999999,
+        "warmSwitchToZeroErrandTaskMs": 1399.6130049999992,
+        "warmSwitchBackToHistoryTaskMs": 1373.4982119999986,
+        "postGcHeapAfterRepeatedNavigationBytes": 54927936
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-3cf1e554-8943-4845-843b-b838f0b8c8f7",
+          "history-ordinary-b-1edd59fd-8c77-4f1e-ac9f-8a4427964f39",
+          "history-parent-84adb098-3566-4ad5-821f-7b6f8ddc620c"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3cf1e554-8943-4845-843b-b838f0b8c8f7",
+            "history-ordinary-b-1edd59fd-8c77-4f1e-ac9f-8a4427964f39",
+            "history-parent-84adb098-3566-4ad5-821f-7b6f8ddc620c"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3cf1e554-8943-4845-843b-b838f0b8c8f7",
+            "history-ordinary-b-1edd59fd-8c77-4f1e-ac9f-8a4427964f39",
+            "history-parent-84adb098-3566-4ad5-821f-7b6f8ddc620c"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-3cf1e554-8943-4845-843b-b838f0b8c8f7",
+            "history-ordinary-b-1edd59fd-8c77-4f1e-ac9f-8a4427964f39",
+            "history-parent-84adb098-3566-4ad5-821f-7b6f8ddc620c"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome-repeat3/errand-history-sample.json",
+      "sha256": "06fcca4c0d447ddea461f589b741e04866efef4b1fe8e9e3fbf292525460a087",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "713da10322ee987064750d865bf6e48962b9008facded14dae551fa539c1496a",
+        "timestamp": "2026-11-14T02:06:01.902Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1959.3476859999992,
+        "coldReloadInputAcceptedMs": 1402.2245059999987,
+        "warmSwitchToZeroErrandTaskMs": 1395.5699240000013,
+        "warmSwitchBackToHistoryTaskMs": 1321.4651159999994,
+        "postGcHeapAfterRepeatedNavigationBytes": 53205948
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-797e79ba-9474-4a74-8a07-0e4fcd0c2ebc",
+          "history-ordinary-b-02f968a8-535d-43eb-818c-c0641e073a13",
+          "history-parent-0ec4259f-d868-46db-9f47-ef2e966b4779"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-797e79ba-9474-4a74-8a07-0e4fcd0c2ebc",
+            "history-ordinary-b-02f968a8-535d-43eb-818c-c0641e073a13",
+            "history-parent-0ec4259f-d868-46db-9f47-ef2e966b4779"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-797e79ba-9474-4a74-8a07-0e4fcd0c2ebc",
+            "history-ordinary-b-02f968a8-535d-43eb-818c-c0641e073a13",
+            "history-parent-0ec4259f-d868-46db-9f47-ef2e966b4779"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-797e79ba-9474-4a74-8a07-0e4fcd0c2ebc",
+            "history-ordinary-b-02f968a8-535d-43eb-818c-c0641e073a13",
+            "history-parent-0ec4259f-d868-46db-9f47-ef2e966b4779"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome-repeat4/errand-history-sample.json",
+      "sha256": "838ac7bed85b999a99a8a2794bfaf506a605537f75d94b212c18711616de986e",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "d689e42f43eced41a1eb758825f61ae825bf8a75b29086870e18ae8c3be7afbf",
+        "timestamp": "2026-11-14T02:07:06.288Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1921.6862290000008,
+        "coldReloadInputAcceptedMs": 1355.8003900000003,
+        "warmSwitchToZeroErrandTaskMs": 1301.0806679999987,
+        "warmSwitchBackToHistoryTaskMs": 1276.9205059999986,
+        "postGcHeapAfterRepeatedNavigationBytes": 55140024
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-8d36cb75-ad0a-4e3e-8cb5-ec6269f1c92d",
+          "history-ordinary-b-b298ce23-1178-492d-9c43-29e34f529141",
+          "history-parent-5329e9dd-d1e4-4926-ad2b-cfa110c2f2c6"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-8d36cb75-ad0a-4e3e-8cb5-ec6269f1c92d",
+            "history-ordinary-b-b298ce23-1178-492d-9c43-29e34f529141",
+            "history-parent-5329e9dd-d1e4-4926-ad2b-cfa110c2f2c6"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-8d36cb75-ad0a-4e3e-8cb5-ec6269f1c92d",
+            "history-ordinary-b-b298ce23-1178-492d-9c43-29e34f529141",
+            "history-parent-5329e9dd-d1e4-4926-ad2b-cfa110c2f2c6"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-8d36cb75-ad0a-4e3e-8cb5-ec6269f1c92d",
+            "history-ordinary-b-b298ce23-1178-492d-9c43-29e34f529141",
+            "history-parent-5329e9dd-d1e4-4926-ad2b-cfa110c2f2c6"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome-repeat5/errand-history-sample.json",
+      "sha256": "24592f8437e550bf31153895b4a67e293739b93e0b47402cdb555fa811801be1",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "3c09a96a4d5de1f621f47264c7147c903b1b8ebb85018cd39e97a955745fe545",
+        "timestamp": "2026-11-14T02:08:10.919Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1916.7079200000007,
+        "coldReloadInputAcceptedMs": 1373.469536999999,
+        "warmSwitchToZeroErrandTaskMs": 1303.0196269999979,
+        "warmSwitchBackToHistoryTaskMs": 1297.7178539999986,
+        "postGcHeapAfterRepeatedNavigationBytes": 53213316
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-d0c66852-5945-4ea3-ac42-2f6144b49ded",
+          "history-ordinary-b-093bfb55-a74d-4ddb-98e5-a24a0e7f407f",
+          "history-parent-7a313c27-0edf-4249-88d5-8bd960d324ae"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-d0c66852-5945-4ea3-ac42-2f6144b49ded",
+            "history-ordinary-b-093bfb55-a74d-4ddb-98e5-a24a0e7f407f",
+            "history-parent-7a313c27-0edf-4249-88d5-8bd960d324ae"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-d0c66852-5945-4ea3-ac42-2f6144b49ded",
+            "history-ordinary-b-093bfb55-a74d-4ddb-98e5-a24a0e7f407f",
+            "history-parent-7a313c27-0edf-4249-88d5-8bd960d324ae"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-d0c66852-5945-4ea3-ac42-2f6144b49ded",
+            "history-ordinary-b-093bfb55-a74d-4ddb-98e5-a24a0e7f407f",
+            "history-parent-7a313c27-0edf-4249-88d5-8bd960d324ae"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome-repeat6/errand-history-sample.json",
+      "sha256": "91fe118b9a29803c2abac3f238bdda02fa476caab57e66443842325e0dba02b1",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "a0a5fe3c5f30cf3049f910d34ed5018350879d90497cb42106f583e32c837cd1",
+        "timestamp": "2026-11-14T02:09:14.354Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1907.9782950000008,
+        "coldReloadInputAcceptedMs": 1296.9710169999998,
+        "warmSwitchToZeroErrandTaskMs": 1289.8502949999984,
+        "warmSwitchBackToHistoryTaskMs": 1376.5764849999978,
+        "postGcHeapAfterRepeatedNavigationBytes": 53145072
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-58a1ae59-cd00-4dad-9690-21eed5fe14a2",
+          "history-ordinary-b-0afbd603-0541-43bb-8e4c-35af9da40a63",
+          "history-parent-b70c8e16-f2ec-4c43-ad9b-83727191622d"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-58a1ae59-cd00-4dad-9690-21eed5fe14a2",
+            "history-ordinary-b-0afbd603-0541-43bb-8e4c-35af9da40a63",
+            "history-parent-b70c8e16-f2ec-4c43-ad9b-83727191622d"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-58a1ae59-cd00-4dad-9690-21eed5fe14a2",
+            "history-ordinary-b-0afbd603-0541-43bb-8e4c-35af9da40a63",
+            "history-parent-b70c8e16-f2ec-4c43-ad9b-83727191622d"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-58a1ae59-cd00-4dad-9690-21eed5fe14a2",
+            "history-ordinary-b-0afbd603-0541-43bb-8e4c-35af9da40a63",
+            "history-parent-b70c8e16-f2ec-4c43-ad9b-83727191622d"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-827d8-seline-100-finished-Errands-mobile-chrome/errand-history-sample.json",
+      "sha256": "578e3190d9ff33d8494b82a2a509d818a32d29048aca684408993c25717e9a58",
+      "platform": "phone",
+      "finishedHistoryCount": 100,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "745c78cd5d8486b105d4c3ce99b85631c0c3e52dffb50674e8db3c7f7ce81d3f",
+        "timestamp": "2026-11-14T02:02:50.300Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 1905.7671979999996,
+        "coldReloadInputAcceptedMs": 1396.8649110000006,
+        "warmSwitchToZeroErrandTaskMs": 1280.0769189999992,
+        "warmSwitchBackToHistoryTaskMs": 1315.6791900000026,
+        "postGcHeapAfterRepeatedNavigationBytes": 53157372
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-18949f01-4f37-4608-8eaa-ef6d0b18acb9",
+          "history-ordinary-b-d409ac7b-eec8-4ed4-b747-7faf9eba96e2",
+          "history-parent-4bb0f5ff-a45c-4f02-97dd-c2ed246e5e66"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-18949f01-4f37-4608-8eaa-ef6d0b18acb9",
+            "history-ordinary-b-d409ac7b-eec8-4ed4-b747-7faf9eba96e2",
+            "history-parent-4bb0f5ff-a45c-4f02-97dd-c2ed246e5e66"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-18949f01-4f37-4608-8eaa-ef6d0b18acb9",
+            "history-ordinary-b-d409ac7b-eec8-4ed4-b747-7faf9eba96e2",
+            "history-parent-4bb0f5ff-a45c-4f02-97dd-c2ed246e5e66"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-18949f01-4f37-4608-8eaa-ef6d0b18acb9",
+            "history-ordinary-b-d409ac7b-eec8-4ed4-b747-7faf9eba96e2",
+            "history-parent-4bb0f5ff-a45c-4f02-97dd-c2ed246e5e66"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome-repeat1/errand-history-sample.json",
+      "sha256": "b2adc56c7c2d971db7994c418c5d5d423e76a891ac4bc8ad91b9c3ae0c2e05ec",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "f3a32ad353b9340a3a984aae9879a1e06bbc3b2218e41f922ebd14de4452ec64",
+        "timestamp": "2026-11-14T02:04:15.721Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2632.5861250000016,
+        "coldReloadInputAcceptedMs": 2947.532702999997,
+        "warmSwitchToZeroErrandTaskMs": 2385.781769999994,
+        "warmSwitchBackToHistoryTaskMs": 1216.0901330000052,
+        "postGcHeapAfterRepeatedNavigationBytes": 53526452
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-9dc45c49-b0ca-4dd6-a038-a2e660e4563e",
+          "history-ordinary-b-7c027d07-e119-468d-a3a7-c0f4e0e31f01",
+          "history-parent-40ad6751-cc2f-484f-910a-7846d0d94814"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-9dc45c49-b0ca-4dd6-a038-a2e660e4563e",
+            "history-ordinary-b-7c027d07-e119-468d-a3a7-c0f4e0e31f01",
+            "history-parent-40ad6751-cc2f-484f-910a-7846d0d94814"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-9dc45c49-b0ca-4dd6-a038-a2e660e4563e",
+            "history-ordinary-b-7c027d07-e119-468d-a3a7-c0f4e0e31f01",
+            "history-parent-40ad6751-cc2f-484f-910a-7846d0d94814"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-9dc45c49-b0ca-4dd6-a038-a2e660e4563e",
+            "history-ordinary-b-7c027d07-e119-468d-a3a7-c0f4e0e31f01",
+            "history-parent-40ad6751-cc2f-484f-910a-7846d0d94814"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome-repeat2/errand-history-sample.json",
+      "sha256": "201fe95f9db8bb7f0039be6c6d4e05fa49d3ab5182866ce31c638b267835844c",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "b342651a8fbb5960fd4d7e50916274c8da1d8a0b9a8f0e28d77d2351d14eef7e",
+        "timestamp": "2026-11-14T02:05:19.651Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2711.799463999996,
+        "coldReloadInputAcceptedMs": 3220.7851230000015,
+        "warmSwitchToZeroErrandTaskMs": 2342.0370669999975,
+        "warmSwitchBackToHistoryTaskMs": 1274.8702300000004,
+        "postGcHeapAfterRepeatedNavigationBytes": 53537380
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-f414c3cc-5517-471c-b9d7-2235c37bb4c4",
+          "history-ordinary-b-7de44446-c697-45d9-81eb-e1c959ee06a5",
+          "history-parent-dd490bea-6c2e-486b-a895-339d9e25f599"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f414c3cc-5517-471c-b9d7-2235c37bb4c4",
+            "history-ordinary-b-7de44446-c697-45d9-81eb-e1c959ee06a5",
+            "history-parent-dd490bea-6c2e-486b-a895-339d9e25f599"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f414c3cc-5517-471c-b9d7-2235c37bb4c4",
+            "history-ordinary-b-7de44446-c697-45d9-81eb-e1c959ee06a5",
+            "history-parent-dd490bea-6c2e-486b-a895-339d9e25f599"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-f414c3cc-5517-471c-b9d7-2235c37bb4c4",
+            "history-ordinary-b-7de44446-c697-45d9-81eb-e1c959ee06a5",
+            "history-parent-dd490bea-6c2e-486b-a895-339d9e25f599"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome-repeat3/errand-history-sample.json",
+      "sha256": "a903ee92e16ef8f52d32a8a859e057fbf671826c203084994f65f5e31670aca4",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "d2b3a6a876b928a3e6d849edd7cabdbff89f89f3feb7954f899f69b84bceaab5",
+        "timestamp": "2026-11-14T02:06:24.100Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2676.8087219999943,
+        "coldReloadInputAcceptedMs": 3301.7289509999973,
+        "warmSwitchToZeroErrandTaskMs": 2387.276772999998,
+        "warmSwitchBackToHistoryTaskMs": 1223.9844339999981,
+        "postGcHeapAfterRepeatedNavigationBytes": 53560428
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-b65b7835-aa7a-469f-8212-c3d9ff8003a7",
+          "history-ordinary-b-ba4223d9-5e5e-44a3-ac78-d0e110a58e06",
+          "history-parent-408b4812-eb65-42b9-9fca-7937fa4e0da0"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-b65b7835-aa7a-469f-8212-c3d9ff8003a7",
+            "history-ordinary-b-ba4223d9-5e5e-44a3-ac78-d0e110a58e06",
+            "history-parent-408b4812-eb65-42b9-9fca-7937fa4e0da0"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-b65b7835-aa7a-469f-8212-c3d9ff8003a7",
+            "history-ordinary-b-ba4223d9-5e5e-44a3-ac78-d0e110a58e06",
+            "history-parent-408b4812-eb65-42b9-9fca-7937fa4e0da0"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-b65b7835-aa7a-469f-8212-c3d9ff8003a7",
+            "history-ordinary-b-ba4223d9-5e5e-44a3-ac78-d0e110a58e06",
+            "history-parent-408b4812-eb65-42b9-9fca-7937fa4e0da0"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome-repeat4/errand-history-sample.json",
+      "sha256": "15b925e84d833ff54f8557973c5d3e8663f5451b1afa82666ae6fc676cb40c50",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "3a445cec790c8c1eb4c04a3ebd88442673be7a46e544a658c164f213b9869841",
+        "timestamp": "2026-11-14T02:07:28.696Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2706.509450999998,
+        "coldReloadInputAcceptedMs": 3040.861474999998,
+        "warmSwitchToZeroErrandTaskMs": 2411.1946860000025,
+        "warmSwitchBackToHistoryTaskMs": 1242.1486679999944,
+        "postGcHeapAfterRepeatedNavigationBytes": 53563956
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-391c938a-7d09-45d7-9067-f716b1b2219f",
+          "history-ordinary-b-c771799d-720b-4f7e-afaf-7429d4eed281",
+          "history-parent-a066442d-df4a-4e19-8a4a-53a7ab1076c0"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-391c938a-7d09-45d7-9067-f716b1b2219f",
+            "history-ordinary-b-c771799d-720b-4f7e-afaf-7429d4eed281",
+            "history-parent-a066442d-df4a-4e19-8a4a-53a7ab1076c0"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-391c938a-7d09-45d7-9067-f716b1b2219f",
+            "history-ordinary-b-c771799d-720b-4f7e-afaf-7429d4eed281",
+            "history-parent-a066442d-df4a-4e19-8a4a-53a7ab1076c0"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-391c938a-7d09-45d7-9067-f716b1b2219f",
+            "history-ordinary-b-c771799d-720b-4f7e-afaf-7429d4eed281",
+            "history-parent-a066442d-df4a-4e19-8a4a-53a7ab1076c0"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome-repeat5/errand-history-sample.json",
+      "sha256": "46222c9c2d8fd45a628121444071910f431180514cb1b684c640ebffdf62e4cf",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "b67c324c5350eb623b6b5bb2ab896443112bb509b6d8fe3ed7fa3292c08507d4",
+        "timestamp": "2026-11-14T02:08:32.784Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2739.373609000002,
+        "coldReloadInputAcceptedMs": 2850.4706099999967,
+        "warmSwitchToZeroErrandTaskMs": 2324.548038999994,
+        "warmSwitchBackToHistoryTaskMs": 1229.3433589999986,
+        "postGcHeapAfterRepeatedNavigationBytes": 53600540
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-0a98af00-7691-4e8e-be37-f0817444423e",
+          "history-ordinary-b-ed5b4e2d-958f-46dc-947b-5673cdfeaa93",
+          "history-parent-379fa05a-a314-4558-a05d-09353d900648"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0a98af00-7691-4e8e-be37-f0817444423e",
+            "history-ordinary-b-ed5b4e2d-958f-46dc-947b-5673cdfeaa93",
+            "history-parent-379fa05a-a314-4558-a05d-09353d900648"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0a98af00-7691-4e8e-be37-f0817444423e",
+            "history-ordinary-b-ed5b4e2d-958f-46dc-947b-5673cdfeaa93",
+            "history-parent-379fa05a-a314-4558-a05d-09353d900648"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-0a98af00-7691-4e8e-be37-f0817444423e",
+            "history-ordinary-b-ed5b4e2d-958f-46dc-947b-5673cdfeaa93",
+            "history-parent-379fa05a-a314-4558-a05d-09353d900648"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome-repeat6/errand-history-sample.json",
+      "sha256": "31f7a3222b35ed254d3bcfa0e75f8af3559afbebc15fead9b34278c658a0e9f3",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "6c9fa3ed9a8f2f81fc686b30ecde6e544a900f25b82f7fd1053825b81ae74c4c",
+        "timestamp": "2026-11-14T02:09:36.436Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2791.2053149999992,
+        "coldReloadInputAcceptedMs": 3180.0457740000056,
+        "warmSwitchToZeroErrandTaskMs": 2333.4728019999966,
+        "warmSwitchBackToHistoryTaskMs": 1290.5902260000003,
+        "postGcHeapAfterRepeatedNavigationBytes": 53561552
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-7a382e82-f271-4968-994a-bd38442822e6",
+          "history-ordinary-b-c2db9703-83d8-4da5-8db8-e179b622eb84",
+          "history-parent-8283b373-164d-4fe6-a390-aa960cc7dbf7"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-7a382e82-f271-4968-994a-bd38442822e6",
+            "history-ordinary-b-c2db9703-83d8-4da5-8db8-e179b622eb84",
+            "history-parent-8283b373-164d-4fe6-a390-aa960cc7dbf7"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-7a382e82-f271-4968-994a-bd38442822e6",
+            "history-ordinary-b-c2db9703-83d8-4da5-8db8-e179b622eb84",
+            "history-parent-8283b373-164d-4fe6-a390-aa960cc7dbf7"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-7a382e82-f271-4968-994a-bd38442822e6",
+            "history-ordinary-b-c2db9703-83d8-4da5-8db8-e179b622eb84",
+            "history-parent-8283b373-164d-4fe6-a390-aa960cc7dbf7"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-candidate-phone/session-mobile-errand-hist-d1562-eline-1000-finished-Errands-mobile-chrome/errand-history-sample.json",
+      "sha256": "60b2abc97857a0712ddb0a7b0dbf1f32127fcd2eace9f404726c3cca51a92f50",
+      "platform": "phone",
+      "finishedHistoryCount": 1000,
+      "environment": {
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "backendBinarySha256": "ea2e711fa044e6064160a0d93d6c972fa4f70c1e0624ab0ea1860406710b98f9",
+        "fixtureBinarySha256": "e33d0881d11dd00529cb08795fb0b402bbe8ad422aa02e860a6da99a784c9ec8",
+        "frontendDistSha256": "b3875d45ef345482fbcd0c9c937bd13217e3c1dc34d29c8ed8b8f542bc31e2b1",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "manifestSha256": "b487027b948e643f685c88346f5a42a273a21ca355a5531147a94d60a1d17ff6",
+        "timestamp": "2026-11-14T02:03:12.333Z"
+      },
+      "metrics": {
+        "coldParentInputAcceptedMs": 2719.0622060000023,
+        "coldReloadInputAcceptedMs": 2879.177837999996,
+        "warmSwitchToZeroErrandTaskMs": 2345.191242000001,
+        "warmSwitchBackToHistoryTaskMs": 1206.8216540000067,
+        "postGcHeapAfterRepeatedNavigationBytes": 53560852
+      },
+      "materialization": {
+        "expectedOrdinaryIds": [
+          "history-ordinary-a-ef05a9f9-44bb-44e1-90d1-36d78aca8abc",
+          "history-ordinary-b-6269b026-9985-4f93-a688-c5099407d350",
+          "history-parent-13f33a09-e9ba-4e55-a89d-db13d3df4f16"
+        ],
+        "coldNavigation": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-ef05a9f9-44bb-44e1-90d1-36d78aca8abc",
+            "history-ordinary-b-6269b026-9985-4f93-a688-c5099407d350",
+            "history-parent-13f33a09-e9ba-4e55-a89d-db13d3df4f16"
+          ]
+        },
+        "reload": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-ef05a9f9-44bb-44e1-90d1-36d78aca8abc",
+            "history-ordinary-b-6269b026-9985-4f93-a688-c5099407d350",
+            "history-parent-13f33a09-e9ba-4e55-a89d-db13d3df4f16"
+          ]
+        },
+        "switchBackToHistoryTask": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0,
+          "ordinaryIds": [
+            "history-ordinary-a-ef05a9f9-44bb-44e1-90d1-36d78aca8abc",
+            "history-ordinary-b-6269b026-9985-4f93-a688-c5099407d350",
+            "history-parent-13f33a09-e9ba-4e55-a89d-db13d3df4f16"
+          ]
+        }
+      },
+      "maxHistoryRows": 100,
+      "childSubscriptionsAfterBack": [],
+      "errandListResultRows": {
+        "initialNavigation": [],
+        "afterExplicitHistoryOpen": [],
+        "maximumAcrossRun": 0
+      },
+      "pageRows": {
+        "afterExplicitHistoryOpen": [
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "afterRepeatedChildNavigation": [
+          25,
+          25,
+          25,
+          25,
+          25
+        ],
+        "savedLayoutRestore": []
+      }
+    }
+  ],
+  "note": "First candidate before Task04 state repairs and history-code loading experiment; scenario passes do not imply budget acceptance. Baseline caps unchanged."
+}

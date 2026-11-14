@@ -17,7 +17,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useToast } from "@/components/toast-provider";
 import { useErrandActions } from "@/hooks/domains/session/use-errand-actions";
-import { canSendErrandResult, isLiveErrand, type Errand } from "@/lib/types/errands";
+import { canSendErrandResult, isLiveErrand, type ErrandBrowserRow } from "@/lib/types/errands";
 import { cn } from "@/lib/utils";
 import { useSessionMenuOpeningGesture } from "../../mobile/use-session-menu-opening-gesture";
 import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
@@ -25,7 +25,7 @@ import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
 export type ErrandHeaderAction = "stop" | "send_result" | null;
 
 /** **Stop** while live, **Send result to parent** when eligible, never both. */
-export function errandHeaderAction(errand: Errand | null): ErrandHeaderAction {
+export function errandHeaderAction(errand: ErrandBrowserRow | null): ErrandHeaderAction {
   if (!errand) return null;
   if (isLiveErrand(errand)) return "stop";
   return canSendErrandResult(errand) ? "send_result" : null;
@@ -63,7 +63,7 @@ export function ErrandHeaderActionButton({
   errand,
   sessionId,
 }: {
-  errand: Errand | null;
+  errand: ErrandBrowserRow | null;
   sessionId: string;
 }) {
   const { t } = useTranslation();
@@ -109,7 +109,7 @@ export function ErrandHeaderActionsMenu({
   errand,
   sessionId,
 }: {
-  errand: Errand | null;
+  errand: ErrandBrowserRow | null;
   sessionId: string;
 }) {
   const { t } = useTranslation();

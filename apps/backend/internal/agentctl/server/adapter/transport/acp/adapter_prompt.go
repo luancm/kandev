@@ -792,7 +792,7 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 	for _, tcID := range a.activeMonitors[sessionID] {
 		monitorToolCallIDs[tcID] = true
 	}
-	toCancel := make(map[string]*streams.NormalizedPayload)
+	var toCancel []AgentEvent
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
 		switch {
@@ -808,24 +808,27 @@ func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
-			toCancel[tcID] = payload
+			owner := a.activeToolOwners[tcID]
+			if owner.sessionID == "" {
+				owner.sessionID = sessionID
+			}
+			toCancel = append(toCancel, AgentEvent{
+				Type: streams.EventTypeToolUpdate, SessionID: owner.sessionID,
+				ToolCallID: tcID, ParentToolCallID: owner.parentToolCallID,
+				PromptGeneration: owner.promptGeneration, ToolStatus: toolStatusCancelled,
+				NormalizedPayload: payload,
+			})
 			a.forgetPromptHandoffToolLocked(tcID)
 		}
 	}
 	a.activeToolCalls = preserved
 	a.mu.Unlock()
 
-	for toolCallID, normalized := range toCancel {
+	for _, event := range toCancel {
 		a.logger.Debug("cancelling active tool call",
-			zap.String("session_id", sessionID),
-			zap.String("tool_call_id", toolCallID))
-		a.sendUpdate(AgentEvent{
-			Type:              streams.EventTypeToolUpdate,
-			SessionID:         sessionID,
-			ToolCallID:        toolCallID,
-			ToolStatus:        toolStatusCancelled,
-			NormalizedPayload: normalized,
-		})
+			zap.String("session_id", event.SessionID),
+			zap.String("tool_call_id", event.ToolCallID))
+		a.sendUpdate(event)
 	}
 }
 
@@ -877,6 +880,7 @@ func (a *Adapter) isPromptHandoffToolProtectedLocked(toolCallID string) bool {
 }
 
 func (a *Adapter) forgetPromptHandoffToolLocked(toolCallID string) {
+	delete(a.activeToolOwners, toolCallID)
 	delete(a.toolCallParents, toolCallID)
 	delete(a.handoffProtectedToolCalls, toolCallID)
 }

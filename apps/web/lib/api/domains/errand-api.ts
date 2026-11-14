@@ -1,7 +1,12 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
   normalizeErrandAttention,
+  normalizeErrandBrowserAttention,
   type Errand,
+  type ErrandBrowserSummary,
+  type ErrandHistoryPage,
+  type ErrandInspection,
+  type ErrandBrowserRow,
   type ErrandCancelAllResponse,
   type ErrandListResponse,
 } from "@/lib/types/errands";
@@ -24,6 +29,59 @@ export async function listErrands(taskId: string): Promise<Errand[]> {
     task_id: taskId,
   });
   return Array.isArray(response?.errands) ? response.errands.map(normalizeErrandAttention) : [];
+}
+
+/** Reads compact live/outstanding Errands and authoritative task totals. */
+export async function getErrandBrowserSummary(
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<ErrandBrowserSummary> {
+  const client = requireClient();
+  const payload = { task_id: taskId };
+  const response = signal
+    ? await client.request<ErrandBrowserSummary>(
+        "errand.browser_summary",
+        payload,
+        undefined,
+        signal,
+      )
+    : await client.request<ErrandBrowserSummary>("errand.browser_summary", payload);
+  return { ...response, errands: response.errands.map(normalizeErrandBrowserAttention) };
+}
+
+/** Reads one explicit, parent-scoped page of finished Errand history. */
+export async function getErrandHistoryPage(
+  taskId: string,
+  parentSessionId: string,
+  options: { limit?: number; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<ErrandHistoryPage> {
+  const client = requireClient();
+  const payload = {
+    task_id: taskId,
+    parent_session_id: parentSessionId,
+    ...(options.limit === undefined ? {} : { limit: options.limit }),
+    ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
+  };
+  const response = signal
+    ? await client.request<ErrandHistoryPage>("errand.history_page", payload, undefined, signal)
+    : await client.request<ErrandHistoryPage>("errand.history_page", payload);
+  return { ...response, errands: response.errands.map(normalizeErrandBrowserAttention) };
+}
+
+/** Verifies and reads only one retained child and its minimal parent identity. */
+export async function inspectErrand(
+  taskId: string,
+  childSessionId: string,
+  signal?: AbortSignal,
+): Promise<ErrandInspection> {
+  const client = requireClient();
+  const payload = { task_id: taskId, child_session_id: childSessionId };
+  const response = signal
+    ? await client.request<ErrandInspection>("errand.inspect", payload, undefined, signal)
+    : await client.request<ErrandInspection>("errand.inspect", payload);
+  const errand: ErrandBrowserRow = normalizeErrandBrowserAttention(response.errand);
+  return { ...response, errand };
 }
 
 /** Cancels one errand; the errand ID is its session ID. */

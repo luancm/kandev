@@ -11,7 +11,14 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ usesDesktopWorkbench: true }),
 }));
 vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({ getState: () => ({ setActiveSession: mocks.setActive }) }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      tasks: { activeTaskId: "task", activeSessionId: "parent" },
+      setActiveSession: mocks.setActive,
+      releaseErrandInspection: vi.fn(),
+    }),
+    subscribe: () => () => {},
+  }),
 }));
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: { getState: () => ({ api: {} }) },

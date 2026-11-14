@@ -51,6 +51,9 @@ func (s *Service) ParentErrandState(ctx context.Context, parentSessionID string)
 	if !s.featureEnabled() || parentSessionID == "" {
 		return false, false, nil
 	}
+	if reader, ok := s.store.(ParentStateReader); ok {
+		return reader.GetParentErrandState(ctx, parentSessionID)
+	}
 	rows, err := s.store.ListErrandsByParent(ctx, parentSessionID)
 	if err != nil {
 		return false, false, fmt.Errorf("list errands of parent: %w", err)

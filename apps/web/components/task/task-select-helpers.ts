@@ -193,7 +193,12 @@ export function buildSwitchToSession(
     }
     setActiveSession(taskId, sessionId);
     if (newEnvId) {
-      performLayoutSwitch(oldEnvId, newEnvId, sessionId, getTaskSessionIds(state, taskId));
+      performLayoutSwitch(oldEnvId, newEnvId, sessionId, getTaskSessionIds(state, taskId), {
+        sessionListRestoreState: {
+          loaded: state.taskSessionsByTask.loadedByTaskId[taskId] ?? false,
+          knownForeignSessionIds: new Set(),
+        },
+      });
       return;
     }
     // The new session's task_environment_id has not been loaded into the store

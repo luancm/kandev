@@ -28,6 +28,11 @@ func exerciseErrandShellOwnership(t *testing.T, repo *Repository, native bool) {
 	admit(intent.TurnID, intent.SubmissionID)
 	seq := int64(0)
 	send := func(submission, protocol string, patch *streams.ShellOutputPatch) {
+		// A reused ID shared by admitted and native work requires exact source
+		// evidence. Other unowned tests cover changing protocol IDs when unique.
+		if native && submission == "" {
+			protocol = "b-start"
+		}
 		seq++
 		kind := streams.EventTypeToolCall
 		if patch != nil {

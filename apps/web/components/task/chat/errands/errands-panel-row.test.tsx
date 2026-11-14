@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Errand } from "@/lib/types/errands";
+import type { ErrandBrowserRow } from "@/lib/types/errands";
 import { ErrandsPanelRow } from "./errands-panel-row";
 
 const TASK_ID = "task-1";
@@ -15,9 +15,6 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock("@/hooks/domains/session/use-session-context-window", () => ({
-  useSessionContextWindow: () => undefined,
-}));
 vi.mock("@/hooks/domains/session/use-errand-actions", () => ({
   useErrandActions: () => {
     const [pending, setPending] = useState(false);
@@ -41,21 +38,31 @@ vi.mock("./errand-profile-label", () => ({
   ErrandProfileLabel: () => <span>Agent</span>,
 }));
 
-function errand(status: Errand["status"] = "running", errandId = ERRAND_ID): Errand {
+function errand(
+  status: ErrandBrowserRow["status"] = "running",
+  errandId = ERRAND_ID,
+): ErrandBrowserRow {
+  const live = ["queued", "running", "needs_attention"].includes(status);
   return {
     errand_id: errandId,
     task_id: TASK_ID,
     parent_session_id: "parent-1",
     title: "Review acceptance",
-    objective: "Review the change",
     agent_profile_id: "profile-1",
     status,
-    result_state: "none",
-    result_preview: "",
+    result_state: status === "done" ? "delivered" : "none",
     result_truncated: false,
     created_at: new Date(Date.now() - 2 * 60_000).toISOString(),
     updated_at: new Date().toISOString(),
     settled_at: null,
+    version: 1,
+    live,
+    outstanding: live,
+    unread: false,
+    can_send_result: false,
+    tokens_in: 0,
+    tokens_cached_in: 0,
+    tokens_out: 0,
   };
 }
 
@@ -63,7 +70,7 @@ function renderRow({
   status = "running",
   drawer = false,
 }: {
-  status?: Errand["status"];
+  status?: ErrandBrowserRow["status"];
   drawer?: boolean;
 } = {}) {
   return render(

@@ -276,9 +276,6 @@ export function useEnvSwitchCleanup(
             String(session.id),
           )
         : [];
-      if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
-        currentSessionIds.unshift(effectiveSessionId);
-      }
       const sessionListRestoreState: SessionListRestoreState = {
         loaded: activeTaskId
           ? (state.taskSessionsByTask.loadedByTaskId[activeTaskId] ?? false)

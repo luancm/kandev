@@ -10,9 +10,8 @@ import {
   formatContextTokens,
   type ContextWindowUsage,
 } from "@/lib/context-window-usage";
-import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
 import { useErrandActions } from "@/hooks/domains/session/use-errand-actions";
-import { isLiveErrand, type Errand } from "@/lib/types/errands";
+import { type ErrandBrowserRow } from "@/lib/types/errands";
 import { cn } from "@/lib/utils";
 import { errandElapsedLabel } from "./errand-display";
 import { ErrandProfileLabel } from "./errand-profile-label";
@@ -21,7 +20,7 @@ import { ErrandRecoveryNotice, ErrandStatusLabel, errandStatusLabelKey } from ".
 import { useOpenTaskSession } from "./use-open-task-session";
 
 type ErrandsPanelRowProps = {
-  errand: Errand;
+  errand: ErrandBrowserRow;
   taskId: string;
   /** Epoch ms shared by every row so a live panel ticks from one timer. */
   nowMs: number;
@@ -58,7 +57,7 @@ function RowSummary({
   contextSize,
   contextUsed,
 }: {
-  errand: Errand;
+  errand: ErrandBrowserRow;
   nowMs: number;
   title: string;
   contextUsage: ContextWindowUsage | undefined;
@@ -188,18 +187,19 @@ function ErrandStopButton({
   );
 }
 
-function DrawerRow({
-  errand,
-  taskId,
-  nowMs,
-  onOpened,
-  contextUsage,
-  contextDescriptionId,
-  deliveryUncertaintyDescriptionId,
-  recoveryDescriptionId,
-  contextSize,
-  contextUsed,
-}: ErrandsPanelRowPresentationProps) {
+function DrawerRow(props: ErrandsPanelRowPresentationProps) {
+  const {
+    errand,
+    taskId,
+    nowMs,
+    onOpened,
+    contextUsage,
+    contextDescriptionId,
+    deliveryUncertaintyDescriptionId,
+    recoveryDescriptionId,
+    contextSize,
+    contextUsed,
+  } = props;
   const { t } = useTranslation();
   const openSession = useOpenTaskSession();
   const title = errand.title || t("task:errandUntitled");
@@ -223,12 +223,22 @@ function DrawerRow({
           aria-describedby={descriptions.join(" ") || undefined}
           data-testid={`errands-panel-row-${errand.errand_id}`}
           onClick={() => {
-            openSession({ taskId, sessionId: errand.errand_id, title });
-            onOpened();
+            const opening = openSession({
+              taskId,
+              sessionId: errand.errand_id,
+              title,
+              isErrand: true,
+              errand,
+            });
+            if (opening && typeof opening.then === "function") {
+              void opening.then((opened) => {
+                if (opened) onOpened();
+              });
+            } else {
+              onOpened();
+            }
           }}
-          className={cn(
-            "flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-70",
-          )}
+          className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default disabled:opacity-70"
         >
           <RowSummary
             errand={errand}
@@ -245,26 +255,25 @@ function DrawerRow({
             <IconChevronRight aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
         </button>
-        {isLiveErrand(errand) && (
-          <ErrandStopButton errandId={errand.errand_id} title={title} drawer />
-        )}
+        {errand.live && <ErrandStopButton errandId={errand.errand_id} title={title} drawer />}
       </div>
     </li>
   );
 }
 
-function PopoverRow({
-  errand,
-  taskId,
-  nowMs,
-  onOpened,
-  contextUsage,
-  contextDescriptionId,
-  deliveryUncertaintyDescriptionId,
-  recoveryDescriptionId,
-  contextSize,
-  contextUsed,
-}: ErrandsPanelRowPresentationProps) {
+function PopoverRow(props: ErrandsPanelRowPresentationProps) {
+  const {
+    errand,
+    taskId,
+    nowMs,
+    onOpened,
+    contextUsage,
+    contextDescriptionId,
+    deliveryUncertaintyDescriptionId,
+    recoveryDescriptionId,
+    contextSize,
+    contextUsed,
+  } = props;
   const { t } = useTranslation();
   const title = errand.title || t("task:errandUntitled");
   return (
@@ -290,6 +299,7 @@ function PopoverRow({
           title={title}
           queued={errand.status === "queued"}
           onOpened={onOpened}
+          errand={errand}
           describedBy={
             [
               contextUsage ? contextDescriptionId : null,
@@ -300,7 +310,7 @@ function PopoverRow({
               .join(" ") || undefined
           }
         />
-        {isLiveErrand(errand) && (
+        {errand.live && (
           <ErrandStopButton errandId={errand.errand_id} title={title} drawer={false} />
         )}
       </div>
@@ -308,22 +318,26 @@ function PopoverRow({
   );
 }
 
-/** One errand in the chip panel: a card with **Open**, or a full-width row on phones. */
-export function ErrandsPanelRow({ drawer, ...rest }: ErrandsPanelRowProps) {
-  const contextWindow = useSessionContextWindow(rest.errand.errand_id, false);
-  const contextUsage = deriveContextWindowUsage(contextWindow);
+/** One compact browser row. Context is read from the projection, not per-row session subscriptions. */
+export function ErrandsPanelRow({ drawer, errand, ...rest }: ErrandsPanelRowProps) {
+  const contextWindow = errand.metadata?.context_window;
+  const contextSize = contextWindow?.size ?? 0;
+  const contextUsed = contextWindow?.used ?? 0;
+  const contextUsage = deriveContextWindowUsage(
+    contextSize > 0 ? { size: contextSize, used: contextUsed } : undefined,
+  );
   const contextDescriptionId = useId();
   const deliveryUncertaintyDescriptionId = useId();
   const recoveryDescriptionId = useId();
   const presentationProps = {
     ...rest,
+    errand,
     contextUsage,
     contextDescriptionId,
     deliveryUncertaintyDescriptionId,
     recoveryDescriptionId,
-    contextSize: contextWindow?.size ?? 0,
-    contextUsed: contextWindow?.used ?? 0,
+    contextSize,
+    contextUsed,
   };
-
   return drawer ? <DrawerRow {...presentationProps} /> : <PopoverRow {...presentationProps} />;
 }

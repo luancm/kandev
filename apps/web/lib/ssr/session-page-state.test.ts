@@ -18,6 +18,7 @@ import {
 const mocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
   fetchTaskSession: vi.fn(),
+  inspectErrand: vi.fn(),
   fetchUserSettings: vi.fn(),
   fetchWorkflowSnapshot: vi.fn(),
   listWorkflowSteps: vi.fn(),
@@ -27,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   listRepositories: vi.fn(),
   listSessionTurns: vi.fn(),
   listTaskSessionMessages: vi.fn(),
-  listTaskSessions: vi.fn(),
+  listOrdinaryTaskSessions: vi.fn(),
   listWorkflows: vi.fn(),
   listWorkspaces: vi.fn(),
 }));
@@ -43,7 +44,7 @@ vi.mock("@/lib/api", () => ({
   listExecutors: mocks.listExecutors,
   listRepositories: mocks.listRepositories,
   listTaskSessionMessages: mocks.listTaskSessionMessages,
-  listTaskSessions: mocks.listTaskSessions,
+  listOrdinaryTaskSessions: mocks.listOrdinaryTaskSessions,
   listWorkflows: mocks.listWorkflows,
   listWorkspaces: mocks.listWorkspaces,
 }));
@@ -52,6 +53,10 @@ vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.list
 
 vi.mock("@/lib/api/domains/session-api", () => ({
   listSessionTurns: mocks.listSessionTurns,
+}));
+
+vi.mock("@/lib/api/domains/errand-api", () => ({
+  inspectErrand: mocks.inspectErrand,
 }));
 
 vi.mock("@/lib/api/domains/user-shell-api", () => ({
@@ -97,8 +102,9 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 /** Resets mocks and seeds every API mock with its default hydration response. */
 function mockDefaultHydrationData() {
   vi.clearAllMocks();
+  mocks.inspectErrand.mockRejectedValue(new Error("requested task session is unavailable"));
   mocks.fetchTask.mockResolvedValue(makeTask());
-  mocks.listTaskSessions.mockResolvedValue({ sessions: [] });
+  mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [] });
   mocks.listAgents.mockResolvedValue({ agents: [] });
   mocks.listWorkflowSteps.mockResolvedValue({ steps: [] });
   mocks.listAvailableAgents.mockReturnValue(new Promise(() => {}));
@@ -185,7 +191,7 @@ describe("progressive task navigation state", () => {
     expect(result.task).toBe(identity.task);
     expect(result.sessionId).toBe(SESSION_ID);
     expect(mocks.fetchTask).not.toHaveBeenCalled();
-    expect(mocks.listTaskSessions).not.toHaveBeenCalled();
+    expect(mocks.listOrdinaryTaskSessions).not.toHaveBeenCalled();
   });
 
   it("lets route enrichment join the settings agent read", async () => {
@@ -246,7 +252,7 @@ describe("task navigation shell turn hydration", () => {
       allSessionsResponse: { sessions: [], total: 0 },
       sessionListUnavailable: true,
     };
-    mocks.listTaskSessions.mockResolvedValueOnce({ sessions: [session], total: 1 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValueOnce({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
     mocks.listTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false });
     mocks.listSessionTurns.mockResolvedValue({ turns: [], total: 0 });
@@ -257,7 +263,7 @@ describe("task navigation shell turn hydration", () => {
 
     const enrichment = await fetchTaskNavigationEnrichment(identity);
 
-    expect(mocks.listTaskSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.listOrdinaryTaskSessions).toHaveBeenCalledTimes(1);
     expect(mocks.fetchTaskSession).toHaveBeenCalledWith(SESSION_ID, { cache: "no-store" });
     expect(enrichment.initialState.taskSessionsByTask?.loadedByTaskId[TASK_ID]).toBe(true);
     expect(enrichment.initialState.taskSessions?.items[SESSION_ID]).toEqual(session);
@@ -345,7 +351,7 @@ describe("fetchSessionDataForTask initial hydration", () => {
     const primary = makeSession();
     const requested = { ...makeSession(), id: sessionId("session-requested") };
     mocks.fetchTask.mockResolvedValue(makeTask({ primary_session_id: sessionId(primary.id) }));
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [primary, requested], total: 2 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [primary, requested], total: 2 });
     mocks.fetchTaskSession.mockResolvedValue({ session: requested });
 
     const result = await fetchSessionDataForTask(TASK_ID, requested.id);
@@ -354,10 +360,10 @@ describe("fetchSessionDataForTask initial hydration", () => {
     expect(result.sessionId).toBe(requested.id);
   });
 
-  it("rejects a requested session that is not in the route task's session list", async () => {
+  it("does not fall back when a requested session is not in the route task's ordinary list", async () => {
     const primary = makeSession();
     mocks.fetchTask.mockResolvedValue(makeTask({ primary_session_id: sessionId(primary.id) }));
-    mocks.listTaskSessions.mockResolvedValue({
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({
       sessions: [
         primary,
         { ...makeSession(), id: sessionId("other-task-session"), task_id: "task-other" },
@@ -366,10 +372,11 @@ describe("fetchSessionDataForTask initial hydration", () => {
     });
     mocks.fetchTaskSession.mockResolvedValue({ session: primary });
 
-    const result = await fetchSessionDataForTask(TASK_ID, sessionId("other-task-session"));
+    await expect(fetchSessionDataForTask(TASK_ID, sessionId("other-task-session"))).rejects.toThrow(
+      "requested task session is unavailable",
+    );
 
-    expect(mocks.fetchTaskSession).toHaveBeenCalledWith(primary.id, { cache: "no-store" });
-    expect(result.sessionId).toBe(primary.id);
+    expect(mocks.fetchTaskSession).not.toHaveBeenCalled();
   });
 });
 
@@ -387,7 +394,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
       created_at: NOW,
     } as Message;
     const windowTurn = makeTurn("turn-window");
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
     mocks.listTaskSessionMessages.mockResolvedValue({
       messages: [message],
@@ -432,7 +439,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
       config_baseline: { reasoning_effort: "medium" },
     };
 
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
     mocks.listSessionTurns.mockResolvedValue({
       turns: [
@@ -467,7 +474,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
     // A rejected optional turns hydration must not mark the session loaded,
     // so the client hook can fetch turns on first render.
     const session = makeSession();
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
     mocks.listSessionTurns.mockRejectedValue(new Error("turns unavailable"));
     mocks.listTaskSessionMessages.mockResolvedValue(null);
@@ -485,7 +492,7 @@ describe("fetchSessionDataForTask agent hydration", () => {
   it("renders core task and session state when optional agent hydration never settles", async () => {
     vi.useFakeTimers();
     const session = makeSession();
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
     mocks.listAgents.mockReturnValue(new Promise(() => {}));
     mocks.listSessionTurns.mockResolvedValue({ turns: [], total: 0 });
@@ -605,7 +612,7 @@ describe("fetchSessionDataForTask timeout behavior", () => {
     const stalledAgentRequest = new Promise<never>((_, reject) => {
       rejectAgentRequest = reject;
     });
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockReturnValue(new Promise(() => {}));
     mocks.listAgents.mockReturnValue(stalledAgentRequest);
     mocks.listSessionTurns.mockResolvedValue({ turns: [], total: 0 });
@@ -656,7 +663,7 @@ describe("fetchSessionDataForTask timeout behavior", () => {
 describe("fetchTaskNavigationData", () => {
   it("hydrates only essential task/session state without optional boot requests", async () => {
     const session = makeSession();
-    mocks.listTaskSessions.mockResolvedValue({ sessions: [session] });
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session] });
     const result = await fetchTaskNavigationData(TASK_ID);
     expect(result.sessionId).toBe(SESSION_ID);
     expect(result.initialState.taskSessions?.items[SESSION_ID]).toEqual(session);
@@ -664,19 +671,19 @@ describe("fetchTaskNavigationData", () => {
     expect(result.initialState.messages).toBeUndefined();
     expect(result.initialState.turns).toBeUndefined();
     for (const [name, mock] of Object.entries(mocks)) {
-      if (name === "fetchTask" || name === "listTaskSessions") continue;
+      if (name === "fetchTask" || name === "listOrdinaryTaskSessions") continue;
       expect(mock, name).not.toHaveBeenCalled();
     }
   });
 
-  it("ignores a requested session owned by another task", async () => {
+  it("does not fall back when a requested session is owned by another task", async () => {
     const session = makeSession();
-    mocks.listTaskSessions.mockResolvedValue({
+    mocks.listOrdinaryTaskSessions.mockResolvedValue({
       sessions: [{ ...session, id: "foreign-session", task_id: "foreign-task" }, session],
     });
-    const result = await fetchTaskNavigationData(TASK_ID, "foreign-session");
-    expect(result.sessionId).toBe(SESSION_ID);
-    expect(Object.keys(result.initialState.taskSessions!.items)).toEqual([SESSION_ID]);
+    await expect(fetchTaskNavigationData(TASK_ID, "foreign-session")).rejects.toThrow(
+      "requested task session is unavailable",
+    );
   });
 
   it("keeps a sessionless task sessionless without waiting for enrichment", async () => {

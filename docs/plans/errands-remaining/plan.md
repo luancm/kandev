@@ -1,6 +1,6 @@
 ---
 created: 2026-11-10
-status: done
+status: in_progress
 requirements:
   - REQ-TASKS-ERRANDS-002
   - REQ-TASKS-ERRANDS-004
@@ -25,7 +25,32 @@ All four implementation groups are on `feature/plan-errands-first-d-424`: exact 
 
 Fresh managed browser acceptance passed all 21 desktop and 19 phone cases. Follow-up verification corrected lifecycle-only turn selection and exact-authorized cold resume without a retained runtime row. Old browser fixture expectations now require completed child state. The gateway fixture now supplies its real Hub and verifies authenticated subscription identity; its full race suite passed. A failing lifecycle case also exposed literal native filenames being interpreted as URI syntax; both SQLite factories now reuse the existing escaping helper, with independent writer/reader regressions and a passing lifecycle rerun. Affected backend race suites, SQL guard, store conformance, frontend typecheck and 228 tests, translation/wait guards and the normal optimized build passed. Final delivery evidence belongs in [the integration handoff](integration-handoff.md), which owns exact commands, counts, limits and checkpoint history.
 
-No deployment, live database repair, transcript deletion, worktree removal or universal provider certification is included. The unrelated untracked `loading-performance-investigation.md` remains preserved outside this delivery.
+The latest delivered checkpoint is `6e4c5ca9bce14b952d8cbaa52dc0282af870d835`, which also includes startup resilience, cancellation/legacy cleanup compatibility, truthful status counts and individual Stop. The historical receipts above remain accepted. Current work is history-loading performance acceptance and exact replay of late tool updates, followed by integration, commit/push and upstream refresh. The [bounded-use roadmap](bounded-use-roadmap.md) explains the intended first delivery and subsequent pilot.
+
+No deployment, live database repair, transcript deletion, worktree removal or universal provider certification is included.
+
+## Current follow-up: load finished Errands on demand
+
+Keep ordinary task loading approximately constant as completed Errands accumulate. This work addresses the Errands regression, with general asset compression, bundle splitting and unrelated optimization excluded. The [investigation](loading-performance-investigation.md) records the supplied HAR: 107 Errands account for about 243 KB of the parent's 250 KB session list, compared with 7.2 KB for its three ordinary sessions, and historical children enter boot and normal session reconciliation. This is payload/workload evidence, not a before/after latency or memory benchmark.
+
+Planned outcomes:
+
+- Load compact active, queued and needs-attention summaries immediately. Preserve truthful counts, capacity, unread/result indicators and Stop/Stop-all semantics without enumerating finished child sessions.
+- Fetch finished-history summaries asynchronously when the user opens history and paginate larger histories. An eager background fetch of all completed Errands does not satisfy this outcome.
+- Load a child's transcript, session detail and associated subscriptions only when opened. Direct finished-child links load the selected child and minimal parent identity without fetching all history.
+- Exclude finished children from ordinary-session boot/list reconciliation and prevent Errand panels from materializing during saved-layout restoration. Preserve ordinary sibling tabs, parent ownership and explicit child navigation.
+- Render existing result cards from saved content, preserving immutable duration and legacy omissions without fetching the child conversation.
+- Reuse the desktop popover and phone drawer/full-screen child composition. Provide localized loading, empty, retry and next-page states; preserve internal scrolling, safe areas, touch targets and Back navigation. Coalesce duplicate reads and discard stale task/parent/page responses.
+
+The user approved proceeding after reviewing [the impact walkthrough](loading-impact.html). In the [history package](../errand-history-loading/plan.md), Tasks00–03 are implemented and accepted; Task04 performance acceptance remains open. The shared checkout retains those changes uncommitted. Ordinary sessions keep their existing loading behavior; finished history and child details load on demand. Structural bounds and the large-history performance checks pass. The [second paired cohort](../errand-history-loading/paired-performance-v2-handoff.md) and [upstream-main comparison](../errand-history-loading/main-comparison-handoff.md) retain the remaining low-history timing, fixed-memory and navigation-tail findings. No earlier failed measurement has been removed or relabelled as passing.
+
+The [late-tool replay work order](../errand-tool-terminal-replay/task-01-exact-tool-replay.md) is also in progress. The observed completed review was blocked behind a missing-identity tool cancellation. Repair requires exact retained source evidence and an independent real terminal; historical records without that proof remain unresolved. Further Errand launches are held while the primary completes this reliability work.
+
+Acceptance remains pending:
+
+- [ ] Compare the same isolated task with zero, 100 and a larger completed-Errand history, holding ordinary sessions, build, network and cache conditions fixed. Measure boot/list bytes and request counts, session reconciliation work, panel creation/removal, time to usable parent conversation, and retained subscriptions/memory after repeated navigation.
+- [ ] Keep ordinary reload/task-switch work bounded independently of finished-history size, with history requests following explicit demand and pagination. Establish timing/memory tolerances from the controlled baseline before accepting the implementation; no unmeasured performance claim counts as completion.
+- [ ] Prove desktop/phone reload, warm switching, history loading/pagination/retry, direct historical links, self-contained result cards, live status and Stop, stale-response isolation and absence of temporary Errand tabs. Validate runtime cleanup separately from retained-history UI loading.
 
 ## Delivery and acceptance
 

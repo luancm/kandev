@@ -56,6 +56,15 @@ func (r *Repository) initErrandsSchema() error {
 			return fmt.Errorf("initialize errands schema: %w", err)
 		}
 	}
+	if err := r.migrate.Apply("task_session_errands.browser_history_old_index", `DROP INDEX IF EXISTS `+errBrowserHistoryOldIndex); err != nil {
+		return fmt.Errorf("initialize errands schema: %w", err)
+	}
+	if err := r.migrate.Apply("task_session_errands.browser_history_prior_index", `DROP INDEX IF EXISTS `+errBrowserHistoryPriorIndex); err != nil {
+		return fmt.Errorf("initialize errands schema: %w", err)
+	}
+	if err := r.migrate.Apply("task_session_errands.browser_history_normalized_v3", errandBrowserHistoryIndexDDL(r.db.DriverName())); err != nil {
+		return fmt.Errorf("initialize errands schema: %w", err)
+	}
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("initialize errands schema: %w", err)
 	}

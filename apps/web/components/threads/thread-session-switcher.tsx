@@ -1,5 +1,7 @@
 "use client";
 
+import { useInspectedErrandSession } from "@/hooks/domains/session/use-inspected-errand-session";
+
 import { conversationTabSessionId } from "@/lib/task-conversation-navigation";
 import {
   IconAlertCircle,
@@ -342,8 +344,14 @@ export function ThreadSessionSwitcher({
     "",
     enabled ? (errands ?? {}) : undefined,
   );
+  const inspectedChild = useInspectedErrandSession(sessions[0]?.task_id ?? "", selectedSessionId);
   if (views.length <= 1) return null;
-  const selectedConversationId = conversationTabSessionId(selectedSessionId, sessions, errands);
+  const selectedConversationId = conversationTabSessionId(
+    selectedSessionId,
+    sessions,
+    errands,
+    inspectedChild ?? undefined,
+  );
 
   return isMobile ? (
     <div

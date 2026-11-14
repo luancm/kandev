@@ -45,13 +45,17 @@ func (r *Repository) retainUnownedToolSourceTx(ctx context.Context, tx *sqlx.Tx,
 	return err
 }
 
-func unownedToolUpdateTurnTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, agent streams.AgentEvent) (string, error) {
+func (r *Repository) unownedToolUpdateTurnTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, agent streams.AgentEvent) (string, error) {
+	admitted, err := r.admittedToolUpdateSourcesTx(ctx, tx, event, agent)
+	if err != nil {
+		return "", err
+	}
 	rows, err := tx.QueryContext(ctx, tx.Rebind(`SELECT outcome FROM agent_delivery_effects WHERE effect_type=? AND session_id=? AND incarnation_id=? AND harness_generation=? AND stream_id=?`), unownedToolSourceEffect, event.SessionID, event.IncarnationID, event.HarnessGeneration, event.StreamID)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = rows.Close() }()
-	var candidates, exact []unownedToolSource
+	candidates := admitted
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
@@ -61,19 +65,30 @@ func unownedToolUpdateTurnTx(ctx context.Context, tx *sqlx.Tx, event *models.Age
 		if err := json.Unmarshal([]byte(raw), &source); err != nil {
 			return "", err
 		}
-		if !source.matches(event, agent) {
+		probe := agent
+		if len(admitted) > 0 && probe.PromptGeneration == 0 {
+			probe.PromptGeneration = source.PromptGeneration
+		}
+		if !source.matches(event, probe) {
 			continue
 		}
 		candidates = append(candidates, source)
-		if agent.ProtocolMessageID != "" && source.ProtocolID == agent.ProtocolMessageID {
-			exact = append(exact, source)
-		}
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
+	return uniqueToolSourceTurn(candidates, agent.ProtocolMessageID)
+}
+
+func uniqueToolSourceTurn(candidates []unownedToolSource, protocolID string) (string, error) {
 	// Protocol message IDs may change between start and streaming updates.
 	// A unique source tuple is sufficient; multiple sources require exact evidence.
+	var exact []unownedToolSource
+	for _, source := range candidates {
+		if protocolID != "" && source.ProtocolID == protocolID {
+			exact = append(exact, source)
+		}
+	}
 	if len(exact) > 0 {
 		candidates = exact
 	}
@@ -103,7 +118,7 @@ func (r *Repository) unownedErrandEventTurnTx(ctx context.Context, tx *sqlx.Tx, 
 		return "", err
 	}
 	if payload.Type == streams.EventTypeShellOutputUpdate || payload.Type == streams.EventTypeToolUpdate {
-		return unownedToolUpdateTurnTx(ctx, tx, event, payload)
+		return r.unownedToolUpdateTurnTx(ctx, tx, event, payload)
 	}
 	return unownedDeliveryTurnID(event, payload), nil
 }

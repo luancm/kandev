@@ -24,6 +24,7 @@ function restoreActiveSessionPanel(api: DockviewReadyEvent["api"], state: AppSta
     state.tasks.activeSessionId,
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
     taskId ? state.errands.byTaskId[taskId] : undefined,
+    state.tasks.activeSessionId ? state.taskSessions.items[state.tasks.activeSessionId] : undefined,
   );
   if (!activeSessionId) return;
   if (hiddenSessionIdsFor(api).has(activeSessionId)) return;
@@ -99,6 +100,7 @@ function adoptRestoredSessionTabSelection(
     state.tasks.activeSessionId,
     state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [],
     state.errands.byTaskId[activeTaskId],
+    state.tasks.activeSessionId ? state.taskSessions.items[state.tasks.activeSessionId] : undefined,
   );
   // An explicit child route owns selection; a saved peer tab cannot replace it.
   if (selectedHostId !== state.tasks.activeSessionId) return;

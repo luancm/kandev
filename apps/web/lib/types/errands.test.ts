@@ -3,14 +3,20 @@ import {
   canSendErrandResult,
   isLiveErrand,
   normalizeErrandAttention,
+  normalizeErrandBrowserAttention,
   parseErrandAttentionReason,
   parseErrandStatus,
   type Errand,
+  type ErrandBrowserRow,
   type ErrandDeliveryState,
   type ErrandStatus,
 } from "./errands";
 
 const BASE_DATE = "2026-10-26T10:00:00Z";
+const RECOVERY_UNRESOLVED = "recovery_unresolved";
+const TASK_ID = "task-1";
+const PARENT_SESSION_ID = "session-parent";
+const ERRAND_ID = "errand-1";
 
 const STATUSES: Record<ErrandStatus, boolean> = {
   queued: true,
@@ -30,9 +36,9 @@ describe("isLiveErrand", () => {
 describe("Errand", () => {
   it("mirrors the backend ErrandDTO keys, with settled_at sent as null", () => {
     const errand: Errand = {
-      errand_id: "errand-1",
-      task_id: "task-1",
-      parent_session_id: "session-parent",
+      errand_id: ERRAND_ID,
+      task_id: TASK_ID,
+      parent_session_id: PARENT_SESSION_ID,
       title: "API audit",
       objective: "Audit the API",
       agent_profile_id: "profile-1",
@@ -64,9 +70,9 @@ describe("Errand", () => {
 
   it("accepts the server-computed can_send_result flag", () => {
     const errand: Errand = {
-      errand_id: "errand-1",
-      task_id: "task-1",
-      parent_session_id: "session-parent",
+      errand_id: ERRAND_ID,
+      task_id: TASK_ID,
+      parent_session_id: PARENT_SESSION_ID,
       title: "API audit",
       objective: "Audit the API",
       agent_profile_id: "profile-1",
@@ -121,7 +127,7 @@ describe("parseErrandStatus", () => {
 });
 
 describe("Errand attention reason", () => {
-  it.each(["permission", "recovery_unresolved"] as const)("accepts %s", (reason) => {
+  it.each(["permission", RECOVERY_UNRESOLVED] as const)("accepts %s", (reason) => {
     expect(parseErrandAttentionReason(reason)).toBe(reason);
   });
 
@@ -131,14 +137,14 @@ describe("Errand attention reason", () => {
 
   it("keeps only a recognized reason on needs_attention snapshots", () => {
     const attention = normalizeErrandAttention({
-      errand_id: "errand-1",
-      task_id: "task-1",
-      parent_session_id: "session-parent",
+      errand_id: ERRAND_ID,
+      task_id: TASK_ID,
+      parent_session_id: PARENT_SESSION_ID,
       title: "API audit",
       objective: "Audit the API",
       agent_profile_id: "profile-1",
       status: "needs_attention",
-      attention_reason: "recovery_unresolved",
+      attention_reason: RECOVERY_UNRESOLVED,
       result_state: "none",
       result_preview: "",
       result_truncated: false,
@@ -146,7 +152,7 @@ describe("Errand attention reason", () => {
       updated_at: BASE_DATE,
       settled_at: null,
     });
-    expect(attention.attention_reason).toBe("recovery_unresolved");
+    expect(attention.attention_reason).toBe(RECOVERY_UNRESOLVED);
 
     const oldBackend = normalizeErrandAttention({ ...attention, attention_reason: undefined });
     expect(oldBackend).not.toHaveProperty("attention_reason");
@@ -159,5 +165,52 @@ describe("Errand attention reason", () => {
 
     const nonAttention = normalizeErrandAttention({ ...attention, status: "running" });
     expect(nonAttention).not.toHaveProperty("attention_reason");
+  });
+});
+
+describe("compact Errand browser rows", () => {
+  const row: ErrandBrowserRow = {
+    errand_id: ERRAND_ID,
+    task_id: TASK_ID,
+    parent_session_id: PARENT_SESSION_ID,
+    title: "API audit",
+    agent_profile_id: "profile-1",
+    status: "needs_attention",
+    result_state: "pending",
+    result_truncated: false,
+    created_at: BASE_DATE,
+    updated_at: BASE_DATE,
+    settled_at: null,
+    version: 2,
+    live: true,
+    outstanding: true,
+    unread: false,
+    can_send_result: false,
+    tokens_in: 0,
+    tokens_cached_in: 0,
+    tokens_out: 0,
+  };
+
+  it("preserves a recognized reason and never exposes full result fields", () => {
+    const normalized = normalizeErrandBrowserAttention({ ...row, attention_reason: "permission" });
+    expect(normalized.attention_reason).toBe("permission");
+    expect(normalized).not.toHaveProperty("objective");
+    expect(normalized).not.toHaveProperty("result_preview");
+  });
+
+  it("drops invalid and stale attention reasons", () => {
+    expect(
+      normalizeErrandBrowserAttention({
+        ...row,
+        attention_reason: "future",
+      } as unknown as ErrandBrowserRow),
+    ).not.toHaveProperty("attention_reason");
+    expect(
+      normalizeErrandBrowserAttention({
+        ...row,
+        status: "running",
+        attention_reason: "permission",
+      }),
+    ).not.toHaveProperty("attention_reason");
   });
 });

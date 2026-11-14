@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { useNow } from "@/hooks/use-now";
-import { isLiveErrand, type Errand } from "@/lib/types/errands";
+import { isLiveErrand, type ErrandBrowserRow } from "@/lib/types/errands";
 import { cn } from "@/lib/utils";
 import { errandElapsedLabel } from "./errand-display";
 import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
@@ -25,13 +25,13 @@ function Dot() {
   );
 }
 
-function LiveElapsed({ errand }: { errand: Errand }) {
+function LiveElapsed({ errand }: { errand: ErrandBrowserRow }) {
   const now = useNow(ELAPSED_TICK_MS);
   return <>{errandElapsedLabel(errand, now)}</>;
 }
 
 /** Status with its elapsed time; only a live errand ticks. */
-function StatusWithElapsed({ errand }: { errand: Errand }) {
+function StatusWithElapsed({ errand }: { errand: ErrandBrowserRow }) {
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
       <ErrandStatusLabel
@@ -51,7 +51,7 @@ function StatusWithElapsed({ errand }: { errand: Errand }) {
 }
 
 /** Recovery-attention copy stays beside the status in both child headers. */
-export function ErrandRecoveryHeaderNotice({ errand }: { errand: Errand | null }) {
+export function ErrandRecoveryHeaderNotice({ errand }: { errand: ErrandBrowserRow | null }) {
   if (errand?.attention_reason !== "recovery_unresolved" || errand.status !== "needs_attention") {
     return null;
   }

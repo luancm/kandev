@@ -20,6 +20,7 @@ type countingSessionSummaryRepository struct {
 	*sqliterepo.Repository
 	batchSummaryCalls int
 	listSummaryCalls  int
+	ordinaryCalls     int
 	fullBatchCalls    int
 	fullListCalls     int
 }
@@ -92,6 +93,14 @@ func (r *countingSessionSummaryRepository) ListTaskSessionSummaryObservations(
 	return r.Repository.ListTaskSessionSummaryObservations(ctx, taskID)
 }
 
+func (r *countingSessionSummaryRepository) ListOrdinaryTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	r.ordinaryCalls++
+	return r.Repository.ListOrdinaryTaskSessionSummaryObservations(ctx, taskID)
+}
+
 func (r *countingSessionSummaryRepository) BatchGetSessionsByTaskIDs(
 	ctx context.Context,
 	taskIDs []string,
@@ -147,23 +156,36 @@ func TestSessionSummaryServiceUsesNarrowReads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "errand-summary-service", TaskID: "task-1", Role: models.SessionRoleErrand,
+		ParentSessionID: "session-summary-service", State: models.TaskSessionStateCompleted,
+	}); err != nil {
+		t.Fatalf("create errand: %v", err)
+	}
 	batch, err := svc.BatchGetTaskSessionSummaryObservations(ctx, []string{"task-1"})
 	if err != nil {
 		t.Fatalf("batch session summary observations: %v", err)
 	}
-	if len(batch["task-1"]) != 1 || batch["task-1"][0].ID != "session-summary-service" {
+	if len(batch["task-1"]) != 2 {
 		t.Fatalf("batch summary observations = %+v", batch)
 	}
 	listed, err := svc.ListTaskSessionSummaryObservations(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("list session summary observations: %v", err)
 	}
-	if len(listed) != 1 || listed[0].ID != "session-summary-service" {
+	if len(listed) != 2 {
 		t.Fatalf("listed summary observations = %+v", listed)
 	}
-	if reader.batchSummaryCalls != 1 || reader.listSummaryCalls != 1 || reader.fullBatchCalls != 0 || reader.fullListCalls != 0 {
-		t.Fatalf("summary/full read counts = batch %d/list %d/full batch %d/full list %d",
-			reader.batchSummaryCalls, reader.listSummaryCalls, reader.fullBatchCalls, reader.fullListCalls)
+	ordinary, err := svc.ListOrdinaryTaskSessionSummaryObservations(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list ordinary session summary observations: %v", err)
+	}
+	if len(ordinary) != 1 || ordinary[0].ID != "session-summary-service" {
+		t.Fatalf("ordinary session summary observations = %+v", ordinary)
+	}
+	if reader.batchSummaryCalls != 1 || reader.listSummaryCalls != 1 || reader.ordinaryCalls != 1 || reader.fullBatchCalls != 0 || reader.fullListCalls != 0 {
+		t.Fatalf("summary/full read counts = batch %d/list %d/ordinary %d/full batch %d/full list %d",
+			reader.batchSummaryCalls, reader.listSummaryCalls, reader.ordinaryCalls, reader.fullBatchCalls, reader.fullListCalls)
 	}
 }
 

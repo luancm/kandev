@@ -4,6 +4,7 @@ import { IconArrowUpRight } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
+import type { ErrandBrowserRow } from "@/lib/types/errands";
 import { useOpenTaskSession } from "./use-open-task-session";
 
 /** Fine-pointer compact density, 44px hit area on phones and coarse pointers. */
@@ -20,6 +21,7 @@ export function ErrandOpenButton({
   className,
   testId,
   describedBy,
+  errand,
 }: {
   taskId: string | null;
   errandId: string;
@@ -30,6 +32,7 @@ export function ErrandOpenButton({
   className?: string;
   testId?: string;
   describedBy?: string;
+  errand?: ErrandBrowserRow;
 }) {
   const { t } = useTranslation();
   const openSession = useOpenTaskSession();
@@ -44,8 +47,14 @@ export function ErrandOpenButton({
       data-testid={testId ?? `errand-open-${errandId}`}
       onClick={() => {
         if (!taskId) return;
-        openSession({ taskId, sessionId: errandId, title });
-        onOpened?.();
+        const opening = openSession({ taskId, sessionId: errandId, title, isErrand: true, errand });
+        if (opening && typeof opening.then === "function") {
+          void opening.then((opened) => {
+            if (opened) onOpened?.();
+          });
+        } else {
+          onOpened?.();
+        }
       }}
       className={cn(
         "h-6 shrink-0 cursor-pointer gap-1 px-2 text-[11px]",

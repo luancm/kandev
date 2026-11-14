@@ -311,6 +311,9 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 	if err := r.retainUnownedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
 		return 0, err
 	}
+	if err := r.retainAdmittedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
+		return 0, err
+	}
 	if err := r.receiveErrandAwaitReceiptTx(ctx, tx, event); err != nil {
 		return 0, err
 	}

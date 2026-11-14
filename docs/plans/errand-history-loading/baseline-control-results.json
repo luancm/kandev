@@ -1,0 +1,340 @@
+{
+  "purpose": "Contemporaneous diagnostic controls at original production commit; not replacement budgets or candidate acceptance.",
+  "sourceCommit": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+  "originalCapsUnchanged": true,
+  "samples": [
+    {
+      "path": "/tmp/kandev-history-current-baseline-desktop/session-errand-history-bas-3f89e-eline-1000-finished-Errands-chromium/errand-history-sample.json",
+      "sha256": "2f411102038b5af0491ee2ac5a9d117b92d1e1d7796860749092bd93e2362783",
+      "platform": "desktop",
+      "finishedHistoryCount": 1000,
+      "heapBytes": 103042352,
+      "reloadMs": 6919.155825000002,
+      "switchToOrdinaryMs": 2348.965096,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:01:07.632Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "617b1725f311fa91bffd47be4ea239bde8b2af6f0ac33feabf14708cfe403fab"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-desktop/session-errand-history-bas-a124f-baseline-0-finished-Errands-chromium/errand-history-sample.json",
+      "sha256": "2c80c9b60a9a4b3d4ab0216a2127758e4c79bb0982afefd8eedf904bebb5e410",
+      "platform": "desktop",
+      "finishedHistoryCount": 0,
+      "heapBytes": 66933600,
+      "reloadMs": 1540.2200840000005,
+      "switchToOrdinaryMs": 1355.7962039999984,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:00:57.604Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "84606797c8c4551e2fb2cbe6f05d06b57e3e358a673ffbc94f3208b41892e817"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat1/errand-history-sample.json",
+      "sha256": "f05e15854cb2fa7d30b8a4bb11c707111dc5e643a729c6fcce4b64c098adffec",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50176924,
+      "reloadMs": 1154.4194300000008,
+      "switchToOrdinaryMs": 1288.5323849999995,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:02:51.787Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "3f3c9b647f90e2dd3d3a3a420a71d3992f680ed57f5a6e57e7d6d450c329c9a8"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat2/errand-history-sample.json",
+      "sha256": "3b8fa297990b7963f984e314d1394ad44a75a3799f643cce2fd097856f9c1852",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50173540,
+      "reloadMs": 1215.7824329999994,
+      "switchToOrdinaryMs": 1267.5080389999994,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:03:02.185Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "269758df9927e4709878822641298da4b0d1142f42aa8e95f737a298600aaac6"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat3/errand-history-sample.json",
+      "sha256": "1208f50737fa9f562b695c97936d681667fe31e26cb21dbff04482ec111a1537",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50173668,
+      "reloadMs": 1197.2320119999995,
+      "switchToOrdinaryMs": 1298.2295790000007,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:03:12.479Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "cf2a8e6bfbe635c4063cdfcfa80f5bccca8239cefb7c895af70149bb61e8d58f"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat4/errand-history-sample.json",
+      "sha256": "c9831b0c8f33651d33e0d0b5bb8fe05d7dcd2b4c25aecd2cc9987ffe2dd74256",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50173668,
+      "reloadMs": 1266.3218810000008,
+      "switchToOrdinaryMs": 1337.2111669999995,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:03:22.837Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "c5584d7866b60cc38ec1c8e2a253f1682afd9e2685d5b449faf04527d1c94f03"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat5/errand-history-sample.json",
+      "sha256": "ad5cfb6268d2d10fd3edfadd21841637b40b6b3c7446aa1941e93fdd4e240e50",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50202144,
+      "reloadMs": 1260.443147,
+      "switchToOrdinaryMs": 1330.5732420000004,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:03:33.234Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "acd74f53f4d5892059f66173735ca677104c55b16518c6f747835228f4812f8c"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome-repeat6/errand-history-sample.json",
+      "sha256": "43a35e9309f065e849ea4ebdfe3b8b67423516a1c4e04b0b22596b22bd8153e6",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50166664,
+      "reloadMs": 1133.5395740000004,
+      "switchToOrdinaryMs": 1284.3693270000003,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:03:43.553Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "c14cca6567962483b1d04b9312f2f05558fb1dcd03fcf531ed866bcbe56e9ab4"
+      }
+    },
+    {
+      "path": "/tmp/kandev-history-current-baseline-phone-zero/session-mobile-errand-hist-1ae7c-baseline-0-finished-Errands-mobile-chrome/errand-history-sample.json",
+      "sha256": "e28934347a1f1a05e44ef46dec3edb39374759401aa61c85981c5bf7f41544cd",
+      "platform": "phone",
+      "finishedHistoryCount": 0,
+      "heapBytes": 50071960,
+      "reloadMs": 1160.1053390000006,
+      "switchToOrdinaryMs": 1349.623361,
+      "environment": {
+        "phase": "baseline-control",
+        "sourceSha": "6e4c5ca9bce14b952d8cbaa52dc0282af870d835",
+        "browserVersion": "149.0.7827.55",
+        "node": "v24.22.3",
+        "platform": "linux 7.0.12-1-pve x64",
+        "cpus": 6,
+        "memoryBytes": 16777216000,
+        "timestamp": "2026-11-14T03:02:41.482Z",
+        "backendBinarySha256": "015e92004f2f37e9ac6c7ca6fd4956503a79b747b4180da9bb52db926fc032a0",
+        "fixtureBinarySha256": "df656af7f7084741732f216286566ecc65f11243f9b4c91ae4ebd82e2b878490",
+        "frontendDistSha256": "054703cbaa8dab10b31a79ceb0430b7a3ecbecb2a8bf106fc93d209b26587749",
+        "testHarnessSha256": {
+          "apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go": "e5c3c780e0b62864d3ea874b6b10b9bedf255bd81c552a5023527e2a78dd9a92",
+          "apps/web/e2e/global-setup.ts": "e78dc796b14266babfabf1d56ca7f97a8c8ffe7a7142c62ed4e87453eaa4437c",
+          "apps/web/e2e/helpers/errand-history-baseline.ts": "287ea8f4b0711bae2ffed1267299fb66788e48b8555d431fd6d7eda78c315220",
+          "apps/web/e2e/tests/session/errand-history-baseline.spec.ts": "64168a026de2d221adfe2a703e504ef472b95b5c368ee41411e315d2bbe13dfa",
+          "apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts": "b58c3c25d5ddefecab31a085cb5fe4ad15ec96b99b13551750b5182068f4645f"
+        },
+        "changedFiles": [
+          "M apps/web/e2e/global-setup.ts",
+          "?? apps/backend/internal/orchestrator/e2e_errand_history_fixture_test.go",
+          "?? apps/web/e2e/helpers/errand-history-baseline.ts",
+          "?? apps/web/e2e/tests/session/errand-history-baseline.spec.ts",
+          "?? apps/web/e2e/tests/session/mobile-errand-history-baseline.spec.ts"
+        ],
+        "manifestSha256": "d6045458929c240ec86e4e51a729311615bc8ad809edf33232d10d1fe6bbbbc2"
+      }
+    }
+  ]
+}

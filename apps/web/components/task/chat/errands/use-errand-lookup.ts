@@ -1,6 +1,6 @@
 import { useAppStore } from "@/components/state-provider";
-import { selectErrandBySessionId } from "@/lib/state/slices/errands/selectors";
-import type { Errand } from "@/lib/types/errands";
+import { selectErrandBrowserRowBySessionId } from "@/lib/state/slices/errands/selectors";
+import type { ErrandBrowserRow } from "@/lib/types/errands";
 
 /** Task of a session, falling back to the active task while the row is not loaded. */
 export function useSessionTaskId(sessionId: string | null | undefined): string | null {
@@ -12,12 +12,12 @@ export function useSessionTaskId(sessionId: string | null | undefined): string |
   );
 }
 
-/** The live errand row; present only while the errands flag delivered it. */
+/** The bounded current errand row; historical results do not trigger a full list read. */
 export function useLiveErrand(
   taskId: string | null | undefined,
   errandId: string | null | undefined,
-): Errand | undefined {
+): ErrandBrowserRow | undefined {
   return useAppStore((state) =>
-    taskId && errandId ? selectErrandBySessionId(state, taskId, errandId) : undefined,
+    taskId && errandId ? selectErrandBrowserRowBySessionId(state, taskId, errandId) : undefined,
   );
 }

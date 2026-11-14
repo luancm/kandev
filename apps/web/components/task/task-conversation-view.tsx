@@ -20,6 +20,7 @@ export function TaskConversationPanel({
           sessionId,
           state.taskSessionsByTask.itemsByTaskId[taskId] ?? [],
           state.errands.byTaskId[taskId],
+          sessionId ? state.taskSessions.items[sessionId] : undefined,
         )
       : null,
   );

@@ -183,6 +183,7 @@ func (a *Adapter) convertToolCallUpdateForGeneration(
 		parentToolCallID = a.copilotSubagentParentToolCallID(sessionID, emittedToolCallID, tc.Meta)
 	}
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
+	a.trackActiveToolOwner(emittedToolCallID, toolCallOwner{sessionID, parentToolCallID, promptGeneration})
 	a.trackAwaitReceiptCall(sessionID, toolCallID, tc, parentToolCallID)
 
 	return &AgentEvent{
@@ -221,7 +222,12 @@ func (a *Adapter) trackToolCallPayload(
 		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
 		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
 		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
-		a.activeToolCalls[toolCallID] = payload
+		if initiallyTerminalTool(string(call.Status)) {
+			delete(a.activeToolCalls, toolCallID)
+			a.forgetPromptHandoffToolLocked(toolCallID)
+		} else {
+			a.activeToolCalls[toolCallID] = payload
+		}
 		return payload, eventType, signal, toolCallID, "", false
 	}
 
@@ -242,6 +248,7 @@ func (a *Adapter) trackToolCallPayload(
 	}
 	if correlation.terminalSeen {
 		delete(a.activeToolCalls, correlation.emittedToolCallID)
+		a.forgetPromptHandoffToolLocked(correlation.emittedToolCallID)
 	} else if active := a.activeToolCalls[correlation.emittedToolCallID]; sameCodexSubagentChild(active, correlation.payload) {
 		a.activeToolCalls[correlation.emittedToolCallID] = correlation.payload
 	}

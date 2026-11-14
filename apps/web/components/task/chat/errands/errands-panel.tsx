@@ -1,49 +1,42 @@
 "use client";
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
-import { IconChevronRight } from "@tabler/icons-react";
-import { useId } from "react";
 import { IconLoader2, IconPlayerStop, IconX } from "@tabler/icons-react";
+import { useCallback, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { DrawerClose, DrawerDescription, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
-import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useErrandActions } from "@/hooks/domains/session/use-errand-actions";
 import { useNow } from "@/hooks/use-now";
-import type { Errand } from "@/lib/types/errands";
+import type {
+  ErrandBrowserCounts,
+  ErrandBrowserRow,
+  ErrandBrowserSummary,
+} from "@/lib/types/errands";
 import { orderErrandPanel } from "@/lib/errand-panel-order";
 import { cn } from "@/lib/utils";
-import { selectSessionTabTitle } from "../../session-tab-title";
 import { ERRAND_TOUCH_TARGET } from "./errand-open-button";
 import { ErrandsPanelRow } from "./errands-panel-row";
+import { ErrandParentHeading, ErrandsHistoryGroup } from "./errands-history-disclosure";
 
 const CLOCK_TICK_MS = 30_000;
 
 export type ErrandsPanelProps = {
   taskId: string;
-  errands: Errand[];
-  errandsByParent: Record<string, Errand[]>;
-  liveCount: number;
-  isLoaded: boolean;
-  /** Bottom-drawer form for phones and coarse pointers; popover form otherwise. */
+  outstanding: ErrandBrowserRow[];
+  summary: ErrandBrowserSummary | undefined;
+  counts: ErrandBrowserCounts;
+  taskCounts: ErrandBrowserCounts;
+  parentSessionId: string | null;
+  summaryStatus: "idle" | "loading" | "loaded" | "error";
   drawer: boolean;
   /** Closes the surface hosting the panel. */
   onClose: () => void;
+  onRetrySummary: () => void;
 };
 
-function ParentHeading({ parentSessionId, id }: { parentSessionId: string; id: string }) {
-  const { t } = useTranslation();
-  const title = useAppStore((state) => selectSessionTabTitle(state, parentSessionId));
-  return (
-    <h3 id={id} className="truncate px-0.5 text-[11px] font-medium text-muted-foreground">
-      {title || t("task:errandParentFallback")}
-    </h3>
-  );
-}
-
-export function ErrandsParentGroup({
+function ErrandRows({
   parentSessionId,
   errands,
   taskId,
@@ -52,7 +45,7 @@ export function ErrandsParentGroup({
   onClose,
 }: {
   parentSessionId: string;
-  errands: Errand[];
+  errands: ErrandBrowserRow[];
   taskId: string;
   nowMs: number;
   drawer: boolean;
@@ -65,7 +58,7 @@ export function ErrandsParentGroup({
       data-testid="errands-panel-group"
       className="flex flex-col gap-1"
     >
-      <ParentHeading parentSessionId={parentSessionId} id={headingId} />
+      <ErrandParentHeading parentSessionId={parentSessionId} id={headingId} />
       <ul className="flex flex-col gap-1.5">
         {errands.map((errand) => (
           <ErrandsPanelRow
@@ -111,27 +104,105 @@ export function ErrandsStopAllButton({ taskId, drawer }: { taskId: string; drawe
   );
 }
 
+function SummaryMessage({
+  status,
+  onRetry,
+  drawer,
+}: {
+  status: ErrandsPanelProps["summaryStatus"];
+  onRetry: () => void;
+  drawer: boolean;
+}) {
+  const { t } = useTranslation();
+  if (status === "loading" || status === "idle") {
+    return (
+      <p
+        role="status"
+        data-testid="errands-panel-loading"
+        className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground"
+      >
+        <IconLoader2 aria-hidden className="h-3 w-3 animate-spin" />
+        {t("task:errandsPanelLoading")}
+      </p>
+    );
+  }
+  if (status !== "error") return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p role="alert" className="text-[11px] text-destructive">
+        {t("task:errandsPanelFailed")}
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onRetry}
+        className={cn(drawer && ERRAND_TOUCH_TARGET)}
+      >
+        {t("task:errandsHistoryRetry")}
+      </Button>
+    </div>
+  );
+}
+
+function PanelCountIndicators({ counts }: { counts: ErrandBrowserCounts }) {
+  const { t } = useTranslation();
+  return (
+    <ul
+      data-testid="errands-panel-counts"
+      aria-label={t("task:errandsPanelTitle")}
+      className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground"
+    >
+      <li>{t("task:errandsPanelCapacity", { live: counts.live, capacity: counts.capacity })}</li>
+      {counts.pending_results > 0 && (
+        <li>{t("task:errandsPanelPendingResults", { count: counts.pending_results })}</li>
+      )}
+      {counts.unread > 0 && <li>{t("task:errandsPanelUnread", { count: counts.unread })}</li>}
+    </ul>
+  );
+}
+
 function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
   const { t } = useTranslation();
-  const { errands, taskId, nowMs, drawer, onClose, isLoaded } = props;
-  const ordered = orderErrandPanel(errands);
+  const { outstanding, summary, taskId, nowMs, drawer, onClose, summaryStatus, onRetrySummary } =
+    props;
+  const historyOwnerId = `errand-history-${useId()}`;
+  const listRef = useRef<HTMLDivElement>(null);
+  const resetScrollToTop = useCallback(() => {
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, []);
+  const ordered = orderErrandPanel(outstanding);
+  const parentCounts = summary?.parent_counts ?? [];
+  const parentIds = new Set([
+    ...parentCounts.map((item) => item.parent_session_id),
+    ...outstanding.map((item) => item.parent_session_id),
+  ]);
+  const finishedParents = parentCounts.filter(
+    (item) =>
+      parentIds.has(item.parent_session_id) &&
+      (!props.parentSessionId || item.parent_session_id === props.parentSessionId),
+  );
   return (
     <div
       data-testid="errands-panel-list"
+      ref={listRef}
       data-vaul-no-drag={drawer ? true : undefined}
       className={cn(
-        "flex flex-col gap-3 overflow-y-auto",
-        drawer ? "min-h-0 flex-1 px-4 pb-3" : "max-h-64",
+        "flex min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain",
+        drawer ? "flex-1 px-4 pb-3" : "max-h-72 px-0.5",
       )}
     >
+      <SummaryMessage status={summaryStatus} onRetry={onRetrySummary} drawer={drawer} />
       {ordered.active.length > 0 && (
-        <section aria-label={t("github:active")} className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold text-muted-foreground">{t("github:active")}</h2>
-          {ordered.active.map(({ parentId, errands: group }) => (
-            <ErrandsParentGroup
+        <section aria-label={t("task:errandsOutstanding")} className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold text-muted-foreground">
+            {t("task:errandsOutstanding")}
+          </h2>
+          {ordered.active.map(({ parentId, errands }) => (
+            <ErrandRows
               key={parentId}
               parentSessionId={parentId}
-              errands={group}
+              errands={errands}
               taskId={taskId}
               nowMs={nowMs}
               drawer={drawer}
@@ -140,58 +211,55 @@ function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
           ))}
         </section>
       )}
-      {ordered.finished.length > 0 && (
-        <Collapsible data-testid="errands-completed-history" className="min-w-0">
-          <CollapsibleTrigger
-            data-testid="errands-completed-toggle"
-            className={cn(
-              "group flex w-full cursor-pointer items-center gap-2 rounded py-1.5 text-left text-xs text-muted-foreground hover:bg-muted/30",
-              ERRAND_TOUCH_TARGET,
-            )}
-          >
-            <IconChevronRight
-              aria-hidden
-              className="h-3.5 w-3.5 shrink-0 group-data-[state=open]:rotate-90"
-            />
-            {t("automations:completed")} (
-            {ordered.finished.reduce((total, group) => total + group.errands.length, 0)})
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-2 pt-2">
-            {ordered.finished.map(({ parentId, errands: group }) => (
-              <ErrandsParentGroup
-                key={parentId}
-                parentSessionId={parentId}
-                errands={group}
-                taskId={taskId}
-                nowMs={nowMs}
-                drawer={drawer}
-                onClose={onClose}
-              />
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      )}
-      {!isLoaded && (
+      {summaryStatus === "loaded" && outstanding.length === 0 && props.counts.outstanding === 0 && (
         <p
-          role="status"
-          data-testid="errands-panel-loading"
-          className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground"
+          data-testid="errands-outstanding-empty"
+          className="px-0.5 text-[11px] text-muted-foreground"
         >
-          <IconLoader2 aria-hidden className="h-3 w-3 animate-spin" />
-          {t("task:errandsPanelLoading")}
+          {t("task:errandsOutstandingEmpty")}
         </p>
+      )}
+      {finishedParents.length > 0 && (
+        <section aria-label={t("automations:completed")} className="flex flex-col gap-2">
+          <h2 className="text-xs font-semibold text-muted-foreground">
+            {t("automations:completed")}
+          </h2>
+          {finishedParents.map(({ parent_session_id: parentId, counts }) => (
+            <ErrandsHistoryGroup
+              key={parentId}
+              parentSessionId={parentId}
+              taskId={taskId}
+              totalFinished={counts.finished}
+              historyOwnerId={historyOwnerId}
+              nowMs={nowMs}
+              drawer={drawer}
+              onClose={onClose}
+              resetScrollToTop={resetScrollToTop}
+            />
+          ))}
+        </section>
       )}
     </div>
   );
 }
 
-function DrawerPanelHeader() {
+function DrawerPanelHeader({
+  counts,
+  hasSummary,
+}: {
+  counts: ErrandBrowserCounts;
+  hasSummary: boolean;
+}) {
   const { t } = useTranslation();
   return (
-    <DrawerHeader className="shrink-0 flex-row items-center justify-between gap-3 text-left">
+    <DrawerHeader
+      data-testid="errands-panel-header"
+      className="shrink-0 flex-row items-center justify-between gap-3 text-left"
+    >
       <div className="min-w-0">
         <DrawerTitle>{t("task:errandsPanelTitle")}</DrawerTitle>
         <DrawerDescription>{t("task:errandsPanelDescription")}</DrawerDescription>
+        {hasSummary && <PanelCountIndicators counts={counts} />}
       </div>
       <DrawerClose asChild>
         <Button
@@ -208,34 +276,45 @@ function DrawerPanelHeader() {
   );
 }
 
-function PopoverPanelHeader({ total }: { total: number }) {
+function PopoverPanelHeader({
+  total,
+  counts,
+  hasSummary,
+}: {
+  total: number;
+  counts: ErrandBrowserCounts;
+  hasSummary: boolean;
+}) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border pb-2">
-      <span className="text-xs font-semibold text-foreground">{t("task:errandsPanelTitle")}</span>
-      <Badge variant="outline" className="text-[10px]">
-        {t("task:errandsPanelTotal", { count: total })}
-      </Badge>
+    <div className="flex shrink-0 flex-col gap-1 border-b border-border pb-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-foreground">{t("task:errandsPanelTitle")}</span>
+        <Badge variant="outline" className="text-[10px]">
+          {t("task:errandsPanelTotal", { count: total })}
+        </Badge>
+      </div>
+      {hasSummary && <PanelCountIndicators counts={counts} />}
     </div>
   );
 }
 
-/**
- * Errands of a task grouped by the session that started them, with **Stop
- * all errands** pinned below the list while any errand is live. Mounted only
- * while its popover or drawer is open, so its clock stops when it closes.
- */
+/** Errands use summary totals and fetch finished pages only when a disclosure opens. */
 export function ErrandsPanel(props: ErrandsPanelProps) {
-  const { taskId, errands, liveCount, drawer } = props;
+  const { taskId, counts, taskCounts, summary, drawer } = props;
   const nowMs = useNow(CLOCK_TICK_MS);
-  const footer = liveCount > 0 && <ErrandsStopAllButton taskId={taskId} drawer={drawer} />;
+  const footer = taskCounts.live > 0 && <ErrandsStopAllButton taskId={taskId} drawer={drawer} />;
+  const total = counts.outstanding + counts.finished;
   if (drawer) {
     return (
       <div data-testid="errands-panel" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <DrawerPanelHeader />
+        <DrawerPanelHeader counts={counts} hasSummary={Boolean(summary)} />
         <PanelList {...props} nowMs={nowMs} />
         {footer && (
-          <div className="shrink-0 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div
+            data-testid="errands-panel-footer"
+            className="shrink-0 border-t border-border p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+          >
             {footer}
           </div>
         )}
@@ -243,10 +322,13 @@ export function ErrandsPanel(props: ErrandsPanelProps) {
     );
   }
   return (
-    <div data-testid="errands-panel" className="flex flex-col gap-2">
-      <PopoverPanelHeader total={errands.length} />
+    <div
+      data-testid="errands-panel"
+      className="flex max-h-[min(28rem,70dvh)] min-h-0 flex-col gap-2"
+    >
+      <PopoverPanelHeader total={total} counts={counts} hasSummary={Boolean(summary)} />
       <PanelList {...props} nowMs={nowMs} />
-      {footer && <div className="border-t border-border pt-2">{footer}</div>}
+      {footer && <div className="shrink-0 border-t border-border pt-2">{footer}</div>}
     </div>
   );
 }

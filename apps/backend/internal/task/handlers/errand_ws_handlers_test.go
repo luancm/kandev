@@ -16,21 +16,43 @@ import (
 )
 
 type fakeErrandService struct {
-	snapshots  []errands.Snapshot
-	errand     *models.Errand
-	listed     []string
-	cancelled  []errands.CancelRequest
-	cancelAll  []string
-	cancelErr  error
-	cancelAllN int
-	cancelAllE error
-	sent       []string
-	sendErr    error
+	snapshots         []errands.Snapshot
+	errand            *models.Errand
+	listed            []string
+	summaries         []string
+	history           []models.ErrandHistoryPageRequest
+	inspections       [][2]string
+	browserSummary    models.ErrandBrowserSummary
+	browserPage       models.ErrandHistoryPage
+	browserInspection models.ErrandBrowserInspection
+	browserErr        error
+	cancelled         []errands.CancelRequest
+	cancelAll         []string
+	cancelErr         error
+	cancelAllN        int
+	cancelAllE        error
+	sent              []string
+	sendErr           error
 }
 
 func (f *fakeErrandService) List(_ context.Context, taskID string) ([]errands.Snapshot, error) {
 	f.listed = append(f.listed, taskID)
 	return f.snapshots, nil
+}
+
+func (f *fakeErrandService) BrowserSummary(_ context.Context, taskID string) (models.ErrandBrowserSummary, error) {
+	f.summaries = append(f.summaries, taskID)
+	return f.browserSummary, f.browserErr
+}
+
+func (f *fakeErrandService) HistoryPage(_ context.Context, request models.ErrandHistoryPageRequest, _ string) (models.ErrandHistoryPage, string, error) {
+	f.history = append(f.history, request)
+	return f.browserPage, "next-cursor", f.browserErr
+}
+
+func (f *fakeErrandService) Inspect(_ context.Context, taskID, childSessionID string) (models.ErrandBrowserInspection, error) {
+	f.inspections = append(f.inspections, [2]string{taskID, childSessionID})
+	return f.browserInspection, f.browserErr
 }
 
 func (f *fakeErrandService) Lookup(_ context.Context, id string) (*models.Errand, error) {
@@ -120,6 +142,9 @@ func TestErrandRequestsFailWithFeatureDisabledWhileTheFlagIsOff(t *testing.T) {
 		})
 	}
 	require.Empty(t, svc.listed)
+	require.Empty(t, svc.summaries)
+	require.Empty(t, svc.history)
+	require.Empty(t, svc.inspections)
 	require.Empty(t, svc.cancelled)
 	require.Empty(t, svc.cancelAll)
 }
@@ -168,8 +193,24 @@ func TestErrandRequestsDenyAForeignTaskBeforeTouchingErrands(t *testing.T) {
 	response, err = h.wsCancelAllErrands(foreign, errandMessage(t, ws.ActionErrandCancelAll, map[string]string{"task_id": "task-b"}))
 	require.NoError(t, err)
 	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
+	response, err = h.wsErrandBrowserSummary(foreign, errandMessage(t, ws.ActionErrandBrowserSummary, map[string]string{"task_id": "task-b"}))
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
+	response, err = h.wsErrandHistoryPage(foreign, errandMessage(t, ws.ActionErrandHistoryPage, map[string]string{
+		"task_id": "task-b", "parent_session_id": "parent-1",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
+	response, err = h.wsErrandInspect(foreign, errandMessage(t, ws.ActionErrandInspect, map[string]string{
+		"task_id": "task-b", "child_session_id": "errand-1",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
 
 	require.Empty(t, svc.listed)
+	require.Empty(t, svc.summaries)
+	require.Empty(t, svc.history)
+	require.Empty(t, svc.inspections)
 	require.Empty(t, svc.cancelled, "an unauthorized cancel must never reach the service")
 	require.Empty(t, svc.cancelAll)
 }
@@ -260,9 +301,36 @@ func TestErrandActionsAreRegisteredOnTheDispatcher(t *testing.T) {
 	h := errandHandlers(t, &fakeErrandService{}, true)
 	dispatcher := ws.NewDispatcher()
 	h.registerWS(dispatcher)
-	for _, action := range []string{ws.ActionErrandList, ws.ActionErrandCancel, ws.ActionErrandCancelAll, ws.ActionErrandSendResult} {
+	for _, action := range []string{ws.ActionErrandList, ws.ActionErrandBrowserSummary, ws.ActionErrandHistoryPage,
+		ws.ActionErrandInspect, ws.ActionErrandCancel, ws.ActionErrandCancelAll, ws.ActionErrandSendResult} {
 		require.True(t, dispatcher.HasHandler(action), action)
 	}
+}
+
+func TestErrandBrowserReadsRemainAvailableWhenFeatureFlagIsOff(t *testing.T) {
+	svc := &fakeErrandService{browserSummary: models.ErrandBrowserSummary{TaskID: "task-b"}}
+	h := errandHandlers(t, svc, false)
+	ctx := errandCallerAs("user-b")
+
+	response, err := h.wsErrandBrowserSummary(ctx, errandMessage(t, ws.ActionErrandBrowserSummary, map[string]string{"task_id": "task-b"}))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"scope":{"task_id":"task-b"},"errands":[],"counts":{"live":0,"capacity":0,"queued":0,"outstanding":0,"finished":0,"pending_results":0,"unread":0},"parent_counts":[]}`, string(response.Payload))
+
+	response, err = h.wsErrandHistoryPage(ctx, errandMessage(t, ws.ActionErrandHistoryPage, map[string]interface{}{
+		"task_id": "task-b", "parent_session_id": "parent-1",
+	}))
+	require.NoError(t, err)
+	require.Contains(t, string(response.Payload), `"next_cursor":"next-cursor"`)
+
+	response, err = h.wsErrandInspect(ctx, errandMessage(t, ws.ActionErrandInspect, map[string]string{
+		"task_id": "task-b", "child_session_id": "errand-1",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, []string{"task-b"}, svc.summaries)
+	require.Len(t, svc.history, 1)
+	require.Equal(t, models.ErrandHistoryPageRequest{TaskID: "task-b", ParentSessionID: "parent-1", Limit: 0}, svc.history[0])
+	require.Equal(t, [][2]string{{"task-b", "errand-1"}}, svc.inspections)
+	require.NotEqual(t, ws.MessageTypeError, response.Type)
 }
 
 // @covers AC-TASKS-ERRANDS-003.3

@@ -51,6 +51,94 @@ export type Errand = {
 /** Response of the `errand.list` request. */
 export type ErrandListResponse = { errands: Errand[] };
 
+export type ErrandBrowserContextMetadata = {
+  context_window?: {
+    size?: number;
+    used?: number;
+    remaining?: number;
+    efficiency?: number;
+    source?: string;
+    timestamp?: string;
+  } | null;
+  context_compaction_count?: number;
+};
+
+/** Compact row used only by the new bounded browser read actions. */
+export type ErrandBrowserRow = {
+  errand_id: string;
+  task_id: string;
+  parent_session_id: string;
+  title: string;
+  agent_profile_id: string;
+  status: ErrandStatus;
+  attention_reason?: ErrandAttentionReason;
+  result_state: ErrandResultState;
+  delivery_state?: ErrandDeliveryState;
+  result_truncated: boolean;
+  created_at: string;
+  updated_at: string;
+  settled_at: string | null;
+  version: number;
+  live: boolean;
+  outstanding: boolean;
+  unread: boolean;
+  can_send_result: boolean;
+  metadata?: ErrandBrowserContextMetadata;
+  tokens_in: number;
+  tokens_cached_in: number;
+  tokens_out: number;
+};
+
+export type ErrandBrowserCounts = {
+  live: number;
+  capacity: number;
+  queued: number;
+  outstanding: number;
+  finished: number;
+  pending_results: number;
+  unread: number;
+};
+
+export type ErrandBrowserScope = {
+  task_id: string;
+  parent_session_id?: string;
+  child_session_id?: string;
+};
+
+export type ErrandParentBrowserCounts = {
+  parent_session_id: string;
+  counts: ErrandBrowserCounts;
+};
+
+export type ErrandBrowserSummary = {
+  scope: ErrandBrowserScope;
+  errands: ErrandBrowserRow[];
+  counts: ErrandBrowserCounts;
+  parent_counts: ErrandParentBrowserCounts[];
+};
+
+export type ErrandHistoryPage = {
+  scope: ErrandBrowserScope;
+  errands: ErrandBrowserRow[];
+  total_finished: number;
+  has_more: boolean;
+  next_cursor: string | null;
+};
+
+export type ErrandInspection = {
+  scope: ErrandBrowserScope;
+  errand: ErrandBrowserRow;
+  child_session_exists: boolean;
+  parent: {
+    available: boolean;
+    id?: string;
+    title?: string;
+    role?: string;
+    environment_id?: string;
+    task_environment_id?: string;
+  };
+};
+
 /** Response of the `errand.cancel_all` request. */
 export type ErrandCancelAllResponse = { cancelled: number };
 
@@ -108,5 +196,14 @@ export function normalizeErrandAttention(errand: Errand): Errand {
     errand.status === "needs_attention"
       ? parseErrandAttentionReason(errand.attention_reason)
       : null;
+  return reason ? { ...snapshot, attention_reason: reason } : snapshot;
+}
+
+/** Normalize the attention reason on a compact browser snapshot. */
+export function normalizeErrandBrowserAttention(row: ErrandBrowserRow): ErrandBrowserRow {
+  const snapshot = { ...row };
+  delete snapshot.attention_reason;
+  const reason =
+    row.status === "needs_attention" ? parseErrandAttentionReason(row.attention_reason) : null;
   return reason ? { ...snapshot, attention_reason: reason } : snapshot;
 }
