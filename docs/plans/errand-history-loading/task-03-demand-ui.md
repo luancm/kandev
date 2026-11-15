@@ -95,7 +95,6 @@ Direct owner-switch checkpoint hashes: `apps/web/components/task/chat/errands/er
 
 Remaining limits: Task04’s frozen 0/100/1000 timing and performance matrix was not rerun; mixed-parent global ordering browser coverage remains in Task04, while this work order’s shared-owner parent-switch behavior is covered at component and hook level. Task03 stays `in_progress` for parent/Era Sol review. No commit or push was made. E2E/test/build processes are terminal, `/tmp/kandev-errands-repair-build.lock` is released, and the main Kandev instance was left untouched.
 
-
 ### Parent acceptance after recovered review
 
-The preceding worker checkpoint is historical. Parent addressed all three recovered findings and the adjacent session-only inspection case; [final remediation evidence](task-03-parent-remediation.md) records the exact source, RED/GREEN results, 274-test combined control suite, two inspection tests, typecheck/lint and fresh desktop/phone 1/1 passes. Task03 is accepted as the demand-history implementation boundary. Task04 owns remaining combined compatibility, rendered inspection and frozen performance acceptance. No commit or push is claimed.
+The preceding worker checkpoint is historical. Parent addressed all three recovered findings and the adjacent session-only inspection case; [final remediation evidence](demand-ui-parent-remediation.md) records the exact source, RED/GREEN results, 274-test combined control suite, two inspection tests, typecheck/lint and fresh desktop/phone 1/1 passes. Task03 is accepted as the demand-history implementation boundary. Task04 owns remaining combined compatibility, rendered inspection and frozen performance acceptance. No commit or push is claimed.

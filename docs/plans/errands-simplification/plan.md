@@ -4,11 +4,17 @@ status: in_progress
 requirements:
   - REQ-TASKS-ERRAND-HISTORY-001
   - REQ-TASKS-ERRAND-COMPLETION-001
+  - REQ-TASKS-ERRANDS-002
   - REQ-TASKS-ERRANDS-004
+  - REQ-PLATFORM-DELIVERY-RETENTION-001
+  - REQ-PLATFORM-UNDELIVERED-PROMPT-001
 system_design:
   - ../../specs/tasks/system-design/errand-history-loading.md
   - ../../specs/tasks/system-design/errand-completion-cleanup.md
   - ../../specs/tasks/system-design/errand-await-receipts.md
+  - ../../specs/tasks/system-design/errands.md
+  - ../../specs/tasks/system-design/errand-recovery-and-delivery.md
+  - ../../specs/platform/system-design/undelivered-prompt-recovery.md
 legacy_specs: []
 ---
 
@@ -30,16 +36,19 @@ Keeping the current dead loader and optional interfaces costs extra state and un
 
 ## Order and ownership
 
-| Work order                                                               | Result                                                                                                  | Dependency                                                      |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| [01: private browser state](task-01-private-browser-state.md)            | Remove obsolete inventory state and preserve real consumers                                             | Accepted                                                        |
-| [02: lifecycle contract and controller](task-02-lifecycle-controller.md) | Strengthen boundary tests, repair legacy completion identity, then make installed capabilities explicit | After 01; accept the repair before the structural refactor      |
-| [03: owned await requests](task-03-owned-await.md)                       | Remove duplicate internal identity and ownerless service paths                                          | After 02                                                        |
-| [04: ordinary subscriptions](task-04-ordinary-header-subscriptions.md)   | Bound view-model listeners while preserving child recognition and ownership                             | After 03; source review before final browser/performance checks |
+| Work order                                                               | Result                                                                                                  | Dependency                                                                  |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [01: private browser state](task-01-private-browser-state.md)            | Remove obsolete inventory state and preserve real consumers                                             | Accepted                                                                    |
+| [02: lifecycle contract and controller](task-02-lifecycle-controller.md) | Strengthen boundary tests, repair legacy completion identity, then make installed capabilities explicit | After 01; accept the repair before the structural refactor                  |
+| [03: owned await requests](task-03-owned-await.md)                       | Remove duplicate internal identity and ownerless service paths                                          | After 02                                                                    |
+| [04: ordinary subscriptions](task-04-ordinary-header-subscriptions.md)   | Bound view-model listeners while preserving child recognition and ownership                             | After 03; source review before final browser/performance checks             |
+| [05: definite non-delivery](task-05-definite-non-delivery.md)            | Preserve exact upstream unsent-prompt proof through Errand admission, claims and recovery               | Integrate upstream f52fbebd9b; independent of the open performance decision |
 
 Task01 is accepted: 100 focused tests, desktop 3/3 and phone 3/3, no-findings review and unchanged frozen source hashes. Task02's test phase exposed a supported legacy-provider cleanup defect; the bounded repair is accepted after 54 orchestrator tests, four Errands controls, an unchanged GREEN public user-continuation oracle and no-findings review. The controller refactor is also accepted: 98 orchestrator tests, four Errands controls, normal optimized compilation and completed scoped lint passed, with no review findings. Task03 is accepted after 83 service, handler, SQLite/PostgreSQL repository and orchestrator tests, scoped lint, unchanged source hashes and no-findings review. Five-minute lint wrapper timeouts remain recorded separately from identical-scope longer runs that passed. All three implementation owners released the checkout and their checkpoints were delivered. Task04's final controls and measurements are recorded below; performance acceptance and separate review-history publication remain open.
 
 The functional controls at `77b155597c` passed, but its matched ordinary comparison raised a desktop return-navigation warning. Task04's source is now accepted after 47 focused tests, typecheck, lint, formatting and independent review. Its real-store tests show twelve extra ordinary listeners/callbacks reduced to one, with both callers and ownership effects unchanged. The single production hook grows from 201 to 263 lines to make the selected inputs explicit. Profiling did not establish that those subscriptions cause the whole timing difference; fresh desktop 3/3, phone 3/3 and 28 comparison scenarios now pass. The unchanged numerical gates retain a phone switch-away warning, roughly one MiB fixed heap cost and measurable desktop switching cost. Performance acceptance remains open; the [final receipt](ordinary-header-verification.md) preserves all values and independent review. [Source handoff](ordinary-header-subscriptions-handoff.md); [original warning](final-verification-handoff.md).
+
+The final upstream check added `f52fbebd9b`, which settles definitely-unsent prompts. Its clean merge exposed a concrete integration gap: Errand admission could preserve an uncertainty wrapper after the exact non-delivery receipt was committed. Task05 is accepted after independent source review, public caller and ownership regressions, 130 integration tests, actual SQLite/PostgreSQL conformance, normal optimized compilation and lint, and desktop 3/3 plus phone 3/3. The [handoff](definite-non-delivery-handoff.md) records counts, source hashes and limits. It reuses existing receipt, admission and claim owners without broadening uncertain-work recovery. Parent owns the merge commit and publication; the frozen performance gate remains open.
 
 The task plan records actual child IDs, branch/head and active ownership. One writer owns this shared checkout at a time, including documentation changes. Read-only review may run concurrently. Writers must not stage, commit, push, start live agents or change runtime data. Parent owns review, integrated verification and delivery. Missing Specialist workflow is recorded in the task plan; native children are not persistent platform subtasks.
 

@@ -197,7 +197,46 @@ func (s *Service) errandParentSubmissionEvidence(ctx context.Context, a models.E
 		submission.TerminalSequence > 0 && terminalDeliverySubmission(submission.State) {
 		return models.ErrandAdmissionAccepted
 	}
+	if submission.ID == a.SubmissionID && submission.SessionID == a.ErrandID &&
+		normalizeDeliverySubmissionID(submission.DispatchAttemptID) == a.SubmissionID &&
+		s.errandParentUnsentEvidence(ctx, a, submission) {
+		return models.ErrandAdmissionRefused
+	}
 	return models.ErrandAdmissionUnknown
+}
+
+func (s *Service) errandParentUnsentEvidence(ctx context.Context, a models.ErrandParentAdmission, submission *models.AgentDeliverySubmission) bool {
+	store, ok := s.repo.(interface {
+		AgentDeliverySubmissionWasUnsent(context.Context, *models.AgentDeliverySubmission) (bool, error)
+		GetErrandTurnSettlementDecision(context.Context, string, string, string) (*models.AgentDeliveryEffect, error)
+		GetErrand(context.Context, string) (*models.Errand, error)
+		GetActiveTurnBySessionID(context.Context, string) (*models.Turn, error)
+	})
+	if !ok {
+		return false
+	}
+	proved, err := store.AgentDeliverySubmissionWasUnsent(ctx, submission)
+	if err != nil || !proved {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, a.ErrandID)
+	if err != nil || !matchingUnsentErrandSession(session, a, submission) {
+		return false
+	}
+	row, err := store.GetErrand(ctx, a.ErrandID)
+	if err != nil || row == nil || row.Lifecycle == models.ErrandLifecycleCancelled {
+		return false
+	}
+	turn, err := store.GetActiveTurnBySessionID(ctx, a.ErrandID)
+	if err != nil || !matchingUnsentErrandTurn(turn, a) {
+		return false
+	}
+	intent, err := store.GetErrandTurnSettlementDecision(ctx, a.ErrandID, submission.IncarnationID, a.TurnID)
+	if err != nil || !matchingUnsentErrandIntent(intent, session, a, submission) {
+		return false
+	}
+	generation, err := s.currentDeliveryGeneration(ctx, session, submission.IncarnationID)
+	return err == nil && generation == submission.HarnessGeneration
 }
 
 func (s *Service) reconcileErrandParentAdmissions(ctx context.Context) error {
@@ -220,4 +259,21 @@ func (s *Service) errandDispatchTurnID(ctx context.Context, sessionID, turnID st
 		return "", err
 	}
 	return turn.ID, nil
+}
+
+func matchingUnsentErrandSession(session *models.TaskSession, admission models.ErrandParentAdmission, submission *models.AgentDeliverySubmission) bool {
+	return session != nil && models.IsErrandSession(session) && session.TaskID == admission.TaskID &&
+		session.ParentSessionID == admission.ParentSessionID && admission.SenderSessionID == admission.ParentSessionID &&
+		session.QueueIncarnationID == submission.IncarnationID
+}
+
+func matchingUnsentErrandTurn(turn *models.Turn, admission models.ErrandParentAdmission) bool {
+	return turn != nil && turn.ID == admission.TurnID && turn.TaskID == admission.TaskID
+}
+
+func matchingUnsentErrandIntent(intent *models.AgentDeliveryEffect, session *models.TaskSession, admission models.ErrandParentAdmission, submission *models.AgentDeliverySubmission) bool {
+	return intent != nil && intent.State == models.DeliveryEffectPending && intent.Outcome == errandTurnSourceParent &&
+		intent.SubmissionID == admission.SubmissionID && intent.HarnessGeneration == submission.HarnessGeneration &&
+		submission.OwnerGeneration == submission.HarnessGeneration && intent.StreamID != "" &&
+		(session.AgentExecutionID == "" || session.AgentExecutionID == intent.StreamID)
 }

@@ -16,7 +16,7 @@ import (
 )
 
 func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
-	for _, outcome := range []string{"accepted", "sql_failure", "shutdown_before_admission", "shutdown_after_admission"} {
+	for _, outcome := range []string{"accepted", "sql_failure", "shutdown_before_admission", "shutdown_after_admission", "unsent"} {
 		t.Run(outcome, func(t *testing.T) {
 			ctx := t.Context()
 			f := newSendNowErrandFixture(t)
@@ -81,6 +81,10 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, snapshot.Receipts, 1)
 			token := snapshot.Receipts[0].Envelope.Token
+			var unrelated *models.Errand
+			if outcome == "unsent" {
+				unrelated = f.result(t, "unrelated-later-result")
+			}
 			select {
 			case <-done:
 				t.Fatal("claim worker finished before admission")
@@ -97,6 +101,14 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 				switch outcome {
 				case "sql_failure":
 					require.Error(t, err)
+					failed()
+				case "unsent":
+					require.NoError(t, err)
+					submission, err := repo.GetAgentDeliverySubmission(ctx, normalizeDeliverySubmissionID(submissionID))
+					require.NoError(t, err)
+					changed, err := repo.FailUnsentAgentDeliverySubmission(ctx, submission, time.Now().UTC())
+					require.NoError(t, err)
+					require.True(t, changed)
 					failed()
 				case "shutdown_after_admission":
 					require.NoError(t, err)
@@ -119,6 +131,12 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 			row, err := repo.GetErrand(ctx, live.ID)
 			require.NoError(t, err)
 			require.Equal(t, live.ResultRevision, row.ResultRevision)
+			if unrelated != nil {
+				retained, err := repo.GetErrand(ctx, unrelated.ID)
+				require.NoError(t, err)
+				require.Equal(t, unrelated.ResultRevision, retained.ResultRevision)
+				require.Equal(t, models.ErrandResultPending, retained.ResultState)
+			}
 			if outcome == "accepted" || outcome == "shutdown_after_admission" {
 				require.Equal(t, models.ErrandResultDelivered, row.ResultState, "accepted or uncertain provider admission retains ownership")
 			} else {
@@ -148,7 +166,7 @@ func TestSendNowCreatedClaimWaitsForPreparedAdmission(t *testing.T) {
 				}
 			}
 			status := queue.GetStatus(ctx, "session-1")
-			if outcome == "sql_failure" || outcome == "shutdown_before_admission" {
+			if outcome == "sql_failure" || outcome == "shutdown_before_admission" || outcome == "unsent" {
 				require.Len(t, status.Entries, 1)
 				require.Equal(t, source.ID, status.Entries[0].ID)
 			} else {

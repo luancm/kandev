@@ -2067,7 +2067,8 @@ func (sm *SessionManager) sendPrompt(
 			return nil, err
 		}
 	}
-	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
+	initialDelivery, err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID)
+	if err != nil {
 		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
 		return nil, err
 	}
@@ -2096,6 +2097,7 @@ func (sm *SessionManager) sendPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,
 	); err != nil {
+		err = sm.settleUnsentInitialDelivery(preparedCtx, initialDelivery, err)
 		if sm.turnChangeFailed != nil {
 			sm.turnChangeFailed(preparedCtx, execution, promptGeneration, err)
 		}
@@ -2407,7 +2409,7 @@ func (sm *SessionManager) callAgentctlPrompt(
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+		return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
 	}
 	var err error
 	if steer {
@@ -2441,7 +2443,8 @@ func (sm *SessionManager) dispatchPrompt(
 	submissionID string,
 ) error {
 	err := sm.callAgentctlPrompt(ctx, execution, prompt, attachments, promptGeneration, steer, submissionID)
-	if err == nil || !isAgentStreamNotConnectedErr(err) || sm.streamManager == nil {
+	var notSent *agentctl.RequestNotSentError
+	if err == nil || !errors.As(err, &notSent) || !isAgentStreamNotConnectedErr(err) || sm.streamManager == nil {
 		return err
 	}
 
@@ -2484,7 +2487,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	for {
 		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
-			return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+			return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
 		}
 		hasAgentStream := client.HasAgentStream()
 		releaseClient()
@@ -2498,13 +2501,13 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 				if lastErr != nil {
 					return fmt.Errorf("timed out waiting for updates stream reconnect: %w", lastErr)
 				}
-				return reconnectCtx.Err()
+				return &agentctl.RequestNotSentError{Err: reconnectCtx.Err()}
 			}
 		}
 
 		client, releaseClient = execution.AcquireAgentCtlClient()
 		if client == nil {
-			return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+			return &agentctl.RequestNotSentError{Err: fmt.Errorf("execution %q has no agentctl client", execution.ID)}
 		}
 		hasAgentStream = client.HasAgentStream()
 		releaseClient()
@@ -2513,13 +2516,13 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 				reconnectCtx, execution, prompt, attachments, promptGeneration, steer, submissionID,
 			); err == nil {
 				return nil
-			} else if !isAgentStreamNotConnectedErr(err) {
+			} else if !errors.As(err, new(*agentctl.RequestNotSentError)) || !isAgentStreamNotConnectedErr(err) {
 				return err
 			} else {
 				lastErr = err
 			}
 		} else {
-			lastErr = fmt.Errorf("agent stream not connected")
+			lastErr = &agentctl.RequestNotSentError{Err: agentctl.ErrAgentStreamNotConnected}
 		}
 
 		select {
@@ -2527,7 +2530,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 			if lastErr != nil {
 				return fmt.Errorf("timed out waiting for updates stream reconnect: %w", lastErr)
 			}
-			return reconnectCtx.Err()
+			return &agentctl.RequestNotSentError{Err: reconnectCtx.Err()}
 		case <-time.After(100 * time.Millisecond):
 		}
 	}

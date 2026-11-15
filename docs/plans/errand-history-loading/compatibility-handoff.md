@@ -40,5 +40,4 @@ No owned build, browser or test process remains. The shared lock is free and app
 - `apps/web/e2e/helpers/errands.ts`: `b2fc797289685b3b2c31bb454d4907281a7771257ad086a426a6fbca14145c9a`
 - `apps/web/e2e/tests/session/errands.spec.ts`: `3c6281e364929aab8b4197e698339863f988c417255b53f97bae5056a1eb6fa9`
 
-
 The user authorized the fresh paired comparison on 2026-11-14. The [paired protocol](paired-performance-protocol.md) fixes interleaving, samples, unchanged threshold formula and structural gates before collection. Earlier references to a pending user decision are historical; Task04 remains in progress until this matrix passes.

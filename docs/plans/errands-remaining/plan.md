@@ -5,11 +5,13 @@ requirements:
   - REQ-TASKS-ERRANDS-002
   - REQ-TASKS-ERRANDS-004
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
+  - REQ-PLATFORM-STARTUP-HOUSEKEEPING-001
   - REQ-TASKS-ERRANDS-010
   - REQ-TASKS-ERRANDS-011
   - REQ-TASKS-ERRAND-COMPLETION-001
 system_design:
   - ../../specs/platform/system-design/durable-agent-delivery.md
+  - ../../specs/platform/system-design/startup-housekeeping.md
   - ../../specs/tasks/system-design/errand-status-and-continuation.md
   - ../../specs/tasks/system-design/errand-completion-cleanup.md
   - ../../specs/tasks/system-design/errands.md

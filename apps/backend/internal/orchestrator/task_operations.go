@@ -7489,6 +7489,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 	}
 
+	if models.IsErrandSession(session) && session.ParentSessionID != "" &&
+		errandPromptOrigin(resumePromptCtx, session, options).SenderSessionID == session.ParentSessionID {
+		options.reserveTurnUntilDispatch = true
+		options.requireNonterminalSession = true
+		if options.expectedSessionIdentity == nil {
+			options.expectedSessionIdentity = &messagequeue.QueueSessionIdentity{
+				TaskID: taskID, SessionID: sessionID, SessionIncarnationID: session.QueueIncarnationID,
+			}
+		}
+	}
 	session, rollback, releaseDispatchGuard, err := s.claimAndGuardDispatch(
 		resumePromptCtx, taskID, sessionID, foregroundClaim, options, foregroundDispatch, resumeAttempt,
 		queuedDispatchGuard,
@@ -7954,18 +7964,7 @@ func (s *Service) finishPromptExecutorDispatch(
 	}
 	if execErr != nil {
 		execErr = s.persistRuntimeReplacementRecoveryBlock(ctx, sessionID, delivery, execErr)
-		if delivery != nil {
-			unknownErr := delivery.markInterrupted(
-				context.WithoutCancel(ctx), "prompt_dispatch_failed",
-			)
-			recoveryErr := s.deliveryRecoveryError(
-				context.WithoutCancel(ctx), sessionID, "unknown_prompt_outcome", delivery,
-			)
-			if unknownErr != nil {
-				execErr = errors.Join(execErr, unknownErr)
-			}
-			execErr = errors.Join(execErr, recoveryErr)
-		}
+		execErr = s.settlePromptDispatchError(context.WithoutCancel(ctx), sessionID, delivery, dispatchAccepted, execErr)
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.
 		if releaseDispatchGuard != nil {
@@ -9477,7 +9476,8 @@ func (s *Service) handlePromptDispatchFailure(
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
 	}
-	if rollback.createdTurn && rollback.reservedTurn != nil && !rollback.reservedTurnAccepted {
+	if rollback.createdTurn && rollback.reservedTurn != nil && !rollback.reservedTurnAccepted &&
+		!errors.Is(promptErr, lifecycle.ErrUncertainPromptDelivery) {
 		s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
 	}
 	return nil, s.handlePromptError(ctx, taskID, sessionID, rollback.previousSessionState, promptErr)
