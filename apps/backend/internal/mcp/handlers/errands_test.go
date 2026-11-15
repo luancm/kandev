@@ -54,26 +54,22 @@ func (f *fakeErrandService) Start(_ context.Context, req errands.StartRequest) (
 func (f *fakeErrandService) Await(_ context.Context, req errands.AwaitRequest) (errands.AwaitResult, error) {
 	f.awaitReq = req
 	result := f.awaitResult
-	result.Delivery = models.ErrandAwaitDelivery{Version: 1, Token: req.Token, Items: []models.ErrandAwaitDeliveryItem{}}
+	result.Delivery = models.ErrandAwaitDelivery{Version: 1, Token: req.Owner.Token, Items: []models.ErrandAwaitDeliveryItem{}}
 	return result, f.awaitErr
 }
 
 func (f *fakeErrandService) OfferAwait(context.Context, models.ErrandAwaitIdentity, models.ErrandAwaitDelivery) error {
 	return nil
 }
-func (f *fakeErrandService) AbortOwnedAwait(ctx context.Context, id models.ErrandAwaitIdentity) error {
+func (f *fakeErrandService) AbortOwnedAwait(_ context.Context, id models.ErrandAwaitIdentity) error {
 	f.abortOwner = id
-	return f.AbortAwait(ctx, id.ParentSessionID, id.Token)
+	f.releaseCalls++
+	f.releaseToken = id.Token
+	f.releaseParent = id.ParentSessionID
+	return nil
 }
 func awaitTestContext(taskID, sessionID string) context.Context {
 	return streams.WithMCPExecutionContext(context.Background(), streams.MCPExecutionContext{TaskID: taskID, SessionID: sessionID, ParentIncarnationID: "launched", HarnessGeneration: 1})
-}
-
-func (f *fakeErrandService) AbortAwait(_ context.Context, parentID string, token string) error {
-	f.releaseCalls++
-	f.releaseToken = token
-	f.releaseParent = parentID
-	return nil
 }
 
 func (f *fakeErrandService) Cancel(_ context.Context, req errands.CancelRequest) (*errands.Snapshot, error) {
@@ -223,7 +219,8 @@ func TestAwaitErrandsForwardsParentAndReturnsView(t *testing.T) {
 	resp, err := h.handleAwaitErrands(awaitTestContext(task.ID, primary.ID), msg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
-	assert.Equal(t, primary.ID, fake.awaitReq.ParentSessionID)
+	assert.Equal(t, models.ErrandAwaitIdentity{TaskID: task.ID, ParentSessionID: primary.ID,
+		ParentIncarnationID: "launched", HarnessGeneration: 1, Token: "token-1"}, fake.awaitReq.Owner)
 	assert.Equal(t, []string{"errand-1", "errand-2"}, fake.awaitReq.ErrandIDs)
 	assert.Equal(t, "all", fake.awaitReq.Mode)
 	assert.Equal(t, 30, fake.awaitReq.MaxWaitSeconds)
@@ -253,7 +250,7 @@ func TestAwaitErrandsRefusesErrandSender(t *testing.T) {
 	resp, err := h.handleAwaitErrands(context.Background(), msg)
 	require.NoError(t, err)
 	assert.Equal(t, string(errands.ReasonNotPermitted), errandErrorReason(t, resp))
-	assert.Equal(t, "", fake.awaitReq.ParentSessionID, "the service must not be called")
+	assert.Equal(t, "", fake.awaitReq.Owner.ParentSessionID, "the service must not be called")
 }
 
 func TestAwaitErrandsReleaseReturnsClaimWithToken(t *testing.T) {

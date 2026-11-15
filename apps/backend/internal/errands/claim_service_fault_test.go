@@ -45,8 +45,7 @@ func exerciseServiceClaimFault(t *testing.T, postgres, await bool) {
 	installServiceClaimFault(t, conn)
 	var text string
 	if await {
-		result, claimErr := h.service.Await(t.Context(), AwaitRequest{ParentSessionID: testParent,
-			ErrandIDs: []string{"claim-a", "claim-b"}, Mode: "all", Token: "faulted-await"})
+		result, claimErr := h.service.Await(t.Context(), AwaitRequest{Owner: testAwaitOwner("faulted-await"), ErrandIDs: []string{"claim-a", "claim-b"}, Mode: "all"})
 		err = claimErr
 		for _, item := range result.Errands {
 			text += item.Result

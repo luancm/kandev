@@ -16,7 +16,6 @@ type ErrandMCPService interface {
 	Await(ctx context.Context, req errands.AwaitRequest) (errands.AwaitResult, error)
 	OfferAwait(context.Context, models.ErrandAwaitIdentity, models.ErrandAwaitDelivery) error
 	AbortOwnedAwait(context.Context, models.ErrandAwaitIdentity) error
-	AbortAwait(ctx context.Context, parentSessionID, token string) error
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	ParentOutstanding(ctx context.Context, parentSessionID string) (bool, error)
 	List(ctx context.Context, taskID string) ([]errands.Snapshot, error)
@@ -62,7 +61,7 @@ type cancelErrandRequest struct {
 }
 
 // awaitErrandView is one errand in an await response. Result and Truncated
-// appear only for an undelivered result, DeliveredVia only for a delivered one.
+// describe this await's claim; DeliveredVia identifies another claim's route.
 type awaitErrandView struct {
 	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
 	ErrandID        string                       `json:"errand_id"`
@@ -144,12 +143,10 @@ func (h *Handlers) handleAwaitErrands(ctx context.Context, msg *ws.Message) (*ws
 		return errandServiceError(msg, err), nil
 	}
 	result, err := h.errands.Await(ctx, errands.AwaitRequest{
-		Owner:           &owner,
-		ParentSessionID: parent.ID,
-		ErrandIDs:       req.ErrandIDs,
-		Mode:            req.Mode,
-		MaxWaitSeconds:  req.MaxWaitSeconds,
-		Token:           req.AwaitToken,
+		Owner:          owner,
+		ErrandIDs:      req.ErrandIDs,
+		Mode:           req.Mode,
+		MaxWaitSeconds: req.MaxWaitSeconds,
 	})
 	if err != nil {
 		return errandServiceError(msg, err), nil

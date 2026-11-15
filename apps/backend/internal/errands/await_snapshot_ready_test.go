@@ -46,7 +46,7 @@ func TestAwaitStaleSnapshotRechecksReadiness(t *testing.T) {
 		done := make(chan AwaitResult, 1)
 		errors := make(chan error, 1)
 		go func() {
-			result, err := h.service.Await(ctx, AwaitRequest{ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: "all", MaxWaitSeconds: 600, Token: "resumed-await"})
+			result, err := h.service.Await(ctx, AwaitRequest{Owner: testAwaitOwner("resumed-await"), ErrandIDs: []string{id}, Mode: "all", MaxWaitSeconds: 600})
 			done <- result
 			errors <- err
 		}()

@@ -248,9 +248,7 @@ func TestLaterParentTurnSupersedesAnUndeliveredResult(t *testing.T) {
 func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
 	h, id := pendingResultHarness(t, "the answer")
 	ctx := context.Background()
-	first, err := h.service.Await(ctx, AwaitRequest{
-		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-a",
-	})
+	first, err := h.service.Await(ctx, AwaitRequest{Owner: testAwaitOwner("token-a"), ErrandIDs: []string{id}, Mode: awaitModeAll})
 	if err != nil {
 		t.Fatalf("Await: %v", err)
 	}
@@ -260,9 +258,7 @@ func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
 	if len(first.Errands) != 1 || first.Errands[0].Result != "the answer" {
 		t.Fatalf("first await = %+v, want the result", first.Errands)
 	}
-	second, err := h.service.Await(ctx, AwaitRequest{
-		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-b",
-	})
+	second, err := h.service.Await(ctx, AwaitRequest{Owner: testAwaitOwner("token-b"), ErrandIDs: []string{id}, Mode: awaitModeAll})
 	if err != nil {
 		t.Fatalf("second Await: %v", err)
 	}
@@ -275,13 +271,11 @@ func TestAwaitClaimsTheResultOnceAndAnotherAwaitSeesOnlyTheRoute(t *testing.T) {
 func TestReleasedAwaitMakesTheResultDeliverableAgain(t *testing.T) {
 	h, id := pendingResultHarness(t, "the answer")
 	ctx := context.Background()
-	if _, err := h.service.Await(ctx, AwaitRequest{
-		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: awaitModeAll, Token: "token-a",
-	}); err != nil {
+	if _, err := h.service.Await(ctx, AwaitRequest{Owner: testAwaitOwner("token-a"), ErrandIDs: []string{id}, Mode: awaitModeAll}); err != nil {
 		t.Fatalf("Await: %v", err)
 	}
-	if err := h.service.ReleaseAwait(ctx, "token-a"); err != nil {
-		t.Fatalf("ReleaseAwait: %v", err)
+	if err := h.service.AbortOwnedAwait(ctx, testAwaitOwner("token-a")); err != nil {
+		t.Fatalf("AbortOwnedAwait: %v", err)
 	}
 	row, _ := h.store.GetErrand(ctx, id)
 	if row.ResultState != models.ErrandResultPending || row.DeliveryToken != "" {
@@ -376,7 +370,7 @@ func (s *replaceClaimOnConflictStore) ListErrandResultClaims(ctx context.Context
 
 func releaseDelivery(h *harness, route models.ErrandDeliveryRoute, token string) error {
 	if route == models.ErrandDeliveryAwait {
-		return h.service.ReleaseAwait(context.Background(), token)
+		return h.service.releaseClaim(context.Background(), token, models.ErrandDeliveryAwait)
 	}
 	return h.service.ReleaseTurnClaim(context.Background(), token)
 }
@@ -609,9 +603,7 @@ func claimDeliveryForErrand(t *testing.T, h *harness, errandID string, route mod
 	ctx := context.Background()
 	switch route {
 	case models.ErrandDeliveryAwait:
-		result, err := h.service.Await(ctx, AwaitRequest{
-			ParentSessionID: testParent, ErrandIDs: []string{errandID}, Mode: awaitModeAll, Token: token,
-		})
+		result, err := h.service.Await(ctx, AwaitRequest{Owner: testAwaitOwner(token), ErrandIDs: []string{errandID}, Mode: awaitModeAll})
 		if err != nil {
 			t.Fatalf("Await: %v", err)
 		}

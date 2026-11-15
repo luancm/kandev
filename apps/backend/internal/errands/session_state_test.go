@@ -15,12 +15,13 @@ func TestAwaitAllWakesWhenCapturedResultSessionBecomesIdle(t *testing.T) {
 	h, repo, row, effect := newTerminalFixture(t)
 	completeTerminalTurn(t, repo, effect, "Settled result", "")
 
-	req := AwaitRequest{ParentSessionID: testParent, ErrandIDs: []string{row.ID}, Mode: awaitModeAll, Token: "state-wake", MaxWaitSeconds: 600}
+	req := AwaitRequest{Owner: testAwaitOwner("state-wake"), ErrandIDs: []string{row.ID}, Mode: awaitModeAll, MaxWaitSeconds: 600}
+	require.NoError(t, repo.BeginErrandAwait(ctx, req.Owner))
 	rows, err := h.service.loadAwaitErrands(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waiter := h.service.awaits.register(testParent, req.Token)
+	waiter := h.service.awaits.register(testParent, req.Owner.Token)
 	defer h.service.awaits.remove(waiter)
 	if err := h.service.OnErrandTurnSettled(ctx, TurnSettlement{
 		SessionID: row.ID, TurnID: row.FirstTurnID, SubmissionID: row.SubmissionID, Outcome: models.ErrandOutcomeDone,
@@ -52,7 +53,7 @@ func TestAwaitAllWakesWhenCapturedResultSessionBecomesIdle(t *testing.T) {
 	deadline := time.NewTimer(time.Minute)
 	defer deadline.Stop()
 	result, err := h.service.awaitLoop(ctx, req, rows, waiter, deadline)
-	if err != nil || len(result.Errands) != 1 || result.Errands[0].Result != "Settled result" || result.Token != req.Token {
+	if err != nil || len(result.Errands) != 1 || result.Errands[0].Result != "Settled result" || result.Token != req.Owner.Token {
 		t.Fatalf("awaited settled result = %+v, %v", result, err)
 	}
 }

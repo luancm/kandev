@@ -13,6 +13,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func testAwaitOwner(token string) models.ErrandAwaitIdentity {
+	return models.ErrandAwaitIdentity{TaskID: testTask, ParentSessionID: testParent,
+		ParentIncarnationID: "launched", HarnessGeneration: 1, Token: token}
+}
+
 type memoryStore struct {
 	mu         sync.Mutex
 	errands    map[string]*models.Errand

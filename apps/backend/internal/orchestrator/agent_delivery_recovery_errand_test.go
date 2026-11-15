@@ -307,12 +307,15 @@ type pendingErrandAwait struct {
 
 func startPendingErrandAwait(t *testing.T, fixture *recoveryAttentionEventFixture) *pendingErrandAwait {
 	t.Helper()
+	parent, err := fixture.repo.Repository.GetTaskSession(t.Context(), fixture.parentSession)
+	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
+	owner := models.ErrandAwaitIdentity{TaskID: parent.TaskID, ParentSessionID: parent.ID,
+		ParentIncarnationID: parent.QueueIncarnationID, HarnessGeneration: 1, Token: "recovery-observer-await"}
 	await := &pendingErrandAwait{cancel: cancel, done: make(chan error, 1), finished: make(chan struct{})}
 	go func() {
 		_, err := fixture.errands.Await(ctx, errands.AwaitRequest{
-			ParentSessionID: fixture.parentSession, ErrandIDs: []string{fixture.errandsID},
-			Mode: "all", MaxWaitSeconds: 600, Token: "recovery-observer-await",
+			Owner: owner, ErrandIDs: []string{fixture.errandsID}, Mode: "all", MaxWaitSeconds: 600,
 		})
 		await.done <- err
 		close(await.finished)

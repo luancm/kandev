@@ -38,7 +38,7 @@ func TestAwaitRequiresAuthenticatedLaunchedParentOwner(t *testing.T) {
 			response, err := h.handleAwaitErrands(ctx, msg)
 			require.NoError(t, err)
 			require.Equal(t, ws.MessageTypeError, response.Type)
-			require.Empty(t, fake.awaitReq.ParentSessionID)
+			require.Empty(t, fake.awaitReq.Owner.ParentSessionID)
 		})
 	}
 }

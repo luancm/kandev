@@ -47,7 +47,7 @@ func TestAwaitCancellationAfterClaimCannotReturnSuccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	h.service.store = &replacingClaimStore{Store: h.store, afterClaim: cancel}
-	result, err := h.service.Await(ctx, AwaitRequest{ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: "all", Token: "cancel-after-claim"})
+	result, err := h.service.Await(ctx, AwaitRequest{Owner: testAwaitOwner("cancel-after-claim"), ErrandIDs: []string{id}, Mode: "all"})
 	if !errors.Is(err, context.Canceled) || len(result.Errands) != 0 {
 		t.Fatalf("cancelled await returned success: result=%+v err=%v", result, err)
 	}
@@ -66,7 +66,7 @@ func TestClaimSnapshotRetryIsBounded(t *testing.T) {
 			var err error
 			var token, text string
 			if await {
-				result, callErr := h.service.Await(t.Context(), AwaitRequest{ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: "all", Token: "bounded-await"})
+				result, callErr := h.service.Await(t.Context(), AwaitRequest{Owner: testAwaitOwner("bounded-await"), ErrandIDs: []string{id}, Mode: "all"})
 				err, token = callErr, result.Token
 				for _, item := range result.Errands {
 					text += item.Result
@@ -101,9 +101,7 @@ func TestAwaitReprojectsStaleClaim(t *testing.T) {
 	h, id := pendingResultHarness(t, "stale output")
 	store := &replacingClaimStore{Store: h.store, ids: []string{id}}
 	h.service.store = store
-	result, err := h.service.Await(context.Background(), AwaitRequest{
-		ParentSessionID: testParent, ErrandIDs: []string{id}, Mode: "all", Token: "stale-await",
-	})
+	result, err := h.service.Await(context.Background(), AwaitRequest{Owner: testAwaitOwner("stale-await"), ErrandIDs: []string{id}, Mode: "all"})
 	if err != nil || len(result.Errands) != 1 || result.Errands[0].Result != "authoritative replacement" {
 		t.Fatalf("stale await was not reprojected: result=%+v err=%v calls=%d", result, err, store.calls)
 	}

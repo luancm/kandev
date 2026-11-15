@@ -197,8 +197,12 @@ func TestErrandAdmissionDirectPromptUsesAuthenticatedContext(t *testing.T) {
 
 func TestErrandAdmissionAbortBeforeDelayedAwaitClaim(t *testing.T) {
 	f := newAdmissionIntegrationFixture(t, messagequeue.DeliveryProtocolLegacy)
-	require.NoError(t, f.errands.AbortAwait(t.Context(), f.parent, "early-abort"))
-	_, err := f.repo.ClaimResults(t.Context(), f.taskID, f.parent, models.ErrandDeliveryAwait, "early-abort",
+	parent, err := f.repo.GetTaskSession(t.Context(), f.parent)
+	require.NoError(t, err)
+	owner := models.ErrandAwaitIdentity{TaskID: f.taskID, ParentSessionID: f.parent,
+		ParentIncarnationID: parent.QueueIncarnationID, HarnessGeneration: 1, Token: "early-abort"}
+	require.NoError(t, f.errands.AbortOwnedAwait(t.Context(), owner))
+	_, err = f.repo.ClaimResults(t.Context(), f.taskID, f.parent, models.ErrandDeliveryAwait, "early-abort",
 		[]models.ErrandClaimCandidate{{ID: f.row.ID, Version: f.row.Version}}, time.Now().UTC(), admissionClaimInventory(t, f.repo, f.parent))
 	require.ErrorIs(t, err, models.ErrErrandVersionConflict)
 	row, err := f.repo.GetErrand(t.Context(), f.row.ID)

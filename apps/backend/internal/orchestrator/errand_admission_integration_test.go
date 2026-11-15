@@ -113,10 +113,15 @@ func TestErrandAdmissionRealDispatchReservesBeforeProvider(t *testing.T) {
 
 func TestErrandAdmissionServiceAbortReleasesRealAwait(t *testing.T) {
 	f := newAdmissionIntegrationFixture(t, messagequeue.DeliveryProtocolLegacy)
-	_, err := f.repo.ClaimResults(t.Context(), f.taskID, f.parent, models.ErrandDeliveryAwait, "await-abort",
+	parent, err := f.repo.GetTaskSession(t.Context(), f.parent)
+	require.NoError(t, err)
+	owner := models.ErrandAwaitIdentity{TaskID: f.taskID, ParentSessionID: f.parent,
+		ParentIncarnationID: parent.QueueIncarnationID, HarnessGeneration: 1, Token: "await-abort"}
+	require.NoError(t, f.repo.BeginErrandAwait(t.Context(), owner))
+	_, err = f.repo.ClaimResults(t.Context(), f.taskID, f.parent, models.ErrandDeliveryAwait, "await-abort",
 		[]models.ErrandClaimCandidate{{ID: f.row.ID, Version: f.row.Version}}, time.Now().UTC(), admissionClaimInventory(t, f.repo, f.parent))
 	require.NoError(t, err)
-	require.NoError(t, f.errands.ReleaseAwait(t.Context(), "await-abort"))
+	require.NoError(t, f.errands.AbortOwnedAwait(t.Context(), owner))
 	row, err := f.repo.GetErrand(t.Context(), f.row.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandResultPending, row.ResultState, "known await failure must durably abort before release")

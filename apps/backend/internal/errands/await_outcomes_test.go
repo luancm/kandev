@@ -32,7 +32,7 @@ func exerciseAwaitResponseIdentity(t *testing.T, postgres bool) {
 	_, err = repo.ClaimResults(ctx, testTask, testParent, models.ErrandDeliveryTurnContext, "already", []models.ErrandClaimCandidate{{ID: b.ID, Version: b.Version}}, h.service.clock.Now(), models.ErrandInventory(all))
 	require.NoError(t, err)
 	id := models.ErrandAwaitIdentity{TaskID: testTask, ParentSessionID: testParent, Token: "response", ParentIncarnationID: "launched", HarnessGeneration: 3, SubmissionID: "original"}
-	result, err := h.service.Await(ctx, AwaitRequest{Owner: &id, ParentSessionID: testParent, Token: id.Token, ErrandIDs: []string{"claim-b", "claim-a"}, Mode: "all"})
+	result, err := h.service.Await(ctx, AwaitRequest{Owner: id, ErrandIDs: []string{"claim-b", "claim-a"}, Mode: "all"})
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Delivery.Version)
 	require.Equal(t, id.Token, result.Delivery.Token)
@@ -48,13 +48,13 @@ func exerciseAwaitResponseIdentity(t *testing.T, postgres bool) {
 	require.Equal(t, "offered", state, "success is not receipt")
 	foreign := id
 	foreign.HarnessGeneration++
-	_, err = h.service.Await(ctx, AwaitRequest{Owner: &foreign, ParentSessionID: testParent, Token: id.Token, ErrandIDs: []string{"claim-a"}, Mode: "all"})
+	_, err = h.service.Await(ctx, AwaitRequest{Owner: foreign, ErrandIDs: []string{"claim-a"}, Mode: "all"})
 	require.Error(t, err)
 	require.NoError(t, conn.Get(&state, "SELECT state FROM errand_await_attempt WHERE token='response'"))
 	require.Equal(t, "offered", state, "foreign begin error cannot abort original attempt")
 	next := id
 	next.Token = "status-only"
-	status, err := h.service.Await(ctx, AwaitRequest{Owner: &next, ParentSessionID: testParent, Token: next.Token, ErrandIDs: []string{"claim-a", "claim-b"}, Mode: "all"})
+	status, err := h.service.Await(ctx, AwaitRequest{Owner: next, ErrandIDs: []string{"claim-a", "claim-b"}, Mode: "all"})
 	require.NoError(t, err)
 	require.Empty(t, status.Delivery.Items)
 	require.NoError(t, h.service.OfferAwait(ctx, next, status.Delivery))
@@ -69,7 +69,7 @@ func exerciseAwaitResponseIdentity(t *testing.T, postgres bool) {
 	require.NotEqual(t, item.ResultRevision, row.ResultRevision)
 	successor := id
 	successor.Token = "equal-text-distinct-revision"
-	later, err := h.service.Await(ctx, AwaitRequest{Owner: &successor, ParentSessionID: testParent, Token: successor.Token, ErrandIDs: []string{"claim-a"}, Mode: "all"})
+	later, err := h.service.Await(ctx, AwaitRequest{Owner: successor, ErrandIDs: []string{"claim-a"}, Mode: "all"})
 	require.NoError(t, err)
 	require.Equal(t, result.Errands[1].Result, later.Errands[0].Result)
 	require.Equal(t, row.ResultRevision, later.Delivery.Items[0].ResultRevision)

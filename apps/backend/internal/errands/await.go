@@ -7,8 +7,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -23,15 +21,13 @@ const (
 
 var errAwaitSnapshotNotReady = errors.New("errand await snapshot is no longer ready")
 
-// AwaitRequest is one in-turn join. Token identifies the claim so a later
-// release can return it. MaxWaitSeconds is 0 to 600.
+// AwaitRequest is one owned in-turn join. Owner binds the claim and its
+// later receipt or abort. MaxWaitSeconds is 0 to 600.
 type AwaitRequest struct {
-	Owner           *models.ErrandAwaitIdentity
-	ParentSessionID string
-	ErrandIDs       []string
-	Mode            string
-	MaxWaitSeconds  int
-	Token           string
+	Owner          models.ErrandAwaitIdentity
+	ErrandIDs      []string
+	Mode           string
+	MaxWaitSeconds int
 }
 
 // AwaitErrand is one named errand in an await response.
@@ -64,40 +60,24 @@ func (s *Service) Await(ctx context.Context, req AwaitRequest) (result AwaitResu
 	if err := validateAwait(req); err != nil {
 		return AwaitResult{}, err
 	}
-	if req.Token == "" {
-		req.Token = uuid.NewString()
+	if err := s.store.BeginErrandAwait(ctx, req.Owner); err != nil {
+		return AwaitResult{Token: req.Owner.Token}, err
 	}
-	bound := req.Owner == nil
 	defer func() {
-		result.Token = req.Token
-		if returnErr == nil || !bound {
+		result.Token = req.Owner.Token
+		if returnErr == nil {
 			return
 		}
 		abortCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		var abortErr error
-		if req.Owner != nil {
-			abortErr = s.AbortOwnedAwait(abortCtx, *req.Owner)
-		} else {
-			abortErr = s.AbortAwait(abortCtx, req.ParentSessionID, req.Token)
-		}
-		returnErr = errors.Join(returnErr, abortErr)
+		returnErr = errors.Join(returnErr, s.AbortOwnedAwait(abortCtx, req.Owner))
 	}()
-	if req.Owner != nil {
-		if req.Owner.Token != req.Token || req.Owner.ParentSessionID != req.ParentSessionID {
-			return AwaitResult{}, models.ErrInvalidErrand
-		}
-		if err := s.store.BeginErrandAwait(ctx, *req.Owner); err != nil {
-			return AwaitResult{}, err
-		}
-		bound = true
-	}
 	rows, err := s.loadAwaitErrands(ctx, req)
 	if err != nil {
 		return AwaitResult{}, err
 	}
 	started := time.Now()
-	waiter := s.awaits.register(req.ParentSessionID, req.Token)
+	waiter := s.awaits.register(req.Owner.ParentSessionID, req.Owner.Token)
 	defer s.awaits.remove(waiter)
 	deadline := time.NewTimer(time.Duration(req.MaxWaitSeconds) * time.Second)
 	defer deadline.Stop()
@@ -106,33 +86,6 @@ func (s *Service) Await(ctx context.Context, req AwaitRequest) (result AwaitResu
 		result.DurationMS = time.Since(started).Milliseconds()
 	}
 	return result, err
-}
-
-// ReleaseAwait returns results still delivered under token to pending.
-func (s *Service) ReleaseAwait(ctx context.Context, token string) error {
-	return s.releaseClaim(ctx, token, models.ErrandDeliveryAwait)
-}
-
-// AbortAwait records a parent-scoped abort even before a delayed result claim.
-// The caller has irrevocably selected an error response rather than success.
-func (s *Service) AbortAwait(ctx context.Context, parentSessionID, token string) error {
-	parent, err := s.store.GetTaskSession(ctx, parentSessionID)
-	if err != nil {
-		return err
-	}
-	if parent == nil || models.IsErrandSession(parent) {
-		return models.ErrInvalidErrand
-	}
-	released, err := s.store.AbortAwait(ctx, parent.TaskID, parent.ID, token)
-	if err != nil {
-		return fmt.Errorf("abort errand await: %w", err)
-	}
-	for _, row := range released {
-		s.publish(ctx, row)
-	}
-	s.wakeAwaits(parent.ID)
-	s.deliverPending(ctx, parent.ID)
-	return nil
 }
 
 // EndParentAwaits ends every in-flight await of a parent. Each returns
@@ -212,7 +165,7 @@ func (s *Service) finishAwait(
 			return result, err
 		}
 	}
-	return AwaitResult{Token: req.Token}, fmt.Errorf("await snapshot retry exhausted: %w", models.ErrErrandVersionConflict)
+	return AwaitResult{Token: req.Owner.Token}, fmt.Errorf("await snapshot retry exhausted: %w", models.ErrErrandVersionConflict)
 }
 
 func (s *Service) finishAwaitSnapshot(ctx context.Context, req AwaitRequest, timedOut, ended bool) (AwaitResult, error) {
@@ -220,7 +173,7 @@ func (s *Service) finishAwaitSnapshot(ctx context.Context, req AwaitRequest, tim
 	if err != nil {
 		return AwaitResult{}, err
 	}
-	items, err := s.awaitItems(ctx, req.Token, rows, timedOut, ended)
+	items, err := s.awaitItems(ctx, req.Owner.Token, rows, timedOut, ended)
 	if err != nil {
 		return AwaitResult{}, err
 	}
@@ -235,7 +188,7 @@ func (s *Service) finishAwaitSnapshot(ctx context.Context, req AwaitRequest, tim
 			}
 		}
 	}
-	delivery := models.ErrandAwaitDelivery{Version: 1, Token: req.Token, Items: make([]models.ErrandAwaitDeliveryItem, 0, 5)}
+	delivery := models.ErrandAwaitDelivery{Version: 1, Token: req.Owner.Token, Items: make([]models.ErrandAwaitDeliveryItem, 0, 5)}
 	if !ended {
 		claimed, err := s.claimAwait(ctx, req, rows, inventory)
 		if err != nil {
@@ -246,13 +199,13 @@ func (s *Service) finishAwaitSnapshot(ctx context.Context, req AwaitRequest, tim
 		}
 		for i, row := range rows {
 			if snapshot := claimed[row.ID]; snapshot != nil {
-				fillAwaitResult(&items[i], snapshot, req.Token)
+				fillAwaitResult(&items[i], snapshot, req.Owner.Token)
 				delivery.Items = append(delivery.Items, models.ErrandAwaitDeliveryItem{ErrandID: snapshot.ID, ResultRevision: snapshot.ResultRevision})
 			}
 		}
 	}
 
-	return AwaitResult{Delivery: delivery, Token: req.Token, Errands: items, Ended: ended, EndReason: awaitEndReason(req.Mode, timedOut, ended)}, nil
+	return AwaitResult{Delivery: delivery, Token: req.Owner.Token, Errands: items, Ended: ended, EndReason: awaitEndReason(req.Mode, timedOut, ended)}, nil
 }
 
 func awaitEndReason(mode string, timedOut, ended bool) string {
@@ -282,13 +235,13 @@ func awaitSnapshotReady(mode string, rows []*models.Errand, items []AwaitErrand)
 }
 
 func (s *Service) claimAwait(ctx context.Context, req AwaitRequest, rows []*models.Errand, inventory []models.ErrandClaimCandidate) (map[string]*models.Errand, error) {
-	unlock := s.parentLocks.lock(req.ParentSessionID)
+	unlock := s.parentLocks.lock(req.Owner.ParentSessionID)
 	defer unlock()
 	included := make([]composedErrand, 0, len(rows))
 	for _, row := range rows {
 		included = append(included, composedErrand{errand: row})
 	}
-	return s.claimPending(ctx, included, models.ErrandDeliveryAwait, req.Token, inventory)
+	return s.claimPending(ctx, included, models.ErrandDeliveryAwait, req.Owner.Token, inventory)
 }
 
 func (s *Service) awaitItems(
@@ -327,7 +280,7 @@ func fillAwaitResult(item *AwaitErrand, row *models.Errand, token string) {
 
 func validateAwait(req AwaitRequest) error {
 	switch {
-	case req.ParentSessionID == "":
+	case req.Owner.ParentSessionID == "":
 		return fmt.Errorf("%w: parent session is required", ErrInvalidRequest)
 	case len(req.ErrandIDs) < awaitMinErrands || len(req.ErrandIDs) > awaitMaxErrands:
 		return fmt.Errorf("%w: errand_ids must contain 1 to 5 ids", ErrInvalidRequest)
@@ -360,7 +313,7 @@ func (s *Service) loadAwaitErrands(ctx context.Context, req AwaitRequest) ([]*mo
 	rows := make([]*models.Errand, 0, len(req.ErrandIDs))
 	for _, id := range req.ErrandIDs {
 		row, err := s.store.GetErrand(ctx, id)
-		if errors.Is(err, models.ErrErrandNotFound) || (err == nil && row.ParentSessionID != req.ParentSessionID) {
+		if errors.Is(err, models.ErrErrandNotFound) || (err == nil && row.ParentSessionID != req.Owner.ParentSessionID) {
 			return nil, notFound()
 		}
 		if err != nil {
@@ -378,7 +331,7 @@ func (s *Service) reloadAwait(ctx context.Context, req AwaitRequest, seeded []*m
 		if err != nil {
 			return nil, fmt.Errorf("reload awaited errand: %w", err)
 		}
-		if current.ParentSessionID != req.ParentSessionID {
+		if current.ParentSessionID != req.Owner.ParentSessionID {
 			return nil, notFound()
 		}
 		rows[i] = current
@@ -393,7 +346,7 @@ func errandSettled(status models.ErrandStatus) bool {
 }
 
 func (s *Service) awaitSnapshot(ctx context.Context, req AwaitRequest) ([]*models.Errand, []models.ErrandClaimCandidate, error) {
-	inventory, err := s.store.ListErrandsByParent(ctx, req.ParentSessionID)
+	inventory, err := s.store.ListErrandsByParent(ctx, req.Owner.ParentSessionID)
 	if err != nil {
 		return nil, nil, err
 	}

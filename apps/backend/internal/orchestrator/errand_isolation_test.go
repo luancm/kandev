@@ -607,8 +607,12 @@ func settleParentFixtureErrand(t *testing.T, f *parentSettlementFailureFixture) 
 		SessionID: row.ID, TurnID: row.FirstTurnID, SubmissionID: row.SubmissionID,
 		Outcome: models.ErrandOutcomeFailed, FailureSummary: "finished child outcome",
 	}))
+	parent, err := f.repo.GetTaskSession(ctx, f.parentID)
+	require.NoError(t, err)
 	result, err := f.errands.Await(ctx, errands.AwaitRequest{
-		ParentSessionID: f.parentID, ErrandIDs: []string{f.errandID}, Mode: "all", Token: "finish-" + row.ID,
+		Owner: models.ErrandAwaitIdentity{TaskID: f.taskID, ParentSessionID: f.parentID,
+			ParentIncarnationID: parent.QueueIncarnationID, HarnessGeneration: 1, Token: "finish-" + row.ID},
+		ErrandIDs: []string{f.errandID}, Mode: "all",
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Errands, 1)
