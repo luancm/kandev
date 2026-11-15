@@ -618,26 +618,3 @@ func TestErrandLifecycleRecoveryRetriesPartialStopFailure(t *testing.T) {
 	require.False(t, running)
 	require.Empty(t, delivery.parents)
 }
-
-// The lifecycle-only test controller implements the production capability.
-func (*recordingErrandController) ReconcileLifecycle(context.Context) error { return nil }
-
-type lifecycleOpaqueController struct {
-	ErrandController
-	deliveries int
-}
-
-func (c *lifecycleOpaqueController) SweepDelivery(context.Context) error {
-	c.deliveries++
-	return nil
-}
-
-func TestErrandLifecycleMissingCapabilityBlocksAdmissionAndDelivery(t *testing.T) {
-	svc, _ := newServiceWithRealRepo(t)
-	underlying := &recordingErrandController{}
-	opaque := &lifecycleOpaqueController{ErrandController: underlying}
-	svc.SetErrandController(opaque)
-	svc.ceilingSweepTick(t.Context())
-	require.Zero(t, underlying.drainCall)
-	require.Zero(t, opaque.deliveries)
-}

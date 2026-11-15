@@ -23,7 +23,7 @@ function makeStore({
   const items = Object.fromEntries(sessions.map((session) => [session.id as string, session]));
   const state: Record<string, unknown> = {
     features: { errands: errandsEnabled },
-    errands: { byTaskId: { [TASK_ID]: errandRows }, loadedByTaskId: {}, liveRevisionByTaskId: {} },
+    errands: { byTaskId: { [TASK_ID]: errandRows } },
     tasks: {
       activeTaskId: TASK_ID,
       activeSessionId,

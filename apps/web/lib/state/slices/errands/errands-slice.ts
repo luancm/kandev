@@ -11,22 +11,12 @@ import {
   type ErrandHistoryPage,
 } from "@/lib/types/errands";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
-import type {
-  ErrandBrowserReadObservation,
-  ErrandsListObservation,
-  ErrandsSlice,
-  ErrandsSliceState,
-} from "./types";
+import type { ErrandBrowserReadObservation, ErrandsSlice, ErrandsSliceState } from "./types";
 
 export const defaultErrandsState: ErrandsSliceState = {
   errands: {
     byTaskId: {},
-    loadedByTaskId: {},
-    loadedConnectionGenerationByTaskId: {},
-    loadedReadScopeByTaskId: {},
     resetEpochByTaskId: {},
-    liveRevisionByTaskId: {},
-    liveRevisionByErrandIdByTaskId: {},
     removedSessionIdsByTaskId: {},
     browserSummaryByTaskId: {},
     browserSummaryReadByTaskId: {},
@@ -46,10 +36,7 @@ export function mergeErrandsHydrationState(
     ...initialErrands,
     browserReadScopeIdentity: undefined,
     detailObservationRevisionBySessionId: undefined,
-    loadedConnectionGenerationByTaskId: {},
-    loadedReadScopeByTaskId: {},
     resetEpochByTaskId: {},
-    liveRevisionByErrandIdByTaskId: {},
     browserSummaryByTaskId: {},
     browserSummaryReadByTaskId: {},
     browserRevisionByTaskId: {},
@@ -71,34 +58,6 @@ function isOlderErrand(
   const incomingAt = parseStrictRfc3339Timestamp(incoming.updated_at);
   const existingAt = parseStrictRfc3339Timestamp(existing.updated_at);
   return incomingAt !== null && existingAt !== null && incomingAt < existingAt;
-}
-
-function isStaleListedErrand(
-  incoming: Errand,
-  existing: Errand | undefined,
-  requestRevision: number,
-  rowRevisions: Record<string, number> | undefined,
-): boolean {
-  if (!existing) return false;
-  const rowRevision = rowRevisions?.[incoming.errand_id] ?? 0;
-  return (
-    isOlderErrand(incoming, existing) ||
-    (rowRevision > requestRevision && !isOlderErrand(existing, incoming))
-  );
-}
-
-function observationIsCurrent(
-  state: AppState,
-  taskId: string,
-  observation: ErrandsListObservation,
-): boolean {
-  return (
-    state.features.errands &&
-    state.connection.status === "connected" &&
-    (state.connection.generation ?? 0) === observation.connectionGeneration &&
-    stateReadScopeIdentity(state) === observation.readScopeIdentity &&
-    (state.errands.resetEpochByTaskId?.[taskId] ?? 0) === observation.taskResetEpoch
-  );
 }
 
 function browserObservationIsCurrent(
@@ -215,13 +174,11 @@ function newestKnownErrand(state: AppState, taskId: string, id: string) {
 }
 
 function pruneOperationalRows(state: AppState, taskId: string, rows: ErrandBrowserRow[]): void {
-  if (state.errands.loadedByTaskId[taskId]) return;
   const liveIds = new Set(rows.filter((row) => row.live).map((row) => row.errand_id));
   const operational = state.errands.byTaskId[taskId];
   for (const id of Object.keys(operational ?? {})) {
     if (liveIds.has(id)) continue;
     delete operational[id];
-    delete state.errands.liveRevisionByErrandIdByTaskId?.[taskId]?.[id];
   }
 }
 
@@ -230,22 +187,15 @@ function applyOperationalErrand(state: AppState, snapshot: Errand): boolean {
   const errands = state.errands.byTaskId[taskId];
   const existing = newestKnownErrand(state, taskId, snapshot.errand_id);
   if (isOlderErrand(snapshot, existing)) return false;
-  // Complete compatibility inventories remain complete; browser event retention
-  // follows operational lifetime and never becomes another finished-history cache.
-  const retained = isLiveErrand(snapshot) || state.errands.loadedByTaskId[taskId];
-  if (retained) (state.errands.byTaskId[taskId] ??= {})[snapshot.errand_id] = snapshot;
+  if (isLiveErrand(snapshot))
+    (state.errands.byTaskId[taskId] ??= {})[snapshot.errand_id] = snapshot;
   else if (errands) delete errands[snapshot.errand_id];
-  const revision = (state.errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
-  state.errands.liveRevisionByTaskId[taskId] = revision;
-  const revisions = ((state.errands.liveRevisionByErrandIdByTaskId ??= {})[taskId] ??= {});
-  if (retained) revisions[snapshot.errand_id] = revision;
-  else delete revisions[snapshot.errand_id];
   return true;
 }
 
-function createErrandListActions(
+function createOperationalErrandActions(
   set: ImmerSet,
-): Pick<ErrandsSlice, "upsertErrand" | "setTaskErrands" | "removeTaskErrands"> {
+): Pick<ErrandsSlice, "upsertErrand" | "removeTaskErrands"> {
   return {
     upsertErrand: (errand) =>
       set((draft) => {
@@ -261,47 +211,11 @@ function createErrandListActions(
         }
       }),
 
-    setTaskErrands: (taskId, errands, requestRevision, observation) =>
-      set((draft) => {
-        if (observation && !observationIsCurrent(draft, taskId, observation)) return;
-        const current = (draft.errands.byTaskId[taskId] ??= {});
-        const removedSessionIds = draft.errands.removedSessionIdsByTaskId[taskId] ?? {};
-        const listed = errands
-          .filter((errand) => errand.task_id === taskId && !removedSessionIds[errand.errand_id])
-          .map(normalizeErrandAttention);
-        const racedLiveUpdates =
-          (draft.errands.liveRevisionByTaskId[taskId] ?? 0) !== requestRevision;
-        if (!racedLiveUpdates) {
-          const listedIds = new Set(listed.map((errand) => errand.errand_id));
-          for (const errandId of Object.keys(current)) {
-            if (!listedIds.has(errandId)) delete current[errandId];
-          }
-        }
-        const rowRevisions = draft.errands.liveRevisionByErrandIdByTaskId?.[taskId];
-        for (const errand of listed) {
-          if (
-            !isStaleListedErrand(errand, current[errand.errand_id], requestRevision, rowRevisions)
-          )
-            current[errand.errand_id] = errand;
-        }
-        draft.errands.loadedByTaskId[taskId] = true;
-        if (observation) {
-          (draft.errands.loadedConnectionGenerationByTaskId ??= {})[taskId] =
-            observation.connectionGeneration;
-          (draft.errands.loadedReadScopeByTaskId ??= {})[taskId] = observation.readScopeIdentity;
-        }
-      }),
-
     removeTaskErrands: (taskId) =>
       set((draft) => {
         (draft.errands.resetEpochByTaskId ??= {})[taskId] =
           (draft.errands.resetEpochByTaskId?.[taskId] ?? 0) + 1;
-        delete draft.errands.loadedConnectionGenerationByTaskId?.[taskId];
-        delete draft.errands.loadedReadScopeByTaskId?.[taskId];
         delete draft.errands.byTaskId[taskId];
-        delete draft.errands.loadedByTaskId[taskId];
-        delete draft.errands.liveRevisionByTaskId[taskId];
-        delete draft.errands.liveRevisionByErrandIdByTaskId?.[taskId];
         delete draft.errands.removedSessionIdsByTaskId[taskId];
         delete draft.errands.browserSummaryByTaskId[taskId];
         delete draft.errands.browserSummaryReadByTaskId[taskId];
@@ -618,7 +532,7 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
       );
       draft.errands = { ...defaultErrandsState.errands, resetEpochByTaskId: epochs };
     }),
-  ...createErrandListActions(set),
+  ...createOperationalErrandActions(set),
   ...createBrowserSummaryActions(set),
   ...createErrandHistoryActions(set),
   ...createErrandHistoryPageAction(set),

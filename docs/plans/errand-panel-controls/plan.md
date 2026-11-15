@@ -15,7 +15,7 @@ legacy_specs: []
 
 ## Outcome and evidence
 
-Show truthful parent activity counts and offer direct individual Stop in the Errands panel. Tasks owns this outcome because it owns errand lifecycle and cancellation; UI is a consumer of that contract. `ErrandsChipBody` counts `isLiveErrand`, which includes queued and attention, then always uses `errandsChipRunning`. `PopoverRow` offers only Open; `DrawerRow` is one navigation button. Individual cancellation already exists in the child header and `useErrandActions`. The screenshot and this static source trace establish the presentation defect; no live instance or database was mutated and no rendered reproduction was run.
+This completed package corrected the original parent-count and individual-control defects. At the design checkpoint, `ErrandsChipBody` counted queued and attention work with `isLiveErrand` but labelled the total as running; `PopoverRow` offered only Open and `DrawerRow` was one navigation button. Individual cancellation already existed in the child header and `useErrandActions`. The screenshot and static source trace established that initial diagnosis without a rendered reproduction or live instance/database mutation. Tasks owns lifecycle and cancellation; UI consumes that contract. The later [bounded history design](../../specs/tasks/system-design/errand-history-loading.md) owns the current browser summary and history reads.
 
 ## Scope and assumptions
 
@@ -23,7 +23,7 @@ Confirmed: distinguish recovery attention from running and expose individual sto
 
 ## Delivery and ownership
 
-The user approved the design and implementation. Frontend and backend workers released source ownership; the parent completed review remediation and final integration. Unit/hook coverage passed 34 tests, backend race checks passed 77, and fresh managed browser acceptance passed 19 desktop and 16 phone cases against the combined source. Public coordination guidance is updated. Heavy checks ran serially under the shared lock. See [final integration evidence](final-integration-handoff.md) for receipts, exact source hashes, rendered inspection and limits; parent owns commit and push.
+The user approved the design and implementation. Frontend and backend workers released source ownership; the parent completed review remediation and final integration. Unit/hook coverage passed 34 tests, backend race checks passed 77, and fresh managed browser acceptance passed 19 desktop and 16 phone cases against the combined source. Public coordination guidance is updated. Heavy checks ran serially under the shared lock. The [local integration handoff](final-integration-handoff.md) preserves those receipts, exact source hashes, rendered inspection and limits. Its pending commit/push step is historical: the later delivery checkpoint is `6f0053b803`, with production source `ee0f077cb9`; [delivery integration evidence](../errands-remaining/final-integration-handoff.md) records that acceptance and links the final performance disposition.
 
 ## Technical approach
 
@@ -93,4 +93,4 @@ All implementation and review findings are closed for this package. Final backen
 
 ## Risks
 
-Long localized mixed-count labels must wrap within the chip container. Phone button refactoring can accidentally nest actions or navigate on Stop. Existing backend cancellation can fail; preserve the row and show failure instead of falsely settling it. Existing unrelated untracked loading-performance notes are preserved.
+Long localized mixed-count labels must wrap within the chip container. Phone button refactoring can accidentally nest actions or navigate on Stop. Existing backend cancellation can fail; preserve the row and show failure instead of falsely settling it. The original repair preserved the separately owned loading-performance notes; their later acceptance is linked above.

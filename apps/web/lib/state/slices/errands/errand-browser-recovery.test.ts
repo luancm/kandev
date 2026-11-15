@@ -71,7 +71,7 @@ it("ends loading when a completed history response loses its observation ownersh
 });
 
 // @covers AC-TASKS-ERRAND-HISTORY-001.3
-it("does not accumulate full rows or per-row revisions after repeated completion", () => {
+it("does not accumulate full rows after repeated completion", () => {
   const store = createAppStore();
   for (let index = 0; index < 250; index++) {
     const errand = makeErrand({ errand_id: `child-${index}` });
@@ -80,9 +80,6 @@ it("does not accumulate full rows or per-row revisions after repeated completion
     store.getState().upsertErrand(makeErrand({ errand_id: `unseen-${index}`, status: "done" }));
   }
   expect(Object.keys(store.getState().errands.byTaskId[taskId] ?? {})).toHaveLength(0);
-  expect(
-    Object.keys(store.getState().errands.liveRevisionByErrandIdByTaskId?.[taskId] ?? {}),
-  ).toHaveLength(0);
 });
 
 // @covers AC-TASKS-ERRAND-HISTORY-001.6
@@ -193,7 +190,4 @@ it("evicts operational rows after an authoritative summary repairs a missed term
   store.getState().beginErrandBrowserSummaryRead(taskId, observation, "repair");
   store.getState().setErrandBrowserSummary(taskId, makeBrowserSummary([]), observation, "repair");
   expect(Object.keys(store.getState().errands.byTaskId[taskId] ?? {})).toHaveLength(0);
-  expect(
-    Object.keys(store.getState().errands.liveRevisionByErrandIdByTaskId?.[taskId] ?? {}),
-  ).toHaveLength(0);
 });

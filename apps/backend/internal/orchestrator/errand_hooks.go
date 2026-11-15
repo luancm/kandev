@@ -67,10 +67,8 @@ func (s *Service) captureErrandDeletionTarget(ctx context.Context, sessionID str
 }
 
 func (s *Service) notifyErrandSessionStateChanged(ctx context.Context, sessionID string) {
-	observer, ok := s.errands.(interface {
-		OnSessionStateChanged(context.Context, string) error
-	})
-	if !ok {
+	observer := s.errands
+	if observer == nil {
 		return
 	}
 	if err := observer.OnSessionStateChanged(ctx, sessionID); err != nil {

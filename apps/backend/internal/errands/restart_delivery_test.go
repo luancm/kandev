@@ -8,7 +8,7 @@ import (
 )
 
 // @covers AC-TASKS-ERRANDS-004.8
-func TestRestartDeliversAResultThatWasStillPending(t *testing.T) {
+func TestReconcileRetriesPendingResultNotification(t *testing.T) {
 	ctx := context.Background()
 	h, repo, errand := settledTerminalFixture(t, "the answer")
 	errandID := errand.ID
@@ -18,11 +18,11 @@ func TestRestartDeliversAResultThatWasStillPending(t *testing.T) {
 		t.Fatalf("GetErrand: %v", err)
 	}
 	if row.ResultState != models.ErrandResultPending {
-		t.Fatalf("result state = %s before restart, want pending", row.ResultState)
+		t.Fatalf("result state = %s before reconciliation, want pending", row.ResultState)
 	}
 
 	// The settle that produced the result already asked for a notification.
-	// A restart must ask again, because nothing shows the result was delivered.
+	// Reconciliation must ask again because nothing shows the result was delivered.
 	h.deliverer.mu.Lock()
 	h.deliverer.parents = nil
 	h.deliverer.mu.Unlock()
@@ -35,6 +35,6 @@ func TestRestartDeliversAResultThatWasStillPending(t *testing.T) {
 	parents := append([]string(nil), h.deliverer.parents...)
 	h.deliverer.mu.Unlock()
 	if len(parents) != 1 || parents[0] != testParent {
-		t.Fatalf("restart delivered to parents %v, want exactly [%s]", parents, testParent)
+		t.Fatalf("reconciliation notified parents %v, want exactly [%s]", parents, testParent)
 	}
 }

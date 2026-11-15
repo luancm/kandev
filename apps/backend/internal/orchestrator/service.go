@@ -4058,9 +4058,8 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is in REVIEW state (not stuck IN_PROGRESS) -- skipped for a
-	// re-tracked session's task, per AC-EXECUTORS-SURVIVAL-003.5, and for an
-	// errand, which never owns task runtime state.
+	// Only an ordinary session that was not re-tracked can move an unarchived,
+	// still IN_PROGRESS task to REVIEW.
 	if !retracked && running.TaskID != "" && !models.IsErrandSession(session) {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {

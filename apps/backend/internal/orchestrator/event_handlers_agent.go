@@ -3089,16 +3089,9 @@ func (s *Service) finishAgentCompletedTurn(
 		zap.Bool("workflow_transitioned", transitioned))
 
 	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
-		// Terminal-receipt path. Only flip the session to WAITING_FOR_INPUT
-		// when the most recent agent-authored message actually asked the
-		// user for input. Sibling sessions (root task, ParentID empty)
-		// keep the original affordance so a finishing session on a
-		// multi-session task still flips to WAITING — only subtasks
-		// (ParentID non-empty) get the guard. setSessionWaitingForInputIfRequested
-		// itself inspects the task row to pick the path; for sibling
-		// sessions the call is a no-op pass-through to the unconditional
-		// helper, preserving the pre-fix behavior. An errand settles without
-		// touching task runtime state.
+		// Errands and deferred parent workflows settle without changing task
+		// state. Root-task sessions become promptable unconditionally;
+		// subtasks do so only when the latest agent message requests input.
 		guard.unlock()
 		if models.IsErrandSession(session) || deferTaskWorkflow {
 			s.setSessionWaitingForInputWithoutTaskState(ctx, data.TaskID, data.SessionID, session)
@@ -3113,10 +3106,7 @@ func (s *Service) finishAgentCompletedTurn(
 	s.captureGitStatusSnapshot(ctx, data.SessionID)
 
 	// Clean up the agent execution (stop agentctl, release port)
-	_, completionOwned := s.errands.(interface {
-		RetryErrandCompletion(context.Context, string) error
-	})
-	if !models.IsErrandSession(session) || !completionOwned {
+	if !models.IsErrandSession(session) || s.errands == nil {
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 	}
 

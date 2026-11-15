@@ -164,7 +164,7 @@ and the reason in `details.reason`, as `handleSpawnSession` does.
 
 | `details.reason` | Code | Raised when |
 | --- | --- | --- |
-| `feature_disabled` | `NOT_FOUND` | An errand MCP or WebSocket action runs with the flag off, as in background work |
+| `feature_disabled` | `NOT_FOUND` | A gated MCP action, `errand.list`, or mutating WebSocket action runs with the flag off |
 | `errand_not_supported`, `errand_not_permitted`, `errand_sender_not_parent` | `FORBIDDEN` | In order: an ineligible start caller or task, errands included; another guarded mutation from an errand; another agent messaging an errand |
 | `errand_profile_not_found`, `errand_profile_ambiguous`, `errand_profile_incompatible` | `VALIDATION_ERROR` | Profile resolution fails, passthrough included; `details.available` lists up to 20 names |
 | `errand_not_found` | `NOT_FOUND` | An ID is not an errand of the caller (MCP) or task (WebSocket) |
@@ -181,11 +181,19 @@ pending.
 
 | Name | Direction | Payload |
 | --- | --- | --- |
-| `errand.list` | request | `task_id`; returns `errands[]` (`ErrandDTO`) |
+| `errand.list` | request | `task_id`; complete `errands[]` (`ErrandDTO`) |
+| `errand.browser_summary` | request | `task_id`; compact outstanding rows and authoritative task/parent counts |
+| `errand.history_page` | request | `task_id`, `parent_session_id`, `limit` (default/max 25), optional cursor; compact finished rows and pagination |
+| `errand.inspect` | request | `task_id`, `child_session_id`; verified child/parent identity and compact errand, no transcript |
 | `errand.cancel` | request | `session_id` |
 | `errand.cancel_all` | request | `task_id`; returns `cancelled`, the count |
 | `errand.send_result` | request | `session_id` |
 | `errand.updated` | event | one `ErrandDTO` plus `workspace_id`, routed with `Hub.BroadcastToWorkspaceOrDrop` |
+
+The [bounded history design](errand-history-loading.md) owns browser reads,
+guards and retention. These reads require workspace authorization, work with
+the flag off, and never fall back to complete lists. API, internal and MCP
+inventories remain complete; mutations retain feature and ownership gates.
 
 The gateway scopes requests through `task_id` and `session_id`. A queued
 errand has no session row: cancel authorization resolves its task from the
@@ -470,14 +478,14 @@ session, errand, and parent IDs as fields only.
 
 ## Frontend
 
-- **State/transport.** Session projections carry role, parent and waiting
-  fields. `lib/types/errands.ts`, the `errands` slice, `errand.updated` and
-  `use-task-errands.ts` own the shared list/live state and reconnect refresh;
-  `use-errand-actions.ts` owns mutations. Mounting multiple surfaces must
-  retain one shared list request. Historical result cards use message
-  snapshots, not today's rows. Shared connection generation and read scope
-  fence list freshness; stale requests cannot publish or clear replacements.
-- **Conversations and history.** [Errand conversation navigation](errand-conversation-navigation.md) owns parent-tab hosting, scoped preview/Threads selection, normal phone selectors, parent-owned panels, collapsed completed history and consistent historical disclosures. Role restrictions and direct child transcripts survive the release toggle. Normal conversations retain their tabs; opening an errand never transfers workflow ownership.
+- **State/transport.** The `errands` slice and `use-task-errands.ts` share
+  compact summaries, demand history and targeted inspection under the
+  [bounded history design](errand-history-loading.md)'s ownership and stale-response
+  guards. Operational live rows stay separate. Reconnect refreshes summaries
+  and marks history stale without refilling it. `use-errand-actions.ts` owns
+  mutations; complete `listErrands` remains a compatibility API. Historical
+  cards use saved snapshots without history or inspection reads.
+- **Conversations and history.** [Errand conversation navigation](errand-conversation-navigation.md) owns parent hosting, normal selectors, scoped child selection and historical disclosures. Normal tabs, retained transcripts and role restrictions survive the release toggle.
 - **Navigation ownership.** Kanban `PreviewSessionTabs` and Threads
   `TaskSessionNavigationContext` own selection and Back within their host.
   Neither operation transfers workflow ownership.
@@ -488,7 +496,7 @@ session, errand, and parent IDs as fields only.
 
 ### Current management and transcript history
 
-The parent chip and panel own live management; transcripts own historical events. This approved separation avoids retained errands competing with normal conversations as tabs. Existing direct links, session selection and transcripts remain intact; no deletion, runtime cleanup or backend ownership change follows from hiding tabs. [Task29](../../../plans/errands-review-repairs/task-29-conversation-navigation-and-history.md) owns implementation and evidence.
+Panels manage live work; transcripts retain history. Hiding child tabs preserves direct links and runtime ownership. [Task29](../../../plans/errands-review-repairs/task-29-conversation-navigation-and-history.md) records evidence.
 
 ### Phone composition
 
@@ -501,12 +509,13 @@ Reuse the shipped Errands bottom Drawer and `mobile-picker-sheet.tsx`: normal co
 `FeaturesConfig.Errands`, `"false"` in every `profiles.yaml` profile, and
 exposed as `errands` in `lib/state/slices/features/types.ts`; E2E specs
 enable it with `backend.useEnv`. It gates `CapabilityErrands`, the errand
-prompt sections, the MCP actions, the WebSocket requests,
-`ComposeParentTurn`, `OnParentTurnSettled`, delivery, and frontend errand
-management and mutation surfaces. Retained child transcripts, parent Back
-navigation, and persisted-role restrictions remain available while disabled. Errand mode resolution, the workflow-detached predicate, and
-reconciliation of cancellations do not read the flag, so existing errand
-sessions stay isolated and fail closed.
+prompt sections, the MCP actions, the legacy `errand.list` and mutating
+WebSocket requests, `ComposeParentTurn`, `OnParentTurnSettled`, delivery,
+and frontend errand management and mutation surfaces. Retained child
+transcripts, parent Back navigation, and persisted-role restrictions remain
+available while disabled. Errand mode resolution, the workflow-detached
+predicate, and reconciliation of cancellations do not read the flag, so
+existing errand sessions stay isolated and fail closed.
 
 ## Verification strategy
 

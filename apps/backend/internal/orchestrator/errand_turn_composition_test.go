@@ -15,6 +15,7 @@ import (
 // fakeErrandComposer records composition and release calls. It satisfies
 // ErrandController with no-op lifecycle hooks.
 type fakeErrandComposer struct {
+	recordingErrandController
 	composition errands.Composition
 	composeErr  error
 	routes      []models.ErrandDeliveryRoute

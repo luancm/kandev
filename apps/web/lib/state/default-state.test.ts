@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { defaultState, mergeInitialState } from "./default-state";
 import { createAppStore, type HydrationState } from "./store";
-import { ERRAND_TASK_ID, makeErrand } from "./slices/errands/errands.test-helpers";
+import {
+  ERRAND_PARENT_ID,
+  ERRAND_TASK_ID,
+  makeErrand,
+  makeBrowserErrandRow,
+  makeBrowserSummary,
+  makeHistoryPage,
+  makeInspection,
+} from "./slices/errands/errands.test-helpers";
+import { stateReadScopeIdentity } from "./shared-resource-reads";
 
 describe("turn hydration state", () => {
   it("defaults and deep-merges loaded session markers", () => {
@@ -38,37 +47,54 @@ describe("turn hydration state", () => {
 });
 
 describe("errands hydration state", () => {
-  it("accepts list delivery updates without inheriting hydrated live-row ownership", () => {
-    const cached = makeErrand({ delivery_state: "uncertain" });
-    const store = createAppStore({
-      errands: {
-        ...defaultState.errands,
-        byTaskId: { [ERRAND_TASK_ID]: { [cached.errand_id]: cached } },
-        liveRevisionByErrandIdByTaskId: { [ERRAND_TASK_ID]: { [cached.errand_id]: 4 } },
-      },
+  it("clears runtime browser ownership from a previously retained Errands snapshot", () => {
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const running = makeErrand();
+    store.getState().upsertErrand(running);
+    const observation = {
+      connectionGeneration: store.getState().connection.generation ?? 0,
+      readScopeIdentity: stateReadScopeIdentity(store.getState()),
+      taskResetEpoch: 0,
+      observationRevision: store.getState().errands.browserRevisionByTaskId[ERRAND_TASK_ID],
+    };
+    const outstanding = makeBrowserErrandRow({
+      status: "running",
+      result_state: "none",
+      live: true,
+      outstanding: true,
     });
-    const received = { ...cached, delivery_state: "received" as const };
-    store.getState().setTaskErrands(ERRAND_TASK_ID, [received], 0);
+    const finished = makeBrowserErrandRow({ errand_id: "finished-child" });
+    store.getState().beginErrandBrowserSummaryRead(ERRAND_TASK_ID, observation, "summary");
+    store
+      .getState()
+      .setErrandBrowserSummary(
+        ERRAND_TASK_ID,
+        makeBrowserSummary([outstanding]),
+        observation,
+        "summary",
+      );
+    store.getState().openErrandHistory("panel", ERRAND_TASK_ID, ERRAND_PARENT_ID);
+    store.getState().beginErrandHistoryRead("panel", observation, null, "history");
+    store
+      .getState()
+      .setErrandHistoryPage("panel", makeHistoryPage([finished]), observation, null, "history");
+    store.getState().retainErrandInspection("child", makeInspection(finished));
+    const retained = store.getState().errands;
+    expect(retained.browserSummaryByTaskId[ERRAND_TASK_ID].errands).toEqual([outstanding]);
+    expect(retained.historyByOwnerId.panel.pages[0].errands).toEqual([finished]);
+    expect(retained.detailOwnersBySessionId[finished.errand_id]).toEqual({ child: true });
 
-    expect(store.getState().errands.byTaskId[ERRAND_TASK_ID][cached.errand_id]).toEqual(received);
-  });
-
-  it("keeps runtime snapshot ownership metadata out of hydrated state", () => {
-    const state = mergeInitialState({
-      errands: {
-        byTaskId: { "task-1": {} },
-        loadedByTaskId: { "task-1": true },
-        loadedConnectionGenerationByTaskId: { "task-1": 4 },
-        loadedReadScopeByTaskId: { "task-1": "stale-scope" },
-        resetEpochByTaskId: { "task-1": 12 },
-      },
-    } as unknown as HydrationState);
-
-    expect(state.errands.byTaskId).toEqual({ "task-1": {} });
-    expect(state.errands.loadedByTaskId).toEqual({ "task-1": true });
-    expect(state.errands.loadedConnectionGenerationByTaskId).toEqual({});
-    expect(state.errands.loadedReadScopeByTaskId).toEqual({});
-    expect(state.errands.resetEpochByTaskId).toEqual({});
+    const state = mergeInitialState({ errands: retained });
+    expect(state.errands.byTaskId[ERRAND_TASK_ID]).toEqual({ [running.errand_id]: running });
+    expect(state.errands.browserReadScopeIdentity).toBeUndefined();
+    expect(state.errands.browserSummaryByTaskId).toEqual({});
+    expect(state.errands.browserSummaryReadByTaskId).toEqual({});
+    expect(state.errands.browserRevisionByTaskId).toEqual({});
+    expect(state.errands.historyByOwnerId).toEqual({});
+    expect(state.errands.detailBySessionId).toEqual({});
+    expect(state.errands.detailOwnersBySessionId).toEqual({});
+    expect(state.errands.detailObservationRevisionBySessionId).toBeUndefined();
   });
 });
 

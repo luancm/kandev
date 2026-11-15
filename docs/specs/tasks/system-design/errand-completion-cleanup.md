@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-ERRAND-COMPLETION-001
@@ -14,22 +14,26 @@ owners:
 
 This design implements [completed errand sessions](../requirements/errand-completion-cleanup.md), reusing the exact identity, durable settlement and admission boundaries in [errand recovery and delivery](errand-recovery-and-delivery.md). The [task-owned worktree decision](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md) remains authoritative. Conversation retention and execution lifetime are separate: completion releases execution resources, while explicit continuation may restore the retained conversation.
 
-`settleDetachedAgentReadyTurn` currently settles an errand result and publishes `WAITING_FOR_INPUT`; it leaves a promptable runtime. The process-exit path through `finishAgentCompletedTurn` schedules execution cleanup but also leaves an errand session waiting. `TaskSessionStateCompleted` already exists. Generic completed-session resume is deliberately gated by `AllowCompletedSessionResume`; the errand follow-up paths must supply that permission only after validating the exact completed errand and existing caller authority.
+Both the ready and process-exit paths capture exact completion ownership and settle through the Errands service. The repository commits the exact terminal decision, current result or no-result outcome, and completion obligation atomically. The existing teardown owner closes the captured execution and conditionally projects `COMPLETED` only after acknowledged close or authenticated absence. Generic completed-session resume remains gated by `AllowCompletedSessionResume`; errand follow-up paths supply that permission only after validating the exact completed errand and existing caller authority.
 
-| Acceptance | Owner |
-| --- | --- |
-| .1 | Exact terminal settlement followed by durable success-close intent |
-| .2 | Confirmed execution close and conditional session projection |
-| .3 | Admission arbitration and explicit same-conversation resume |
-| .4 | Existing startup/sweep recovery and conservative retained-session repair |
+| Acceptance | Owner                                                                    |
+| ---------- | ------------------------------------------------------------------------ |
+| .1         | Exact terminal settlement followed by durable success-close intent       |
+| .2         | Confirmed execution close and conditional session projection             |
+| .3         | Admission arbitration and explicit same-conversation resume              |
+| .4         | Existing startup/sweep recovery and conservative retained-session repair |
 
 ## Durable close authority
 
-Extend the existing private `ErrandTeardownIntent` boundary with an explicit completion purpose. A missing purpose remains cancellation for compatibility with stored intents. Keep one versioned JSON contract and exact target identity rather than adding another teardown table or independent coordinator. Any schema/codec changes must preserve both SQLite and PostgreSQL behavior.
+The existing private `ErrandTeardownIntent` carries an explicit completion purpose. A missing purpose remains cancellation for compatibility with stored intents. One versioned JSON contract carries exact target identity; there is no separate completion teardown table or coordinator. Schema/codec changes must preserve both SQLite and PostgreSQL behavior.
 
 Capture task, immutable role/parent, session incarnation, execution, exact terminal turn and submission from existing positive evidence. Commit the completion obligation alongside the exact terminal settlement decision, or recover it idempotently from that committed decision before successor admission. A result's delivery state is independent: neither awaiting nor uncertain parent reception delays or authorizes a different close target. A user-origin turn uses its existing no-result settlement receipt and never creates a parent notification merely because its runtime closes.
 
-Successful completion must not call the cancellation operation unchanged. `errand_teardown.go` currently uses `cancelSession`, cancellation reasons and failed execution state. Share the exact-target validation, admission arbitration, confirmed-stop and receipt machinery, while selecting distinct completion effects. Completion preserves errand lifecycle/outcome, result revision, delivery claims, transcript, provider resume identity and task-owned environment. Cancellation takes its existing semantic precedence; retries must not convert a cancellation into successful completion or lose an outstanding physical-stop obligation.
+Legacy providers can complete an explicit user follow-up without a durable delivery-submission row. If the existing submission inventory read succeeds but supplies no identity, the exact committed successful terminal decision may supply the missing submission for cleanup. The completed current turn must belong to the verified task/session, equal the Errand's latest settled turn and match the persisted teardown target; the decision must match its session, incarnation, turn, submission and captured execution. This is resolution from retained evidence, not synthesis of a submission. A read error, unresolved or conflicting inventory, incomplete turn or missing/conflicting decision cannot authorize it. Runtime inventory, successor admission, stop acknowledgement and post-stop ownership checks remain separate requirements.
+
+The same identity resolution applies when cancellation inherits that pending completion target. It does not turn cancellation into successful completion: the cancellation path retains its outcome and physical-stop obligation. Historical decisions for other turns, a delivered result and `LastOutcome` alone never supply cleanup authority.
+
+Successful completion and cancellation share exact-target validation, admission arbitration, confirmed-stop and receipt machinery, with distinct projection effects. Completion uses `errand_completion_cleanup.go` and preserves errand lifecycle/outcome, result revision, delivery claims, transcript, provider resume identity and task-owned environment. Cancellation retains its cancellation reason and precedence; retries must not convert a cancellation into successful completion or lose an outstanding physical-stop obligation. Closed completion obligations can retire obsolete success projection without repeating a confirmed stop or overwriting a cancelled session.
 
 ## Ordering, races and session state
 
@@ -55,4 +59,4 @@ Use production SQLite/service integration with controlled physical-provider boun
 
 ## Implementation package
 
-[Completion cleanup plan and work order](../../../plans/errand-completion-cleanup/plan.md).
+[Completion cleanup plan and work order](../../../plans/errand-completion-cleanup/plan.md) and [accepted integration evidence](../../../plans/errands-remaining/final-integration-handoff.md). The behavior-preserving [simplification package](../../../plans/errands-simplification/plan.md) strengthens contract coverage before making the installed controller capabilities explicit; it does not change these ownership or recovery rules.

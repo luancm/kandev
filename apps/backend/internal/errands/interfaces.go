@@ -137,7 +137,7 @@ type ErrandTeardown interface {
 	RetryErrandTeardown(ctx context.Context, intent ErrandTeardownIntent) (TeardownOutcome, error)
 }
 
-// TeardownIntentStore is an additive capability until lifecycle callers migrate.
+// TeardownIntentStore conditionally advances persisted exact-target teardown intents.
 type TeardownIntentStore interface {
 	GetErrand(context.Context, string) (*models.Errand, error)
 	TransitionErrandTeardownIntent(context.Context, string, string, int64, models.ErrandTeardownIntentState) (*models.Errand, error)

@@ -18,6 +18,17 @@ system_design:
 
 # Task 03: Add the errands frontend data layer and tab filter
 
+## Historical loader design (2026-10-26)
+
+This completed work order records the original complete-list loader and tab
+filter, not the current browser design. The [bounded history design](../../specs/tasks/system-design/errand-history-loading.md)
+supersedes its private `setTaskErrands`, inventory selectors and loader maps;
+[conversation navigation](../../specs/tasks/system-design/errand-conversation-navigation.md)
+supersedes the original flag-dependent tab rules. Complete `listErrands` API
+and MCP inventories retain their contracts. The implementation and verification
+receipts below remain historical evidence; they are not instructions to
+restore the old browser loader.
+
 ## Summary
 
 Give the web app a typed errand model, an `errands` store slice with
@@ -139,7 +150,7 @@ delegation. No user-facing copy was added.
   `{task_id}`, and `errand.send_result` `{session_id}` through the
   authenticated WebSocket client.
 - Hooks: `useTaskErrands(taskId)` returns `{ errands, errandsByParent,
-  liveCount, isLoaded }`; while the flag is on it loads `errand.list` once
+liveCount, isLoaded }`; while the flag is on it loads `errand.list` once
   per task and connection, shared by every consumer, and refreshes after a
   reconnect. While the flag is off it returns nothing and sends nothing.
   `useErrandActions()` returns `cancelErrand(sessionId)`,
@@ -177,7 +188,7 @@ Verification passed:
 `message-favorites/favorites-store.test.ts`) that reproduce identically on
 the base commit.
 
-Open contract points for tasks 04, 05, and 08:
+Historical open contract points for tasks 04, 05, and 08:
 
 - No event removes an errand row. When an errand session is deleted, live
   clients keep the row until the next `errand.list` load.

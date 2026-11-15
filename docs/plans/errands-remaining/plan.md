@@ -67,7 +67,9 @@ The completed source also preserves normal picker/handoff exclusion, phone navig
 
 ## Execution boundaries
 
-The primary owns integration judgment, documentation, tests and final delivery. Earlier Lunaldinho implementation and Era Sol reviews are historical accepted inputs, recorded in their handoffs; they are not active work. The user explicitly replaced delegation with direct primary execution. Ancient running labels are not evidence of a live writer or a new implementation obligation. Supported cancellation was used where available; no direct SQL repair of historical live records was performed.
+The requested [code quality and redesign roadmap](code-quality-roadmap.md) is a follow-up to this completed delivery, alongside the bounded-use pilot. Its first bounded audit selected [private browser-state removal and explicit lifecycle integration](../errands-simplification/plan.md), with contract-test strengthening before the backend refactor. It does not reopen accepted implementation work orders or claim that functional verification proves maintainability.
+
+The primary owns integration judgment and final delivery. Earlier Lunaldinho implementation and Era Sol reviews are historical accepted inputs, recorded in their handoffs; they are not active work. The current task plan records the user-authorized Coordinate assignments and one-writer ownership for the follow-up. Ancient running labels are not evidence of a live writer or a new implementation obligation. Supported cancellation was used where available; no direct SQL repair of historical live records was performed.
 
 Heavy checks run sequentially under `/tmp/kandev-errands-repair-build.lock`, with two Go workers and one browser worker. Test builds disable inlining only for the large orchestrator package; a separate normal optimized backend build verifies production compilation. Disk headroom is monitored, and rebuildable caches are cleared only between builds or after hooks when no compiler/linter owns them. PostgreSQL without a DSN remains an explicit skip.
 

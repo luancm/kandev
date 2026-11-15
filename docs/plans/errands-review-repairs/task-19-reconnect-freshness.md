@@ -20,6 +20,10 @@ system_design:
 
 # Task 19: Refresh each task across connection generations
 
+## Historical complete-list repair
+
+This completed work order records the former `errand.list` browser loader, including its private freshness maps and `setTaskErrands` merge path. The current [bounded history design](../../specs/tasks/system-design/errand-history-loading.md) replaces that loader with scoped summary/history/inspection reads. Preserve the lessons below: receipt and recovery projections can change without advancing `updated_at`, and deferred-response tests must prove that an older attempt cannot overwrite newer observations or clear its replacement. The historical TDD receipts establish their original implementation, not a requirement to retain its private maps.
+
 ## Scope and authority
 
 Repairs review finding(s) 13 at baseline `6400a265bb8a0a35fb702eced2aff1eeb81023d9`. This work order is part of [the repair package](plan.md). The [shared recovery design](../../specs/tasks/system-design/errand-recovery-and-delivery.md) resolves cross-packet contracts and takes precedence over historical diagnostic proposals. Partial production and regression changes survived the interrupted implementation. This packet resumes their acceptance; the later Task29 integration has already repaired the required connection.generation test-fixture shapes.
@@ -31,6 +35,7 @@ Repairs review finding(s) 13 at baseline `6400a265bb8a0a35fb702eced2aff1eeb81023
 use-task-errands.ts remembers previousConnection in a hook-local ref, while loadedByTaskId means loaded forever. A reconnect while B is selected refreshes B only; visiting A sees loaded:true and never refreshes it. Its loadsByStore entry is also only task-keyed, so a still-pending request from the old transport can swallow the new reconnect request and later write an obsolete snapshot.
 
 Own:
+
 - apps/web/lib/state/slices/ui/{types.ts,ui-slice.ts}, plus a new connection-generation.test.ts beside the slice.
 - apps/web/lib/state/slices/errands/{types.ts,errands-slice.ts} and errands-slice.test.ts.
 - apps/web/hooks/domains/session/use-task-errands.ts and use-task-errands.test.ts.
@@ -64,10 +69,10 @@ Use real StateProvider/createAppStore and actual useTaskErrands, real slice, def
 - second store, scope/workspace/auth switch and task switch cannot consume old-attempt result. Scope identity changes at the same production store boundary used by task-session reads.
 - connection generation increments only at actual connected boundaries, independent of mounted hooks; duplicate statuses stay stable.
 
-~~~
+```
 (cd apps/web && pnpm exec vitest run hooks/domains/session/use-task-errands.test.ts lib/state/slices/errands/errands-slice.test.ts lib/state/slices/ui/connection-generation.test.ts lib/ws/handlers/errands.test.ts lib/api/domains/errand-api.test.ts)
 (cd apps/web && pnpm exec eslint --max-warnings 0 hooks/domains/session/use-task-errands.ts hooks/domains/session/use-task-errands.test.ts lib/state/slices/errands/types.ts lib/state/slices/errands/errands-slice.ts lib/state/slices/errands/errands-slice.test.ts lib/state/slices/ui/types.ts lib/state/slices/ui/ui-slice.ts lib/state/slices/ui/connection-generation.test.ts)
-~~~
+```
 
 The two new counters are private ownership/freshness metadata, not user-visible statuses. Add any changed default-state file to ESLint. Existing mock state shapes need generation:0 or nullish-compatible handling; run rg for full-module useTaskErrands mocks before final suite.
 
@@ -89,9 +94,9 @@ The hydration regression failed before normalization because `mergeInitialState`
 
 Final regression command, including every required work-order test and the changed default-state, UI-slice and nearest consumer suites:
 
-~~~sh
+```sh
 (cd apps/web && pnpm exec vitest run hooks/domains/session/use-task-errands.test.ts lib/state/slices/errands/errands-slice.test.ts lib/state/slices/ui/connection-generation.test.ts lib/state/slices/ui/ui-slice.test.ts lib/state/default-state.test.ts lib/ws/handlers/errands.test.ts lib/api/domains/errand-api.test.ts components/task/chat/errands/errands-chip.test.tsx components/task/mobile/mobile-sessions-section.errands.test.tsx components/task/mobile/mobile-sessions-section.test.tsx --maxWorkers=1)
-~~~
+```
 
 Result: 10 files and 147 tests passed; `/tmp/errands-task19-final-vitest-3.log`.
 
@@ -99,11 +104,11 @@ Scoped ESLint passed with `--max-warnings 0` for every changed Task19 source and
 
 No browser suite was rerun: this packet changes only store freshness and hydration metadata, with no markup, layout, navigation or input behavior. Existing desktop and native-phone Errands evidence remains applicable.
 
-### Reopened by the scope review
+### Historical reopening by the scope review
 
 The user-requested scope review found a remaining stale-response race in the existing live/list merge contract. `setTaskErrands` uses a changed `liveRevisionByTaskId` to preserve removals, but still replaces an existing row when the incoming timestamp is equal. Await receipt/recovery projection updates `errand_await_attempt` without advancing the errand row's `updated_at`, so a delayed list can overwrite a later live `received` observation with `uncertain`, or hide a newly published warning, then stamp the cache fresh. The previous test receipt remains valid for its covered cases but does not establish this schedule.
 
-Task19 is reopened for a focused regression in the existing slice and `use-task-errands` tests: capture a list request, publish a delivery-state change with identical `updated_at`, then resolve the older response last. Cover warning introduction/removal and an unrelated row update. Preserve the newer live observation with per-row request/event ownership or an equally complete existing authority; do not use the unchanged errand timestamp as projection ordering. No new public API, UI layout or browser behavior is proposed. Run the existing Task19 focused command after correction. This checkpoint records the finding only; no additional production repair was made during the scope review.
+At that checkpoint, Task19 was reopened for a focused regression in the existing slice and `use-task-errands` tests: capture a list request, publish a delivery-state change with identical `updated_at`, then resolve the older response last. Cover warning introduction/removal and an unrelated row update. Preserve the newer live observation with per-row request/event ownership or an equally complete existing authority; do not use the unchanged errand timestamp as projection ordering. No new public API, UI layout or browser behavior is proposed. Run the existing Task19 focused command after correction. This checkpoint records the finding only; no additional production repair was made during the scope review.
 
 #### Reopened-race repair receipt (2026-11-01)
 

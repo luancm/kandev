@@ -1,8 +1,10 @@
 # Parent integration and final verification
 
-## Current state
+This is the historical local-acceptance handoff before commit/push. The later delivery checkpoint is `6f0053b803`, with production source `ee0f077cb9`. See [delivery integration evidence](../errands-remaining/final-integration-handoff.md) and the [final performance disposition](../errand-history-loading/summary-followup-handoff.md) for the subsequent accepted state; the original receipts and hashes below remain unchanged.
 
-Final local acceptance passed for the combined cleanup and panel-control source. Backend race checks passed 77 tests, scoped Go lint passed with zero issues, and fresh managed browser runs passed 19 desktop and 16 phone cases without failures or skips. Normal-hook commit and push remain the final delivery step.
+## Historical local-acceptance checkpoint
+
+Final local acceptance passed for the combined cleanup and panel-control source. Backend race checks passed 77 tests, scoped Go lint passed with zero issues, and fresh managed browser runs passed 19 desktop and 16 phone cases without failures or skips. Normal-hook commit and push remained outstanding at this checkpoint.
 
 ## Review corrections
 
@@ -38,7 +40,7 @@ Desktop log: `/tmp/kandev-errands-final-parent/logs/kandev-run.e2e.T3vziioe.log`
 
 ## Limits and follow-up
 
-Provider behavior used isolated local mock fixtures; this is not live Mac or PostgreSQL validation. No persistence schema changed. The verification Errand's missing result delivery remains a [deferred incident](../errands-remaining/verification-result-delivery-incident.md), not a resolved cause. Separately owned performance planning is excluded from this delivery. Both managed runs exited and released their lock; retained logs/screenshots are evidence, and private caches can be removed after commit hooks finish.
+Provider behavior used isolated local mock fixtures; this is not live Mac or PostgreSQL validation. No persistence schema changed. At this checkpoint, the verification Errand's missing result delivery remained a [deferred incident](../errands-remaining/verification-result-delivery-incident.md), not a resolved cause. The later delivery evidence above includes the separately verified exact-tool replay repair. Separately owned performance planning is excluded from this delivery. Both managed runs exited and released their lock; retained logs/screenshots are evidence, and private caches can be removed after commit hooks finish.
 
 ## Accepted source hashes
 

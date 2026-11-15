@@ -8,12 +8,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// errandStartupReconciler is the startup part of the errands service. It is
-// type-asserted from ErrandController so the controller's method set stays fixed.
-type errandStartupReconciler interface {
-	Reconcile(ctx context.Context) error
-}
-
 // A pending exact target must retain its runtime and turn evidence until
 // authenticated recovery and Errands reconciliation classify that target.
 func (s *Service) errandOwnsStartupTeardown(ctx context.Context, session *models.TaskSession) bool {
@@ -39,8 +33,8 @@ func (s *Service) errandOwnsStartupTeardown(ctx context.Context, session *models
 // reconcileErrandsOnStartup repairs errand state after session recovery. A
 // failure is logged; the next boot retries the same repairs.
 func (s *Service) reconcileErrandsOnStartup(ctx context.Context) {
-	reconciler, ok := s.errands.(errandStartupReconciler)
-	if !ok {
+	reconciler := s.errands
+	if reconciler == nil {
 		return
 	}
 	if err := s.reconcileErrandParentAdmissions(ctx); err != nil {

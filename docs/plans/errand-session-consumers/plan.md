@@ -1,6 +1,6 @@
 ---
 created: 2026-11-02
-status: draft
+status: done
 requirements:
   - REQ-TASKS-ERRANDS-005
 system_design:
@@ -12,7 +12,7 @@ legacy_specs: []
 
 ## Overview
 
-The summary menus map every session to indistinguishable profile labels; preview deletion and several route/task-picker fallbacks select raw first rows. Errands share the session collection, so these consumers must distinguish automatic normal-conversation choices from intentional child access. The user requested planning and execution together; implement sequentially after recording this package.
+At this package's original checkpoint, summary menus mapped every session to indistinguishable profile labels, while preview deletion and several route/task-picker fallbacks selected raw first rows. Tasks01–02 repaired those automatic choices while preserving intentional child access; both are complete with verification below. This package predates the later [bounded history design](../../specs/tasks/system-design/errand-history-loading.md), which now owns ordinary browser membership and selected-child detail retention.
 
 ## Scope and technical approach
 
@@ -47,8 +47,10 @@ Complete. Eight pre-fix behavioral assertions failed across all six affected ent
 
 Fresh managed desktop build and final retries-disabled desktop/phone acceptance passed one test per viewport, no skips. Final logs: `/tmp/kandev-run.e2e.N2xI620R.log` and `/tmp/kandev-run.e2e.gWl0TF9A.log`. Both prove the real summary menu excludes real child sessions and explicit child transcript navigation remains available. The first phone attempt passed menu assertions but timed out on an optional Cancel cleanup step; the final test navigates directly to the retained child instead. No dialog-dismissal claim is inferred from that attempt. Existing focused handoff tests preserve exact explicit source selection and Blank initialization.
 
+The two browser logs named above were already absent at the 2026-11-15 evidence-retention checkpoint. Their pass counts remain historical reports; the [private archive](../errand-history-loading/plan.md#evidence-retention-2026-11-15) does not recover missing logs.
+
 Catalog validation passed (422 decisions, 1,862 specifications), all specification lint passed, 63 public-doc tests passed, and 54 published pages validated. Full feature-range documentation coverage passed (728 changed paths, 88 reference documents); whitespace checks passed. Existing Task24 acceptance remains historical; this packet does not reopen dark media work. No PostgreSQL/provider behavior changes.
 
 ## Risks
 
-Do not filter the shared session collection or reject explicit child selection. Do not hide input-needed errands. No-normal-session cases must not manufacture a child target. Preserve the preview deletion callback's current-selection guard.
+The original repair kept filtering at the automatic-choice boundary. The later bounded history design separates ordinary browser membership from complete internal/API inventories. Preserve explicit child selection, input-needed Errands, the existing sessionless fallback when no normal conversation remains, and the preview deletion callback's current-selection guard.

@@ -11,36 +11,17 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// errandTurnSettler is the settlement part of the errands service. It is
-// type-asserted from ErrandController, which keeps its own method set fixed.
-type errandTurnSettler interface {
-	OnErrandTurnSettled(ctx context.Context, settlement errands.TurnSettlement) error
-	OnParentTurnSettled(ctx context.Context, parentSessionID string, cause errands.SettleCause) (bool, error)
-}
-
-type errandTurnCanceller interface {
-	OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error
-}
-
 // errandOutstandingReason is the delivery workflow no-op reason recorded when
 // a parent turn ends while its errands still owe an outcome.
 const errandOutstandingReason = "errands_outstanding"
-
-func (s *Service) errandSettler() (errandTurnSettler, bool) {
-	if s.errands == nil {
-		return nil, false
-	}
-	settler, ok := s.errands.(errandTurnSettler)
-	return settler, ok
-}
 
 // settleErrandTurn records a settled errand turn. Only the errand's own
 // settled turn is captured; a session that is not an errand is ignored.
 func (s *Service) settleErrandTurn(
 	ctx context.Context, sessionID, turnID string, outcome models.ErrandOutcome, failureSummary string, submissionIDs ...string,
 ) error {
-	settler, ok := s.errandSettler()
-	if !ok || sessionID == "" || turnID == "" {
+	settler := s.errands
+	if settler == nil || sessionID == "" || turnID == "" {
 		return nil
 	}
 	submissionID := ""
@@ -59,8 +40,8 @@ func (s *Service) settleErrandTurn(
 }
 
 func (s *Service) settleCompletedErrandTurn(ctx context.Context, data watcher.AgentEventData, session *models.TaskSession, turnID string) error {
-	settler, ok := s.errandSettler()
-	if !ok || session == nil || !models.IsErrandSession(session) || session.ID == "" || turnID == "" {
+	settler := s.errands
+	if settler == nil || session == nil || !models.IsErrandSession(session) || session.ID == "" || turnID == "" {
 		return nil
 	}
 	target := models.ErrandTeardownTarget{
@@ -79,10 +60,8 @@ func (s *Service) settleCompletedErrandTurn(ctx context.Context, data watcher.Ag
 }
 
 func (s *Service) scheduleErrandCompletionRetry(ctx context.Context, sessionID string) {
-	controller, ok := s.errands.(interface {
-		RetryErrandCompletion(context.Context, string) error
-	})
-	if !ok || sessionID == "" {
+	controller := s.errands
+	if controller == nil || sessionID == "" {
 		return
 	}
 	go func() {
@@ -96,8 +75,8 @@ func (s *Service) scheduleErrandCompletionRetry(ctx context.Context, sessionID s
 }
 
 func (s *Service) settleCancelledErrandTurn(ctx context.Context, sessionID, turnID, submissionID string) {
-	canceller, ok := s.errands.(errandTurnCanceller)
-	if !ok || sessionID == "" || turnID == "" {
+	canceller := s.errands
+	if canceller == nil || sessionID == "" || turnID == "" {
 		return
 	}
 	if err := s.reconcileAgentDeliverySubmissionSettlements(withSettledDeliverySessionStateConvergenceSkipped(ctx), sessionID, submissionID); err != nil {
@@ -115,8 +94,8 @@ func (s *Service) settleCancelledErrandTurn(ctx context.Context, sessionID, turn
 // parent still owes an errand outcome. Unreadable inventory defers task workflow
 // settlement while leaving session completion independent.
 func (s *Service) settleParentTurn(ctx context.Context, sessionID string, cause errands.SettleCause) (bool, error) {
-	settler, ok := s.errandSettler()
-	if !ok || sessionID == "" {
+	settler := s.errands
+	if settler == nil || sessionID == "" {
 		return false, nil
 	}
 	outstanding, err := settler.OnParentTurnSettled(ctx, sessionID, cause)

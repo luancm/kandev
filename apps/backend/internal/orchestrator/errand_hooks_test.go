@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -43,6 +44,30 @@ func (c *recordingErrandController) CascadeTask(taskID string) bool {
 	c.record("cascade-task:" + taskID)
 	return true
 }
+
+func (*recordingErrandController) OnSessionStateChanged(context.Context, string) error { return nil }
+
+func (*recordingErrandController) OnErrandTurnSettled(context.Context, errands.TurnSettlement) error {
+	return nil
+}
+
+func (*recordingErrandController) OnErrandTurnCancelled(context.Context, string, string, string) error {
+	return nil
+}
+
+func (*recordingErrandController) OnParentTurnSettled(context.Context, string, errands.SettleCause) (bool, error) {
+	return false, nil
+}
+
+func (*recordingErrandController) RetryErrandCompletion(context.Context, string) error { return nil }
+
+func (*recordingErrandController) ReconcileTerminalDecisions(context.Context, string) error {
+	return nil
+}
+
+func (*recordingErrandController) ReconcileLifecycle(context.Context) error { return nil }
+
+func (*recordingErrandController) Reconcile(context.Context) error { return nil }
 
 func (c *recordingErrandController) seen() []string {
 	c.mu.Lock()

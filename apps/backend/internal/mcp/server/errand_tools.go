@@ -50,9 +50,9 @@ const (
 	toolGetTaskPlan         = "get_task_plan_kandev"
 )
 
-// errandCatalogTools is the fixed read-only Kandev catalog of an errand session
-// (AC-TASKS-ERRANDS-009.2). Nothing outside this list is visible to an errand,
-// whatever providers or capabilities its parent inherited.
+// errandCatalogTools is the fixed read-only Kandev catalog of an errand session.
+// Nothing outside this list is visible to an errand, whatever providers or
+// capabilities its parent inherited.
 var errandCatalogTools = []string{
 	toolListWorkspaces,
 	toolListWorkflows,

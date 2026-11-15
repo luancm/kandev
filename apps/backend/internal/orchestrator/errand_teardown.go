@@ -468,6 +468,9 @@ func (o *errandTeardownOwner) classifyObservedPrompt(ctx context.Context, store 
 		return nil, "", errands.TeardownSuperseded, nil
 	}
 	submissionID, err := teardownSubmission(ctx, store, row, session, turn)
+	if err == nil && submissionID == "" {
+		submissionID, err = completedTeardownSubmission(ctx, store, row, target, turn)
+	}
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -488,6 +491,24 @@ func (o *errandTeardownOwner) classifyObservedPrompt(ctx context.Context, store 
 		return nil, "", errands.TeardownCompleted, nil
 	}
 	return session, executionID, "", nil
+}
+
+// Legacy delivery may retain submission identity only in the exact completed receipt.
+func completedTeardownSubmission(ctx context.Context, store errandTeardownStore, row *models.Errand, target models.ErrandTeardownTarget, turn *models.Turn) (string, error) {
+	if target.SubmissionID == "" || target.ExecutionID == "" || row.TeardownIntent == nil || row.TeardownIntent.Target != target {
+		return "", nil
+	}
+	if !teardownTurnMatches(row, turn) || !completionTurnMatches(turn, target) || row.LatestSettledTurnID != target.TurnID {
+		return "", nil
+	}
+	decision, err := store.GetErrandTurnSettlementDecision(ctx, row.ID, target.SessionIncarnation, target.TurnID)
+	if err != nil {
+		return "", err
+	}
+	if !completionDecisionMatchesTarget(decision, target) || decision.StreamID != target.ExecutionID {
+		return "", nil
+	}
+	return decision.SubmissionID, nil
 }
 
 func reservedTeardownSubmissionEvidenceError(turn *models.Turn, target models.ErrandTeardownTarget, parentID string) error {

@@ -12,8 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// settlingErrandController adds the settlement methods to the recording
-// controller so the type assertion in errandSettler succeeds.
+// settlingErrandController records settlement calls and their outcomes.
 type settlingErrandController struct {
 	recordingErrandController
 	settlements   []errands.TurnSettlement
@@ -87,19 +86,13 @@ func TestParentSettlementReadFailureDefersWorkflow(t *testing.T) {
 	require.Equal(t, []errands.SettleCause{errands.SettleCauseUserCancel}, controller.causes)
 }
 
-func TestSettlementHooksIgnoreControllerWithoutSettlementMethods(t *testing.T) {
+func TestSettlementHooksIgnoreUnwiredController(t *testing.T) {
 	svc := &Service{logger: testLogger()}
-	svc.SetErrandController(&recordingErrandController{})
 
 	require.NotPanics(t, func() {
 		require.NoError(t, svc.settleErrandTurn(context.Background(), "errand-1", "turn-1", models.ErrandOutcomeDone, ""))
 	})
 	outstanding, err := svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
-	require.NoError(t, err)
-	require.False(t, outstanding)
-
-	svc.SetErrandController(nil)
-	outstanding, err = svc.settleParentTurn(context.Background(), "parent-1", errands.SettleCauseTurnDone)
 	require.NoError(t, err)
 	require.False(t, outstanding)
 }

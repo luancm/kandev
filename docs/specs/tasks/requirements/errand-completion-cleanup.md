@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-11-03
 owners:

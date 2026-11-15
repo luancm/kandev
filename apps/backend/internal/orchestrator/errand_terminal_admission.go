@@ -16,10 +16,8 @@ const (
 )
 
 func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionID string) error {
-	controller, ok := s.errands.(interface {
-		ReconcileTerminalDecisions(context.Context, string) error
-	})
-	if !ok {
+	controller := s.errands
+	if controller == nil {
 		return nil
 	}
 	if err := controller.ReconcileTerminalDecisions(ctx, sessionID); err != nil {
@@ -36,10 +34,8 @@ func (s *Service) retryErrandCompletionBeforeAdmission(ctx context.Context, sess
 	if !models.IsErrandSession(session) {
 		return nil
 	}
-	completion, ok := s.errands.(interface {
-		RetryErrandCompletion(context.Context, string) error
-	})
-	if !ok {
+	completion := s.errands
+	if completion == nil {
 		return nil
 	}
 	err = completion.RetryErrandCompletion(ctx, sessionID)

@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { createAppStore } from "@/lib/state/store";
-import { selectLiveErrandCount, selectTaskErrands } from "@/lib/state/slices/errands/selectors";
+import {
+  selectErrandBySessionId,
+  selectErrandBrowserSummary,
+} from "@/lib/state/slices/errands/selectors";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import type { Errand } from "@/lib/types/errands";
-import { ERRAND_TASK_ID, makeErrand } from "@/lib/state/slices/errands/errands.test-helpers";
+import {
+  ERRAND_TASK_ID,
+  makeErrand,
+  makeBrowserErrandRow,
+  makeBrowserSummary,
+} from "@/lib/state/slices/errands/errands.test-helpers";
 import { registerWsHandlers } from "@/lib/ws/router";
 import { registerErrandsHandlers } from "./errands";
 
@@ -19,32 +28,45 @@ describe("errand.updated", () => {
     const store = createAppStore();
     registerErrandsHandlers(store)["errand.updated"]!(errandUpdated(makeErrand()));
 
-    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)).toEqual([makeErrand()]);
+    expect(selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1")).toEqual(
+      makeErrand(),
+    );
   });
 
   it("applies updates in timestamp order regardless of arrival order", () => {
     const store = createAppStore();
     const handle = registerErrandsHandlers(store)["errand.updated"]!;
-    store
-      .getState()
-      .setTaskErrands(
-        ERRAND_TASK_ID,
-        [
-          withDeliveryState(
-            makeErrand({ status: "done", updated_at: "2026-10-26T10:00:09Z" }),
-            "uncertain",
-          ),
-        ],
-        0,
-      );
+    store.getState().setConnectionStatus("connected");
+    const observation = {
+      connectionGeneration: store.getState().connection.generation ?? 0,
+      readScopeIdentity: stateReadScopeIdentity(store.getState()),
+      taskResetEpoch: 0,
+      observationRevision: 0,
+    };
+    const pending = makeBrowserErrandRow({
+      status: "done",
+      result_state: "pending",
+      outstanding: true,
+      delivery_state: "uncertain",
+      updated_at: "2026-10-26T10:00:09Z",
+    });
+    store.getState().beginErrandBrowserSummaryRead(ERRAND_TASK_ID, observation, "summary");
+    store.getState().setErrandBrowserSummary(
+      ERRAND_TASK_ID,
+      makeBrowserSummary([pending], {
+        live: 0,
+        outstanding: 1,
+        pending_results: 1,
+      }),
+      observation,
+      "summary",
+    );
     handle(errandUpdated(makeErrand({ status: "running", updated_at: "2026-10-26T10:00:01Z" })));
 
-    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0].status).toBe("done");
-    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0]).toHaveProperty(
-      "delivery_state",
-      "uncertain",
-    );
-    expect(selectLiveErrandCount(store.getState(), ERRAND_TASK_ID)).toBe(0);
+    const summary = selectErrandBrowserSummary(store.getState(), ERRAND_TASK_ID);
+    expect(summary?.errands).toEqual([pending]);
+    expect(summary?.counts).toMatchObject({ live: 0, outstanding: 1, pending_results: 1 });
+    expect(selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1")).toBeUndefined();
   });
 
   it("applies equal-timestamp receipt and omission updates to only their errand", () => {
@@ -55,22 +77,17 @@ describe("errand.updated", () => {
     handle(errandUpdated(sibling));
 
     handle(errandUpdated(withDeliveryState(makeErrand(), "received")));
+    expect(selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1")).toHaveProperty(
+      "delivery_state",
+      "received",
+    );
     expect(
-      selectTaskErrands(store.getState(), ERRAND_TASK_ID).find(
-        (row) => row.errand_id === "errand-1",
-      ),
-    ).toHaveProperty("delivery_state", "received");
-    expect(
-      selectTaskErrands(store.getState(), ERRAND_TASK_ID).find(
-        (row) => row.errand_id === sibling.errand_id,
-      ),
+      selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, sibling.errand_id),
     ).not.toHaveProperty("delivery_state");
 
     handle(errandUpdated(makeErrand()));
     expect(
-      selectTaskErrands(store.getState(), ERRAND_TASK_ID).find(
-        (row) => row.errand_id === "errand-1",
-      ),
+      selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1"),
     ).not.toHaveProperty("delivery_state");
   });
 
@@ -90,7 +107,9 @@ describe("errand.updated", () => {
     handlers["errand.updated"]!(errandUpdated(makeErrand()));
     dispose();
 
-    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)).toHaveLength(1);
+    expect(selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1")).toEqual(
+      makeErrand(),
+    );
   });
 });
 
@@ -109,9 +128,9 @@ describe("errand.updated attention reason", () => {
       delivery_state: "uncertain" as const,
     } as Errand;
     handle(errandUpdated(recovery));
-    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0].attention_reason).toBe(
-      "recovery_unresolved",
-    );
+    expect(
+      selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1")?.attention_reason,
+    ).toBe("recovery_unresolved");
 
     handle(
       errandUpdated({
@@ -120,9 +139,9 @@ describe("errand.updated attention reason", () => {
         updated_at: "2026-10-26T10:00:02Z",
       } as Errand),
     );
-    expect(selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0].attention_reason).toBe(
-      "permission",
-    );
+    expect(
+      selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1")?.attention_reason,
+    ).toBe("permission");
 
     const running = {
       ...recovery,
@@ -132,7 +151,7 @@ describe("errand.updated attention reason", () => {
     delete running.attention_reason;
     handle(errandUpdated(running));
 
-    const projected = selectTaskErrands(store.getState(), ERRAND_TASK_ID)[0];
+    const projected = selectErrandBySessionId(store.getState(), ERRAND_TASK_ID, "errand-1");
     expect(projected).not.toHaveProperty("attention_reason");
     expect(projected).toMatchObject({
       status: "running",

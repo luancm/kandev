@@ -983,7 +983,6 @@ function removeErrandSessionState(
   delete errands.byTaskId[taskId]?.[sessionId];
   const removedIds = (errands.removedSessionIdsByTaskId[taskId] ??= {});
   removedIds[sessionId] = true;
-  errands.liveRevisionByTaskId[taskId] = (errands.liveRevisionByTaskId[taskId] ?? 0) + 1;
   const summary = errands.browserSummaryByTaskId?.[taskId];
   if (summary) summary.errands = summary.errands.filter((row) => row.errand_id !== sessionId);
   for (const chain of Object.values(errands.historyByOwnerId ?? {})) {
