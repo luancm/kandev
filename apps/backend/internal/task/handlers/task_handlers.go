@@ -55,6 +55,8 @@ type TaskHandlers struct {
 	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	backgroundWorkEnabled         bool
+	errands                       ErrandService
+	errandsEnabled                bool
 	logger                        *logger.Logger
 }
 
@@ -292,6 +294,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/deferred-launch/discard", h.httpDiscardDeferredLaunch)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
+	api.GET("/tasks/:id/sessions/ordinary", h.httpListOrdinaryTaskSessions)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
@@ -360,6 +363,8 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	dispatcher.RegisterFunc(ws.ActionTaskSessionListOrdinary, h.wsListOrdinaryTaskSessions)
+	h.registerErrandWS(dispatcher)
 	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkList, h.wsListBackgroundWorkloads)
 	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkGet, h.wsGetBackgroundWorkload)
 	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkAction, h.wsExecuteBackgroundAction)

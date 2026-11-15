@@ -28,6 +28,8 @@ const (
 	SurfaceManagedConversation Surface = "managed-conversation"
 	// SurfaceCoordinator is the copilot's conversation MCP surface.
 	SurfaceCoordinator Surface = "coordinator"
+	// SurfaceErrand is the fixed, read-only catalog of an errand session.
+	SurfaceErrand Surface = "errand"
 )
 
 type Capability string
@@ -39,6 +41,9 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityErrands grants a parent session the errand start, await, and
+	// cancel tools. It is granted only while features.errands is on.
+	CapabilityErrands Capability = "errands"
 	// CapabilityWorkspaceCollaborationReport exposes the report-only delivery
 	// mode on the task message tool while collaboration enforcement is enabled.
 	CapabilityWorkspaceCollaborationReport Capability = "workspace-collaboration-report"
@@ -254,10 +259,13 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 		surface = SurfaceAutomation
 	case mcpmode.Coordinator:
 		surface = SurfaceCoordinator
+	case mcpmode.Errand:
+		surface = SurfaceErrand
 	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
+	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation &&
+		surface != SurfaceCoordinator && surface != SurfaceErrand {
 		capabilities = append(capabilities, CapabilityUserQuestion)
 	}
 	return New(surface, capabilities, providers)
@@ -265,7 +273,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation, SurfaceCoordinator:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation, SurfaceCoordinator, SurfaceErrand:
 		return surface
 	default:
 		return SurfaceKanbanTask

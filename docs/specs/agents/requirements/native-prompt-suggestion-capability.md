@@ -119,4 +119,3 @@ This feature changes eligibility evidence, without a new interaction or layout.
 ## Implementation plans
 
 - [Native capability normalization](../../../plans/native-prompt-suggestion-capability/plan.md)
-

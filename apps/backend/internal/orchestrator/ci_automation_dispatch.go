@@ -257,7 +257,7 @@ func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
 	if session == nil {
 		return false
 	}
-	if models.IsCompletionFollowUpSession(session.Metadata) {
+	if models.IsWorkflowDetachedSession(session) {
 		return false
 	}
 	switch session.State {

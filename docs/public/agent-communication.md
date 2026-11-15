@@ -21,6 +21,30 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 2. Send a bounded request with the expected result and reply target.
 3. Read the reply, confirm the contract, then implement and test.
 
+## Errand tools
+
+With the experimental `features.errands` flag enabled and a compatible structured profile, a normal task agent can delegate a bounded objective without creating another task. See [enable and use Errands](coordination.md#use-agent-created-errands-experimental) for installation and UI steps.
+
+| Tool | Contract |
+|---|---|
+| `start_errand_kandev` | Accepts `title`, `prompt`, and optional `agent_profile`; returns `errand_id`, the identical `session_id`, status and effective profile. Start returns after admission; it does not wait for completion. |
+| `await_errands_kandev` | Optionally waits for actual start-returned `errand_ids`, with `mode` `all` or `any` and `max_wait_seconds` up to 600. The caller must own those errands. Successful responses include `duration_ms` and `end_reason` (`all_ready`, `any_ready`, `timeout`, or `parent_ended`). |
+| `cancel_errand_kandev` | Stops the named `errand_id`. |
+| `message_task_kandev` | A parent can address the returned child `session_id` for follow-up work. Use the current task ID and the explicit child session ID. |
+| `list_task_sessions_kandev` | Discovers child sessions and their role, parent and state. Queued errand identities can exist before a session row is launched. |
+
+Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.
+
+Successful await responses also include `await_delivery: {version: 1, token, items: [{errand_id, result_revision}]}`. This correlates the result revisions carried by that response; it is not acknowledgement that the parent received them. Empty or status-only responses do not acknowledge any result.
+
+Keep the parent conversational: starting an errand is enough to receive its result later. Await only when the current turn needs to join. Every parent turn with errands in flight receives a bounded status block; results settling mid-turn wait for await or a later turn. A delivered result is claimed once, while its immutable transcript card remains available after reload and later child turns. Notification turns use the parent's normal queue and respect Auto-run.
+
+Attention projections can include `attention_reason`: `permission` for approval requests or `recovery_unresolved` for identified unresolved recovery. Recovery attention is not a terminal result and continues to consume live capacity. Follow-up admission refuses unresolved earlier work with conflict reason `errand_recovery_unresolved`; inspect the retained conversation rather than replaying the original instruction.
+
+Use separate start calls and retain each returned identity. Errands have depth one, share the task workspace and are limited to five live children per task. Their parent retains workflow ownership while outstanding results keep it in progress. Parent-turn cancellation does not stop children; explicit Stop and parent/task termination have different scopes.
+
+A child has exactly these read-only Kandev tools: `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, `list_tasks_kandev`, `list_related_tasks_kandev`, `list_task_sessions_kandev`, `get_task_conversation_kandev`, and `get_task_plan_kandev`. The child cannot redelegate, mutate task plans, ask a workflow question, or complete a step. The parent's selected external MCP servers are snapshotted at start, subject to their current enabled definitions.
+
 ## Discovering task IDs
 
 An agent typically learns a peer's task ID in one of three ways:

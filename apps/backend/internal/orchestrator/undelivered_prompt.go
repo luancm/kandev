@@ -20,7 +20,7 @@ func (s *Service) settlePromptDispatchError(ctx context.Context, sessionID strin
 		return cause
 	}
 	var notSent *agentruntime.RequestNotSentError
-	if !accepted && errors.As(cause, &notSent) {
+	if !accepted && !errors.Is(cause, agentruntime.ErrUncertainPromptDelivery) && errors.As(cause, &notSent) {
 		if err := delivery.failUnsent(ctx); err == nil {
 			return cause
 		} else {
@@ -31,6 +31,9 @@ func (s *Service) settlePromptDispatchError(ctx context.Context, sessionID strin
 }
 
 func (r *agentDeliverySubmissionRuntime) failUnsent(ctx context.Context) error {
+	if r.completed {
+		return nil
+	}
 	writer, ok := r.store.(unsentDeliveryStore)
 	if !ok {
 		return fmt.Errorf("unsent delivery settlement is unavailable")
@@ -48,6 +51,19 @@ func (r *agentDeliverySubmissionRuntime) failUnsent(ctx context.Context) error {
 	}
 	r.completed = true
 	return nil
+}
+
+func (r *agentDeliverySubmissionRuntime) unsentReceipt(ctx context.Context) (bool, error) {
+	if r == nil || r.expected == nil || r.expected.SessionID != r.sessionID {
+		return false, nil
+	}
+	reader, ok := r.store.(interface {
+		AgentDeliverySubmissionWasUnsent(context.Context, *models.AgentDeliverySubmission) (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("unsent delivery receipt storage is unavailable")
+	}
+	return reader.AgentDeliverySubmissionWasUnsent(ctx, r.expected)
 }
 
 // Unknown outcomes cannot be displaced by a later admission's recovery block.

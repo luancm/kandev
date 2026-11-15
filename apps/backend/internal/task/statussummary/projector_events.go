@@ -332,6 +332,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreErrands(ctx, taskID, state); err != nil {
+		return err
+	}
 	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
 		return err
 	}
@@ -344,6 +347,7 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.errands = cloneErrands(summary.Errands)
 	state.unreadBaseline = slices.Clone(summary.UnreadSessionIDs)
 	state.quotaWait = cloneQuotaWait(summary.QuotaWait)
 	state.quotaWaitObserved = summary.QuotaWait != nil
@@ -452,6 +456,9 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 		return err
 	}
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreErrands(ctx, taskID, state); err != nil {
 		return err
 	}
 	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {

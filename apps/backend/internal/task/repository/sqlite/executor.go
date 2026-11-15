@@ -268,6 +268,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
+	if err := r.retainPromptAdmissionTx(ctx, tx, running); err != nil {
+		return err
+	}
 	metadataJSON, err = r.retainBuiltinBindingTx(ctx, tx, running, metadataJSON)
 	if err != nil {
 		return err

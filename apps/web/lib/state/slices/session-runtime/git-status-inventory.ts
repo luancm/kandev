@@ -1,3 +1,4 @@
+import type { ImmerSet } from "./session-runtime-slice";
 import type { SessionRuntimeSliceState } from "./types";
 
 /** Returns the environment's inventory generation, or 0 before the first one. */
@@ -163,4 +164,25 @@ export function reconcileGitStatusInventory(
   };
   pruneEnvironmentScopes(state, environmentId, new Set(normalized));
   return true;
+}
+
+export function buildGitInventoryActions(set: ImmerSet) {
+  return {
+    invalidateGitStatusInventory: (sessionId: string) =>
+      set((draft) => {
+        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
+        invalidateGitStatusInventory(draft, envKey);
+      }),
+    reconcileGitStatusInventory: (
+      environmentId: string,
+      generation: number,
+      scopes: readonly string[],
+    ) => {
+      let applied = false;
+      set((draft) => {
+        applied = reconcileGitStatusInventory(draft, environmentId, generation, scopes);
+      });
+      return applied;
+    },
+  };
 }

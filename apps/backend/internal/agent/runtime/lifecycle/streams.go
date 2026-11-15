@@ -66,6 +66,7 @@ type StreamManager struct {
 	deliverySubmissionSettler      func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
 	deliveryMu                     sync.RWMutex
 	delivery                       AgentDeliveryRepository
+	errandAwaitRefresh             func(context.Context, string)
 	ackMu                          sync.Mutex
 	ackWorkers                     map[string]*durableDeliveryAckWorker
 	ackStopped                     bool

@@ -40,7 +40,7 @@ type BuiltinTaskPreferences struct {
 
 func ResolveBuiltinPackages(workspaceID, taskID string, surface mcpprofile.Surface, policy *BuiltinWorkspacePolicy, preferences *BuiltinTaskPreferences) (*mcpprofile.BuiltinManifest, error) {
 	switch surface {
-	case mcpprofile.SurfaceExternal, mcpprofile.SurfaceAutomation, mcpprofile.SurfaceCoordinator, mcpprofile.SurfaceManagedConversation:
+	case mcpprofile.SurfaceExternal, mcpprofile.SurfaceAutomation, mcpprofile.SurfaceCoordinator, mcpprofile.SurfaceManagedConversation, mcpprofile.SurfaceErrand:
 		return nil, nil
 	}
 	manifest := &mcpprofile.BuiltinManifest{

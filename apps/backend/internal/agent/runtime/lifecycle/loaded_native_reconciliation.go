@@ -27,7 +27,7 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, ErrDeliveryRecoveryBlocked)
 	}
 	if proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID); err == nil && proof != nil {
-		return proof, nil
+		return proof, m.consumeInterruptedDelegations(ctx, proof)
 	}
 	if settled, err := m.hasProjectedTerminalRetirement(ctx, execution); err == nil && settled {
 		if err := m.AcknowledgeNativeResumeDelivery(ctx, sessionID); err != nil {
@@ -36,21 +36,15 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 		proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
 		return proof, classifyLoadedNativeRefusal(err)
 	}
+	if err := m.preserveInterruptedDelegation(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	historical, err := m.readLoadedNativeHistoricalOwner(ctx, execution)
 	if err != nil {
 		return nil, classifyLoadedNativeRefusal(err)
 	}
-	if historical == nil {
-		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalPeerRecordMissing, ErrDeliveryRecoveryBlocked)
-	}
-	if historical.ExecutionID == execution.ID {
-		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, ErrDeliveryRecoveryBlocked)
-	}
-	if historical.HarnessGeneration < execution.DeliveryHarnessGeneration {
-		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalGenerationSuperseded, ErrDeliveryRecoveryBlocked)
-	}
-	if !loadedRecoverySuccessorMatches(execution, *historical) {
-		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalNativeIdentityMismatch, ErrDeliveryOwnerMismatch)
+	if err := m.validateLoadedNativeSuccessor(ctx, execution, historical); err != nil {
+		return nil, err
 	}
 	if err := proveHistoricalDeliveryOwnerDead(*historical); err != nil {
 		return nil, withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, err)
@@ -60,6 +54,29 @@ func (m *Manager) ReconcileLoadedNativeDelivery(ctx context.Context, sessionID s
 	}
 	proof, err := m.GetNativeResumeDeliveryEvidence(ctx, sessionID)
 	return proof, classifyLoadedNativeRefusal(err)
+}
+
+func (m *Manager) validateLoadedNativeSuccessor(ctx context.Context, execution *AgentExecution, historical *AgentDeliveryRecoveryIdentity) error {
+	if historical == nil {
+		return withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalPeerRecordMissing, ErrDeliveryRecoveryBlocked)
+	}
+	if historical.ExecutionID == execution.ID {
+		return withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalLiveWork, ErrDeliveryRecoveryBlocked)
+	}
+	if loadedRecoverySuccessorMatches(execution, *historical) {
+		return nil
+	}
+	matches, err := m.savedInterruptedSuccessorMatches(ctx, execution, *historical)
+	if err != nil {
+		return classifyLoadedNativeRefusal(err)
+	}
+	if matches {
+		return nil
+	}
+	if historical.HarnessGeneration < execution.DeliveryHarnessGeneration {
+		return withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalGenerationSuperseded, ErrDeliveryRecoveryBlocked)
+	}
+	return withDeliveryRecoveryRefusal(DeliveryRecoveryRefusalNativeIdentityMismatch, ErrDeliveryOwnerMismatch)
 }
 
 func classifyLoadedNativeRefusal(err error) error {
@@ -156,6 +173,13 @@ func (m *Manager) loadedNativeHistoricalOwner(ctx context.Context, execution *Ag
 			}
 			historical = m.persistedDeliveryRecordControlIdentity(ctx, DeliveryRecordEvidenceRequest{TaskID: execution.TaskID, SessionID: execution.SessionID}, journal.SubmissionSummary{
 				ID: submission.ID, SessionID: submission.SessionID, IncarnationID: submission.IncarnationID, HarnessGeneration: submission.HarnessGeneration, StreamID: submission.StreamID})
+			if historical == nil {
+				var err error
+				historical, err = m.savedInterruptedDelegationOwner(ctx, execution, row, submission.StreamID)
+				if err != nil {
+					return nil, err
+				}
+			}
 			if historical == nil {
 				return nil, ErrDeliveryRecoveryBlocked
 			}

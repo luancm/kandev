@@ -421,6 +421,37 @@ function handleTaskUpsert(
   logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
 
+/** Drops the deleted task's per-session client state and its errands. */
+function evictDeletedTaskSessions(state: AppState, taskId: string, sessionIds: string[]): void {
+  for (const sid of sessionIds) {
+    useContextFilesStore.getState().clearSession(sid);
+    state.clearQueueStatus?.(sid);
+    state.removeTaskSession?.(taskId, sid);
+  }
+  state.removeTaskErrands?.(taskId);
+}
+
+type TaskStatusSummaryMessage = Parameters<
+  NonNullable<WsHandlers["task.status_summary.updated"]>
+>[0];
+
+function handleTaskStatusSummaryUpdated(
+  store: StoreApi<AppState>,
+  message: TaskStatusSummaryMessage,
+): void {
+  const { task_id: taskId, status_summary: summary, workspace_id: workspaceId } = message.payload;
+  const unreadSessionIds = summary.unread_session_ids;
+  if (Array.isArray(unreadSessionIds)) {
+    store.getState().markErrandBrowserUnread(taskId, unreadSessionIds);
+  }
+  store.setState((state) =>
+    updateTaskStatusSummaryInBothKanbans(
+      applyTaskOverviewPatch(state, taskId, { id: taskId, statusSummary: summary }, workspaceId),
+      message,
+    ),
+  );
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -463,12 +494,8 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       cleanupTaskStorage(deletedId, sessionIds, envIds);
       // Remove the deleted task before the next sidebar preference PATCH.
       currentState.removeTaskFromSidebarPrefs(deletedId);
-      for (const sid of sessionIds) {
-        retireSessionReads(store, sid);
-        useContextFilesStore.getState().clearSession(sid);
-        currentState.clearQueueStatus?.(sid);
-        currentState.removeTaskSession?.(deletedId, sid);
-      }
+      for (const sid of sessionIds) retireSessionReads(store, sid);
+      evictDeletedTaskSessions(currentState, deletedId, sessionIds);
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 
@@ -519,21 +546,6 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.state_changed": (message) => {
       handleTaskUpsert("task.state_changed", store, message);
     },
-    "task.status_summary.updated": (message) => {
-      store.setState((state) =>
-        updateTaskStatusSummaryInBothKanbans(
-          applyTaskOverviewPatch(
-            state,
-            message.payload.task_id,
-            {
-              id: message.payload.task_id,
-              statusSummary: message.payload.status_summary,
-            },
-            message.payload.workspace_id,
-          ),
-          message,
-        ),
-      );
-    },
+    "task.status_summary.updated": (message) => handleTaskStatusSummaryUpdated(store, message),
   };
 }

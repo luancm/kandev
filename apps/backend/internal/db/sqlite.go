@@ -77,7 +77,7 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// journal_size_limit has no DSN parameter; applyWriterPragmas sets it.
 	dsn := fmt.Sprintf(
 		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared&_txlock=immediate",
-		normalizedPath,
+		EscapeSQLiteURIPath(filepath.ToSlash(normalizedPath)),
 		int(defaultBusyTimeout/time.Millisecond),
 	)
 	db, err := sql.Open(sqliteWriterDriverName, dsn)
@@ -118,7 +118,7 @@ func OpenSQLiteReaderWithConns(dbPath string, readerConns int) (*sql.DB, error) 
 	// WAL is persistent; synchronous is connection-local and only the writer commits.
 	dsn := fmt.Sprintf(
 		"file:%s?_foreign_keys=on&mode=ro&_busy_timeout=%d",
-		normalizedPath,
+		EscapeSQLiteURIPath(filepath.ToSlash(normalizedPath)),
 		int(defaultBusyTimeout/time.Millisecond),
 	)
 	db, err := sql.Open("sqlite3", dsn)

@@ -2702,10 +2702,15 @@ func (r *Repository) removeTaskMetadataKeyWithExecutor(
 	return rows > 0, err
 }
 
+// titleClaimSessionNotErrand keeps an errand session from claiming the
+// generated-title handoff; a session ID without a row stays eligible.
+const titleClaimSessionNotErrand = `
+			  AND NOT EXISTS (SELECT 1 FROM task_sessions WHERE id = ? AND role = ?)`
+
 // ClaimTaskTitleSession atomically assigns the first eligible session as the
 // owner of a pending title handoff. Repeated calls by that same session are
 // idempotent; a different session observes the existing owner and returns
-// false.
+// false. An errand session is never eligible.
 func (r *Repository) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, bool, error) {
 	if sessionID == "" {
 		return false, false, nil
@@ -2747,6 +2752,8 @@ func (r *Repository) ClaimTaskTitleSession(ctx context.Context, taskID, sessionI
 		}
 		args = []interface{}{string(payload), time.Now().UTC(), taskID}
 	}
+	query += titleClaimSessionNotErrand
+	args = append(args, sessionID, string(models.SessionRoleErrand))
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, false, err
@@ -3925,6 +3932,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	}
 	if !found {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
+	if err := lockErrandTask(ctx, tx, id); err != nil {
+		return "", err
 	}
 	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
@@ -5448,15 +5458,19 @@ func (r *Repository) purgeQueueSessionPoliciesInTx(
 	tx *sqlx.Tx,
 	sessionIDs []string,
 ) error {
+	present, err := internaldb.TableExistsContext(ctx, tx, "queue_session_state")
+	if err != nil {
+		return fmt.Errorf("check queue session policy table: %w", err)
+	}
+	if !present {
+		return nil
+	}
 	for _, sessionID := range sessionIDs {
 		if _, err := tx.ExecContext(
 			ctx,
 			r.db.Rebind(`DELETE FROM queue_session_state WHERE session_id = ?`),
 			sessionID,
 		); err != nil {
-			if internaldb.IsMissingTableError(err) {
-				return nil
-			}
 			return fmt.Errorf("purge queue session policy for %s: %w", sessionID, err)
 		}
 	}
@@ -5729,6 +5743,10 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		if errors.Is(err, ErrTaskNotFound) {
 			return false, nil
 		}
+		return false, err
+	}
+
+	if err := lockErrandTask(ctx, tx, id); err != nil {
 		return false, err
 	}
 

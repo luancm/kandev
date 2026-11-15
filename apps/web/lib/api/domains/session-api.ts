@@ -133,6 +133,11 @@ export async function listTaskSessions(taskId: string, options?: ApiRequestOptio
   return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions`, options);
 }
 
+/** Lists ordinary task-navigation membership without Errand child sessions. */
+export async function listOrdinaryTaskSessions(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions/ordinary`, options);
+}
+
 export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
 }

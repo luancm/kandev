@@ -32,6 +32,10 @@ func (sm *StreamManager) projectReceivedDeliveryEvent(ctx context.Context, execu
 			return ErrDeliveryRecoveryBlocked
 		}
 	}
+	event, _, err := resolveRetainedEventTurn(ctx, delivery, retained, event)
+	if err != nil {
+		return err
+	}
 	effect := deliveryEffectForDeliveryEvent(retained)
 	applied, err := sm.deliveryEffectAlreadyApplied(ctx, delivery, effect)
 	if err != nil {

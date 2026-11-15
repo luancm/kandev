@@ -9,6 +9,7 @@ const sessionMocks = vi.hoisted(() => {
   return {
     startedAt,
     updatedAt,
+    inspectedChildId: null as string | null,
     sessionLists: new Map<string, Array<Record<string, unknown>>>(),
     sessionErrors: new Map<string, string | null>(),
     sessionLoaded: new Map<string, boolean>(),
@@ -42,8 +43,20 @@ const sessionMocks = vi.hoisted(() => {
 export { sessionMocks };
 
 vi.mock("./thread-conversation", () => ({
-  ThreadConversation: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid={`thread-conversation-${sessionId}`} />
+  ThreadConversation: ({
+    sessionId,
+    onSelectSession,
+  }: {
+    sessionId: string;
+    onSelectSession: (id: string) => void;
+  }) => (
+    <div data-testid={`thread-conversation-${sessionId}`}>
+      {sessionMocks.inspectedChildId && (
+        <button onClick={() => onSelectSession(sessionMocks.inspectedChildId!)}>
+          {sessionMocks.inspectedChildId}
+        </button>
+      )}
+    </div>
   ),
 }));
 
@@ -60,6 +73,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   sessionMocks.useTaskSessions.mockClear();
+  sessionMocks.inspectedChildId = null;
   sessionMocks.sessionLists.clear();
   sessionMocks.sessionErrors.clear();
   sessionMocks.sessionLoaded.clear();

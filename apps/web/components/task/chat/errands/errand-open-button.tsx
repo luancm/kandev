@@ -1,0 +1,69 @@
+"use client";
+
+import { IconArrowUpRight } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
+import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
+import type { ErrandBrowserRow } from "@/lib/types/errands";
+import { useOpenTaskSession } from "./use-open-task-session";
+
+/** Fine-pointer compact density, 44px hit area on phones and coarse pointers. */
+export const ERRAND_TOUCH_TARGET =
+  "max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11";
+
+/** **Open** for one errand; a queued errand has no session to open yet. */
+export function ErrandOpenButton({
+  taskId,
+  errandId,
+  title,
+  queued = false,
+  onOpened,
+  className,
+  testId,
+  describedBy,
+  errand,
+}: {
+  taskId: string | null;
+  errandId: string;
+  title: string;
+  queued?: boolean;
+  /** Called after the session was opened, e.g. to close the surface that listed it. */
+  onOpened?: () => void;
+  className?: string;
+  testId?: string;
+  describedBy?: string;
+  errand?: ErrandBrowserRow;
+}) {
+  const { t } = useTranslation();
+  const openSession = useOpenTaskSession();
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={!taskId || queued}
+      aria-label={t("chat:errandOpenAria", { title })}
+      aria-describedby={describedBy}
+      data-testid={testId ?? `errand-open-${errandId}`}
+      onClick={() => {
+        if (!taskId) return;
+        const opening = openSession({ taskId, sessionId: errandId, title, isErrand: true, errand });
+        if (opening && typeof opening.then === "function") {
+          void opening.then((opened) => {
+            if (opened) onOpened?.();
+          });
+        } else {
+          onOpened?.();
+        }
+      }}
+      className={cn(
+        "h-6 shrink-0 cursor-pointer gap-1 px-2 text-[11px]",
+        ERRAND_TOUCH_TARGET,
+        className,
+      )}
+    >
+      {t("chat:errandOpen")}
+      <IconArrowUpRight aria-hidden className="h-3 w-3" />
+    </Button>
+  );
+}

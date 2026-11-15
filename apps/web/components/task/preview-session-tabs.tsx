@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  TaskSessionNavigationContext,
+  useScopedTaskSessionNavigation,
+} from "./chat/errands/task-session-navigation-context";
+import { conversationTabSessionId, isErrandConversation } from "@/lib/task-conversation-navigation";
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -35,11 +40,11 @@ import { limitSessionName, useSessionRenameCommitter } from "./use-session-renam
 import {
   buildAgentLabelsById,
   isSessionActive,
-  pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
 import { useTranslation } from "react-i18next";
+import { usePreviewConversation } from "./use-preview-conversation";
 
 const LABEL_SEPARATOR = " \u2022 ";
 const PLAN_TAB_ID = "plan";
@@ -153,7 +158,7 @@ function useBuildPreviewTabs({
           id: session.id,
           label,
           icon: isSessionActive(session.state) ? (
-            <RunningSpinner />
+            <GridSpinner className="text-muted-foreground shrink-0 text-[12px]" />
           ) : (
             <SessionAgentLogo profile={profile} />
           ),
@@ -291,14 +296,8 @@ export function PreviewSessionTabs({
     [primarySessionId],
   );
 
-  const activeSessionId = useMemo(
-    () => pickActiveSessionId(sortedSessions, sessionId),
-    [sortedSessions, sessionId],
-  );
-  const activeSession = useMemo(
-    () => sortedSessions.find((s) => s.id === activeSessionId) ?? null,
-    [sortedSessions, activeSessionId],
-  );
+  const activeSession = usePreviewConversation(taskId, sessionId, sortedSessions);
+  const activeSessionId = activeSession?.id ?? null;
   const taskStatusSummaryDetail = useAppStore(
     (state) =>
       (
@@ -333,7 +332,9 @@ export function PreviewSessionTabs({
   const handleSessionRemoved = useCallback(
     (removedSessionId: string) => {
       if (removedSessionId !== activeSessionIdRef.current) return;
-      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
+      const remaining = sortedSessionsRef.current.filter(
+        (s) => s.id !== removedSessionId && !isErrandConversation(s),
+      );
       onSessionChange?.(remaining[0]?.id ?? null);
     },
     [onSessionChange],
@@ -342,12 +343,12 @@ export function PreviewSessionTabs({
   // Do not force the Plan view while the session list is still loading. The
   // first render can have zero sessions before the list arrives, and treating
   // that transient state as sessionless would mark an unseen plan as seen.
-  const hasNoSessions = isLoaded && sortedSessions.length === 0;
+  const hasNoSessions = isLoaded && sortedSessions.length === 0 && !activeSession;
   const planTabState = usePreviewPlanTab(taskId, hasNoSessions, onSessionChange);
   const { viewMode, planTab, hasPlan } = planTabState;
 
   const sessionTabs = useBuildPreviewTabs({
-    sortedSessions,
+    sortedSessions: sortedSessions.filter((session) => session.role !== "errand"),
     profilesById,
     agentLabelsById,
     taskId,
@@ -355,6 +356,8 @@ export function PreviewSessionTabs({
     dialogs,
     handleSessionRemoved,
   });
+
+  const openConversation = useScopedTaskSessionNavigation(taskId, planTabState.handleTabChange);
 
   const tabs = useMemo<SessionTab[]>(() => [...sessionTabs, planTab], [sessionTabs, planTab]);
 
@@ -398,45 +401,56 @@ export function PreviewSessionTabs({
       statusSummary={taskStatusSummary}
       resumption={resumption}
     >
-      <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-        <div className="border-b px-2 py-1">
-          <SessionTabs
-            tabs={tabs}
-            activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
-            onTabChange={planTabState.handleTabChange}
-            listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-          />
-        </div>
-        <div className="flex-1 min-h-0">
-          <PreviewTabBody
+      <TaskSessionNavigationContext.Provider value={openConversation}>
+        <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
+          <div className="border-b px-2 py-1">
+            <SessionTabs
+              tabs={tabs}
+              activeTab={
+                viewMode === "plan"
+                  ? PLAN_TAB_ID
+                  : (conversationTabSessionId(
+                      activeSessionId,
+                      sortedSessions,
+                      {},
+                      activeSession ?? undefined,
+                    ) ?? "")
+              }
+              onTabChange={planTabState.handleTabChange}
+              listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            />
+          </div>
+          <div className="flex-1 min-h-0">
+            <PreviewTabBody
+              viewMode={viewMode}
+              planState={planTabState.planState}
+              activeSession={activeSession}
+              taskId={taskId}
+              workspaceId={workspaceId}
+              statusSummary={taskStatusSummary}
+              resumption={resumption}
+            />
+          </div>
+          <PreviewRecoveryRegion
+            key={activeSessionId}
             viewMode={viewMode}
-            planState={planTabState.planState}
-            activeSession={activeSession}
+            session={activeSession}
+            archived={isArchived}
+            ownedByChat={automaticRecoveryOwnedByChat}
             taskId={taskId}
             workspaceId={workspaceId}
-            statusSummary={taskStatusSummary}
             resumption={resumption}
           />
+          <PreviewSessionTabDialogHost
+            dialogs={dialogs}
+            sortedSessions={sortedSessions}
+            profilesById={profilesById}
+            agentLabelsById={agentLabelsById}
+            taskId={taskId}
+            isPrimarySession={isPrimarySession}
+          />
         </div>
-        <PreviewRecoveryRegion
-          key={activeSessionId}
-          viewMode={viewMode}
-          session={activeSession}
-          archived={isArchived}
-          ownedByChat={automaticRecoveryOwnedByChat}
-          taskId={taskId}
-          workspaceId={workspaceId}
-          resumption={resumption}
-        />
-        <PreviewSessionTabDialogHost
-          dialogs={dialogs}
-          sortedSessions={sortedSessions}
-          profilesById={profilesById}
-          agentLabelsById={agentLabelsById}
-          taskId={taskId}
-          isPrimarySession={isPrimarySession}
-        />
-      </div>
+      </TaskSessionNavigationContext.Provider>
     </PreviewTaskErrorShell>
   );
 }
@@ -465,7 +479,7 @@ function PreviewTabBody({
   if (!activeSession) return null;
   return (
     <PreviewSessionBody
-      key={activeSession.id}
+      key={taskId}
       session={activeSession}
       taskId={taskId}
       workspaceId={workspaceId}
@@ -625,10 +639,6 @@ export function PreviewSessionBody({
       </TaskLaunchErrorProvider>
     </div>
   );
-}
-
-function RunningSpinner() {
-  return <GridSpinner className="text-muted-foreground shrink-0 text-[12px]" />;
 }
 
 function PreviewLoadingState({ label }: { label: string }) {

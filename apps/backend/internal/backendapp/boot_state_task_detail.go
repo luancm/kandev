@@ -24,20 +24,26 @@ func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, req *http.Req
 		b.logBootError("get task detail task", err)
 		return nil
 	}
-	sessionObservations, err := b.p.taskSvc.ListTaskSessionSummaryObservations(ctx, task.ID)
+	sessionObservations, err := b.p.taskSvc.ListOrdinaryTaskSessionSummaryObservations(ctx, task.ID)
 	if err != nil {
 		b.logBootError("list task detail session summaries", err)
 		sessionObservations = nil
 	}
 	sessions := make([]*taskmodels.TaskSession, 0, len(sessionObservations))
 	for _, observation := range sessionObservations {
-		if observation != nil {
+		if observation != nil && observation.Role != taskmodels.SessionRoleErrand {
 			sessions = append(sessions, observation.ToTaskSession())
 		}
 	}
 	activeSessionID := resolveTaskDetailSessionID(task, sessions, requestedSessionID)
 	var activeSession *taskmodels.TaskSession
-	if activeSessionID != "" {
+	if requestedSessionID != "" && activeSessionID == "" {
+		activeSession = b.requestedErrandSession(ctx, task.ID, requestedSessionID)
+		if activeSession != nil {
+			activeSessionID = requestedSessionID
+		}
+	}
+	if activeSessionID != "" && activeSession == nil {
 		activeSession, err = b.p.taskSvc.GetTaskSession(ctx, activeSessionID)
 		if err != nil {
 			b.logBootError("get task detail active session", err)
@@ -59,6 +65,30 @@ func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, req *http.Req
 			"sidebarTaskPage":  sidebarTaskPage,
 		},
 	}
+}
+
+func (b bootStateBuilder) requestedErrandSession(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+) *taskmodels.TaskSession {
+	if b.p.errandService == nil {
+		return nil
+	}
+	inspection, err := b.p.errandService.Inspect(ctx, taskID, sessionID)
+	if err != nil || inspection.Errand == nil || !inspection.ChildSessionExists {
+		return nil
+	}
+	child, err := b.p.taskSvc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		b.logBootError("get task detail errand session", err)
+		return nil
+	}
+	if child == nil || child.TaskID != taskID || child.Role != taskmodels.SessionRoleErrand ||
+		child.ParentSessionID != inspection.Errand.ParentSessionID {
+		return nil
+	}
+	return child
 }
 
 func (b bootStateBuilder) taskDetailSidebarTaskPage(
@@ -228,10 +258,13 @@ func resolveTaskDetailSessionID(task *taskmodels.Task, sessions []*taskmodels.Ta
 	if task == nil {
 		return ""
 	}
-	for _, session := range sessions {
-		if session != nil && session.TaskID == task.ID && session.ID == requestedSessionID && requestedSessionID != "" {
-			return session.ID
+	if requestedSessionID != "" {
+		for _, session := range sessions {
+			if session != nil && session.TaskID == task.ID && session.ID == requestedSessionID {
+				return session.ID
+			}
 		}
+		return ""
 	}
 	for _, session := range sessions {
 		if session != nil && session.TaskID == task.ID && session.IsPrimary {
@@ -457,8 +490,14 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	activeSessionID string,
 	projections bootSessionRuntimeProvider,
 ) {
-	sessionItems := make(map[string]any, len(sessions))
-	sessionList := make([]any, 0, len(sessions))
+	ordinarySessions := make([]*taskmodels.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.Role != taskmodels.SessionRoleErrand {
+			ordinarySessions = append(ordinarySessions, session)
+		}
+	}
+	sessionItems := make(map[string]any, len(ordinarySessions)+1)
+	sessionList := make([]any, 0, len(ordinarySessions))
 	environmentBySession := make(map[string]string, len(sessions))
 	worktrees := make(map[string]any)
 	worktreesBySession := make(map[string]any)
@@ -473,10 +512,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		b.logBootError("get task detail session pending actions", err)
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
 	}
-	for _, session := range sessions {
-		if session == nil {
-			continue
-		}
+	for _, session := range ordinarySessions {
 		isActive := session.ID == activeSessionID
 		if isActive && activeSession != nil {
 			session = activeSession
@@ -506,6 +542,21 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			worktreesBySession[session.ID] = []string{summaryDTO.WorktreeID}
 		}
 		addTaskDetailSessionMetadata(session, sessionModelsByID, sessionModeByID, sessionMCPStatusByID)
+	}
+	if activeSession != nil && activeSession.Role == taskmodels.SessionRoleErrand {
+		if _, ordinaryMember := sessionItems[activeSession.ID]; !ordinaryMember {
+			childPendingActions, err := b.bootPendingActionsForInputCapableSessions(
+				ctx,
+				map[string][]*taskmodels.TaskSession{taskID: {activeSession}},
+			)
+			if err != nil {
+				b.logBootError("get task detail errand pending actions", err)
+				childPendingActions = map[string]taskmodels.TaskPendingAction{}
+			}
+			sessionItems[activeSession.ID] = b.taskDetailActiveSessionDTO(
+				ctx, activeSession, childPendingActions, projections,
+			)
+		}
 	}
 	state["taskSessions"] = map[string]any{"items": sessionItems}
 	state["taskSessionsByTask"] = map[string]any{

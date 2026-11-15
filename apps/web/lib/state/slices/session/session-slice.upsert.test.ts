@@ -218,6 +218,58 @@ describe("upsertTaskSessionFromEvent environment registry", () => {
   });
 });
 
+describe("Errand rows stay outside ordinary session membership", () => {
+  it("filters Errands from an authoritative complete snapshot", () => {
+    const store = makeStore();
+    const ordinary = makeSession({ id: "session-ordinary" });
+    const child = makeSession({
+      id: "session-errand",
+      role: "errand",
+      parent_session_id: ordinary.id,
+    });
+
+    store.getState().setTaskSessionsForTask(TASK_ID, [ordinary, child], {});
+
+    expect(
+      store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID].map((session) => session.id),
+    ).toEqual([ordinary.id]);
+    expect(store.getState().taskSessions.items[child.id]).toBeUndefined();
+  });
+
+  it("ignores unseen child detail events without list invalidation or membership", () => {
+    const store = makeStore();
+    const ordinary = makeSession({ id: "session-ordinary" });
+    store.getState().setTaskSessionsForTask(TASK_ID, [ordinary], {});
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ id: "session-errand", role: "errand", parent_session_id: ordinary.id }),
+      );
+
+    expect(store.getState().taskSessions.items["session-errand"]).toBeUndefined();
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
+    expect(
+      store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID].map((session) => session.id),
+    ).toEqual([ordinary.id]);
+  });
+
+  it("does not add a targeted child detail read to ordinary membership", () => {
+    const store = makeStore();
+    const child = makeSession({
+      id: "session-errand",
+      role: "errand",
+      parent_session_id: "parent" as TaskSession["id"],
+    });
+
+    store.getState().setTaskSession(child);
+
+    expect(store.getState().taskSessions.items[child.id].role).toBe("errand");
+    expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID]).toBeUndefined();
+  });
+});
+
 describe("agentctl readiness from session snapshots", () => {
   it("promotes a hydrated live session when its ready event was missed", () => {
     const store = makeStore();

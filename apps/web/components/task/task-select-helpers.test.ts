@@ -126,6 +126,9 @@ function makeEnvStore(
               sessionIds.map((id) => ({ id })),
             ]),
           ),
+          loadedByTaskId: Object.fromEntries(
+            Object.keys(taskSessionsByTask).map((taskId) => [taskId, true]),
+          ),
         },
       }) as unknown as AppState,
   } as unknown as StoreApi<AppState>;
@@ -532,10 +535,18 @@ describe("buildSwitchToSession", () => {
     switchToSession("task-new", "sess-new", "sess-old");
 
     expect(setActiveSession).toHaveBeenCalledWith("task-new", "sess-new");
-    expect(performLayoutSwitch).toHaveBeenCalledWith("env-A", "env-B", "sess-new", [
+    expect(performLayoutSwitch).toHaveBeenCalledWith(
+      "env-A",
+      "env-B",
       "sess-new",
-      "sess-sibling",
-    ]);
+      ["sess-new", "sess-sibling"],
+      {
+        sessionListRestoreState: {
+          loaded: true,
+          knownForeignSessionIds: new Set(),
+        },
+      },
+    );
     expect(releaseLayoutToDefault).not.toHaveBeenCalled();
   });
 
@@ -665,4 +676,26 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
 
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
   });
+});
+
+// @covers AC-TASKS-ERRANDS-005.6
+it("filters fallback candidates without excluding explicit children or pending input owners", () => {
+  const child = {
+    id: "child",
+    role: "errand",
+    state: "WAITING_FOR_INPUT",
+    pending_action: "permission",
+    is_primary: true,
+  } as TaskSession;
+  const sessions = [child, { id: "normal" } as TaskSession];
+  expect(resolveTaskSessionId({ sessions, preferredSessionId: "" })).toBe("normal");
+  expect(resolveTaskSessionId({ sessions: [child], preferredSessionId: "" })).toBe("");
+  expect(resolveTaskSessionId({ sessions, preferredSessionId: "child" })).toBe("child");
+  expect(
+    resolveTaskSessionId({
+      sessions,
+      preferredSessionId: "normal",
+      taskPendingAction: "permission",
+    }),
+  ).toBe("child");
 });

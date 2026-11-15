@@ -212,4 +212,3 @@ Verification:
 - One Chromium performance trace per state was recorded. The corrected run
   measured lower totals, but the runs were not load-controlled, so no CPU
   improvement is claimed. See [plan results](plan.md#verification-results).
-

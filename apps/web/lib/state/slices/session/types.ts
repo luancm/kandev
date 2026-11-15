@@ -91,6 +91,8 @@ export type TaskSessionsState = {
   activityEpochBySession?: Record<string, number>;
   /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
   readCursorEpochBySession?: Record<string, number>;
+  /** Monotonic live context generation used to reject snapshots captured before context changes. */
+  contextWindowEpochBySession?: Record<string, number>;
   /** Per-session generation used to keep recovery notifications ahead of stale hydration. */
   workspaceRecoveryEpochBySession?: Record<string, number>;
   /** Latest event projection for sessions that have not hydrated yet. */
@@ -100,6 +102,7 @@ export type TaskSessionsState = {
 export type TaskSessionHydrationEpoch = {
   activity: number;
   readCursor: number;
+  contextWindow?: number;
   workspaceRecovery?: number;
 };
 

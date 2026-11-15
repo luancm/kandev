@@ -100,7 +100,7 @@ The profile picker shows only profiles compatible with the task executor. If non
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
 | **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
-**Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
+**Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summary-source menus in New Agent and New Subtask list normal conversations; inspect delegated errand transcripts through their parent’s Errands panel. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
@@ -237,6 +237,13 @@ before it accepts new work. This delivery recovery is automatic and separate
 from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
+
+A historical completion that cannot be matched to its original turn is retained
+with a diagnostic warning. That record alone does not prevent Kandev from starting
+or stop a later completion in the same session when its own evidence can be
+verified. Saved messages remain available. Actions that depend on the unresolved
+record can still be blocked; Kandev does not declare it recovered or resend the
+old prompt.
 
 After a restart, confirmed evidence that the exact Remote Docker or Sprites
 instance is absent ends attachment so the existing recovery actions can check

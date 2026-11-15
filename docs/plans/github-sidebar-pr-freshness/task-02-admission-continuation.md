@@ -181,4 +181,3 @@ P2 credential/lifetime fencing) is recorded in the plan and covered by the last
 four tests above. Pending work is now keyed by provider target with a consumer
 set and a per-target deadline; pruning compares the workspace credential
 fingerprint and live watch IDs.
-

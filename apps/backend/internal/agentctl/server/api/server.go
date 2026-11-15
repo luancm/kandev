@@ -87,7 +87,8 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 			},
 		},
 	}
-	if mcpServer != nil {
+	if mcpServer != nil && procMgr != nil {
+		mcpServer.SetAwaitAbortStore(procMgr)
 		procMgr.SetBuiltinToolCatalog(mcpServer.BuiltinCatalog)
 	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {

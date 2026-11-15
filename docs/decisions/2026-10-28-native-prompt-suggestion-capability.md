@@ -89,4 +89,3 @@ runtime feature flag.
 - [ACP compatibility dialects](0044-acp-agent-compatibility-dialects.md)
 - [Origin identity](0035-version-agent-ready-events-by-prompt-generation.md)
 - [Implementation plan](../plans/native-prompt-suggestion-capability/plan.md)
-

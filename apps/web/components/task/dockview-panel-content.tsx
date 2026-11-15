@@ -37,6 +37,7 @@ import { TerminalPanel } from "./terminal-panel";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
+import { panelConversationSessionId } from "@/lib/task-conversation-navigation";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -86,8 +87,17 @@ function ChatContent({
 }) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const sessionId =
+    useAppStore((state) =>
+      panelConversationSessionId(
+        paramSessionId ?? null,
+        storeSessionId,
+        taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
+        taskId ? state.errands.byTaskId[taskId] : undefined,
+        storeSessionId ? state.taskSessions.items[storeSessionId] : undefined,
+      ),
+    ) ?? (paramSessionId ? null : storeSessionId);
   const isVisible = usePanelActive(panelId);
   const { openFile } = useFileEditors(isVisible);
   const addDiffViewerPanel = useDockviewStore((state) => state.addDiffViewerPanel);
@@ -95,7 +105,7 @@ function ChatContent({
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
-  useChatSessionTitle(panelId, sessionId);
+  useChatSessionTitle(panelId, paramSessionId ?? sessionId);
   const handleOpenHistoricalDiff = useCallback(
     (target: HistoricalTurnDiffTarget) => {
       setSelectedDiff({ path: target.path ?? "", historical: target });

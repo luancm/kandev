@@ -1,10 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { t } from "@/lib/i18n";
 import { KanbanCardActions } from "./kanban-card-actions";
 import type { KanbanCardActionProps } from "./kanban-card-content";
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => true }));
 
 afterEach(cleanup);
 
@@ -57,4 +59,28 @@ describe("Kanban card processing menu", () => {
       expect(screen.getByRole("menu")).toBeDefined();
     },
   );
+});
+
+describe("Kanban card errands summary", () => {
+  it("keeps the backend errand count separate from native subagent count", () => {
+    render(
+      actions({
+        task: {
+          id: "task-1",
+          title: "Task",
+          workflowStepId: "step-1",
+          activeSubagentCount: 4,
+          statusSummary: {
+            revision: 9,
+            updated_at: "2026-10-28T12:00:00Z",
+            errands: { live: 2, waiting: true },
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByTestId("task-errands-summary").textContent).toContain("2 errands");
+    expect(screen.getByTestId("task-errands-waiting").textContent).toBe("Waiting on errands");
+    expect(screen.getByTestId("task-subagent-count").textContent).toBe("4");
+  });
 });

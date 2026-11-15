@@ -124,7 +124,7 @@ func TestDurableEventKeepsExplicitDispatchOwnership(t *testing.T) {
 		{name: "current generation", event: agentctl.AgentEvent{PromptGeneration: 10}, want: "current-turn"},
 		{name: "older generation", event: agentctl.AgentEvent{PromptGeneration: 9}, want: "previous-turn"},
 		{name: "unknown generation", event: agentctl.AgentEvent{PromptGeneration: 8}},
-		{name: "submission", event: agentctl.AgentEvent{DeliverySubmissionID: "submission"}, want: "current-turn"},
+		{name: "unproven submission", event: agentctl.AgentEvent{DeliverySubmissionID: "submission"}},
 		{name: "pending legacy dispatch", pending: true, want: "current-turn"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,4 +239,17 @@ func TestCanonicalAgentMessageIDPreservesNativeAndReasoningIdentity(t *testing.T
 	replayed.CanonicalMessageID = "agent-delivery-segment-already-resolved"
 	require.Equal(t, "stable-base", canonicalAgentMessageID(execution, replayed),
 		"retry and reconnect derive from the stable base instead of hashing a resolved ID")
+}
+
+func TestErrandUnknownSubmissionDoesNotAdoptCurrentTurnProbe(t *testing.T) {
+	execution := &AgentExecution{SessionID: "session", promptTurnID: "successor", promptGeneration: 2}
+	stored := durableAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", DeliverySubmissionID: "original", DeliveryStreamID: "stream", DeliverySequence: 1})
+	var payload agentctl.AgentEvent
+	require.NoError(t, json.Unmarshal(stored.Payload, &payload))
+	require.NotEqual(t, "successor", payload.TurnID, "original submission must not inherit successor turn")
+}
+func TestErrandExplicitConflictingTurnProbe(t *testing.T) {
+	execution := &AgentExecution{SessionID: "session", promptTurnID: "successor", promptGeneration: 2, promptTurnIDs: map[uint64]string{1: "original", 2: "successor"}}
+	event := agentctl.AgentEvent{Type: "message_chunk", PromptGeneration: 1, TurnID: "successor", DeliverySubmissionID: "original"}
+	require.NotEqual(t, "successor", execution.promptTurnIDForEvent(event), "conflicting turn must not override known generation")
 }

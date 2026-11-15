@@ -71,6 +71,9 @@ const (
 	// ModeCoordinator registers the fixed six-tool catalog for a workspace
 	// coordinator's conversation session.
 	ModeCoordinator = mcpmode.Coordinator
+	// ModeErrand registers the fixed eight-tool read-only catalog for an
+	// errand session. Parent-only errand tools never appear in this mode.
+	ModeErrand = mcpmode.Errand
 	// ModeManagedConversation exposes only the selected plugin agent tools.
 	ModeManagedConversation = "managed-conversation"
 )
@@ -110,7 +113,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator, ModeErrand:
 		return mode
 	default:
 		return ModeTask
@@ -119,6 +122,8 @@ func normalizeMode(mode string) string {
 
 // Server wraps the MCP server with backend client for communication.
 type Server struct {
+	awaitAbortStore            AwaitAbortStore
+	awaitAbortPending          map[string]models.ErrandAwaitIdentity
 	builtinPackages            map[mcpprofile.PackageID]*builtinPackageServer
 	backend                    BackendClient
 	sessionID                  string
@@ -402,6 +407,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeAutomation
 	case mcpprofile.SurfaceCoordinator:
 		return ModeCoordinator
+	case mcpprofile.SurfaceErrand:
+		return ModeErrand
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -948,7 +955,7 @@ func (s *Server) SetMode(mode string) {
 // copilot.md#attended-only), mirroring mcpprofile.Legacy's own exclusion of
 // SurfaceAutomation and SurfaceCoordinator from CapabilityUserQuestion.
 func isFixedCatalogMode(mode string) bool {
-	return mode == ModeAutomation || mode == ModeCoordinator
+	return mode == ModeAutomation || mode == ModeCoordinator || mode == ModeErrand
 }
 
 func surfaceForMode(mode string) mcpprofile.Surface {
@@ -963,6 +970,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceAutomation
 	case ModeCoordinator:
 		return mcpprofile.SurfaceCoordinator
+	case ModeErrand:
+		return mcpprofile.SurfaceErrand
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -1525,7 +1534,9 @@ func (s *Server) registerAgentPermissionTools() {
 // registerTools assembles the selected packages before publishing their views.
 func (s *Server) registerTools() {
 	s.registerContextTools()
-	s.registerPluginTools()
+	if s.profile.Surface != mcpprofile.SurfaceErrand {
+		s.registerPluginTools()
+	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", len(s.mcpServer.ListTools())),

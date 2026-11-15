@@ -26,6 +26,8 @@ type AgentDeliveryRecoveryIdentity struct {
 	PromptGeneration  uint64
 	HistoryGap        *models.AgentDeliveryHistoryGap
 	PayloadHash       string
+	TurnID            string
+	NativeSessionID   string
 }
 
 // RecoverAgentPromptStreamWithIdentity resolves a retained owner through the
@@ -247,7 +249,7 @@ func deliveryReconciliationIdentity(identity AgentDeliveryRecoveryIdentity) Deli
 		OriginalRuntime: identity.OriginalRuntime, SessionID: identity.SessionID, ExecutionID: identity.ExecutionID,
 		IncarnationID: identity.IncarnationID, HarnessGeneration: identity.HarnessGeneration,
 		StreamID: identity.StreamID, SubmissionID: identity.SubmissionID,
-		PromptGeneration: identity.PromptGeneration,
+		PromptGeneration: identity.PromptGeneration, TurnID: identity.TurnID, NativeSessionID: identity.NativeSessionID,
 	}
 }
 

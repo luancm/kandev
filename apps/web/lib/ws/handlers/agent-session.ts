@@ -1,5 +1,6 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
+import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
@@ -130,6 +131,13 @@ export function clearPinnedSessionIfOverridden(store: StoreApi<AppState>, sessio
   }));
 }
 
+function clearRemovedSessionPin(store: StoreApi<AppState>, removedSessionId: string): void {
+  if (store.getState().tasks.pinnedSessionId !== removedSessionId) return;
+  store.setState((state) => ({
+    tasks: { ...state.tasks, pinnedSessionId: null },
+  }));
+}
+
 /** Promote agentctl status to "ready" when the session enters a live state.
  *  Acts as a fallback for missed/late agentctl_ready WS events — the backend
  *  cannot reach RUNNING/WAITING_FOR_INPUT without a live agentctl. Never
@@ -193,6 +201,19 @@ export function shouldAdoptNewSession(
 }
 
 /**
+ * Errand role identity keeps selection explicit, including retained sessions
+ * after the feature is disabled.
+ */
+function isAutoSelectionExcludedErrand(
+  state: AppState,
+  taskId: string,
+  session: { id: string; role?: unknown },
+): boolean {
+  if (session.role === "errand") return true;
+  return Boolean(state.errands?.byTaskId?.[taskId]?.[session.id]);
+}
+
+/**
  * Pick the newest non-terminal session for a task. Used when the currently
  * active session just reached a terminal state — we want to hand focus to the
  * session that replaced it (typically created by a workflow step transition).
@@ -202,6 +223,7 @@ export function pickReplacementSessionId(state: AppState, taskId: string): strin
   if (!sessions) return null;
   for (let i = sessions.length - 1; i >= 0; i -= 1) {
     const candidate = sessions[i];
+    if (isAutoSelectionExcludedErrand(state, taskId, candidate)) continue;
     if (!isTerminalSessionState(candidate.state)) return candidate.id;
   }
   return null;
@@ -230,18 +252,84 @@ export function pickPrimarySessionReplacement(
   return primary && primary !== retiredSessionId ? primary : null;
 }
 
+function findUniqueTaskMatch(taskIds: string[]): { found: boolean; taskId: string | null } {
+  const uniqueTaskIds = [...new Set(taskIds)];
+  return {
+    found: uniqueTaskIds.length > 0,
+    taskId: uniqueTaskIds.length === 1 ? (uniqueTaskIds[0] ?? null) : null,
+  };
+}
+
+function findTaskForRemovedSession(state: AppState, sessionId: string): string | null {
+  const sessionTaskId = state.taskSessions?.items?.[sessionId]?.task_id;
+  if (sessionTaskId) return sessionTaskId;
+
+  const sessionTaskMatch = findUniqueTaskMatch(
+    Object.entries(state.taskSessionsByTask?.itemsByTaskId ?? {}).flatMap(([taskId, sessions]) =>
+      sessions.some((session) => session.id === sessionId) ? [taskId] : [],
+    ),
+  );
+  if (sessionTaskMatch.found) return sessionTaskMatch.taskId;
+
+  return findUniqueTaskMatch(
+    Object.entries(state.errands?.byTaskId ?? {}).flatMap(([taskId, errands]) =>
+      errands[sessionId]?.task_id === taskId ? [taskId] : [],
+    ),
+  ).taskId;
+}
+
+function handleSessionRemoved(
+  store: StoreApi<AppState>,
+  payload: { session_id?: string; task_id?: string },
+): void {
+  const sessionId = payload.session_id;
+  if (!sessionId) return;
+
+  const before = store.getState();
+  const knownTaskId = findTaskForRemovedSession(before, sessionId);
+  if (payload.task_id && knownTaskId && payload.task_id !== knownTaskId) return;
+  const taskId = payload.task_id || knownTaskId;
+  if (!taskId) return;
+
+  const wasActive =
+    before.tasks.activeTaskId === taskId && before.tasks.activeSessionId === sessionId;
+  const wasPinned = before.tasks.pinnedSessionId === sessionId;
+  retireSessionReads(store, sessionId);
+  before.removeTaskSession(taskId, sessionId);
+
+  const after = store.getState();
+  if (wasActive) {
+    const replacement =
+      pickReplacementSessionId(after, taskId) ??
+      pickPrimarySessionReplacement(after, taskId, sessionId);
+    if (replacement && replacement !== sessionId) {
+      inheritAgentctlStatus(after, sessionId, replacement);
+      clearPinnedSessionIfOverridden(store, replacement);
+      after.setActiveSessionAuto(taskId, replacement);
+    } else {
+      after.clearActiveSession();
+    }
+  } else if (wasPinned) {
+    clearRemovedSessionPin(store, sessionId);
+  }
+}
+
 // Fields carried onto the update object verbatim whenever the payload defines
 // them (undefined = key omitted so it never clobbers live client state).
 // `name` is present here so a rename event's cleared label ("") still applies;
 // foreground_activity/active_subagent_count carry the ADR-0049 activity
 // substate; supports_steering carries the live steer-eligibility flip so the
 // composer can switch affordance without a refetch; cancellation_* carry the
-// backend-owned cancellation projection.
+// backend-owned cancellation projection. role and parent_session_id are
+// omitted for ordinary sessions, so absence must never clear a known errand.
 const CARRIED_WHEN_DEFINED = [
   "session_recovery_blocks",
   "review_status",
   "error_message",
   "is_passthrough",
+  "role",
+  "parent_session_id",
+  "waiting_on_errands",
   "name",
   "foreground_activity",
   "active_subagent_count",
@@ -271,7 +359,9 @@ function carryDefinedFields(
 
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildSessionUpdate(payload: any): Record<string, unknown> {
+function buildSessionUpdate(payload: any): {
+  sessionUpdate: Record<string, unknown>;
+} {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
@@ -284,7 +374,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   carryDefinedFields(update, payload);
-  return update;
+  return { sessionUpdate: update };
 }
 
 /** Upsert the session in the per-task sessions list from a WS event.
@@ -298,10 +388,10 @@ function upsertTaskSessionList(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
   sessionUpdate: Record<string, unknown>,
-): void {
+): boolean {
   const newState = payload.new_state as TaskSessionState | undefined;
   const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing && !newState) return;
+  if (!existing && !newState) return false;
 
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
@@ -314,6 +404,7 @@ function upsertTaskSessionList(
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
+  return true;
 }
 
 // Fan out the office refetch trigger only when the session's state
@@ -940,12 +1031,28 @@ function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: stri
   state.clearLaunchWarning?.(sessionId);
 }
 
+function invalidateStartingConfig(store: StoreApi<AppState>, sessionId: SessionId): void {
+  const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
+  store
+    .getState()
+    .invalidateConfirmedConfigOptions(
+      sessionId,
+      agentctl?.startingExecutionId ??
+        (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
+    );
+  if (agentctl?.startingExecutionId) {
+    const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
+    store.getState().setSessionAgentctlStatus(sessionId, status);
+  }
+}
+
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
+    "session.removed": (message) => handleSessionRemoved(store, message.payload),
     // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together
     "session.state_changed": (message) => {
       const payload = message.payload;
@@ -957,7 +1064,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const taskId = toTaskId(rawTaskId);
       const sessionId = toSessionId(rawSessionId);
 
-      const sessionUpdate = buildSessionUpdate(payload);
+      const { sessionUpdate } = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
       if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
@@ -982,30 +1089,42 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState: newState ?? "-",
       });
 
+      if (
+        !existingSession &&
+        isAutoSelectionExcludedErrand(store.getState(), taskId, {
+          id: sessionId,
+          role: payload.role,
+        })
+      ) {
+        upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+        maybeNotifySessionFailure(store, {
+          taskId,
+          sessionId,
+          newState,
+          payload,
+          previousState: undefined,
+        });
+        maybeFanOutOfficeRefetch(store, newState, undefined);
+        return;
+      }
+
       maybeMarkQuickChatUnseenIdle(store, sessionId, {
         previousState: existingSession?.state,
         fallbackPreviousState: payload.old_state as TaskSessionState | undefined,
         newState,
         updatedAt: payload.updated_at,
       });
+      const contextEpoch =
+        store.getState().taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0;
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      const acceptedContextEpoch =
+        store.getState().taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0;
+      if (acceptedContextEpoch === contextEpoch) extractContextWindow(store, sessionId, payload);
       store.getState().reconcileWorkflowSessionFocus?.(taskId);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
-      extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
       if (newState === "STARTING") {
-        const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
-        store
-          .getState()
-          .invalidateConfirmedConfigOptions(
-            sessionId,
-            agentctl?.startingExecutionId ??
-              (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
-          );
-        if (agentctl?.startingExecutionId) {
-          const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
-          store.getState().setSessionAgentctlStatus(sessionId, status);
-        }
+        invalidateStartingConfig(store, sessionId);
       }
 
       // A confirmed RUNNING transition clears the resume-skipped marker
@@ -1016,14 +1135,22 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         clearResumeAndLaunchWarnings(store, sessionId);
       }
 
-      maybeAdoptSessionOnTransition(
-        store,
-        taskId,
-        sessionId,
-        newState,
-        !!existingSession,
-        existingSession?.state,
-      );
+      const incomingRole = payload.role ?? existingSession?.role;
+      if (
+        !isAutoSelectionExcludedErrand(store.getState(), taskId, {
+          id: sessionId,
+          role: incomingRole,
+        })
+      ) {
+        maybeAdoptSessionOnTransition(
+          store,
+          taskId,
+          sessionId,
+          newState,
+          !!existingSession,
+          existingSession?.state,
+        );
+      }
 
       maybeNotifySessionFailure(store, {
         taskId,

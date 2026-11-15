@@ -1,0 +1,77 @@
+package orchestrator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+const (
+	errandTurnSourceUser   = "user"
+	errandTurnSourceParent = "parent"
+)
+
+func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionID string) error {
+	controller := s.errands
+	if controller == nil {
+		return nil
+	}
+	if err := controller.ReconcileTerminalDecisions(ctx, sessionID); err != nil {
+		return err
+	}
+	return s.retireSettledErrandPrompt(ctx, sessionID)
+}
+
+func (s *Service) retryErrandCompletionBeforeAdmission(ctx context.Context, sessionID string) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !models.IsErrandSession(session) {
+		return nil
+	}
+	completion := s.errands
+	if completion == nil {
+		return nil
+	}
+	err = completion.RetryErrandCompletion(ctx, sessionID)
+	if !errors.Is(err, ErrCancelInFlight) {
+		return err
+	}
+	if err := s.waitForCancelInFlight(ctx, sessionID); err != nil {
+		return err
+	}
+	return completion.RetryErrandCompletion(ctx, sessionID)
+}
+
+func (s *Service) reserveErrandTerminalIntent(ctx context.Context, session *models.TaskSession, origin errands.ParentPromptOrigin, turnID, submissionID, executionID string) error {
+	store, ok := s.repo.(interface {
+		ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
+	})
+	if !ok || !models.IsErrandSession(session) {
+		return nil
+	}
+	if submissionID == "" {
+		submissionID = "errand-turn:" + turnID
+	}
+	incarnationID := session.QueueIncarnationID
+	generation, err := s.currentDeliveryGeneration(ctx, session, incarnationID)
+	if err != nil {
+		return err
+	}
+	source := errandTurnSourceUser
+	if origin.SenderSessionID == session.ParentSessionID {
+		source = errandTurnSourceParent
+	}
+	submissionID = normalizeDeliverySubmissionID(submissionID)
+	return store.ReserveErrandTurnSettlement(ctx, session.TaskID, &models.AgentDeliveryEffect{
+		EffectKey:  fmt.Sprintf("errand.turn:%s:%s:%s:%s", session.TaskID, incarnationID, turnID, submissionID),
+		EffectType: db.ErrandTurnSettlementEffect, State: models.DeliveryEffectPending, SessionID: session.ID,
+		IncarnationID: incarnationID, HarnessGeneration: generation, StreamID: executionID,
+		TurnID: turnID, SubmissionID: submissionID, Outcome: source,
+	})
+}

@@ -53,6 +53,10 @@ func TestMCPSessionExclusionResolution(t *testing.T) {
 	service := mcpconfig.NewSelectionService(repo, repo)
 	service.SetSessionMCPStateRepository(repo)
 	service.SetSessionResolutionContext(func(context.Context, string, string) (mcpconfig.ResolutionContext, error) { return rc, nil })
+	inherited, err := service.InheritedDefinitionIDs(ctx, def.WorkspaceID, rc.SessionID)
+	if err != nil || len(inherited) != 1 || inherited[0] != def.ID {
+		t.Fatalf("inherited sources did not deduplicate repository selections: %v, %v", inherited, err)
+	}
 	snapshot, err := service.ReadSnapshot(ctx, origin)
 	if err != nil {
 		t.Fatal(err)

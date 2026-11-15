@@ -110,6 +110,11 @@ func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (l
 // task is loaded first so a read error fails every session, config-mode
 // included; a coordinator-origin task then wins regardless of config_mode.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
+	if models.IsErrandSession(session) {
+		// An errand always gets the fixed errand catalog, whatever its task
+		// carries. Errand sessions never reach the task-state checks below.
+		return McpModeErrand, nil
+	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
 	if err != nil && !notFound {
@@ -166,6 +171,9 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
+	if models.IsErrandSession(session) {
+		return mcpprofile.New(mcpprofile.SurfaceErrand, nil, nil), nil
+	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
 	if err != nil && !notFound {
@@ -227,7 +235,16 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if task.IsFromOffice {
 		surface = mcpprofile.SurfaceOfficeTask
 	}
-	capabilities := make([]mcpprofile.Capability, 0, 2)
+	capabilities := e.kanbanSessionCapabilities(task, session, surface, allowTitleTool)
+	return e.withTaskCapabilities(mcpprofile.New(surface, capabilities, nil)), nil
+}
+
+// kanbanSessionCapabilities lists the task-local capabilities of an ordinary
+// (non-coordinator, non-automation, non-configuration) task session.
+// CapabilityErrands is granted only to an ordinary kanban session while the
+// errands gate is on; passthrough and ephemeral sessions cannot delegate.
+func (e *Executor) kanbanSessionCapabilities(task *models.Task, session *models.TaskSession, surface mcpprofile.Surface, allowTitleTool bool) []mcpprofile.Capability {
+	capabilities := make([]mcpprofile.Capability, 0, 3)
 	if task.Autopilot {
 		if task.ParentID != "" && !session.IsPassthrough {
 			capabilities = append(capabilities, mcpprofile.CapabilityParentQuestion)
@@ -238,7 +255,15 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
-	return e.withTaskCapabilities(mcpprofile.New(surface, capabilities, nil)), nil
+	if e.errandsGranted(task, session, surface) {
+		capabilities = append(capabilities, mcpprofile.CapabilityErrands)
+	}
+	return capabilities
+}
+
+func (e *Executor) errandsGranted(task *models.Task, session *models.TaskSession, surface mcpprofile.Surface) bool {
+	return e.errandsEnabled != nil && e.errandsEnabled() &&
+		surface == mcpprofile.SurfaceKanbanTask && !task.IsEphemeral && !session.IsPassthrough
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
@@ -1595,6 +1620,8 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	// Task metadata cannot grant session launch provenance.
+	delete(metadata, models.SessionMetaKeyErrandLaunchAuthority)
 	metadata = seed.ApplyToMetadata(metadata)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
@@ -1659,7 +1686,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	// metadata for repo-less tasks where the user picked a starting folder.
 	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
-	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+	identity, reserved, err := models.ReadReservedLaunchIdentity(ctx)
+	if err != nil {
+		return "", err
+	}
+	if reserved {
 		if identity.TaskID != task.ID {
 			return "", errors.New("reserved launch belongs to another task")
 		}
@@ -1686,6 +1717,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID
 	}
+	if isErrand, err := applyErrandSessionIdentity(ctx, session); err != nil {
+		return "", err
+	} else if isErrand {
+		isPrimarySession = false
+	}
+	metadata = session.Metadata
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session
@@ -2649,9 +2686,10 @@ func (e *Executor) handleLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, taskRepositoryID, launchErr, nil,
 	)
 	if changed {
-		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
+		if updateErr := e.writeTaskFailedForRuntime(failCtx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after launch error",
 				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
 				zap.Error(updateErr))
 		}
 	}

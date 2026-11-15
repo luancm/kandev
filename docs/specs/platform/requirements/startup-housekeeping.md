@@ -57,6 +57,18 @@ Executor ownership and conversation identity retain their existing owners.
   backup-before-mutation rule, event-listener-before-attachment rule, complete
   MCP wiring before agent activation, and final required-store health checks.
 
+- **AC-PLATFORM-STARTUP-HOUSEKEEPING-001.6:** A reconciliation failure confined
+  to a retained session or historical operation shall not prevent application
+  readiness, access to saved conversations, or independent work. Preserve the
+  unresolved evidence and expose its diagnostic context. Only operations that
+  depend on that evidence may remain blocked; do not infer successful delivery
+  or repeat a prior prompt to make recovery appear complete.
+- **AC-PLATFORM-STARTUP-HOUSEKEEPING-001.7:** An unresolved historical completion
+  shall not prevent later, independently attributable completions in the same
+  session from settling. Missing legacy attribution shall remain distinct from
+  a confirmed identity conflict. Required-store or installation-wide ownership
+  failures that prevent safe independent operation remain governed by 001.3.
+
 ### REQ-PLATFORM-STARTUP-HOUSEKEEPING-002: Work proportional to outstanding state
 
 **Intent:** A normal restart should not reprocess all historical conversations.

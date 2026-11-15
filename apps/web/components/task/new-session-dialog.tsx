@@ -13,7 +13,7 @@ import { AgentSelector, TaskFormInputs } from "@/components/task-create-dialog-s
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
-import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { useContextSessionOptions } from "@/hooks/use-context-session-options";
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { useCompatibleAgentProfiles } from "@/hooks/domains/session/use-compatible-agent-profiles";
 import type { AgentProfileOption } from "@/lib/state/slices";
@@ -121,26 +121,6 @@ function activateNewSession(
   setActiveSession(taskId, sessionId);
   const { api, centerGroupId } = useDockviewStore.getState();
   if (api) addSessionPanel(api, groupId ?? centerGroupId, sessionId, tabLabel);
-}
-
-function useSessionOptions(taskId: string) {
-  const { t } = useTranslation();
-  const { sessions, loadSessions } = useTaskSessions(taskId);
-  const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  useEffect(() => {
-    loadSessions(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return useMemo(() => {
-    const sorted = [...sessions].sort(
-      (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-    );
-    return sorted.map((s, idx) => {
-      const profile = agentProfiles.find((p: { id: string }) => p.id === s.agent_profile_id);
-      const name = profile ? agentProfileDisplayLabel(profile) : t("task:panelAgent");
-      return { id: s.id, label: name, index: idx + 1, agentName: profile?.agent_name };
-    });
-  }, [sessions, agentProfiles, t]);
 }
 
 function isMissingCompatibleProfile(
@@ -369,7 +349,7 @@ function NewSessionForm({
   const promptRef = useRef<TaskFormInputsHandle | null>(null);
   const busySignal = Number(isCreating) + Number(isSummarizing);
   const isBusyState = busySignal > 0;
-  const sessionOptions = useSessionOptions(taskId);
+  const sessionOptions = useContextSessionOptions(taskId);
   const isUtilityConfigured = useIsUtilityConfigured();
   const profileSelection = useSessionProfileSelection({
     agentProfiles,

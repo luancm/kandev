@@ -44,6 +44,9 @@ func (s *Service) focusTaskSessionAdmitted(
 	if !eligibleFocusedSession(current, taskID) {
 		return result, nil
 	}
+	if models.IsErrandSession(current) && current.State == models.TaskSessionStateCompleted {
+		return result, nil
+	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return result, nil

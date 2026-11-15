@@ -32,7 +32,9 @@ initial prompts. A missing client before the RPC retains the unsent error type.
 The orchestrator checks both the typed error and the acceptance callback. Only an
 unaccepted, proven unsent request can settle as failed. The repository pins the
 captured submission ID, session, incarnation, harness and owner generations, hash,
-dispatching state, and absence of terminal sequence under the existing SQL locks.
+and dispatch attempt ID under the existing SQL locks and unchanged lock order.
+The conditional update requires dispatching state, no terminal identifiers, and
+no conflicting terminal inbox event or terminal settlement effect.
 It sets `failed`, the failed outcome, and a settlement timestamp without a terminal
 event. A failed conditional write preserves recovery protection. No journal
 capability, new journal state, or new agentctl endpoint is introduced.
@@ -44,6 +46,15 @@ Candidate selection and the conditional update both reject conflicting terminal
 evidence and open delivery recovery blocks. Identity, hash, outcome, and claim
 association remain. Ordinary failed rows without settlement proof remain protected.
 This extends the [retention design](backend-agent-delivery-retention.md).
+
+Errand admission consumes this same exact receipt across parent follow-ups,
+initial dispatch and initial Send Now. A generic failure callback or unsent error
+alone does not authorize refusal cleanup: the conditional settlement must have
+committed for the captured owner. Existing admission, turn and claim owners then
+resolve only that attempt. The receipt is not a provider terminal event or an
+Errand terminal decision. Conflicting acceptance or terminal inbox/effect evidence
+continues to prevent refusal, including after restart or payload pruning. See the
+[integration work order](../../../plans/errands-simplification/task-05-definite-non-delivery.md).
 
 ## Existing historical recovery
 

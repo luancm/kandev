@@ -7,6 +7,7 @@ import {
   effectiveTaskPendingAction,
   resolvePreferredSessionId,
   resolveTaskSessionId,
+  resolveLoadedSessionId,
   taskPendingSelectionMatches,
   taskPendingSelectionSnapshot,
   type TaskPendingSelectionSnapshot,
@@ -136,7 +137,7 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
   try {
     const sessions = await actions.loadTaskSessionsForTask(taskId);
     if (!selectionIsCurrent(actions)) return;
-    const sessionId = sessions[0]?.id ?? null;
+    const sessionId = resolveLoadedSessionId(sessions, "");
     if (sessionId) {
       actions.setActiveSession(taskId, sessionId);
       navigate(taskId, sessionId);

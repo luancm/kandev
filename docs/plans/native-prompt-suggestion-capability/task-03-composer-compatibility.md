@@ -192,4 +192,3 @@ The first local E2E launch stopped in global setup because the prebuilt backend
 artifacts predated the changed sources. `make -C apps/backend build` refreshed
 them, and the managed runner rebuilt the web and fixture artifacts for the
 passing runs above.
-

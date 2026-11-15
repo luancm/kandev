@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { defaultState, mergeInitialState } from "./default-state";
-import type { HydrationState } from "./store";
+import { createAppStore, type HydrationState } from "./store";
+import {
+  ERRAND_PARENT_ID,
+  ERRAND_TASK_ID,
+  makeErrand,
+  makeBrowserErrandRow,
+  makeBrowserSummary,
+  makeHistoryPage,
+  makeInspection,
+} from "./slices/errands/errands.test-helpers";
+import { stateReadScopeIdentity } from "./shared-resource-reads";
 
 describe("turn hydration state", () => {
   it("defaults and deep-merges loaded session markers", () => {
@@ -33,6 +43,58 @@ describe("turn hydration state", () => {
       messageIds: ["message-1"],
       activeTurnObserved: true,
     });
+  });
+});
+
+describe("errands hydration state", () => {
+  it("clears runtime browser ownership from a previously retained Errands snapshot", () => {
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const running = makeErrand();
+    store.getState().upsertErrand(running);
+    const observation = {
+      connectionGeneration: store.getState().connection.generation ?? 0,
+      readScopeIdentity: stateReadScopeIdentity(store.getState()),
+      taskResetEpoch: 0,
+      observationRevision: store.getState().errands.browserRevisionByTaskId[ERRAND_TASK_ID],
+    };
+    const outstanding = makeBrowserErrandRow({
+      status: "running",
+      result_state: "none",
+      live: true,
+      outstanding: true,
+    });
+    const finished = makeBrowserErrandRow({ errand_id: "finished-child" });
+    store.getState().beginErrandBrowserSummaryRead(ERRAND_TASK_ID, observation, "summary");
+    store
+      .getState()
+      .setErrandBrowserSummary(
+        ERRAND_TASK_ID,
+        makeBrowserSummary([outstanding]),
+        observation,
+        "summary",
+      );
+    store.getState().openErrandHistory("panel", ERRAND_TASK_ID, ERRAND_PARENT_ID);
+    store.getState().beginErrandHistoryRead("panel", observation, null, "history");
+    store
+      .getState()
+      .setErrandHistoryPage("panel", makeHistoryPage([finished]), observation, null, "history");
+    store.getState().retainErrandInspection("child", makeInspection(finished));
+    const retained = store.getState().errands;
+    expect(retained.browserSummaryByTaskId[ERRAND_TASK_ID].errands).toEqual([outstanding]);
+    expect(retained.historyByOwnerId.panel.pages[0].errands).toEqual([finished]);
+    expect(retained.detailOwnersBySessionId[finished.errand_id]).toEqual({ child: true });
+
+    const state = mergeInitialState({ errands: retained });
+    expect(state.errands.byTaskId[ERRAND_TASK_ID]).toEqual({ [running.errand_id]: running });
+    expect(state.errands.browserReadScopeIdentity).toBeUndefined();
+    expect(state.errands.browserSummaryByTaskId).toEqual({});
+    expect(state.errands.browserSummaryReadByTaskId).toEqual({});
+    expect(state.errands.browserRevisionByTaskId).toEqual({});
+    expect(state.errands.historyByOwnerId).toEqual({});
+    expect(state.errands.detailBySessionId).toEqual({});
+    expect(state.errands.detailOwnersBySessionId).toEqual({});
+    expect(state.errands.detailObservationRevisionBySessionId).toBeUndefined();
   });
 });
 

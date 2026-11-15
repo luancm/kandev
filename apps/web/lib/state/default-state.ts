@@ -21,7 +21,9 @@ import {
   defaultFailedInboxState,
   defaultPreviewFeedbackState,
   defaultInboxHistoryState,
+  defaultErrandsState,
 } from "./slices";
+import { mergeErrandsHydrationState } from "./slices/errands/errands-slice";
 import { mergeHydratedQuickChatSessions } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import { mergeUserShellsState } from "@/lib/state/user-shell-scope";
@@ -100,6 +102,7 @@ export const defaultState = {
   failedInbox: defaultFailedInboxState.failedInbox,
   previewFeedback: defaultPreviewFeedbackState.previewFeedback,
   inboxHistory: defaultInboxHistoryState.inboxHistory,
+  errands: defaultErrandsState.errands,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -476,6 +479,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       },
     },
     workspaceContextGeneration: mergeWorkspaceContextGeneration(initialState),
+    errands: mergeErrandsHydrationState(initialState.errands),
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
     repositories: { ...defaultState.repositories, ...initialState.repositories },

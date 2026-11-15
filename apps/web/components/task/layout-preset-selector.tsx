@@ -53,6 +53,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
+import { useLayoutApplyOwnership } from "./layout-preset-selector-apply-ownership";
 import { SavedLayoutDeleteConfirmation } from "./saved-layout-delete-confirmation";
 import { useSavedLayoutMutations } from "./use-saved-layout-mutations";
 import { useTranslation } from "react-i18next";
@@ -292,24 +293,38 @@ function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInLayoutProf
 }
 
 function useApplySavedLayout() {
-  const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
-  const currentLayoutEnvId = useDockviewStore((s) => s.currentLayoutEnvId);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const appStore = useAppStoreApi();
   const { isLoaded: taskSessionsLoaded, loadSessions } = useTaskSessions(activeTaskId);
+  const captureApplyOwner = useLayoutApplyOwnership(appStore, activeTaskId);
 
-  return useCallback(
+  const applySynchronousLayout = useCallback(
+    (apply: () => void) => {
+      const owner = captureApplyOwner();
+      if (!owner?.isCurrent()) return;
+      apply();
+    },
+    [captureApplyOwner],
+  );
+
+  const applySavedLayout = useCallback(
     async (layout: SavedLayout) => {
-      const sessionIds = await resolveLayoutApplySessionIds({
-        activeTaskId,
-        activeSessionId,
-        sessionsLoaded: taskSessionsLoaded,
+      const owner = captureApplyOwner();
+      if (!owner) return;
+      const sessionIdentities = await resolveLayoutApplySessionIds({
+        activeTaskId: owner.taskId,
+        sessionsLoaded: owner.taskId
+          ? (appStore.getState().taskSessionsByTask.loadedByTaskId[owner.taskId] ?? false)
+          : taskSessionsLoaded,
         loadSessions,
         getSessionsForTask: (taskId) =>
           appStore.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? [],
+        getSessionsLoadedForTask: (taskId) =>
+          appStore.getState().taskSessionsByTask.loadedByTaskId[taskId] ?? false,
       });
-      applyCustomLayout(
+      if (!owner.isCurrent()) return;
+
+      useDockviewStore.getState().applyCustomLayout(
         {
           id: layout.id,
           name: layout.name,
@@ -317,24 +332,27 @@ function useApplySavedLayout() {
           layout: layout.layout,
           createdAt: layout.created_at,
         },
-        { activeSessionId, sessionIds, envId: currentLayoutEnvId },
+        {
+          activeSessionId: owner.sessionId,
+          sessionIds: sessionIdentities.sessionIds,
+          envId: owner.environmentId,
+          sessionListRestoreState: {
+            loaded: sessionIdentities.loaded,
+            knownForeignSessionIds: new Set(),
+          },
+        },
       );
     },
-    [
-      activeSessionId,
-      activeTaskId,
-      appStore,
-      applyCustomLayout,
-      currentLayoutEnvId,
-      loadSessions,
-      taskSessionsLoaded,
-    ],
+    [activeTaskId, appStore, captureApplyOwner, loadSessions, taskSessionsLoaded],
   );
+
+  return { applySavedLayout, applySynchronousLayout };
 }
 
 function useApplyBuiltInLayout(
   savedLayouts: SavedLayout[],
   applySavedLayout: (layout: SavedLayout) => Promise<void>,
+  applySynchronousLayout: (apply: () => void) => void,
 ) {
   const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
   return useCallback(
@@ -344,9 +362,9 @@ function useApplyBuiltInLayout(
         void applySavedLayout(override);
         return;
       }
-      applyBuiltInPreset(presetId, true);
+      applySynchronousLayout(() => applyBuiltInPreset(presetId, true));
     },
-    [applyBuiltInPreset, applySavedLayout, savedLayouts],
+    [applyBuiltInPreset, applySavedLayout, applySynchronousLayout, savedLayouts],
   );
 }
 
@@ -517,8 +535,16 @@ export function LayoutPresetSelector() {
   const pendingTarget = useRef<SavedLayout | null>(null);
   const resetLayout = useDockviewStore((s) => s.resetLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
-  const handleApplyCustom = useApplySavedLayout();
-  const handleApplyBuiltIn = useApplyBuiltInLayout(savedLayouts, handleApplyCustom);
+  const { applySavedLayout: handleApplyCustom, applySynchronousLayout } = useApplySavedLayout();
+  const handleApplyBuiltIn = useApplyBuiltInLayout(
+    savedLayouts,
+    handleApplyCustom,
+    applySynchronousLayout,
+  );
+  const handleResetLayout = useCallback(
+    () => applySynchronousLayout(resetLayout),
+    [applySynchronousLayout, resetLayout],
+  );
   const { saveLayout, deleteLayout } = useSavedLayoutMutations();
   const { dropdownOpen, tooltipOpen, handleDropdownOpenChange, handleTooltipOpenChange } =
     usePresetDropdownVisibility(cancelDelete);
@@ -568,7 +594,7 @@ export function LayoutPresetSelector() {
         deleteMenuRef={deleteMenuRef}
         tooltipOpen={!isMobile && tooltipOpen}
         onTooltipOpenChange={handleTooltipOpenChange}
-        resetLayout={resetLayout}
+        resetLayout={handleResetLayout}
         savedLayouts={savedLayouts}
         isFinePointer={isMobile || isFinePointer}
         onApplyCustom={handleApplyCustom}

@@ -41,6 +41,7 @@ export type DiffState = {
 };
 
 export type ConnectionState = {
+  generation: number;
   status: ConnectionStatus;
   error: string | null;
   issueSeverity: ConnectionIssueSeverity;

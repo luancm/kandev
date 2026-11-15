@@ -7,6 +7,9 @@ func BuiltinToolPackage(name string) PackageID {
 }
 
 var builtinToolPackages = map[string]PackageID{
+	"start_errand_kandev":                           PackageCore,
+	"await_errands_kandev":                          PackageCore,
+	"cancel_errand_kandev":                          PackageCore,
 	"answer_question_kandev":                        PackageCore,
 	"list_pending_questions_kandev":                 PackageCore,
 	"list_pending_agent_permissions_kandev":         PackageCore,

@@ -280,6 +280,10 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// Errand marks an IntentStart launch as an errand session. Like SpawnOrigin
+	// it is server-side provenance (`json:"-"`): a WS client must not be able to
+	// request errand isolation or forge the errand's trusted first-turn block.
+	Errand *ErrandLaunch `json:"-"`
 	// PreserveWorkflowSourceBinding marks a spawn_session_kandev launch: the
 	// helper session must not become the recorded recipient of the workflow
 	// step it was spawned from. It is server-only intent, independent of the
@@ -1031,9 +1035,11 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		startTaskOptions{
 			ProfileExplicit:               req.ProfileExplicit,
 			SpawnOrigin:                   req.SpawnOrigin,
-			PreserveWorkflowSourceBinding: req.PreserveWorkflowSourceBinding,
 			MCPServerIDs:                  req.MCPServerIDs,
 			reusePreparedPrimary:          req.reusePreparedPrimary,
+			Errand:                        req.Errand,
+			Origin:                        errandStartOrigin(req.Errand),
+			PreserveWorkflowSourceBinding: req.PreserveWorkflowSourceBinding,
 		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {

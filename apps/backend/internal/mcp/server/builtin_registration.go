@@ -12,6 +12,8 @@ func (s *Server) registerContextTools() {
 	switch s.profile.Surface {
 	case mcpprofile.SurfaceManagedConversation:
 		return
+	case mcpprofile.SurfaceErrand:
+		s.registerErrandCatalogTools()
 	case mcpprofile.SurfaceAutomation:
 		if s.profile.BuiltinPackages != nil {
 			s.registerBuiltinTools()

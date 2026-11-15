@@ -251,6 +251,8 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls    map[string]*streams.NormalizedPayload
+	activeToolOwners   map[string]toolCallOwner
+	awaitReceiptCalls  map[string]string
 	contextCompactions map[string]*streams.NormalizedPayload
 	// cursorTaskMetaBySession stores Cursor's non-standard `cursor/task`
 	// metadata until the matching subagent tool_call appears, keyed by session

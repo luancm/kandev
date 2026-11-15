@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
-import type { ExecutorProfile } from "@/lib/types/http";
+import type { TaskSession, ExecutorProfile } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
 const mockToast = vi.fn();
@@ -14,6 +14,8 @@ const mockRecordRecentUse = vi.fn();
 let mockAgentSelectorValue: string | undefined;
 let mockAgentSelectorOnChange: ((value: string) => void) | undefined;
 let mockExecutorProfile: ExecutorProfile | null = null;
+let mockSessions: TaskSession[] = [];
+let mockSessionOptions: { id: string; index: number }[] = [];
 let mockContextSelectValue: string | undefined;
 const PLUGIN_COMPOSER_LABEL = "Plugin composer action";
 const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
@@ -29,7 +31,8 @@ const BASE_PROFILE: AgentProfileOption = {
 };
 
 const mockState = {
-  features: { dynamicAgentRouting: true },
+  features: { dynamicAgentRouting: true, errands: false },
+  errands: { byTaskId: {} as Record<string, Record<string, { parent_session_id: string }>> },
   kanban: {
     workflowId: null,
     tasks: [{ id: "task-1", title: "Task title" }],
@@ -193,7 +196,7 @@ vi.mock("@/hooks/use-summarize-session", () => ({
 
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: () => ({
-    sessions: [],
+    sessions: mockSessions,
     loadSessions: vi.fn(),
   }),
 }));
@@ -230,11 +233,14 @@ vi.mock("./session-dialog-shared", () => ({
   ContextSelect: ({
     value,
     onValueChange,
+    sessionOptions,
   }: {
+    sessionOptions: typeof mockSessionOptions;
     value: string;
     onValueChange: (value: string) => void;
   }) => {
     mockContextSelectValue = value;
+    mockSessionOptions = sessionOptions;
     return (
       <div>
         <span data-testid="context-value">{value}</span>
@@ -277,6 +283,7 @@ describe("NewSessionDialog", () => {
     mockAgentSelectorValue = undefined;
     mockAgentSelectorOnChange = undefined;
     mockContextSelectValue = undefined;
+    mockSessions = [];
   });
 
   beforeEach(() => {
@@ -643,4 +650,29 @@ describe("NewSessionDialog", () => {
       ),
     );
   });
+});
+
+// @covers AC-TASKS-ERRANDS-005.7
+it.each([true, false])("omits errands before numbering summary sources with flag %s", (enabled) => {
+  mockState.features.errands = enabled;
+  mockState.errands.byTaskId = { "task-1": { partial: { parent_session_id: "normal-a" } } };
+  mockSessions = [
+    { id: "normal-a", started_at: "2026-01-01" },
+    { id: "child", role: "errand", started_at: "2026-01-02" },
+    { id: "partial", started_at: "2026-01-02" },
+    { id: "normal-b", started_at: "2026-01-03" },
+  ] as TaskSession[];
+  const { rerender } = render(
+    <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
+  );
+  expect(mockSessionOptions.map(({ id, index }) => ({ id, index }))).toEqual([
+    { id: "normal-a", index: 1 },
+    { id: "normal-b", index: 2 },
+  ]);
+  mockSessions = mockSessions.filter((session) => session.id === "child");
+  rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+  expect(mockSessionOptions).toEqual([]);
+  cleanup();
+  mockSessions = [];
+  mockState.errands.byTaskId = {};
 });

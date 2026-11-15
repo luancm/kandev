@@ -298,4 +298,3 @@ All work orders passed. This plan and the work-order results are current. The
 new Agents requirement is `active` and its design is `current`. The linked UI
 contract was reconciled without changing historical test results. No commit,
 push, or upstream publication was performed.
-

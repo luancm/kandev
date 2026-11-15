@@ -48,6 +48,7 @@ import (
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/events/bus"
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
 	"github.com/kandev/kandev/internal/failedinbox"
@@ -1137,6 +1138,7 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 type routeParams struct {
 	ctx                           context.Context
 	router                        *gin.Engine
+	errandService                 *errands.Service
 	gateway                       *gateways.Gateway
 	taskSvc                       *taskservice.Service
 	taskRepo                      *sqliterepo.Repository
@@ -1359,7 +1361,7 @@ func registerRoutes(p routeParams) {
 	}
 
 	p.gateway.SetupRoutes(p.router)
-	registerTaskRoutes(p, planService, handoffSvc)
+	p.errandService = registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
 	if p.authSvc != nil {
 		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.services.SessionHostnameResolver, p.log)
@@ -1749,13 +1751,53 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 	return ""
 }
 
+// setTaskCreatedWithPRHook associates a GitHub PR created by the task-create
+// flow with its task, when GitHub integration is wired.
+func setTaskCreatedWithPRHook(p routeParams, taskH *taskhandlers.TaskHandlers) {
+	ghSvc := p.services.GitHub
+	if ghSvc == nil {
+		return
+	}
+	taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
+		// Task-create-from-PR runs once per task and the PR maps to the
+		// primary repository (first task_repository row). Resolve to that
+		// repository_id so the resulting TaskPR/PRWatch are scoped per-repo.
+		repositoryID := resolvePrimaryTaskRepositoryID(ctx, p.taskRepo, taskID, p.log)
+		task, taskErr := p.taskRepo.GetTask(ctx, taskID)
+		if taskErr != nil || task == nil || task.WorkspaceID == "" {
+			p.log.Warn("cannot associate GitHub PR without task workspace", zap.String("task_id", taskID), zap.Error(taskErr))
+			return
+		}
+		if err := ghSvc.AssociatePRByURLForWorkspace(
+			ctx, task.WorkspaceID, github.DefaultUserID,
+			sessionID, taskID, repositoryID, prURL, branch,
+		); err != nil {
+			p.log.Warn("failed to associate task GitHub PR", zap.String("task_id", taskID), zap.Error(err))
+		}
+	})
+}
+
+// mentionSubmissionValidators returns the submission validators the message
+// routes apply to user-entered references.
+func mentionSubmissionValidators(p routeParams) []entityrefs.SubmissionValidator {
+	var validators []entityrefs.SubmissionValidator
+	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
+		validators = append(validators, p.services.Mentions.Submission)
+	}
+	return validators
+}
+
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
-func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+func registerPromptAttachmentRoutes(p routeParams) {
 	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
 		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
 	} else {
 		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
+}
+
+func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) *errands.Service {
+	registerPromptAttachmentRoutes(p)
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	if p.features.WorkspaceCollaboration {
 		taskhandlers.RegisterWorkspaceCollaborationRoutes(p.router, p.gateway.Dispatcher, p.taskSvc)
@@ -1776,6 +1818,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
 	configureWorkspaceAdoptionCaller(taskH)
 	taskH.SetBackgroundWorkEnabled(p.features.AgentBackgroundWork)
+	errandSvc := wireErrands(p, taskH)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
 		taskH.SetAgentProfileRecentUseRecorder(p.services.User)
@@ -1787,39 +1830,16 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if p.workspaceRestorer != nil {
 		taskH.SetWorkspaceQuarantineRestorer(p.workspaceRestorer)
 	}
-	if p.services.GitHub != nil {
-		ghSvc := p.services.GitHub
-		taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
-			// Task-create-from-PR runs once per task and the PR maps to the
-			// primary repository (first task_repository row). Resolve to that
-			// repository_id so the resulting TaskPR/PRWatch are scoped per-repo.
-			repositoryID := resolvePrimaryTaskRepositoryID(ctx, p.taskRepo, taskID, p.log)
-			task, taskErr := p.taskRepo.GetTask(ctx, taskID)
-			if taskErr != nil || task == nil || task.WorkspaceID == "" {
-				p.log.Warn("cannot associate GitHub PR without task workspace", zap.String("task_id", taskID), zap.Error(taskErr))
-				return
-			}
-			if err := ghSvc.AssociatePRByURLForWorkspace(
-				ctx, task.WorkspaceID, github.DefaultUserID,
-				sessionID, taskID, repositoryID, prURL, branch,
-			); err != nil {
-				p.log.Warn("failed to associate task GitHub PR", zap.String("task_id", taskID), zap.Error(err))
-			}
-		})
-	}
+	setTaskCreatedWithPRHook(p, taskH)
 	taskhandlers.RegisterRepositoryRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositorySetRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterRepositoryBranchPolicyRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
-	var referenceValidators []entityrefs.SubmissionValidator
-	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
-		referenceValidators = append(referenceValidators, p.services.Mentions.Submission)
-	}
 	taskhandlers.RegisterMessageRoutes(
 		p.router, p.gateway.Dispatcher, p.taskSvc,
-		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, referenceValidators...,
+		&orchestratorWrapper{svc: p.orchestratorSvc}, p.log, mentionSubmissionValidators(p)...,
 	)
 	processHandlers := taskhandlers.RegisterProcessRoutes(p.router, p.taskSvc, p.lifecycleMgr, p.log)
 	if p.agentSettingsController != nil && p.taskSvc != nil {
@@ -1839,6 +1859,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 		p.log.Debug("Registered Public Share Links handlers (HTTP)")
 	}
 	p.log.Debug("Registered Task Service handlers (HTTP + WebSocket)")
+	return errandSvc
 }
 
 // configureMCPServices installs workspace authorization, selection ownership, and automation usage
@@ -1881,6 +1902,7 @@ func configureMCPServices(
 	p.taskSvc.SetMCPSelectionWriter(mcpSelectionService)
 	if p.orchestratorSvc != nil {
 		p.orchestratorSvc.SetMCPSelectionWriter(mcpSelectionService)
+		p.orchestratorSvc.SetMCPSelectionReader(mcpSelectionService)
 	}
 	return catalogRepo, mcpCatalog, mcpSelectionService
 }
@@ -2654,6 +2676,9 @@ func registerMCPAndDebugRoutes(
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
+	if p.errandService != nil {
+		mcpHandlers.SetErrands(p.errandService, p.features.Errands)
+	}
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })

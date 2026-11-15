@@ -68,6 +68,7 @@ type AgentDeliveryPromptTurnBinding struct {
 	StreamID          string                   `json:"stream_id"`
 	SubmissionID      string                   `json:"submission_id"`
 	TurnID            string                   `json:"turn_id"`
+	NativeSessionID   string                   `json:"native_session_id,omitempty"`
 }
 
 // RecoveryNoticeSourceIdentity returns the stable JSON tuple for an

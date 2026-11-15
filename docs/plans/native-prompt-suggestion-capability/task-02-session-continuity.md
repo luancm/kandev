@@ -159,4 +159,3 @@ The origin-reset regression was proven RED by temporarily removing the
 transition reset: the delayed notification claimed the prior window and emitted
 a suggestion with the old generation. The failed/same-ID regressions were
 proven RED by temporarily restoring the pre-transition reset.
-

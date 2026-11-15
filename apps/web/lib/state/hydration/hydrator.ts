@@ -21,7 +21,7 @@ import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-ses
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { mergeRuntimeStorageHealth } from "@/lib/session-delivery-storage";
-import type { RuntimeStorageHealth } from "@/lib/types/http";
+import type { RuntimeStorageHealth, TaskSession } from "@/lib/types/http";
 import {
   captureActiveTurnWindowObservation,
   mergeTurnRows,
@@ -42,6 +42,12 @@ import {
   isStaleSessionStateEvent,
   sessionStateConfirmsAgentctlExecutionReady,
 } from "@/lib/session-state";
+import { readContextWindowMetadata } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  copyAcceptedTaskSessionContextPair,
+  resolveTaskSessionContextSnapshot,
+  synchronizeAcceptedContextWindow,
+} from "@/lib/state/slices/session/hydration-epochs";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 import {
@@ -593,6 +599,17 @@ function hydrateTaskSessions(
   deepMerge(draft.taskSessions, { ...incoming, items });
   applyHydratedRuntimeStorage(draft, previousStorage, incomingStorage);
 
+  for (const [sessionId, incomingSession] of Object.entries(incoming.items ?? {})) {
+    const accepted = draft.taskSessions.items[sessionId];
+    if (accepted) {
+      synchronizeAcceptedContextWindow(
+        draft as unknown as Parameters<typeof synchronizeAcceptedContextWindow>[0],
+        incomingSession,
+        accepted,
+      );
+    }
+  }
+
   for (const [sessionId, previousCursor] of previousCursors) {
     if (draft.taskSessions.items[sessionId]?.last_read_message_id !== previousCursor) {
       const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
@@ -623,9 +640,15 @@ function prepareHydratedSessionItems(
     state.previousCursors.set(sessionId, existing?.last_read_message_id);
     state.previousStorage.set(sessionId, existing?.runtime_storage_health);
     state.incomingStorage.set(sessionId, session.runtime_storage_health);
+    items[sessionId] = resolveTaskSessionContextSnapshot(
+      existing,
+      session,
+      draft.taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0,
+      requestEpoch,
+    );
     if (existing && hasNewerReadCursor(currentEpoch, requestEpoch)) {
       items[sessionId] = {
-        ...session,
+        ...items[sessionId],
         last_read_message_id: existing.last_read_message_id,
       };
     }
@@ -652,21 +675,60 @@ function hydrateTaskSessionsByTask(
   draft: Draft<AppState>,
   incoming: NonNullable<HydrationState["taskSessionsByTask"]>,
   hydratedSessionIds: ReadonlySet<string>,
+  requestEpochs: Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined,
 ): void {
+  const contextSnapshots = new Map<string, TaskSession>();
   const itemsByTaskId = Object.fromEntries(
     Object.entries(incoming.itemsByTaskId ?? {}).map(([taskId, sessions]) => [
       taskId,
       sessions.map((session) => {
         const canonical = draft.taskSessions.items[session.id];
-        return canonical &&
-          (hydratedSessionIds.has(session.id) ||
-            isStaleSessionStateEvent(canonical, session.updated_at))
-          ? canonical
-          : session;
+        if (canonical && hydratedSessionIds.has(session.id)) return canonical;
+
+        const previousListRow = draft.taskSessionsByTask.itemsByTaskId[taskId]?.find(
+          (candidate) => candidate.id === session.id,
+        );
+        const existing = canonical ?? previousListRow;
+        const accepted = resolveTaskSessionContextSnapshot(
+          existing,
+          session,
+          draft.taskSessions.contextWindowEpochBySession?.[session.id] ?? 0,
+          requestEpochs?.[session.id],
+        );
+        if (canonical) {
+          draft.taskSessions.items[session.id] = copyAcceptedTaskSessionContextPair(
+            canonical,
+            accepted,
+          );
+        }
+
+        const acceptedRow =
+          canonical && isStaleSessionStateEvent(canonical, session.updated_at)
+            ? draft.taskSessions.items[session.id]
+            : accepted;
+        if (readContextWindowMetadata(session.metadata).present) {
+          contextSnapshots.set(session.id, session);
+        }
+        return acceptedRow;
       }),
     ]),
   );
   deepMerge(draft.taskSessionsByTask, { ...incoming, itemsByTaskId });
+
+  for (const [sessionId, contextSnapshot] of contextSnapshots) {
+    const accepted =
+      draft.taskSessions.items[sessionId] ??
+      Object.values(draft.taskSessionsByTask.itemsByTaskId)
+        .flat()
+        .find((session) => session.id === sessionId);
+    if (accepted) {
+      synchronizeAcceptedContextWindow(
+        draft as unknown as Parameters<typeof synchronizeAcceptedContextWindow>[0],
+        contextSnapshot,
+        accepted,
+      );
+    }
+  }
 }
 
 function hydrateSessionAgentctlStatuses(
@@ -750,6 +812,7 @@ function hydrateSession(
       draft,
       state.taskSessionsByTask,
       new Set(Object.keys(state.taskSessions?.items ?? {})),
+      taskSessionHydrationEpochsAtRequestStart,
     );
   }
   if (state.sessionAgentctl)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/errands"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -114,6 +115,10 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue drain is unavailable", nil)
 	}
 
+	if refusal := h.errandContinuationRefusal(ctx, msg, req.SessionID); refusal != nil {
+		return refusal, nil
+	}
+
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 	}
@@ -125,6 +130,9 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 		drained, err = h.queueDrainer.DrainQueuedMessage(ctx, req.SessionID)
 	}
 	if err != nil {
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
+		}
 		switch {
 		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
@@ -192,6 +200,9 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 		autoRun, dispatched, err = h.queueAutoRun.SetQueueAutoRun(ctx, req.SessionID, *req.Enabled)
 	}
 	if err != nil {
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
+		}
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
 		}
@@ -288,6 +299,10 @@ func (h *QueueHandlers) wsSendNow(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue send-now is unavailable", nil)
 	}
 
+	if refusal := h.errandContinuationRefusal(ctx, msg, req.SessionID); refusal != nil {
+		return refusal, nil
+	}
+
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 	}
@@ -326,6 +341,9 @@ func validateSendNowRequest(req wsSendNowRequest) string {
 
 // sendNowErrorResponse maps send-now failures to their stable websocket error codes.
 func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, err error) (*ws.Message, error) {
+	if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+		return response, nil
+	}
 	switch {
 	case errors.Is(err, orchestrator.ErrSendNowEntryNotFound):
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)

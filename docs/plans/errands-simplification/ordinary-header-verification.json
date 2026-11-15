@@ -1,0 +1,2166 @@
+{
+  "collectedAt": "2026-11-15T15:01:06.546698+00:00",
+  "status": "collected_with_warning; parent_disposition_pending",
+  "heads": {
+    "matched-main": "585824a5d066d22785814c0394b88dd57f6c5ded",
+    "candidate-on": "90aaec3aee7b038cb3d650103d2384a9c4470534"
+  },
+  "counts": {
+    "desktopControls": {
+      "passed": 3,
+      "total": 3
+    },
+    "phoneControls": {
+      "passed": 3,
+      "total": 3
+    },
+    "comparison": {
+      "passed": 28,
+      "total": 28
+    },
+    "latencyWithinBoundary": 7,
+    "latencyGateCount": 8,
+    "heapWithinBoundary": 1,
+    "heapGateCount": 2
+  },
+  "formula": "reference p95 + max(3 \u00d7 MAD, p95 \u2212 median)",
+  "units": "Latency milliseconds; retained heap bytes. Paired deltas are candidate minus main in the same round.",
+  "cohorts": {
+    "desktop/matched-main": {
+      "coldMs": {
+        "values": [
+          2210.915401,
+          2255.1192000000005,
+          2190.060388,
+          2207.959935,
+          2241.7463470000002,
+          2860.5791259999996,
+          2235.7064360000004
+        ],
+        "median": 2235.7064360000004,
+        "p95": 2860.5791259999996,
+        "min": 2190.060388,
+        "max": 2860.5791259999996,
+        "mad": 24.791035000000193,
+        "warningBoundary": 3485.451815999999
+      },
+      "reloadMs": {
+        "values": [
+          1589.053113,
+          1566.2420780000002,
+          1589.8021009999993,
+          1612.0795960000005,
+          1538.2277279999998,
+          2698.1394410000003,
+          1559.667031
+        ],
+        "median": 1589.053113,
+        "p95": 2698.1394410000003,
+        "min": 1538.2277279999998,
+        "max": 2698.1394410000003,
+        "mad": 23.026483000000553,
+        "warningBoundary": 3807.2257690000006
+      },
+      "switchAwayMs": {
+        "values": [
+          1173.608953,
+          1183.2970800000003,
+          1124.5021820000002,
+          1371.7535909999997,
+          1202.9329749999997,
+          1399.4278919999997,
+          1235.954568
+        ],
+        "median": 1202.9329749999997,
+        "p95": 1399.4278919999997,
+        "min": 1124.5021820000002,
+        "max": 1399.4278919999997,
+        "mad": 33.021593000000394,
+        "warningBoundary": 1595.9228089999997
+      },
+      "switchBackMs": {
+        "values": [
+          854.3451750000004,
+          875.0756569999994,
+          834.1147790000005,
+          828.0356229999998,
+          1014.9719230000001,
+          1038.7109839999994,
+          966.3125670000009
+        ],
+        "median": 875.0756569999994,
+        "p95": 1038.7109839999994,
+        "min": 828.0356229999998,
+        "max": 1038.7109839999994,
+        "mad": 47.04003399999965,
+        "warningBoundary": 1202.3463109999993
+      },
+      "retainedHeapBytes": {
+        "values": [
+          78856016,
+          75914696,
+          75878216,
+          78937188,
+          75912856,
+          75831244,
+          78925344
+        ],
+        "median": 75914696,
+        "p95": 78937188,
+        "min": 75831244,
+        "max": 78937188,
+        "mad": 83452,
+        "warningBoundary": 81959680
+      }
+    },
+    "desktop/candidate-on": {
+      "coldMs": {
+        "values": [
+          2692.58068,
+          2263.1169980000004,
+          2218.0373540000005,
+          2263.193816,
+          2172.7825130000006,
+          2209.2311839999998,
+          2178.4206059999997
+        ],
+        "median": 2218.0373540000005,
+        "p95": 2692.58068,
+        "min": 2172.7825130000006,
+        "max": 2692.58068,
+        "mad": 45.07964399999992,
+        "warningBoundary": 3167.1240059999996
+      },
+      "reloadMs": {
+        "values": [
+          1568.656196,
+          1526.6510089999992,
+          1559.736575,
+          1538.701164,
+          1665.4664350000003,
+          1626.80274,
+          1616.4528639999999
+        ],
+        "median": 1568.656196,
+        "p95": 1665.4664350000003,
+        "min": 1526.6510089999992,
+        "max": 1665.4664350000003,
+        "mad": 42.00518700000066,
+        "warningBoundary": 1791.4819960000023
+      },
+      "switchAwayMs": {
+        "values": [
+          1461.7380890000004,
+          1414.717001,
+          1193.862964,
+          1216.7553870000002,
+          1178.568596,
+          1378.739129999999,
+          1503.9348369999998
+        ],
+        "median": 1378.739129999999,
+        "p95": 1503.9348369999998,
+        "min": 1178.568596,
+        "max": 1503.9348369999998,
+        "mad": 125.19570700000077,
+        "warningBoundary": 1879.521958000002
+      },
+      "switchBackMs": {
+        "values": [
+          886.7660759999999,
+          923.5242950000002,
+          984.4711249999991,
+          915.5824659999998,
+          880.0852859999995,
+          1021.4875740000007,
+          1059.6397689999994
+        ],
+        "median": 923.5242950000002,
+        "p95": 1059.6397689999994,
+        "min": 880.0852859999995,
+        "max": 1059.6397689999994,
+        "mad": 43.439009000000624,
+        "warningBoundary": 1195.7552429999987
+      },
+      "retainedHeapBytes": {
+        "values": [
+          76895264,
+          76987920,
+          76948664,
+          76916276,
+          76952792,
+          76936752,
+          79019828
+        ],
+        "median": 76948664,
+        "p95": 79019828,
+        "min": 76895264,
+        "max": 79019828,
+        "mad": 32388,
+        "warningBoundary": 81090992
+      }
+    },
+    "phone/matched-main": {
+      "coldMs": {
+        "values": [
+          1865.8292819999997,
+          1943.7551140000005,
+          1904.3076930000002,
+          1850.9411600000003,
+          1889.4772280000002,
+          1937.7951950000001,
+          1896.645212
+        ],
+        "median": 1896.645212,
+        "p95": 1943.7551140000005,
+        "min": 1850.9411600000003,
+        "max": 1943.7551140000005,
+        "mad": 30.815930000000208,
+        "warningBoundary": 2036.2029040000011
+      },
+      "reloadMs": {
+        "values": [
+          1305.3262219999997,
+          1294.0640330000006,
+          1310.0285919999997,
+          1346.3474810000007,
+          1297.001134,
+          1263.2805510000007,
+          1292.4600900000005
+        ],
+        "median": 1297.001134,
+        "p95": 1346.3474810000007,
+        "min": 1263.2805510000007,
+        "max": 1346.3474810000007,
+        "mad": 8.325087999999596,
+        "warningBoundary": 1395.6938280000013
+      },
+      "switchAwayMs": {
+        "values": [
+          1272.561506,
+          1338.4779100000005,
+          1229.6288510000004,
+          1254.0844740000002,
+          1288.8007639999996,
+          1303.9864550000002,
+          1236.0204940000003
+        ],
+        "median": 1272.561506,
+        "p95": 1338.4779100000005,
+        "min": 1229.6288510000004,
+        "max": 1338.4779100000005,
+        "mad": 31.424949000000197,
+        "warningBoundary": 1432.752757000001
+      },
+      "switchBackMs": {
+        "values": [
+          1326.9981750000006,
+          1303.8680860000004,
+          1339.1823829999994,
+          1315.8243919999995,
+          1297.9178780000002,
+          1299.1089109999994,
+          1334.2113069999996
+        ],
+        "median": 1315.8243919999995,
+        "p95": 1339.1823829999994,
+        "min": 1297.9178780000002,
+        "max": 1339.1823829999994,
+        "mad": 16.71548100000018,
+        "warningBoundary": 1389.328826
+      },
+      "retainedHeapBytes": {
+        "values": [
+          54641680,
+          54632200,
+          54638728,
+          54652580,
+          54644672,
+          54626940,
+          54653204
+        ],
+        "median": 54641680,
+        "p95": 54653204,
+        "min": 54626940,
+        "max": 54653204,
+        "mad": 9480,
+        "warningBoundary": 54681644
+      }
+    },
+    "phone/candidate-on": {
+      "coldMs": {
+        "values": [
+          1885.5000340000006,
+          1858.287269,
+          1904.9280830000002,
+          1805.453496,
+          1785.4958430000001,
+          1834.587809,
+          1919.5820470000003
+        ],
+        "median": 1858.287269,
+        "p95": 1919.5820470000003,
+        "min": 1785.4958430000001,
+        "max": 1919.5820470000003,
+        "mad": 46.64081400000032,
+        "warningBoundary": 2059.5044890000013
+      },
+      "reloadMs": {
+        "values": [
+          1257.2541650000003,
+          1237.0855940000001,
+          1255.3405340000008,
+          1297.9632450000008,
+          1273.9022459999996,
+          1282.1183490000003,
+          1256.9173929999997
+        ],
+        "median": 1257.2541650000003,
+        "p95": 1297.9632450000008,
+        "min": 1237.0855940000001,
+        "max": 1297.9632450000008,
+        "mad": 16.648080999999365,
+        "warningBoundary": 1347.907487999999
+      },
+      "switchAwayMs": {
+        "values": [
+          1554.2491300000002,
+          1332.3185570000005,
+          1319.1734900000001,
+          1306.0328740000004,
+          1289.1118449999994,
+          1404.0062659999994,
+          1298.914175
+        ],
+        "median": 1319.1734900000001,
+        "p95": 1554.2491300000002,
+        "min": 1289.1118449999994,
+        "max": 1554.2491300000002,
+        "mad": 20.259315000000242,
+        "warningBoundary": 1789.3247700000002
+      },
+      "switchBackMs": {
+        "values": [
+          1346.5333800000008,
+          1358.5241039999992,
+          1361.0206409999992,
+          1349.750302999999,
+          1348.0692819999995,
+          1334.4106929999998,
+          1343.9392839999991
+        ],
+        "median": 1348.0692819999995,
+        "p95": 1361.0206409999992,
+        "min": 1334.4106929999998,
+        "max": 1361.0206409999992,
+        "mad": 4.129998000000342,
+        "warningBoundary": 1373.9719999999988
+      },
+      "retainedHeapBytes": {
+        "values": [
+          55489420,
+          55509012,
+          55451708,
+          55512920,
+          55466960,
+          55472428,
+          55482108
+        ],
+        "median": 55482108,
+        "p95": 55512920,
+        "min": 55451708,
+        "max": 55512920,
+        "mad": 15148,
+        "warningBoundary": 55558364
+      }
+    }
+  },
+  "comparisons": [
+    {
+      "pairedRoundDeltas": [
+        481.6652789999998,
+        7.997797999999875,
+        27.97696600000063,
+        55.23388100000011,
+        -68.96383399999968,
+        -651.3479419999999,
+        -57.285830000000715
+      ],
+      "pairedMedianDelta": 7.997797999999875,
+      "platform": "desktop",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "coldMs",
+      "medianDelta": -17.66908199999989,
+      "medianDeltaPercent": -0.7903131518292028,
+      "p95Delta": -167.9984459999996,
+      "exceedsVarianceBoundary": false,
+      "boundary": 3485.451815999999,
+      "candidateP95": 2692.58068
+    },
+    {
+      "pairedRoundDeltas": [
+        -20.39691700000003,
+        -39.59106900000097,
+        -30.06552599999941,
+        -73.37843200000043,
+        127.23870700000043,
+        -1071.3367010000002,
+        56.78583299999991
+      ],
+      "pairedMedianDelta": -30.06552599999941,
+      "platform": "desktop",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "reloadMs",
+      "medianDelta": -20.39691700000003,
+      "medianDeltaPercent": -1.283589379935346,
+      "p95Delta": -1032.673006,
+      "exceedsVarianceBoundary": false,
+      "boundary": 3807.2257690000006,
+      "candidateP95": 1665.4664350000003
+    },
+    {
+      "pairedRoundDeltas": [
+        288.12913600000047,
+        231.4199209999997,
+        69.36078199999974,
+        -154.99820399999953,
+        -24.364378999999644,
+        -20.68876200000068,
+        267.9802689999997
+      ],
+      "pairedMedianDelta": 69.36078199999974,
+      "platform": "desktop",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "switchAwayMs",
+      "medianDelta": 175.8061549999993,
+      "medianDeltaPercent": 14.614792233124984,
+      "p95Delta": 104.50694500000009,
+      "exceedsVarianceBoundary": false,
+      "boundary": 1595.9228089999997,
+      "candidateP95": 1503.9348369999998
+    },
+    {
+      "pairedRoundDeltas": [
+        32.4209009999995,
+        48.448638000000756,
+        150.35634599999867,
+        87.54684300000008,
+        -134.88663700000052,
+        -17.223409999998694,
+        93.32720199999858
+      ],
+      "pairedMedianDelta": 48.448638000000756,
+      "platform": "desktop",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "switchBackMs",
+      "medianDelta": 48.448638000000756,
+      "medianDeltaPercent": 5.536508485003,
+      "p95Delta": 20.92878500000006,
+      "exceedsVarianceBoundary": false,
+      "boundary": 1202.3463109999993,
+      "candidateP95": 1059.6397689999994
+    },
+    {
+      "pairedRoundDeltas": [
+        -1960752,
+        1073224,
+        1070448,
+        -2020912,
+        1039936,
+        1105508,
+        94484
+      ],
+      "pairedMedianDelta": 1039936,
+      "platform": "desktop",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "retainedHeapBytes",
+      "medianDelta": 1033968,
+      "medianDeltaPercent": 1.3620129625494304,
+      "p95Delta": 82640,
+      "exceedsVarianceBoundary": false,
+      "boundary": 81959680,
+      "candidateP95": 79019828
+    },
+    {
+      "pairedRoundDeltas": [
+        19.670752000000903,
+        -85.46784500000058,
+        0.6203900000000431,
+        -45.48766400000022,
+        -103.98138500000005,
+        -103.20738600000004,
+        22.93683500000043
+      ],
+      "pairedMedianDelta": -45.48766400000022,
+      "platform": "phone",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "coldMs",
+      "medianDelta": -38.35794299999998,
+      "medianDeltaPercent": -2.0224100299471304,
+      "p95Delta": -24.173067000000174,
+      "exceedsVarianceBoundary": false,
+      "boundary": 2036.2029040000011,
+      "candidateP95": 1919.5820470000003
+    },
+    {
+      "pairedRoundDeltas": [
+        -48.072056999999404,
+        -56.978439000000435,
+        -54.68805799999882,
+        -48.38423599999987,
+        -23.098888000000443,
+        18.837797999999566,
+        -35.54269700000077
+      ],
+      "pairedMedianDelta": -48.072056999999404,
+      "platform": "phone",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "reloadMs",
+      "medianDelta": -39.74696899999981,
+      "medianDeltaPercent": -3.064528469409944,
+      "p95Delta": -48.38423599999987,
+      "exceedsVarianceBoundary": false,
+      "boundary": 1395.6938280000013,
+      "candidateP95": 1297.9632450000008
+    },
+    {
+      "pairedRoundDeltas": [
+        281.68762400000014,
+        -6.15935300000001,
+        89.54463899999973,
+        51.94840000000022,
+        0.31108099999983096,
+        100.01981099999921,
+        62.89368099999956
+      ],
+      "pairedMedianDelta": 62.89368099999956,
+      "platform": "phone",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "switchAwayMs",
+      "medianDelta": 46.61198400000012,
+      "medianDeltaPercent": 3.662847240013889,
+      "p95Delta": 215.77121999999963,
+      "exceedsVarianceBoundary": true,
+      "boundary": 1432.752757000001,
+      "candidateP95": 1554.2491300000002
+    },
+    {
+      "pairedRoundDeltas": [
+        19.535205000000133,
+        54.65601799999877,
+        21.83825799999977,
+        33.92591099999936,
+        50.151403999999275,
+        35.30178200000046,
+        9.727976999999555
+      ],
+      "pairedMedianDelta": 33.92591099999936,
+      "platform": "phone",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "switchBackMs",
+      "medianDelta": 32.24488999999994,
+      "medianDeltaPercent": 2.450546607590165,
+      "p95Delta": 21.83825799999977,
+      "exceedsVarianceBoundary": false,
+      "boundary": 1389.328826,
+      "candidateP95": 1361.0206409999992
+    },
+    {
+      "pairedRoundDeltas": [
+        847740,
+        876812,
+        812980,
+        860340,
+        822288,
+        845488,
+        828904
+      ],
+      "pairedMedianDelta": 845488,
+      "platform": "phone",
+      "reference": "matched-main",
+      "candidate": "candidate-on",
+      "metric": "retainedHeapBytes",
+      "medianDelta": 840428,
+      "medianDeltaPercent": 1.538071303810562,
+      "p95Delta": 859716,
+      "exceedsVarianceBoundary": true,
+      "boundary": 54681644,
+      "candidateP95": 55512920
+    }
+  ],
+  "rawPairs": [
+    {
+      "platform": "desktop",
+      "round": 1,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round1-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "9af3584261c904b933e70ee029a53c38f5d504ea275b9cf5bcf7cdc28bed46d9"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round1-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "294f88b96f41640ab329499de2b9a5350b9dddd07a8058065f5cd832ad18b4b7"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2210.915401,
+          "candidate": 2692.58068,
+          "candidateMinusMain": 481.6652789999998
+        },
+        "reloadMs": {
+          "main": 1589.053113,
+          "candidate": 1568.656196,
+          "candidateMinusMain": -20.39691700000003
+        },
+        "switchAwayMs": {
+          "main": 1173.608953,
+          "candidate": 1461.7380890000004,
+          "candidateMinusMain": 288.12913600000047
+        },
+        "switchBackMs": {
+          "main": 854.3451750000004,
+          "candidate": 886.7660759999999,
+          "candidateMinusMain": 32.4209009999995
+        },
+        "retainedHeapBytes": {
+          "main": 78856016,
+          "candidate": 76895264,
+          "candidateMinusMain": -1960752
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "round": 2,
+      "executionOrder": [
+        "candidate-on",
+        "matched-main"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round2-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "003ab88c5030c346ce3d56176e0c12d2e1cd741ad45f05d0c07a7e252d3f6a33"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round2-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "1948a2e77f2799eb66281aaf745c85b65e031b7b62b6765fd28bd6427b9bab37"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2255.1192000000005,
+          "candidate": 2263.1169980000004,
+          "candidateMinusMain": 7.997797999999875
+        },
+        "reloadMs": {
+          "main": 1566.2420780000002,
+          "candidate": 1526.6510089999992,
+          "candidateMinusMain": -39.59106900000097
+        },
+        "switchAwayMs": {
+          "main": 1183.2970800000003,
+          "candidate": 1414.717001,
+          "candidateMinusMain": 231.4199209999997
+        },
+        "switchBackMs": {
+          "main": 875.0756569999994,
+          "candidate": 923.5242950000002,
+          "candidateMinusMain": 48.448638000000756
+        },
+        "retainedHeapBytes": {
+          "main": 75914696,
+          "candidate": 76987920,
+          "candidateMinusMain": 1073224
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "round": 3,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round3-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "1bcb8ca78bca63e849c78a7008d09703ab54ce0b3209b32682683d3992c21a25"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round3-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "ee8237feb0b06dc9eb1e297d127d6061a90557042c85036c2346cda36aa12ad0"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2190.060388,
+          "candidate": 2218.0373540000005,
+          "candidateMinusMain": 27.97696600000063
+        },
+        "reloadMs": {
+          "main": 1589.8021009999993,
+          "candidate": 1559.736575,
+          "candidateMinusMain": -30.06552599999941
+        },
+        "switchAwayMs": {
+          "main": 1124.5021820000002,
+          "candidate": 1193.862964,
+          "candidateMinusMain": 69.36078199999974
+        },
+        "switchBackMs": {
+          "main": 834.1147790000005,
+          "candidate": 984.4711249999991,
+          "candidateMinusMain": 150.35634599999867
+        },
+        "retainedHeapBytes": {
+          "main": 75878216,
+          "candidate": 76948664,
+          "candidateMinusMain": 1070448
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "round": 4,
+      "executionOrder": [
+        "candidate-on",
+        "matched-main"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round4-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "55695ea0752c285a2d3ea78a3cc5a6ea984d8e8176390a6048bdeb9832ab21dc"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round4-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "dd6845b38b637976df5bac523763cf213ed556aca9b3be292c8f569ed59d9db2"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2207.959935,
+          "candidate": 2263.193816,
+          "candidateMinusMain": 55.23388100000011
+        },
+        "reloadMs": {
+          "main": 1612.0795960000005,
+          "candidate": 1538.701164,
+          "candidateMinusMain": -73.37843200000043
+        },
+        "switchAwayMs": {
+          "main": 1371.7535909999997,
+          "candidate": 1216.7553870000002,
+          "candidateMinusMain": -154.99820399999953
+        },
+        "switchBackMs": {
+          "main": 828.0356229999998,
+          "candidate": 915.5824659999998,
+          "candidateMinusMain": 87.54684300000008
+        },
+        "retainedHeapBytes": {
+          "main": 78937188,
+          "candidate": 76916276,
+          "candidateMinusMain": -2020912
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "round": 5,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round5-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "c77d695e7f54ba41805b0b7417f63f93a25088634d671eb63f070784dd6e90f6"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round5-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "471d1a9c7ac1dd8d781ab39cae3e15e83fad128e788f55fb222aa6b64dcd7714"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2241.7463470000002,
+          "candidate": 2172.7825130000006,
+          "candidateMinusMain": -68.96383399999968
+        },
+        "reloadMs": {
+          "main": 1538.2277279999998,
+          "candidate": 1665.4664350000003,
+          "candidateMinusMain": 127.23870700000043
+        },
+        "switchAwayMs": {
+          "main": 1202.9329749999997,
+          "candidate": 1178.568596,
+          "candidateMinusMain": -24.364378999999644
+        },
+        "switchBackMs": {
+          "main": 1014.9719230000001,
+          "candidate": 880.0852859999995,
+          "candidateMinusMain": -134.88663700000052
+        },
+        "retainedHeapBytes": {
+          "main": 75912856,
+          "candidate": 76952792,
+          "candidateMinusMain": 1039936
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "round": 6,
+      "executionOrder": [
+        "candidate-on",
+        "matched-main"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round6-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "911fd1cedb29d82ad764b35ad507d17e87a9b5a211fb11ef66a2205c55d6c54f"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round6-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "2cb1c011a24219c9264c8945350ee9b9a2e6b48302167641da2937b5e869adc4"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2860.5791259999996,
+          "candidate": 2209.2311839999998,
+          "candidateMinusMain": -651.3479419999999
+        },
+        "reloadMs": {
+          "main": 2698.1394410000003,
+          "candidate": 1626.80274,
+          "candidateMinusMain": -1071.3367010000002
+        },
+        "switchAwayMs": {
+          "main": 1399.4278919999997,
+          "candidate": 1378.739129999999,
+          "candidateMinusMain": -20.68876200000068
+        },
+        "switchBackMs": {
+          "main": 1038.7109839999994,
+          "candidate": 1021.4875740000007,
+          "candidateMinusMain": -17.223409999998694
+        },
+        "retainedHeapBytes": {
+          "main": 75831244,
+          "candidate": 76936752,
+          "candidateMinusMain": 1105508
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "round": 7,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round7-matched-main/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "00f96bbbb834b0983f304840d8785f2d4e31d5c8bf1de0e9d9e0bf817a5166cd"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/desktop-round7-candidate-on/task-ordinary-main-comparison-ordinary-page-main-comparison-chromium/ordinary-main-sample.json",
+        "sha256": "1df3c6491630bb423dd5f7034187cda2f41e9620d8cd0bb86726f92a962724b7"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 2235.7064360000004,
+          "candidate": 2178.4206059999997,
+          "candidateMinusMain": -57.285830000000715
+        },
+        "reloadMs": {
+          "main": 1559.667031,
+          "candidate": 1616.4528639999999,
+          "candidateMinusMain": 56.78583299999991
+        },
+        "switchAwayMs": {
+          "main": 1235.954568,
+          "candidate": 1503.9348369999998,
+          "candidateMinusMain": 267.9802689999997
+        },
+        "switchBackMs": {
+          "main": 966.3125670000009,
+          "candidate": 1059.6397689999994,
+          "candidateMinusMain": 93.32720199999858
+        },
+        "retainedHeapBytes": {
+          "main": 78925344,
+          "candidate": 79019828,
+          "candidateMinusMain": 94484
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 1,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round1-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "7099486826d2703ebbaa83e4f8365bb572d7eb4d212b99733c0cad0ac0be2b4d"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round1-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "647aa50d91b48834e12fc9a82cd8b443f1e2ea7ca7d73d8ff772428469cb65dd"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1865.8292819999997,
+          "candidate": 1885.5000340000006,
+          "candidateMinusMain": 19.670752000000903
+        },
+        "reloadMs": {
+          "main": 1305.3262219999997,
+          "candidate": 1257.2541650000003,
+          "candidateMinusMain": -48.072056999999404
+        },
+        "switchAwayMs": {
+          "main": 1272.561506,
+          "candidate": 1554.2491300000002,
+          "candidateMinusMain": 281.68762400000014
+        },
+        "switchBackMs": {
+          "main": 1326.9981750000006,
+          "candidate": 1346.5333800000008,
+          "candidateMinusMain": 19.535205000000133
+        },
+        "retainedHeapBytes": {
+          "main": 54641680,
+          "candidate": 55489420,
+          "candidateMinusMain": 847740
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 2,
+      "executionOrder": [
+        "candidate-on",
+        "matched-main"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round2-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "ac8b1d65eeea15105694b6566ac7726e3e2e6a46d311699a59e0188ade50089f"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round2-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "d1db0fe898fcb93256bc742911e351ba804333110df87575685eccf0f495f7d8"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1943.7551140000005,
+          "candidate": 1858.287269,
+          "candidateMinusMain": -85.46784500000058
+        },
+        "reloadMs": {
+          "main": 1294.0640330000006,
+          "candidate": 1237.0855940000001,
+          "candidateMinusMain": -56.978439000000435
+        },
+        "switchAwayMs": {
+          "main": 1338.4779100000005,
+          "candidate": 1332.3185570000005,
+          "candidateMinusMain": -6.15935300000001
+        },
+        "switchBackMs": {
+          "main": 1303.8680860000004,
+          "candidate": 1358.5241039999992,
+          "candidateMinusMain": 54.65601799999877
+        },
+        "retainedHeapBytes": {
+          "main": 54632200,
+          "candidate": 55509012,
+          "candidateMinusMain": 876812
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 3,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round3-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "825d03da2cfe21e38a7ec30d0ed9a1766771c32a14b3aa7e11d2b1e27fbd8631"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round3-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "ecda2926b381185a88687c6b8878e6a148671cad870b2a598b2ad1b8ebe7c56b"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1904.3076930000002,
+          "candidate": 1904.9280830000002,
+          "candidateMinusMain": 0.6203900000000431
+        },
+        "reloadMs": {
+          "main": 1310.0285919999997,
+          "candidate": 1255.3405340000008,
+          "candidateMinusMain": -54.68805799999882
+        },
+        "switchAwayMs": {
+          "main": 1229.6288510000004,
+          "candidate": 1319.1734900000001,
+          "candidateMinusMain": 89.54463899999973
+        },
+        "switchBackMs": {
+          "main": 1339.1823829999994,
+          "candidate": 1361.0206409999992,
+          "candidateMinusMain": 21.83825799999977
+        },
+        "retainedHeapBytes": {
+          "main": 54638728,
+          "candidate": 55451708,
+          "candidateMinusMain": 812980
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 4,
+      "executionOrder": [
+        "candidate-on",
+        "matched-main"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round4-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "202dbf096d12a1d196830a54bd5c8efc032060c87eae059a269039100cffb477"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round4-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "b08ad23d1a96018bca433ee2674aca12c00deb5b640ca7e8b21eca132ca73f62"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1850.9411600000003,
+          "candidate": 1805.453496,
+          "candidateMinusMain": -45.48766400000022
+        },
+        "reloadMs": {
+          "main": 1346.3474810000007,
+          "candidate": 1297.9632450000008,
+          "candidateMinusMain": -48.38423599999987
+        },
+        "switchAwayMs": {
+          "main": 1254.0844740000002,
+          "candidate": 1306.0328740000004,
+          "candidateMinusMain": 51.94840000000022
+        },
+        "switchBackMs": {
+          "main": 1315.8243919999995,
+          "candidate": 1349.750302999999,
+          "candidateMinusMain": 33.92591099999936
+        },
+        "retainedHeapBytes": {
+          "main": 54652580,
+          "candidate": 55512920,
+          "candidateMinusMain": 860340
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 5,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round5-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "dc05c532ad1826b13a26253d0ddf7c326b9d6d8a6bcd8036db251bacb035418c"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round5-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "8804b4d070c9f1108251c1e6625e17b665f0f9a403d8b9b9bc8373effd4b0b51"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1889.4772280000002,
+          "candidate": 1785.4958430000001,
+          "candidateMinusMain": -103.98138500000005
+        },
+        "reloadMs": {
+          "main": 1297.001134,
+          "candidate": 1273.9022459999996,
+          "candidateMinusMain": -23.098888000000443
+        },
+        "switchAwayMs": {
+          "main": 1288.8007639999996,
+          "candidate": 1289.1118449999994,
+          "candidateMinusMain": 0.31108099999983096
+        },
+        "switchBackMs": {
+          "main": 1297.9178780000002,
+          "candidate": 1348.0692819999995,
+          "candidateMinusMain": 50.151403999999275
+        },
+        "retainedHeapBytes": {
+          "main": 54644672,
+          "candidate": 55466960,
+          "candidateMinusMain": 822288
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 6,
+      "executionOrder": [
+        "candidate-on",
+        "matched-main"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round6-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "c3b78549261e19fcdb4ca17f4b2bd13a1c8d95fc1975457df7b2703a7365dd6f"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round6-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "cd39e18112d4ec6b0dd8e66aa6b85fb7503b83125b88ac7d01211bbe63b12c32"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1937.7951950000001,
+          "candidate": 1834.587809,
+          "candidateMinusMain": -103.20738600000004
+        },
+        "reloadMs": {
+          "main": 1263.2805510000007,
+          "candidate": 1282.1183490000003,
+          "candidateMinusMain": 18.837797999999566
+        },
+        "switchAwayMs": {
+          "main": 1303.9864550000002,
+          "candidate": 1404.0062659999994,
+          "candidateMinusMain": 100.01981099999921
+        },
+        "switchBackMs": {
+          "main": 1299.1089109999994,
+          "candidate": 1334.4106929999998,
+          "candidateMinusMain": 35.30178200000046
+        },
+        "retainedHeapBytes": {
+          "main": 54626940,
+          "candidate": 55472428,
+          "candidateMinusMain": 845488
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "round": 7,
+      "executionOrder": [
+        "matched-main",
+        "candidate-on"
+      ],
+      "mainSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round7-matched-main/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "f318925942c09298cc34be216f3db4d559dbcdd90f9a00dcba2d40d510fde20b"
+      },
+      "candidateSample": {
+        "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison/phone-round7-candidate-on/task-mobile-ordinary-main--29108-dinary-page-main-comparison-mobile-chrome/ordinary-main-sample.json",
+        "sha256": "d170db8f0c289de6c15b42459661cca478982c31dbcd3d817d775d6dc2b2fd64"
+      },
+      "metrics": {
+        "coldMs": {
+          "main": 1896.645212,
+          "candidate": 1919.5820470000003,
+          "candidateMinusMain": 22.93683500000043
+        },
+        "reloadMs": {
+          "main": 1292.4600900000005,
+          "candidate": 1256.9173929999997,
+          "candidateMinusMain": -35.54269700000077
+        },
+        "switchAwayMs": {
+          "main": 1236.0204940000003,
+          "candidate": 1298.914175,
+          "candidateMinusMain": 62.89368099999956
+        },
+        "switchBackMs": {
+          "main": 1334.2113069999996,
+          "candidate": 1343.9392839999991,
+          "candidateMinusMain": 9.727976999999555
+        },
+        "retainedHeapBytes": {
+          "main": 54653204,
+          "candidate": 55482108,
+          "candidateMinusMain": 828904
+        }
+      }
+    }
+  ],
+  "controls": {
+    "checkedAt": "2026-11-15T14:44:45.557810+00:00",
+    "controls": {
+      "desktop": {
+        "passed": 3,
+        "total": 3,
+        "sample": "/tmp/kandev-task04-final.pqprmph0/desktop-controls/session-errand-detail-rete-3c7d4-fter-repeated-Open-and-Back-chromium/errand-history-sample.json",
+        "retainedChildDetailAfterBack": {
+          "sessionRows": 0,
+          "transcripts": 0,
+          "turnCaches": 0
+        },
+        "initialRows": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0
+        },
+        "sessionListStoreRows": {
+          "expectedOrdinaryIds": [
+            "history-ordinary-a-cbb71df9-8e61-4a42-81e9-cd2b852c6bca",
+            "history-ordinary-b-e4b2055f-63be-4888-ac10-0ec2473e9c2e",
+            "history-parent-00c48c56-bf11-481d-9236-aa069ea47108"
+          ],
+          "coldNavigation": {
+            "total": 3,
+            "ordinary": 3,
+            "errands": 0,
+            "ordinaryIds": [
+              "history-ordinary-a-cbb71df9-8e61-4a42-81e9-cd2b852c6bca",
+              "history-ordinary-b-e4b2055f-63be-4888-ac10-0ec2473e9c2e",
+              "history-parent-00c48c56-bf11-481d-9236-aa069ea47108"
+            ]
+          },
+          "reload": {
+            "total": 3,
+            "ordinary": 3,
+            "errands": 0,
+            "ordinaryIds": [
+              "history-ordinary-a-cbb71df9-8e61-4a42-81e9-cd2b852c6bca",
+              "history-ordinary-b-e4b2055f-63be-4888-ac10-0ec2473e9c2e",
+              "history-parent-00c48c56-bf11-481d-9236-aa069ea47108"
+            ]
+          },
+          "switchBackToHistoryTask": {
+            "total": 3,
+            "ordinary": 3,
+            "errands": 0,
+            "ordinaryIds": [
+              "history-ordinary-a-cbb71df9-8e61-4a42-81e9-cd2b852c6bca",
+              "history-ordinary-b-e4b2055f-63be-4888-ac10-0ec2473e9c2e",
+              "history-parent-00c48c56-bf11-481d-9236-aa069ea47108"
+            ]
+          }
+        },
+        "parentRichSubscriptionRetained": true,
+        "finishedChildRichSubscriptions": []
+      },
+      "phone": {
+        "passed": 3,
+        "total": 3,
+        "sample": "/tmp/kandev-task04-final.pqprmph0/phone-controls/session-mobile-errand-deta-52f2f-fter-repeated-Open-and-Back-mobile-chrome/errand-history-sample.json",
+        "retainedChildDetailAfterBack": {
+          "sessionRows": 0,
+          "transcripts": 0,
+          "turnCaches": 0
+        },
+        "initialRows": {
+          "total": 3,
+          "ordinary": 3,
+          "errands": 0
+        },
+        "sessionListStoreRows": {
+          "expectedOrdinaryIds": [
+            "history-ordinary-a-4a7e9a62-e935-4a76-8b75-e3a5505a7c0b",
+            "history-ordinary-b-9eecfda4-7ab6-4102-8cdb-ba5cc4ce8274",
+            "history-parent-a8e56405-294a-4b86-b3af-a97f51162ecb"
+          ],
+          "coldNavigation": {
+            "total": 3,
+            "ordinary": 3,
+            "errands": 0,
+            "ordinaryIds": [
+              "history-ordinary-a-4a7e9a62-e935-4a76-8b75-e3a5505a7c0b",
+              "history-ordinary-b-9eecfda4-7ab6-4102-8cdb-ba5cc4ce8274",
+              "history-parent-a8e56405-294a-4b86-b3af-a97f51162ecb"
+            ]
+          },
+          "reload": {
+            "total": 3,
+            "ordinary": 3,
+            "errands": 0,
+            "ordinaryIds": [
+              "history-ordinary-a-4a7e9a62-e935-4a76-8b75-e3a5505a7c0b",
+              "history-ordinary-b-9eecfda4-7ab6-4102-8cdb-ba5cc4ce8274",
+              "history-parent-a8e56405-294a-4b86-b3af-a97f51162ecb"
+            ]
+          },
+          "switchBackToHistoryTask": {
+            "total": 3,
+            "ordinary": 3,
+            "errands": 0,
+            "ordinaryIds": [
+              "history-ordinary-a-4a7e9a62-e935-4a76-8b75-e3a5505a7c0b",
+              "history-ordinary-b-9eecfda4-7ab6-4102-8cdb-ba5cc4ce8274",
+              "history-parent-a8e56405-294a-4b86-b3af-a97f51162ecb"
+            ]
+          }
+        },
+        "parentRichSubscriptionRetained": true,
+        "finishedChildRichSubscriptions": []
+      }
+    },
+    "screenshotsInspected": [
+      "desktop-controls/session-errand-history-dem-58059--retains-at-most-four-pages-chromium/task03-errand-history-desktop-summary.png",
+      "desktop-controls/session-errand-history-dem-58059--retains-at-most-four-pages-chromium/task03-errand-history-desktop.png",
+      "phone-controls/session-mobile-errand-hist-2ddee-omposer-and-Stop-all-action-mobile-chrome/task03-errand-history-phone.png"
+    ],
+    "freeBytes": 9899872256
+  },
+  "identities": {
+    "completeInventory": {
+      "path": "/tmp/kandev-task04-final.pqprmph0/complete-after-comparison.json",
+      "sha256": "a98235b59d7b972125140a14b9ef28bc34b06ceac3b88ded83cc7f4fc9282af8"
+    },
+    "inventoryHashConvention": "SHA-256 of JSON object serialized with sort_keys=True and separators=(comma,colon); every path retains its individual SHA in the complete inventory.",
+    "arms": {
+      "candidate": {
+        "head": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+        "sourceCount": 33100,
+        "sourceMapSha256": "17276924d523457d0b8c205b2b6a72296511de6c1c1f11930ba1f282dd0faa09",
+        "artifactCount": 714,
+        "artifactMapSha256": "b8a9265094d39b20895ac3dfc855c8d1cfa2a15cabe362160ff7e9a4d5cf14cd",
+        "backendSha256": "520270ec1483a1906d986b61ab80d2009d0f1812e709dc1d1e3d03d1dd3ecec6",
+        "agentctlSha256": "19da7d721dd9a381c5d7136fa4f6dec1d6171c281ce06927c1a8798ed6de912c",
+        "distFileCount": 692,
+        "distMapSha256": "902aeacf4a3b61112342aec2293908faa09b27569e0a9ebf6bd0f881ca132884",
+        "distIndexSha256": "478ef9d24775226f9c5ff153066670cf694fe7e0ece61b400783c1c909e33f77",
+        "harnessSha256": {
+          "apps/web/e2e/helpers/ordinary-main-comparison.ts": "b1c944168c79a18cd96408700f8381b74bd9be988b2ce9818ea2d66370d46a99",
+          "apps/web/e2e/tests/task/ordinary-main-comparison.spec.ts": "6b0266749cd770c5fce9e55f88ad12ed1ae5e2d714ea8a78a2e1e5066f702f48",
+          "apps/web/e2e/tests/task/mobile-ordinary-main-comparison.spec.ts": "c3f7ef66060fa9afbac3448fde5804cfb2ee8127d5cae0024fd03d74f991a750"
+        }
+      },
+      "main": {
+        "head": "585824a5d066d22785814c0394b88dd57f6c5ded",
+        "sourceCount": 32465,
+        "sourceMapSha256": "ab7ce3f5cbb6a8284b7bf48570e1e40ac9ca2af79c3966ef94551ac8cecbae7b",
+        "artifactCount": 715,
+        "artifactMapSha256": "bbe79477714cc61a4b97e962476f16a7083652ed9c5e8da8481e03ff99af89b6",
+        "backendSha256": "657efc7f4fa1ce0000c8efb30bc79fa2cec9b6d072f19b6a30a41ded56c92e5e",
+        "agentctlSha256": "a3d3c4c4e3149e3ee99ab9801879c153c84ab50f0fe0e9b2fd31b8a3109feee0",
+        "distFileCount": 693,
+        "distMapSha256": "b57c975abf98424f043cf823a893f86b8bdb8c5660525257100d98a363bc575a",
+        "distIndexSha256": "0eab21fe14b7bb415d6df5fc4d8a44c6824f7deace49fee6b0d7063ef706545d",
+        "harnessSha256": {
+          "apps/web/e2e/helpers/ordinary-main-comparison.ts": "b1c944168c79a18cd96408700f8381b74bd9be988b2ce9818ea2d66370d46a99",
+          "apps/web/e2e/tests/task/ordinary-main-comparison.spec.ts": "6b0266749cd770c5fce9e55f88ad12ed1ae5e2d714ea8a78a2e1e5066f702f48",
+          "apps/web/e2e/tests/task/mobile-ordinary-main-comparison.spec.ts": "c3f7ef66060fa9afbac3448fde5804cfb2ee8127d5cae0024fd03d74f991a750"
+        }
+      }
+    },
+    "runner": {
+      "path": "/tmp/kandev-quality-main-comparison-run.py",
+      "sha256": "42a3fe3307aeea231332940d90cd4156668570cfe17beb308e6f2939ec7adcb3"
+    },
+    "analyzer": {
+      "path": "/tmp/kandev-quality-main-comparison-analyze.py",
+      "sha256": "52523ef73f3b99f50ac742cfdd2095923f39344892fb7ce21d73ac9ffab56c36"
+    },
+    "manifests": {
+      "complete-after-comparison.json": "a98235b59d7b972125140a14b9ef28bc34b06ceac3b88ded83cc7f4fc9282af8",
+      "complete-after-desktop.json": "ebd5bf68b765a3baf783dcec4102ae51d920c00c3148fa2a443c7b4af5f4a4c6",
+      "complete-before-comparison.json": "931a6e31d6e3adad0f165546cdcebc2f85634dabfa1ab6981c05da5c86519d12",
+      "complete-before-phone.json": "4c9a25479a2cd0591ef99ac87648207b5378fed0c5fc74cb51a14447a42efdc1",
+      "complete-before.json": "c5b477bf35b927e42ea4ae9da2b17c4d3b96d014d9d2d0db31edf57dd06d5dca",
+      "main-comparison/source-before.json": "110253c8c7e6527c926c53e3bdaff363e8b15eb6aa609f5f8d981a631e9f6493",
+      "main-comparison/source-after.json": "110253c8c7e6527c926c53e3bdaff363e8b15eb6aa609f5f8d981a631e9f6493"
+    },
+    "buildProvenance": {
+      "command": "/tmp/kandev-task04-final.pqprmph0/desktop-command.sh",
+      "fullLog": "/tmp/kandev-task04-final.pqprmph0/logs/kandev-run.e2e.d3PnTkOb.log",
+      "logSha256": "3e660bee4bccab389bfab45a34bd9e1720aeedb07ff937b8ffe0e3d16f490ba9",
+      "node": "v24.22.3",
+      "pnpm": "9.15.9",
+      "buildCount": 1,
+      "phoneNoBuild": true,
+      "comparisonNoBuild": true,
+      "normalGlobalSetup": true,
+      "flags": {
+        "GOMAXPROCS": "2",
+        "GOMEMLIMIT": "3GiB",
+        "GOFLAGS": "-p=1",
+        "webCommand": "build:e2e",
+        "KANDEV_I18N_BUNDLE_PSEUDO": "1",
+        "KANDEV_VERSION": "e2e"
+      }
+    },
+    "reviewedHookSha256": "0c14eb224a724f30aee4aa80a09d54fe57e798ca1e9c10bf422b82e13a28a687",
+    "priorEvidence": {
+      "path": "/home/luancm/.kandev/tasks/important-this-proje_45kr4xxl/kandev/docs/plans/errands-simplification/final-verification-results.json",
+      "sha256": "52d020ba92713694e256fbf27aa2b405ced12eafb7278c7c7611089e905c1a2c",
+      "unchanged": true
+    }
+  },
+  "processRelease": {
+    "checkedAt": "2026-11-15T14:57:05.968486+00:00",
+    "sharedLockAcquiredAndReleased": true,
+    "remainingOwnedProcesses": [],
+    "freeBytes": 9879441408,
+    "handles": [
+      {
+        "handle": 32647,
+        "phase": "desktop managed rebuild/control",
+        "exitCode": 0
+      },
+      {
+        "handle": 26013,
+        "phase": "phone no-build controls",
+        "exitCode": 0
+      },
+      {
+        "handle": 65594,
+        "phase": "28-scenario comparison",
+        "exitCode": 0
+      },
+      {
+        "handle": 9550,
+        "phase": "initial inventory",
+        "exitCode": 0
+      },
+      {
+        "handle": 34548,
+        "phase": "post-desktop inventory",
+        "exitCode": 0
+      },
+      {
+        "handle": 59940,
+        "phase": "pre-phone equality inventory",
+        "exitCode": 0
+      },
+      {
+        "handle": 25416,
+        "phase": "pre-comparison equality inventory",
+        "exitCode": 0
+      },
+      {
+        "handle": 88264,
+        "phase": "post-comparison equality inventory",
+        "exitCode": 0
+      }
+    ],
+    "checkoutStatus": "",
+    "processScanScope": "All processes in E2E temporary fixture/evidence directories or either tested backend binary directory, plus post-preflight browser processes and Node/pnpm runners under either tested checkout."
+  },
+  "priorCohortObservations": [
+    {
+      "platform": "desktop",
+      "metric": "coldMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 2337.137576000001,
+      "currentBoundary": 3485.451815999999,
+      "boundaryChange": 1148.3142399999979,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        -84.25902300000052,
+        4.572924000000512,
+        1.6471290000004046,
+        -67.983655,
+        -11.261961999999585,
+        68.2698290000003,
+        -14.500222000000122
+      ],
+      "currentPairedRoundDeltas": [
+        481.6652789999998,
+        7.997797999999875,
+        27.97696600000063,
+        55.23388100000011,
+        -68.96383399999968,
+        -651.3479419999999,
+        -57.285830000000715
+      ],
+      "priorPairedMedianDelta": -11.261961999999585,
+      "currentPairedMedianDelta": 7.997797999999875,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 2249.533062,
+          "currentMedian": 2235.7064360000004,
+          "medianChange": -13.826625999999578,
+          "priorP95": 2286.9383900000003,
+          "currentP95": 2860.5791259999996,
+          "p95Change": 573.6407359999994,
+          "priorRange": [
+            2227.853678,
+            2286.9383900000003
+          ],
+          "currentRange": [
+            2190.060388,
+            2860.5791259999996
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 2234.5631020000005,
+          "currentMedian": 2218.0373540000005,
+          "medianChange": -16.52574800000002,
+          "priorP95": 2297.2219480000003,
+          "currentP95": 2692.58068,
+          "p95Change": 395.3587319999997,
+          "priorRange": [
+            2181.549407,
+            2297.2219480000003
+          ],
+          "currentRange": [
+            2172.7825130000006,
+            2692.58068
+          ]
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "metric": "reloadMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 1815.148747000001,
+      "currentBoundary": 3807.2257690000006,
+      "boundaryChange": 1992.0770219999995,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        25.740591999999197,
+        32.872801000000436,
+        20.132746000000225,
+        -121.12337399999979,
+        10.708620000000337,
+        36.358108999999786,
+        65.38627799999995
+      ],
+      "currentPairedRoundDeltas": [
+        -20.39691700000003,
+        -39.59106900000097,
+        -30.06552599999941,
+        -73.37843200000043,
+        127.23870700000043,
+        -1071.3367010000002,
+        56.78583299999991
+      ],
+      "priorPairedMedianDelta": 25.740591999999197,
+      "currentPairedMedianDelta": -30.06552599999941,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 1574.9442330000002,
+          "currentMedian": 1589.053113,
+          "medianChange": 14.108879999999772,
+          "priorP95": 1695.0464900000006,
+          "currentP95": 2698.1394410000003,
+          "p95Change": 1003.0929509999996,
+          "priorRange": [
+            1528.2056839999996,
+            1695.0464900000006
+          ],
+          "currentRange": [
+            1538.2277279999998,
+            2698.1394410000003
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 1590.8847639999994,
+          "currentMedian": 1568.656196,
+          "medianChange": -22.22856799999954,
+          "priorP95": 1640.3305110000001,
+          "currentP95": 1665.4664350000003,
+          "p95Change": 25.13592400000016,
+          "priorRange": [
+            1561.078485,
+            1640.3305110000001
+          ],
+          "currentRange": [
+            1526.6510089999992,
+            1665.4664350000003
+          ]
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "metric": "switchAwayMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 1575.2939809999998,
+      "currentBoundary": 1595.9228089999997,
+      "boundaryChange": 20.628827999999885,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        -9.667955999999322,
+        190.3128399999996,
+        28.522588000000724,
+        -175.07059600000048,
+        110.65497700000014,
+        92.83197300000029,
+        63.867637999998806
+      ],
+      "currentPairedRoundDeltas": [
+        288.12913600000047,
+        231.4199209999997,
+        69.36078199999974,
+        -154.99820399999953,
+        -24.364378999999644,
+        -20.68876200000068,
+        267.9802689999997
+      ],
+      "priorPairedMedianDelta": 63.867637999998806,
+      "currentPairedMedianDelta": 69.36078199999974,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 1170.7435930000001,
+          "currentMedian": 1202.9329749999997,
+          "medianChange": 32.18938199999957,
+          "priorP95": 1373.018787,
+          "currentP95": 1399.4278919999997,
+          "p95Change": 26.409104999999727,
+          "priorRange": [
+            1129.550733,
+            1373.018787
+          ],
+          "currentRange": [
+            1124.5021820000002,
+            1399.4278919999997
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 1232.3472169999995,
+          "currentMedian": 1378.739129999999,
+          "medianChange": 146.39191299999948,
+          "priorP95": 1377.0894079999998,
+          "currentP95": 1503.9348369999998,
+          "p95Change": 126.84542899999997,
+          "priorRange": [
+            1156.1390060000003,
+            1377.0894079999998
+          ],
+          "currentRange": [
+            1178.568596,
+            1503.9348369999998
+          ]
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "metric": "switchBackMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 958.5615790000002,
+      "currentBoundary": 1202.3463109999993,
+      "boundaryChange": 243.78473199999917,
+      "priorExceedsVarianceBoundary": true,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        113.5394380000007,
+        119.46016099999997,
+        82.85265000000072,
+        166.42959699999847,
+        94.83124100000077,
+        49.93461400000069,
+        184.36917699999867
+      ],
+      "currentPairedRoundDeltas": [
+        32.4209009999995,
+        48.448638000000756,
+        150.35634599999867,
+        87.54684300000008,
+        -134.88663700000052,
+        -17.223409999998694,
+        93.32720199999858
+      ],
+      "priorPairedMedianDelta": 113.5394380000007,
+      "currentPairedMedianDelta": 48.448638000000756,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 822.2389909999993,
+          "currentMedian": 875.0756569999994,
+          "medianChange": 52.83666600000015,
+          "priorP95": 890.4002849999997,
+          "currentP95": 1038.7109839999994,
+          "p95Change": 148.31069899999966,
+          "priorRange": [
+            814.307785,
+            890.4002849999997
+          ],
+          "currentRange": [
+            828.0356229999998,
+            1038.7109839999994
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 979.4486790000001,
+          "currentMedian": 923.5242950000002,
+          "medianChange": -55.92438399999992,
+          "priorP95": 1039.246185,
+          "currentP95": 1059.6397689999994,
+          "p95Change": 20.393583999999464,
+          "priorRange": [
+            864.2423990000007,
+            1039.246185
+          ],
+          "currentRange": [
+            880.0852859999995,
+            1059.6397689999994
+          ]
+        }
+      }
+    },
+    {
+      "platform": "desktop",
+      "metric": "retainedHeapBytes",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 81878960,
+      "currentBoundary": 81959680,
+      "boundaryChange": 80720,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        1027744,
+        1081776,
+        251476,
+        1045488,
+        3151556,
+        1174084,
+        -1765396
+      ],
+      "currentPairedRoundDeltas": [
+        -1960752,
+        1073224,
+        1070448,
+        -2020912,
+        1039936,
+        1105508,
+        94484
+      ],
+      "priorPairedMedianDelta": 1045488,
+      "currentPairedMedianDelta": 1039936,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 75934440,
+          "currentMedian": 75914696,
+          "medianChange": -19744,
+          "priorP95": 78906700,
+          "currentP95": 78937188,
+          "p95Change": 30488,
+          "priorRange": [
+            75840484,
+            78906700
+          ],
+          "currentRange": [
+            75831244,
+            78937188
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 77051444,
+          "currentMedian": 76948664,
+          "medianChange": -102780,
+          "priorP95": 79934444,
+          "currentP95": 79019828,
+          "p95Change": -914616,
+          "priorRange": [
+            76978476,
+            79934444
+          ],
+          "currentRange": [
+            76895264,
+            79019828
+          ]
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "metric": "coldMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 2088.3875649999986,
+      "currentBoundary": 2036.2029040000011,
+      "boundaryChange": -52.184660999997504,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        -158.10337600000048,
+        -27.303388999999697,
+        -86.15236999999979,
+        -39.32876100000021,
+        -99.05030100000022,
+        -15.566867000000457,
+        -50.17944699999998
+      ],
+      "currentPairedRoundDeltas": [
+        19.670752000000903,
+        -85.46784500000058,
+        0.6203900000000431,
+        -45.48766400000022,
+        -103.98138500000005,
+        -103.20738600000004,
+        22.93683500000043
+      ],
+      "priorPairedMedianDelta": -50.17944699999998,
+      "currentPairedMedianDelta": -45.48766400000022,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 1906.199611,
+          "currentMedian": 1896.645212,
+          "medianChange": -9.554399000000103,
+          "priorP95": 1971.46204,
+          "currentP95": 1943.7551140000005,
+          "p95Change": -27.706925999999385,
+          "priorRange": [
+            1826.9624290000002,
+            1971.46204
+          ],
+          "currentRange": [
+            1850.9411600000003,
+            1943.7551140000005
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 1846.8317260000003,
+          "currentMedian": 1858.287269,
+          "medianChange": 11.45554299999958,
+          "priorP95": 1872.4117389999997,
+          "currentP95": 1919.5820470000003,
+          "p95Change": 47.17030800000066,
+          "priorRange": [
+            1799.6590400000005,
+            1872.4117389999997
+          ],
+          "currentRange": [
+            1785.4958430000001,
+            1919.5820470000003
+          ]
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "metric": "reloadMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 1472.7580590000007,
+      "currentBoundary": 1395.6938280000013,
+      "boundaryChange": -77.06423099999938,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        -59.771066000001156,
+        -16.01629799999955,
+        2.1851110000006884,
+        46.286589999998796,
+        -157.4149750000006,
+        -56.55701299999964,
+        -57.75092600000062
+      ],
+      "currentPairedRoundDeltas": [
+        -48.072056999999404,
+        -56.978439000000435,
+        -54.68805799999882,
+        -48.38423599999987,
+        -23.098888000000443,
+        18.837797999999566,
+        -35.54269700000077
+      ],
+      "priorPairedMedianDelta": -56.55701299999964,
+      "currentPairedMedianDelta": -48.072056999999404,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 1325.7031029999998,
+          "currentMedian": 1297.001134,
+          "medianChange": -28.701968999999735,
+          "priorP95": 1399.0552530000004,
+          "currentP95": 1346.3474810000007,
+          "p95Change": -52.70777199999975,
+          "priorRange": [
+            1254.2207750000007,
+            1399.0552530000004
+          ],
+          "currentRange": [
+            1263.2805510000007,
+            1346.3474810000007
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 1269.1460900000002,
+          "currentMedian": 1257.2541650000003,
+          "medianChange": -11.891924999999901,
+          "priorP95": 1303.3206120000004,
+          "currentP95": 1297.9632450000008,
+          "p95Change": -5.357366999999613,
+          "priorRange": [
+            1241.6402779999999,
+            1303.3206120000004
+          ],
+          "currentRange": [
+            1237.0855940000001,
+            1297.9632450000008
+          ]
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "metric": "switchAwayMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 1429.2977240000018,
+      "currentBoundary": 1432.752757000001,
+      "boundaryChange": 3.4550329999992755,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": true,
+      "priorPairedRoundDeltas": [
+        56.92013700000007,
+        61.858408000000054,
+        19.038959000000432,
+        61.210642999999436,
+        -2.468909999999596,
+        42.176784000000225,
+        8.011919999999918
+      ],
+      "currentPairedRoundDeltas": [
+        281.68762400000014,
+        -6.15935300000001,
+        89.54463899999973,
+        51.94840000000022,
+        0.31108099999983096,
+        100.01981099999921,
+        62.89368099999956
+      ],
+      "priorPairedMedianDelta": 42.176784000000225,
+      "currentPairedMedianDelta": 62.89368099999956,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 1319.3148659999997,
+          "currentMedian": 1272.561506,
+          "medianChange": -46.7533599999997,
+          "priorP95": 1361.533781,
+          "currentP95": 1338.4779100000005,
+          "p95Change": -23.05587099999957,
+          "priorRange": [
+            1255.1459249999998,
+            1361.533781
+          ],
+          "currentRange": [
+            1229.6288510000004,
+            1338.4779100000005
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 1349.9147670000002,
+          "currentMedian": 1319.1734900000001,
+          "medianChange": -30.741277000000082,
+          "priorP95": 1418.4539180000002,
+          "currentP95": 1554.2491300000002,
+          "p95Change": 135.795212,
+          "priorRange": [
+            1297.322709,
+            1418.4539180000002
+          ],
+          "currentRange": [
+            1289.1118449999994,
+            1554.2491300000002
+          ]
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "metric": "switchBackMs",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 1384.5137989999967,
+      "currentBoundary": 1389.328826,
+      "boundaryChange": 4.815027000003283,
+      "priorExceedsVarianceBoundary": false,
+      "currentExceedsVarianceBoundary": false,
+      "priorPairedRoundDeltas": [
+        29.661213000002135,
+        24.287834000000657,
+        64.84383900000012,
+        39.66213600000083,
+        39.20100399999956,
+        45.79879499999879,
+        67.73207900000034
+      ],
+      "currentPairedRoundDeltas": [
+        19.535205000000133,
+        54.65601799999877,
+        21.83825799999977,
+        33.92591099999936,
+        50.151403999999275,
+        35.30178200000046,
+        9.727976999999555
+      ],
+      "priorPairedMedianDelta": 39.66213600000083,
+      "currentPairedMedianDelta": 33.92591099999936,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 1307.5821619999997,
+          "currentMedian": 1315.8243919999995,
+          "medianChange": 8.242229999999836,
+          "priorP95": 1339.0374079999992,
+          "currentP95": 1339.1823829999994,
+          "p95Change": 0.14497500000015862,
+          "priorRange": [
+            1292.4233650000006,
+            1339.0374079999992
+          ],
+          "currentRange": [
+            1297.9178780000002,
+            1339.1823829999994
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 1357.9118310000003,
+          "currentMedian": 1348.0692819999995,
+          "medianChange": -9.842549000000872,
+          "priorP95": 1371.2931160000007,
+          "currentP95": 1361.0206409999992,
+          "p95Change": -10.272475000001577,
+          "priorRange": [
+            1338.2221599999993,
+            1371.2931160000007
+          ],
+          "currentRange": [
+            1334.4106929999998,
+            1361.0206409999992
+          ]
+        }
+      }
+    },
+    {
+      "platform": "phone",
+      "metric": "retainedHeapBytes",
+      "priorCandidateHead": "77b155597c1dab4b16016bc5e5da17ac6a16c632",
+      "currentCandidateHead": "90aaec3aee7b038cb3d650103d2384a9c4470534",
+      "mainHead": "585824a5d066d22785814c0394b88dd57f6c5ded",
+      "priorBoundary": 54858056,
+      "currentBoundary": 54681644,
+      "boundaryChange": -176412,
+      "priorExceedsVarianceBoundary": true,
+      "currentExceedsVarianceBoundary": true,
+      "priorPairedRoundDeltas": [
+        875404,
+        873112,
+        874460,
+        913340,
+        787056,
+        891292,
+        953984
+      ],
+      "currentPairedRoundDeltas": [
+        847740,
+        876812,
+        812980,
+        860340,
+        822288,
+        845488,
+        828904
+      ],
+      "priorPairedMedianDelta": 875404,
+      "currentPairedMedianDelta": 845488,
+      "arms": {
+        "matched-main": {
+          "priorMedian": 54623560,
+          "currentMedian": 54641680,
+          "medianChange": 18120,
+          "priorP95": 54740808,
+          "currentP95": 54653204,
+          "p95Change": -87604,
+          "priorRange": [
+            54612780,
+            54740808
+          ],
+          "currentRange": [
+            54626940,
+            54653204
+          ]
+        },
+        "candidate-on": {
+          "priorMedian": 55527864,
+          "currentMedian": 55482108,
+          "medianChange": -45756,
+          "priorP95": 55597276,
+          "currentP95": 55512920,
+          "p95Change": -84356,
+          "priorRange": [
+            55494368,
+            55597276
+          ],
+          "currentRange": [
+            55451708,
+            55512920
+          ]
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Seven samples per arm/platform; nearest-rank p95 is the maximum. Shared local Chromium host, CPU rate 1, disabled HTTP cache and fresh browser contexts. Results do not prove zero overhead or real-phone/provider reliability.",
+    "One fresh cohort after the accepted Task04 source change. No retries, workload changes, profiler/diagnostic overlay, trace capture, threshold changes or sample replacement. Prior failed observations remain preserved.",
+    "Candidate built once through the managed E2E runner; phone and comparison reused exactly matching artifacts with normal globalSetup. E2E assets are not embedded production-web/native-pilot proof.",
+    "The old desktop return warning remains a separate historical finding. A current gate result cannot attribute performance changes to Task04; main timings and variance boundaries also changed between cohorts.",
+    "Approximately one MiB fixed browser heap cost remains disclosed: current desktop median delta is 1,033,968 bytes and phone 840,428 bytes, regardless of whether a variance gate passes. The prior agreed fixed-cost disposition does not change these numeric gates.",
+    "Historical history workload remains 84/84 functional and 28/30 numeric, including the 56.316 ms and 94,448-byte misses. No historical benchmark, protocol or limit was rewritten.",
+    "Renderer ScriptDuration/TaskDuration in retained raw samples cover more work than the readyMs endpoint. They are diagnostic context, not an isolated React/store CPU or host scheduling measurement.",
+    "Only isolated fixture servers were used. No live instance, live profile or live database was changed; no real provider ran and no credentials were accessed. No Git mutation or checkout source/test/doc edit was performed. No pilot was launched."
+  ],
+  "artifacts": {
+    "approvedAnalyzerResults": {
+      "path": "/tmp/kandev-task04-final.pqprmph0/main-comparison-results.json",
+      "sha256": "995fb975e8164771ee93a9d471d373a502820d0c52275c845a3562aa4c8e927d"
+    },
+    "runs": "/tmp/kandev-task04-final.pqprmph0/main-comparison/runs.json",
+    "fullLogs": "/tmp/kandev-task04-final.pqprmph0/logs",
+    "wrapperLogsAndRawSamples": "/tmp/kandev-task04-final.pqprmph0/main-comparison",
+    "analysisLog": "/tmp/kandev-task04-final.pqprmph0/main-comparison-analysis.log"
+  },
+  "materialFindings": [
+    {
+      "kind": "latency_variance_warning",
+      "platform": "phone",
+      "metric": "switchAwayMs",
+      "candidateP95": 1554.2491300000002,
+      "boundary": 1432.752757000001,
+      "excess": 121.49637299999904
+    },
+    {
+      "kind": "fixed_heap_warning",
+      "platform": "phone",
+      "metric": "retainedHeapBytes",
+      "candidateP95": 55512920,
+      "boundary": 54681644,
+      "excess": 831276
+    },
+    {
+      "kind": "passing_cost_retained",
+      "platform": "desktop",
+      "metric": "switchAwayMs",
+      "medianDelta": 175.8061549999993,
+      "pairedMedianDelta": 69.36078199999974,
+      "disposition": "Explicit cost despite current variance gate passing; parent/user disposition pending."
+    }
+  ]
+}

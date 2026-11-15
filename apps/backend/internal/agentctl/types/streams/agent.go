@@ -299,6 +299,9 @@ type AgentEvent struct {
 
 	// --- Tool call fields (for "tool_call" and "tool_update" types) ---
 
+	// ErrandAwaitReceipt is bounded native result evidence, independent of display data.
+	ErrandAwaitReceipt *ErrandAwaitReceipt `json:"errand_await_receipt,omitempty"`
+
 	// ToolCallID uniquely identifies the tool invocation.
 	ToolCallID string `json:"tool_call_id,omitempty"`
 

@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -242,6 +243,11 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if observation := readAwaitObservation(event); observation != nil && event.TaskID != "" {
+		if err := db.LockErrandDelivery(ctx, tx, r.db.DriverName(), event.TaskID); err != nil {
+			return false, err
+		}
+	}
 	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), []string{event.SessionID}, []string{event.StreamID}, !event.Terminal); err != nil {
 		return false, err
 	}
@@ -275,6 +281,10 @@ func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliver
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
+	turn, errand, err := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
+	if err != nil {
+		return 0, err
+	}
 	if err := r.validateAgentDeliveryEventAdmissionTx(ctx, tx, event); err != nil {
 		return 0, err
 	}
@@ -297,6 +307,15 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 		if err != nil {
 			return 0, err
 		}
+	}
+	if err := r.retainUnownedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
+		return 0, err
+	}
+	if err := r.retainAdmittedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
+		return 0, err
+	}
+	if err := r.receiveErrandAwaitReceiptTx(ctx, tx, event); err != nil {
+		return 0, err
 	}
 	if !cursorExists {
 		cursor = models.AgentDeliveryCursor{
@@ -552,11 +571,25 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if !matches {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
+	admittedTurn, _, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &stored)
+	if err != nil {
+		return false, err
+	}
 	terminalEffect, err := deliveryTerminalSettlementEffect(&stored)
 	if err != nil {
 		return false, err
 	}
+	if admittedTurn != "" && terminalEffect != nil {
+		terminalEffect.TurnID = admittedTurn
+	}
 	if projectedAt.Valid {
+		if terminalEffect != nil {
+			if _, err := r.repairAgentDeliveryTerminalIdentityTx(
+				ctx, tx, terminalEffect.StreamID, terminalEffect.Sequence, terminalEffect, true,
+			); err != nil {
+				return false, err
+			}
+		}
 		return false, commitProjectedTerminalEffect(ctx, tx, r.db.Rebind, terminalEffect)
 	}
 	var projectedSequence int64

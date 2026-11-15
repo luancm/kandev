@@ -17,6 +17,23 @@ type builtinSnapshotReader struct {
 	err      error
 }
 
+func TestErrandBuiltinPreparationSkipsPolicyReader(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task"] = &models.Task{ID: "task", WorkspaceID: "workspace"}
+	session := &models.TaskSession{
+		ID: "child", TaskID: "task", Role: models.SessionRoleErrand, ParentSessionID: "parent",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	reader := &builtinSnapshotReader{err: errors.New("child package policy must not be read")}
+	exec.SetBuiltinPolicyReader(reader)
+	profile, err := exec.PrepareTaskSessionMCPProfile(context.Background(), "task", session, true)
+	require.NoError(t, err)
+	require.Equal(t, p.SurfaceErrand, profile.Surface)
+	require.Nil(t, profile.BuiltinPackages)
+	require.Empty(t, profile.Capabilities)
+	require.Zero(t, reader.reads)
+}
+
 func (r *builtinSnapshotReader) GetBuiltinPolicySnapshot(_ context.Context, workspaceID, taskID string) (*mcpconfig.BuiltinPolicySnapshot, error) {
 	r.reads++
 	return r.snapshot, r.err

@@ -223,6 +223,7 @@ function useTaskDetailRouteData({
   const store = useAppStoreApi();
   const projection = useTaskRouteProjection(taskId, sessionId);
   const routeKey = taskRouteKey(taskId, sessionId);
+  const errandInspectionOwnerId = `task-route-${routeKey}`;
   const navigationOwnerRef = useRef<object>({});
   const navigationContext = beginTaskNavigation(store, navigationOwnerRef.current, routeKey);
   const selectedSessionForNavigationRef = useRef<{
@@ -272,6 +273,7 @@ function useTaskDetailRouteData({
     setRouteState,
     previousLoadedRouteRef,
     store,
+    errandInspectionOwnerId,
     navigationContext,
     hydrationEpochsAtRequestStartRef,
   });
@@ -426,11 +428,64 @@ type TaskDetailRouteFetchArgs = {
   setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
   previousLoadedRouteRef: MutableRefObject<TaskDetailRouteState | null>;
   store: ReturnType<typeof useAppStoreApi>;
+  errandInspectionOwnerId: string;
   navigationContext: TaskNavigationContext;
   hydrationEpochsAtRequestStartRef: MutableRefObject<
     Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
   >;
 };
+
+function beginTaskDetailRouteRead(args: {
+  routeKey: string;
+  setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
+  store: ReturnType<typeof useAppStoreApi>;
+  taskId: string;
+  hydrationEpochsAtRequestStartRef: MutableRefObject<
+    Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
+  >;
+}) {
+  args.setRouteState({ routeKey: args.routeKey, status: "loading", data: null });
+  args.hydrationEpochsAtRequestStartRef.current = captureTaskSessionHydrationEpochs(
+    args.store.getState(),
+    args.taskId,
+  );
+}
+
+function useInitialTaskDetailRouteData(
+  args: Pick<
+    TaskDetailRouteFetchArgs,
+    | "routeInitialData"
+    | "taskId"
+    | "sessionId"
+    | "routeKey"
+    | "store"
+    | "errandInspectionOwnerId"
+    | "previousLoadedRouteRef"
+    | "setRouteState"
+  >,
+): boolean {
+  const {
+    routeInitialData,
+    taskId,
+    sessionId,
+    routeKey,
+    store,
+    errandInspectionOwnerId,
+    previousLoadedRouteRef,
+    setRouteState,
+  } = args;
+  if (!routeDataMatchesSelection(routeInitialData, taskId, sessionId)) return false;
+  store.getState().releaseErrandInspection(errandInspectionOwnerId);
+  const loadedState: TaskDetailRouteState = {
+    routeKey,
+    status: "loaded",
+    data: routeInitialData,
+    forceMergeSession: true,
+  };
+  previousLoadedRouteRef.current = loadedState;
+  setRouteState(loadedState);
+  return true;
+}
 
 function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
   const {
@@ -442,6 +497,7 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
     setRouteState,
     previousLoadedRouteRef,
     store,
+    errandInspectionOwnerId,
     navigationContext,
     hydrationEpochsAtRequestStartRef,
   } = args;
@@ -458,38 +514,39 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
     ) {
       return;
     }
-    if (routeDataMatchesSelection(routeInitialData, taskId, sessionId)) {
-      const loadedState: TaskDetailRouteState = {
-        routeKey,
-        status: "loaded",
-        data: routeInitialData,
-        forceMergeSession: true,
-      };
-      previousLoadedRouteRef.current = loadedState;
-      setRouteState(loadedState);
-      return;
-    }
+    if (useInitialTaskDetailRouteData(args)) return;
     let cancelled = false;
-    setRouteState({ routeKey, status: "loading", data: null });
-    hydrationEpochsAtRequestStartRef.current = captureTaskSessionHydrationEpochs(
-      store.getState(),
+    beginTaskDetailRouteRead({
+      routeKey,
+      setRouteState,
+      store,
       taskId,
-    );
+      hydrationEpochsAtRequestStartRef,
+    });
     readTaskNavigationIdentity(store, taskId, {
       context: navigationContext,
       ...(revision ? { refresh: true } : {}),
     })
-      .then((identity) => {
+      .then(async (identity) => {
         if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
-        assertRequestedSession(identity, taskId, sessionId);
+        const selectedErrandInspection = await assertRequestedSession(identity, taskId, sessionId);
+        if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
+        if (selectedErrandInspection) {
+          store
+            .getState()
+            .retainErrandInspection(errandInspectionOwnerId, selectedErrandInspection);
+        }
+        const routeIdentity = selectedErrandInspection
+          ? { ...identity, selectedErrandInspection }
+          : identity;
         const shellState: TaskDetailRouteState = {
           routeKey,
           status: "loaded",
-          data: buildTaskNavigationShellData(identity, selectedSessionId),
+          data: buildTaskNavigationShellData(routeIdentity, sessionId ?? selectedSessionId),
           forceMergeSession: false,
           navigationContext,
           hydrationEpochsAtRequestStart: hydrationEpochsAtRequestStartRef.current,
-          enrichmentIdentity: identity,
+          enrichmentIdentity: routeIdentity,
         };
         previousLoadedRouteRef.current = shellState;
         setRouteState((current) =>
@@ -507,10 +564,12 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
       });
     return () => {
       cancelled = true;
+      store.getState().releaseErrandInspection(errandInspectionOwnerId);
     };
   }, [
     routeInitialData,
     routeKey,
+    errandInspectionOwnerId,
     sessionId,
     selectedSessionId,
     taskId,

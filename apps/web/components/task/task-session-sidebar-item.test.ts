@@ -140,6 +140,21 @@ describe("buildSidebarItem", () => {
     expect(item.queuedCount).toBe(3);
   });
 
+  it("projects the bounded errands count and waiting state to the row", () => {
+    const item = buildSidebarItem(
+      task({
+        statusSummary: {
+          revision: 6,
+          updated_at: SUMMARY_UPDATED_AT,
+          errands: { live: 2, waiting: true },
+        },
+      }),
+      emptyContext(),
+    );
+
+    expect(item.errandsSummary).toEqual({ live: 2, waiting: true });
+  });
+
   it("leaves queuedCount undefined when the summary has no queued prompts", () => {
     const item = buildSidebarItem(
       task({ statusSummary: { revision: 5, updated_at: UPDATED_AT } }),

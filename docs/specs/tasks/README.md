@@ -9,20 +9,14 @@ owners:
 
 # Task and workflow system
 
-## Purpose
-
-Owns durable work items, task relationships, execution lifecycle, workflow
-steps, queued launches, and task process contracts.
-
 ## Ownership
 
 Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
-documents, attachments, hierarchy, creation, launch, runtime state, workflows,
-completion, and scheduling.
+documents, attachments, hierarchy, creation, launch, runtime state, completion
+and queued-launch scheduling.
 
-Turn change sets bind immutable repository intervals to capture policy,
-history, and transcript anchors. Workspaces own checkout identity; runtime owns
-ordered executor access.
+Turn change sets bind immutable repository intervals to capture policy, history
+and transcript anchors. Workspaces own checkouts; runtime owns ordered access.
 
 ## Exclusions
 
@@ -30,9 +24,9 @@ ordered executor access.
   [agent system](../agents).
 - Repository and worktree ownership belongs to the
   [workspace system](../workspaces).
-- Office-specific autonomous agent identities and dashboards belong to the
-  [Office system](../office).
-- Presentation-only behavior belongs to the [UI specifications](../ui).
+- Autonomous work on task primitives, Office agent identities and dashboards
+  belong to [Office](../office).
+- Presentation-only behavior belongs to [UI](../ui).
 
 ## Specification map
 
@@ -41,10 +35,10 @@ ordered executor access.
 - [Initial task brief](requirements/initial-task-brief.md)
 
 - [Bounded Session History Storage](requirements/bounded-session-history.md)
-- [Task completion, conversation follow-ups, and workspace access](requirements/task-completion.md)
+- [Task completion and follow-ups](requirements/task-completion.md)
 
 - [Agent-Generated Task Titles](requirements/agent-generated-titles.md)
-- [Additional Session Workspace Reuse](requirements/additional-session-workspace-reuse.md)
+- [Session workspace reuse](requirements/additional-session-workspace-reuse.md)
 - [Task Archive Confirmation](requirements/archive-confirmation.md)
 - [Task removal navigation](requirements/removal-navigation.md)
 - [Attach Workspace Sources](requirements/attach-workspace-sources.md)
@@ -58,6 +52,11 @@ ordered executor access.
 - [Active clarification lifecycle](requirements/clarification-active-lifecycle.md)
 - [Clarification response reliability](requirements/clarification-response-reliability.md)
 - [Task Documents](requirements/documents.md)
+- [Errands](requirements/errands.md)
+- [Result delivery](requirements/errand-result-delivery.md)
+- [Context window](requirements/errand-context-window.md)
+- [Panel order](requirements/errand-panel-order.md)
+- [Await duration](requirements/errand-await-duration.md)
 - [Detached Workspace Continuity](requirements/detached-workspace-continuity.md)
 - [Task plan append-mode write](requirements/plan-write-append-mode.md)
 - [Task Execution Stages](requirements/execution-stages.md)
@@ -81,7 +80,7 @@ ordered executor access.
 - [Task plan content size limit](requirements/plan-content-size-limit.md)
 - [Task Plan Comments](requirements/plan-comments.md)
 - [Task plan write consistency](requirements/plan-write-consistency.md)
-- [Passthrough Initial Prompt Turn Boundary](requirements/passthrough-initial-prompt-turn-boundary.md)
+- [Passthrough initial turns](requirements/passthrough-initial-prompt-turn-boundary.md)
 - [Prevent Agent Auto-Start On Open](requirements/prevent-agent-autostart-on-open.md)
 - [Prompt attachments](requirements/prompt-attachments.md)
 - [Saved Prompt Delivery](requirements/saved-prompt-delivery.md)
@@ -100,7 +99,7 @@ ordered executor access.
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Task Cleanup Source Manifest](requirements/archive-source-manifest.md)
 - [Guarded Exact-Task Retirement](requirements/guarded-exact-task-retirement.md)
-- [Restart-Orphaned Session Terminalization](requirements/restart-orphaned-session-terminalization.md)
+- [Restart-orphan settlement](requirements/restart-orphaned-session-terminalization.md)
 - [Sidebar Task Editing](requirements/sidebar-task-edit.md)
 - [Task Actions Menu on Preview and Detail Surfaces](requirements/task-actions-menu.md)
 - [Task menu grouping](requirements/task-menu-grouping.md)
@@ -152,18 +151,24 @@ ordered executor access.
 - [Workflow Settings Autosave](requirements/workflow-settings-autosave.md)
 - [Workflow Step Agent Start Ownership](requirements/workflow-step-agent-start-ownership.md)
 - [Workflow Sync — Per-User Workspace Authorization](requirements/workflow-sync-workspace-authz.md)
-- [Workflow task-step transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
-- [Workflow task-step transition ledger](requirements/workflow-task-step-transition-ledger.md)
+- [Workflow transition ledger scenarios](requirements/workflow-task-step-transition-ledger-scenarios.md)
+- [Workflow transition ledger](requirements/workflow-task-step-transition-ledger.md)
 - [Human Assignee and Actor Attribution](requirements/human-assignee.md)
 
 ### System design
 
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
+- [Errands](system-design/errands.md)
+- [Recovery and delivery](system-design/errand-recovery-and-delivery.md)
+- [Errand conversations](system-design/errand-conversation-navigation.md)
+- [Context window](system-design/errand-context-window.md)
+- [Panel order](system-design/errand-panel-order.md)
+- [Await duration](system-design/errand-await-duration.md)
 - [Initial task brief](system-design/initial-task-brief.md)
 
-- [Task completion, conversation follow-ups, and workspace access](system-design/task-completion.md)
+- [Task completion and follow-ups](system-design/task-completion.md)
 
-- [Additional Session Workspace Reuse](system-design/additional-session-workspace-reuse.md)
+- [Session workspace reuse](system-design/additional-session-workspace-reuse.md)
 - [Environment-Owned Git Status](system-design/environment-owned-git-status.md)
 - [Attach Workspace Sources](system-design/attach-workspace-sources.md)
 - [Command-panel archived task results](system-design/command-panel-archived-task-results.md)
@@ -183,7 +188,7 @@ ordered executor access.
 - [Branch history explanations](system-design/branch-history-explanations.md)
 - [Passthrough Queued Prompt Dispatch](system-design/passthrough-queued-prompt-dispatch.md)
 - [Saved Prompt Delivery](system-design/saved-prompt-delivery.md)
-- [Passthrough Initial Prompt Turn Boundary](system-design/passthrough-initial-prompt-turn-boundary.md)
+- [Passthrough initial turns](system-design/passthrough-initial-prompt-turn-boundary.md)
 - [Prompt attachments](system-design/prompt-attachments.md)
 - [Task Actions Menu on Preview and Detail Surfaces](system-design/task-actions-menu.md)
 - [Task menu grouping](system-design/task-menu-grouping.md)
@@ -227,18 +232,10 @@ ordered executor access.
 - [Workflow Step Agent Start Ownership](system-design/workflow-step-agent-start-ownership.md)
 - [Workflow Step Fixed-Profile Routing](system-design/workflow-step-fixed-profile-routing.md)
 - [Workflow Profile Session Lifecycle and Recipients](system-design/workflow-profile-session-lifecycle.md)
-- [Workflow task-step transition ledger](system-design/workflow-task-step-transition-ledger.md)
+- [Workflow transition ledger](system-design/workflow-task-step-transition-ledger.md)
 - [Human Assignee](system-design/human-assignee.md)
 - [Task Create Agent Compatibility Recovery](system-design/task-create-agent-executor-compatibility.md)
 
 ## Migration record
 
-Migration remains in progress. Files that retain migration wrappers still need
-extraction before this system can return to a complete migration state.
-
-## Related systems
-
-- [Agents](../agents): supplies agent identity and execution profiles.
-- [Office](../office): builds autonomous workflows on task primitives.
-- [UI](../ui): owns presentation-only task surfaces.
-- [Workspaces](../workspaces): owns repositories and task worktrees.
+Migration is incomplete while wrapper files await extraction.

@@ -58,6 +58,9 @@ func (s *Server) registerCoreQuestionTools() {
 }
 
 func (s *Server) registerCoreTaskCapabilities() {
+	if s.profile.HasCapability(mcpprofile.CapabilityErrands) {
+		s.registerErrandParentTools()
+	}
 	if mcpproviders.Contains(s.profile.Providers, mcpproviders.GitHub) || mcpproviders.Contains(s.profile.Providers, mcpproviders.GitLab) {
 		s.registerTaskPRLinkTools()
 	}

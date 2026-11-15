@@ -71,7 +71,7 @@ func (sm *SessionManager) persistInitialDeliveryBeforeDispatch(ctx context.Conte
 
 func (sm *SessionManager) settleUnsentInitialDelivery(ctx context.Context, submission *models.AgentDeliverySubmission, cause error) error {
 	var notSent *agentctl.RequestNotSentError
-	if submission == nil || !errors.As(cause, &notSent) {
+	if submission == nil || errors.Is(cause, ErrUncertainPromptDelivery) || !errors.As(cause, &notSent) {
 		return cause
 	}
 	writer, ok := sm.streamManager.deliveryRepository().(interface {

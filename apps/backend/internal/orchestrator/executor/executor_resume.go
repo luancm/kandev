@@ -3209,22 +3209,20 @@ func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, se
 			zap.String("task_id", taskID))
 		return nil
 	}
-	if sessionID != "" {
-		session, err := e.repo.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			return err
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID || models.IsErrandSession(session) || !isRuntimeWorkingSessionState(session.State) {
+		state := ""
+		if session != nil {
+			state = string(session.State)
 		}
-		if session == nil || !isRuntimeWorkingSessionState(session.State) {
-			state := ""
-			if session != nil {
-				state = string(session.State)
-			}
-			e.logger.Debug("skipping IN_PROGRESS transition because resumed session is no longer active",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("session_state", state))
-			return nil
-		}
+		e.logger.Debug("skipping IN_PROGRESS transition because resumed session is no longer active",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", state))
+		return nil
 	}
 	return e.updateTaskState(ctx, taskID, v1.TaskStateInProgress)
 }
@@ -3237,7 +3235,7 @@ func (e *Executor) writeTaskFailedForRuntime(ctx context.Context, taskID, sessio
 	if err != nil {
 		return err
 	}
-	if session == nil || session.State != models.TaskSessionStateFailed {
+	if session == nil || session.TaskID != taskID || session.State != models.TaskSessionStateFailed || models.IsErrandSession(session) {
 		return nil
 	}
 	return e.updateTaskState(ctx, taskID, v1.TaskStateFailed)

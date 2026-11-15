@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   removeSession: vi.fn(),
   restartSession: vi.fn(),
   isRestarting: false,
+  errandsEnabled: false,
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -25,7 +26,7 @@ vi.mock("@/hooks/use-task-sessions", () => ({
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
-      features: { dynamicAgentRouting: false },
+      features: { dynamicAgentRouting: false, errands: mocks.errandsEnabled },
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
@@ -138,9 +139,23 @@ beforeEach(() => {
   mocks.removeSession.mockReset();
   mocks.restartSession.mockReset();
   mocks.isRestarting = false;
+  mocks.errandsEnabled = false;
 });
 
 describe("MobileSessionsPicker selection", () => {
+  it.each(["Enter", " "])("selects the focused normal session with %s", (key) => {
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    const picker = screen.getByRole("dialog", { name: "Sessions" });
+
+    const row = screen.getByTestId(SESSION_B_ROW);
+    row.focus();
+    fireEvent.keyDown(row, { key });
+
+    expect(mocks.setActiveSession).toHaveBeenCalledExactlyOnceWith(TASK_ID, "session-b");
+    expect(picker.dataset.state).toBe("closed");
+  });
+
   it("uses the effective layout session instead of a stale store session", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 

@@ -3,10 +3,11 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
 import {
-  mergeCompactionCountValue,
-  mergeCompactionReportingValue,
+  parseContextWindowEntry,
+  readContextWindowMetadata,
   reconcileContextWindowMetadata,
   sameContextWindowEntry,
+  patchContextWindowCompaction,
 } from "@/lib/state/slices/session-runtime/context-window";
 
 export function useSessionContextWindow(
@@ -38,6 +39,9 @@ export function useSessionContextWindow(
   const timestamp = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.timestamp : undefined,
   );
+  const contextWindowEpoch = useAppStore((state) =>
+    sessionId ? (state.taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0) : 0,
+  );
 
   // Memoize the combined object
   const contextWindow = useMemo(() => {
@@ -54,44 +58,39 @@ export function useSessionContextWindow(
     };
   }, [size, used, remaining, efficiency, compactionCount, compactionReporting, source, timestamp]);
 
-  const session = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId] : undefined,
+  const sessionMetadata = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.metadata : undefined,
   );
-  const setContextWindow = useAppStore((state) => state.setContextWindow);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Reconcile the retained session metadata with the live cache. This is the
-  // shared freshness boundary for hydration, deferred HTTP snapshots, and a
-  // missed count-only notification.
-  useEffect(() => {
-    if (!sessionId) return;
-    const metadata = session?.metadata;
-    if (!metadata || typeof metadata !== "object") return;
-    const record = metadata as Record<string, unknown>;
-    const hasGauge = Object.prototype.hasOwnProperty.call(record, "context_window");
-    const count = mergeCompactionCountValue(
-      record.context_compaction_count,
-      contextWindow?.compactionCount,
-    );
-    const reporting = mergeCompactionReportingValue(
-      record.context_compaction_reporting,
-      contextWindow?.compactionReporting,
-    );
+  const metadataContextWindow = useMemo(() => {
+    return parseMetadataContextWindow(sessionMetadata);
+  }, [sessionMetadata]);
 
-    // Hydration never clears a live gauge from a stale null snapshot; live WS
-    // events own explicit invalidation.
+  const setContextWindow = useAppStore((state) => state.setContextWindow);
+  useEffect(() => {
+    if (!detailActive || !sessionId || (!contextWindow && contextWindowEpoch > 0)) return;
+    if (!sessionMetadata || typeof sessionMetadata !== "object") return;
+    const record = sessionMetadata as Record<string, unknown>;
     const next = reconcileContextWindowMetadata({
       current: contextWindow,
       gauge: record.context_window,
-      hasGauge,
-      count,
-      reporting,
+      hasGauge: Object.prototype.hasOwnProperty.call(record, "context_window"),
+      count: record.context_compaction_count,
+      reporting: record.context_compaction_reporting,
       timestamp: undefined,
       allowExplicitClear: false,
     });
-    if (next === undefined || next === null || sameContextWindowEntry(next, contextWindow)) return;
+    if (!next || sameContextWindowEntry(next, contextWindow)) return;
     setContextWindow(sessionId, next);
-  }, [sessionId, contextWindow, session?.metadata, setContextWindow]);
+  }, [
+    detailActive,
+    sessionId,
+    sessionMetadata,
+    contextWindow,
+    contextWindowEpoch,
+    setContextWindow,
+  ]);
 
   // Subscribe to session updates via WebSocket
   useEffect(() => {
@@ -108,5 +107,28 @@ export function useSessionContextWindow(
     }
   }, [detailActive, sessionId, connectionStatus]);
 
-  return contextWindow;
+  if (contextWindow) {
+    const record = sessionMetadata as Record<string, unknown> | undefined;
+    return (
+      patchContextWindowCompaction(
+        contextWindow,
+        record?.context_compaction_count,
+        record?.context_compaction_reporting,
+      ) ?? contextWindow
+    );
+  }
+  return contextWindowEpoch === 0 ? metadataContextWindow : undefined;
+}
+
+function parseMetadataContextWindow(sessionMetadata: unknown): ContextWindowEntry | undefined {
+  const metadata = readContextWindowMetadata(sessionMetadata);
+  if (!metadata.present) return undefined;
+  return (
+    parseContextWindowEntry(
+      metadata.contextWindow,
+      undefined,
+      metadata.compactionCount,
+      (sessionMetadata as Record<string, unknown>).context_compaction_reporting,
+    ) ?? undefined
+  );
 }

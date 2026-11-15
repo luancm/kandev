@@ -1,4 +1,4 @@
-package dialect
+package dialect_test
 
 import (
 	"context"
@@ -8,17 +8,18 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
 func TestOrderedIDConcat_FragmentShape(t *testing.T) {
-	got := OrderedIDConcat(SQLite3, "parent_id = p.id")
+	got := dialect.OrderedIDConcat(dialect.SQLite3, "parent_id = p.id")
 	want := "(SELECT GROUP_CONCAT(w.id, ',') FROM (SELECT id FROM tasks WHERE parent_id = p.id ORDER BY id) w)"
 	if got != want {
 		t.Errorf("sqlite: got %q, want %q", got, want)
 	}
 
-	got = OrderedIDConcat(PGX, "parent_id = p.id")
+	got = dialect.OrderedIDConcat(dialect.PGX, "parent_id = p.id")
 	want = "(SELECT string_agg(w.id, ',' ORDER BY w.id) FROM (SELECT id FROM tasks WHERE parent_id = p.id) w)"
 	if got != want {
 		t.Errorf("pgx: got %q, want %q", got, want)
@@ -36,7 +37,7 @@ func TestOrderedIDConcat_SQLite_OrdersAscendingByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	sqlxDB := sqlx.NewDb(rawDB, SQLite3)
+	sqlxDB := sqlx.NewDb(rawDB, dialect.SQLite3)
 	t.Cleanup(func() { _ = sqlxDB.Close() })
 
 	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, parent_id TEXT)`); err != nil {
@@ -53,7 +54,7 @@ func TestOrderedIDConcat_SQLite_OrdersAscendingByID(t *testing.T) {
 		}
 	}
 
-	frag := OrderedIDConcat(SQLite3, "parent_id = 'parent-1'")
+	frag := dialect.OrderedIDConcat(dialect.SQLite3, "parent_id = 'parent-1'")
 	var got string
 	if err := sqlxDB.QueryRowxContext(context.Background(), "SELECT "+frag).Scan(&got); err != nil {
 		t.Fatalf("query: %v", err)
@@ -89,7 +90,7 @@ func TestOrderedIDConcat_Postgres_OrdersAscendingByID(t *testing.T) {
 		}
 	}
 
-	frag := OrderedIDConcat(PGX, "parent_id = 'parent-1'")
+	frag := dialect.OrderedIDConcat(dialect.PGX, "parent_id = 'parent-1'")
 	var got string
 	if err := sqlxDB.QueryRowxContext(context.Background(), "SELECT "+frag).Scan(&got); err != nil {
 		t.Fatalf("query: %v", err)

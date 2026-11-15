@@ -168,4 +168,3 @@ drives the numbered and searching phase helpers separately, because the
 completed phase is applied immediately and its progress is released. The two `...QueryError_ReturnsError`
 tests now accept one unapplied result entry alongside the error instead of
 `nil`, matching the partial-outcome contract.
-
