@@ -4,7 +4,7 @@ Errands should make a focused piece of delegated work easy to inspect, stop and 
 
 The companion [code quality and redesign roadmap](code-quality-roadmap.md) covers maintainability, accumulated implementation complexity and documentation cleanup. The pilot below supplies real-use evidence; it does not substitute for that design review. It uses a verified current build in a disposable instance, independently of the user's main deployment.
 
-The delivery branch is `feature/plan-errands-first-d-424`. Source `ee0f077cb9` includes the history-loading and late-tool replay repairs plus upstream `585824a5d0`. Backend, frontend and rebuilt desktop/phone integration checks pass. The final comparison and first-delivery disposition are recorded; the Kandev task plan owns the final remote-delivery receipt. The Kandev task plan is the current execution queue; the links below retain detailed evidence.
+The delivery branch is `feature/plan-errands-first-d-424`. First-delivery source `ee0f077cb9` includes the history-loading and late-tool replay repairs plus upstream `585824a5d0`; its backend, frontend and rebuilt desktop/phone integration checks passed. Later quality checkpoints are delivered through `77b155597c`. That source passed functional controls but raised a new ordinary return-navigation warning, retained in the [verification receipt](../errands-simplification/final-verification-handoff.md). Task04's subscription optimization is source-reviewed and awaiting fresh browser/performance acceptance. The pilot has not run. The Kandev task plan owns current execution and exact delivery receipts; the first-delivery measurements below remain historical evidence.
 
 ## Finish the current delivery
 
@@ -17,7 +17,7 @@ The delivery branch is `feature/plan-errands-first-d-424`. Source `ee0f077cb9` i
 
 Existing accepted recovery, cleanup, duration and individual Stop behavior is retained. Do not reopen those packages merely to repeat a review. New failures or changed shared boundaries justify focused regressions.
 
-The measured tradeoff remains visible: the final phone first-switch median is +76.2 ms against matching main; the retained heap difference is about 0.8 MiB by differences in medians, or 1.17 MiB desktop / 0.81 MiB phone by paired-round medians. All final latency values pass the unchanged variance warning gates, but this small experiment does not prove zero overhead. The earlier 56.316 ms cold-p95 and 92.2 KiB heap strict-limit misses remain disclosed acceptance exceptions. Carry these observations into the pilot; do not silently widen budgets or infer constant SQL scan cost from bounded browser caches.
+The first-delivery tradeoff remains visible: its phone first-switch median was +76.2 ms against matching main; retained heap differed by about 0.8 MiB by differences in medians, or 1.17 MiB desktop / 0.81 MiB phone by paired-round medians. That cohort passed the unchanged latency warning gates, but does not clear the later warning or prove zero overhead. The earlier 56.316 ms cold-p95 and 92.2 KiB heap strict-limit misses remain disclosed acceptance exceptions. Carry these observations into the pilot; do not silently widen budgets or infer constant SQL scan cost from bounded browser caches.
 
 ## Routing that users and agents can understand
 
