@@ -9,7 +9,7 @@ import { expect, type Page, type Locator } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
-import type { Errand } from "../../lib/types/errands";
+import type { Errand, ErrandBrowserSummary } from "../../lib/types/errands";
 import type { TaskSessionState } from "../../lib/types/http";
 import { mockTurnGate } from "./mock-turn-gate";
 
@@ -37,11 +37,13 @@ export type ErrandUpdateBrowserSocket = {
 /** Send an existing errand.updated event through the browser's real handler path. */
 export async function routeErrandUpdateBrowserSocket(
   page: Page,
+  options: { reflectSyntheticSummary?: boolean } = {},
 ): Promise<ErrandUpdateBrowserSocket> {
   let notify: ((errand: Errand) => void) | undefined;
   let sequence = 0;
   let refuseNextPrompt = false;
   const refused: string[] = [];
+  const overrides = new Map<string, Errand>();
 
   await page.routeWebSocket(/\/ws(?:\?.*)?$/, (socket) => {
     const server = socket.connectToServer();
@@ -89,7 +91,51 @@ export async function routeErrandUpdateBrowserSocket(
       const next = forwarded.join("\n");
       if (next.trim()) server.send(next);
     });
-    server.onMessage((message) => socket.send(message));
+    server.onMessage((message) => {
+      if (typeof message !== "string" || !options.reflectSyntheticSummary || overrides.size === 0) {
+        socket.send(message);
+        return;
+      }
+      const parts = message.split("\n").map((part) => {
+        try {
+          const frame = JSON.parse(part) as {
+            type?: string;
+            action?: string;
+            payload?: ErrandBrowserSummary;
+          };
+          if (
+            frame.type !== "response" ||
+            frame.action !== "errand.browser_summary" ||
+            !frame.payload
+          )
+            return part;
+          const summary = frame.payload;
+          const rows = summary.errands.map((row) => {
+            const override = overrides.get(row.errand_id);
+            return override?.task_id === summary.scope.task_id
+              ? { ...row, status: override.status, updated_at: override.updated_at }
+              : row;
+          });
+          const queued = (parentId?: string) =>
+            rows.filter(
+              (row) => row.status === "queued" && (!parentId || row.parent_session_id === parentId),
+            ).length;
+          frame.payload = {
+            ...summary,
+            errands: rows,
+            counts: { ...summary.counts, queued: queued() },
+            parent_counts: summary.parent_counts.map((parent) => ({
+              ...parent,
+              counts: { ...parent.counts, queued: queued(parent.parent_session_id) },
+            })),
+          };
+          return JSON.stringify(frame);
+        } catch {
+          return part;
+        }
+      });
+      socket.send(parts.join("\n"));
+    });
     notify = (errand) => {
       sequence += 1;
       socket.send(
@@ -107,6 +153,7 @@ export async function routeErrandUpdateBrowserSocket(
     isConnected: () => Boolean(notify),
     notifyErrandUpdated: (errand) => {
       if (!notify) throw new Error("Expected the browser WebSocket to connect first");
+      if (options.reflectSyntheticSummary) overrides.set(errand.errand_id, errand);
       notify(errand);
     },
     refuseNextPrompt: () => {

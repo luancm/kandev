@@ -714,7 +714,9 @@ test.describe("narrow fine-pointer phone layout", () => {
           return errands.map((errand) => sessions.get(errand.errand_id));
         })
         .toEqual(errands.map(() => "RUNNING"));
-      const browserSocket = await routeErrandUpdateBrowserSocket(page);
+      const browserSocket = await routeErrandUpdateBrowserSocket(page, {
+        reflectSyntheticSummary: true,
+      });
       await page.goto(`/t/${taskId}`);
       const chat = parentChat(page, parentId);
       await expect.poll(() => browserSocket.isConnected()).toBe(true);

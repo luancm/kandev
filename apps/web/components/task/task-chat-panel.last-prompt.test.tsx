@@ -5,6 +5,7 @@ import type { Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { MessageListHandle } from "./chat/message-list-shared";
 import type { LoadMessageWindowResult } from "@/hooks/domains/session/load-message-window";
+import { defaultErrandsState } from "@/lib/state/slices/errands/errands-slice";
 
 const { aroundRequest, scrollToMessage } = vi.hoisted(() => ({
   aroundRequest: vi.fn(),
@@ -55,7 +56,7 @@ const state = {
   workflows: { items: [] },
   taskSessions: { items: { [SESSION]: { name: null, agent_profile_id: null } } },
   taskSessionsByTask: { itemsByTaskId: {} },
-  errands: { byTaskId: {} },
+  errands: { ...defaultErrandsState.errands, byTaskId: {} },
   agentProfiles: { items: [] },
   userSettings: {
     showAnchoredPromptBar: true,
