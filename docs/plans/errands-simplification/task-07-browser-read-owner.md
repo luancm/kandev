@@ -74,18 +74,8 @@ flock -x /tmp/kandev-errands-repair-build.lock pnpm e2e:run --host --shards 1 --
 Also run these existing compatibility cases against the same frozen artifacts (use the managed runner's supported --no-build option only after verifying artifact/source identity):
 
 ```bash
-flock -x /tmp/kandev-errands-repair-build.lock pnpm e2e:run --host --shards 1 --project chromium -- tests/session/errands.spec.ts --grep '^two clients remove deleted errands and flag-off restart retains detached sessions including the managed Make override, preserve artifact hashes, and retain all process handles. No UI structure or touch behavior changes are intended; existing desktop/phone compositions remain authoritative, so no new ASCII preview is required. The parent coordinates matching-main ordinary performance and history-growth controls once all affected browser source is settled; do not change workloads, caps or select only favorable samples.
-
-## Results
-
-Pending.
-
-flock -x /tmp/kandev-errands-repair-build.lock pnpm e2e:run --host --shards 1 --project mobile-chrome -- tests/session/mobile-errands.spec.ts --grep '^task29 phone separates normal conversations and parent errands with temporary child navigation and quiet history including the managed Make override, preserve artifact hashes, and retain all process handles. No UI structure or touch behavior changes are intended; existing desktop/phone compositions remain authoritative, so no new ASCII preview is required. The parent coordinates matching-main ordinary performance and history-growth controls once all affected browser source is settled; do not change workloads, caps or select only favorable samples.
-
-## Results
-
-Pending.
-
+flock -x /tmp/kandev-errands-repair-build.lock pnpm e2e:run --host --shards 1 --project chromium tests/session/errands.spec.ts --grep 'two clients remove deleted errands and flag-off restart retains detached sessions$'
+flock -x /tmp/kandev-errands-repair-build.lock pnpm e2e:run --host --shards 1 --project mobile-chrome tests/session/mobile-errands.spec.ts --grep 'task29 phone separates normal conversations and parent errands with temporary child navigation and quiet history$'
 ```
 
 The desktop case supplies real flag-off retained direct navigation; the phone case supplies direct-child reload/Back and parent/ordinary parity. New real-store admission coverage must explicitly cover feature-off inspection and missing-parent/ordinary routes; the six enabled-feature browser cases alone are insufficient. Parent switching, independent panels and Strict Mode cleanup must retain one bounded history owner per surface.
