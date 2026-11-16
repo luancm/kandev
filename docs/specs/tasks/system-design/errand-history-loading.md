@@ -10,6 +10,8 @@ requirements:
 
 # Errand history loading design
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 ## Authority and source grounding
 
 Tasks own the browser inspection contract. The [Errands ADR](../../../decisions/2026-10-23-errands-first-class-delegation.md), [recovery settlement authority](../../../decisions/2026-11-09-errand-recovery-settlement-authority.md), [Errands design](errands.md) and [conversation navigation](errand-conversation-navigation.md) remain authority. This adds a browser read projection, not another lifecycle owner. The projection/query choices are sufficiently captured here; no additional ADR is needed.

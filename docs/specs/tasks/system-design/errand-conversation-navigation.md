@@ -13,6 +13,8 @@ requirements:
 
 # Errand conversation navigation and historical events
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 ## Boundary and rationale
 
 The task system owns the parent-child relationship and selected conversation; no backend identity, permissions, transcript or workspace changes are required. Normal conversations are peers inside a task. Delegated work is inspected within its parent, so retained children do not compete for regular tabs. Existing role/ownership isolation remains authoritative in [the Errands design](errands.md). This local presentation choice is sufficiently recorded here and in its acceptance criteria; no separate ADR is needed.

@@ -1,6 +1,6 @@
 ---
 created: 2026-10-30
-status: draft
+status: done
 requirements:
   - REQ-PLATFORM-INTERACTIVE-READS-005
   - REQ-TASKS-ERRAND-ORDER-001
@@ -65,37 +65,37 @@ Keep the existing shared workspace, depth-one, five-live cap, fixed child tool c
 
 The small packets separate independently testable storage, pure classification, runtime integration and UI outcomes. Execute dependencies before consumers; shared source files, migrations and browser specs have one writer. Commands in work orders define acceptance; only their Results sections establish completed evidence.
 
-| Task | Outcome | Review finding | Depends on | Status |
-| --- | --- | --- | --- | --- |
-| 01 | [Token-fenced result release](task-01-token-fenced-release.md) | 10 | None | done |
-| 02 | [Preserve cancellation against late settlement](task-02-cancellation-settlement.md) | 3 | 01 | done |
-| 03 | [Atomic result claims and response snapshots](task-03-atomic-result-claims.md) | 1, 2 | 02 | done |
-| 04 | [Fenced await outcomes and visible uncertainty](task-04-await-outcome-recovery.md) | 1 | 03 | done |
-| 05 | [Fail closed on parent settlement errors](task-05-parent-settlement-guard.md) | 4 | None | done |
-| 06 | [Preserve task state on unreadable session role](task-06-executor-role-guard.md) | 11 | None | done |
-| 07 | [Capture results before successor admission](task-07-settle-before-successor.md) | 8 | 02, 03, 05 | done |
-| 08 | [Keep created and recovered errands detached](task-08-created-errand-isolation.md) | 9 | 05, 07 | done |
-| 09 | [Persist exact teardown obligations](task-09-teardown-intent-storage.md) | 6 | 04 | done |
-| 10 | [Retry cancellation without stopping successors](task-10-retry-exact-teardown.md) | 6 | 09, 06 | done |
-| 11 | [Reconstruct cancellation before admission](task-11-recover-lost-cascades.md) | 5 | 10 | done |
-| 12 | [Persist and classify reserved launch authority](task-12-reserved-launch-authority.md) | 7 | 06, 09 | done |
-| 13 | [Recover launch bookkeeping without replay](task-13-adopt-reserved-launches.md) | 7 | 08, 11, 12 | done |
-| 14 | [Preserve Send Now sources and receipt identity](task-14-send-now-source-identity.md) | 18 | 04, 08 | done |
-| 15 | [Gate prepared results without losing user input](task-15-disabled-prepared-delivery.md) | 19 | 14 | done |
-| 16 | [Batch bounded errand summary observations](task-16-bounded-summary-aggregate.md) | 12 | None | done |
-| 17 | [Repair missing and stale errand summaries](task-17-authoritative-summary-repair.md) | 12 | 16 | done |
-| 18 | [Preserve role and parent in summary fallback](task-18-fallback-session-identity.md) | 20 | None | done |
-| 19 | [Refresh each task across connection generations](task-19-reconnect-freshness.md) | 13 | None | done |
-| 20 | [Converge authoritative context and cache](task-20-context-snapshot-freshness.md) | 14 | 19 | done |
-| 21 | [Keep errand navigation inside its preview](task-21-preview-navigation.md) | 15 | None | done |
-| 22 | [Hide ownership actions for retained errands](task-22-preview-menu-isolation.md) | 16 | 21 | done |
-| 23 | [Announce rendered Threads status changes](task-23-visible-status-announcements.md) | 17 | 20 | done |
-| 24 | [Verify mixed-parent ordering and transitions](task-24-mixed-parent-browser-acceptance.md) | task17 acceptance | 13, 15, 17, 18, 20, 22, 23 | done |
-| 25 | [Complete current dark desktop and phone evidence](task-25-current-dark-media.md) | task16 acceptance | 24 | done |
-| 26 | [Reconcile manifests and final repair evidence](task-26-documentation-reconciliation.md) | 21 | 25 | done |
-| 27 | [Compact historical await disclosure](task-27-history-disclosure.md) | User-reported historical spinner/visual weight | None | done |
-| 28 | [Avoid notification guard re-entry](task-28-notification-guard.md) | Session-stall investigation | None | done |
-| 29 | [Separate errand navigation and unify history](task-29-conversation-navigation-and-history.md) | Approved UI clarification | 27 | done |
+| Task | Outcome                                                                                        | Review finding                                 | Depends on                 | Status |
+| ---- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------- | ------ |
+| 01   | [Token-fenced result release](task-01-token-fenced-release.md)                                 | 10                                             | None                       | done   |
+| 02   | [Preserve cancellation against late settlement](task-02-cancellation-settlement.md)            | 3                                              | 01                         | done   |
+| 03   | [Atomic result claims and response snapshots](task-03-atomic-result-claims.md)                 | 1, 2                                           | 02                         | done   |
+| 04   | [Fenced await outcomes and visible uncertainty](task-04-await-outcome-recovery.md)             | 1                                              | 03                         | done   |
+| 05   | [Fail closed on parent settlement errors](task-05-parent-settlement-guard.md)                  | 4                                              | None                       | done   |
+| 06   | [Preserve task state on unreadable session role](task-06-executor-role-guard.md)               | 11                                             | None                       | done   |
+| 07   | [Capture results before successor admission](task-07-settle-before-successor.md)               | 8                                              | 02, 03, 05                 | done   |
+| 08   | [Keep created and recovered errands detached](task-08-created-errand-isolation.md)             | 9                                              | 05, 07                     | done   |
+| 09   | [Persist exact teardown obligations](task-09-teardown-intent-storage.md)                       | 6                                              | 04                         | done   |
+| 10   | [Retry cancellation without stopping successors](task-10-retry-exact-teardown.md)              | 6                                              | 09, 06                     | done   |
+| 11   | [Reconstruct cancellation before admission](task-11-recover-lost-cascades.md)                  | 5                                              | 10                         | done   |
+| 12   | [Persist and classify reserved launch authority](task-12-reserved-launch-authority.md)         | 7                                              | 06, 09                     | done   |
+| 13   | [Recover launch bookkeeping without replay](task-13-adopt-reserved-launches.md)                | 7                                              | 08, 11, 12                 | done   |
+| 14   | [Preserve Send Now sources and receipt identity](task-14-send-now-source-identity.md)          | 18                                             | 04, 08                     | done   |
+| 15   | [Gate prepared results without losing user input](task-15-disabled-prepared-delivery.md)       | 19                                             | 14                         | done   |
+| 16   | [Batch bounded errand summary observations](task-16-bounded-summary-aggregate.md)              | 12                                             | None                       | done   |
+| 17   | [Repair missing and stale errand summaries](task-17-authoritative-summary-repair.md)           | 12                                             | 16                         | done   |
+| 18   | [Preserve role and parent in summary fallback](task-18-fallback-session-identity.md)           | 20                                             | None                       | done   |
+| 19   | [Refresh each task across connection generations](task-19-reconnect-freshness.md)              | 13                                             | None                       | done   |
+| 20   | [Converge authoritative context and cache](task-20-context-snapshot-freshness.md)              | 14                                             | 19                         | done   |
+| 21   | [Keep errand navigation inside its preview](task-21-preview-navigation.md)                     | 15                                             | None                       | done   |
+| 22   | [Hide ownership actions for retained errands](task-22-preview-menu-isolation.md)               | 16                                             | 21                         | done   |
+| 23   | [Announce rendered Threads status changes](task-23-visible-status-announcements.md)            | 17                                             | 20                         | done   |
+| 24   | [Verify mixed-parent ordering and transitions](task-24-mixed-parent-browser-acceptance.md)     | task17 acceptance                              | 13, 15, 17, 18, 20, 22, 23 | done   |
+| 25   | [Complete current dark desktop and phone evidence](task-25-current-dark-media.md)              | task16 acceptance                              | 24                         | done   |
+| 26   | [Reconcile manifests and final repair evidence](task-26-documentation-reconciliation.md)       | 21                                             | 25                         | done   |
+| 27   | [Compact historical await disclosure](task-27-history-disclosure.md)                           | User-reported historical spinner/visual weight | None                       | done   |
+| 28   | [Avoid notification guard re-entry](task-28-notification-guard.md)                             | Session-stall investigation                    | None                       | done   |
+| 29   | [Separate errand navigation and unify history](task-29-conversation-navigation-and-history.md) | Approved UI clarification                      | 27                         | done   |
 
 ## UI previews
 
@@ -178,28 +178,23 @@ The preceding parent submission `prompt:queue:76d7d1c4-9927-40c6-bce0-f19247a800
 
 Errands start/await tools are absent from the current tool catalog. Authorized native workers are active instead: `atomic_delivery` owns Task03 plus coordinated admission integration; `summary_repair` owns Tasks17/18; `frontend_repairs` owns Tasks19-23 sequentially. Primary owns new [Task28](task-28-notification-guard.md) and isolated PostgreSQL verification. The primary remains active to integrate progress instead of relying on the broken Errand wake-up path. No prior implementation authorization is being re-requested.
 
-
 ## Resource-constrained resumption (2026-10-31)
 
 The user reported resource exhaustion from concurrent Go and TypeScript builds. Resume the already-authorized implementation sequentially: at most one active implementation errand and one heavy validation command. Use Luna for bounded designed packets and Sol when complexity requires it. Every heavy command must acquire `/tmp/kandev-errands-repair-build.lock`; Go commands use `GOMAXPROCS=2` and `-p 1`. The primary must not run builds while an errand owns validation. Preserve prior partial edits; recover and verify them rather than assuming interrupted commands passed.
 
 Current errand: `2521c824-cf2e-469a-93c9-693335a80ff0` (Lunaldinho), Task 28 notification guard repair. After its receipt, integrate results and continue the remaining work orders in dependency order, recovering Task 03 and the summary/frontend partial edits. Tasks 01, 02, 05, 06, and 27 retain their completed receipts. Task 16 still needs its PostgreSQL acceptance. No commits, pushes, or live-instance changes are authorized by this resumption.
 
-
 ### Sequential handoff after Task 28
 
 Task 28 is done: exact-parent-session guard detection prevents notification readiness re-entry; both same-session regressions reproduced RED, all six focused race cases passed GREEN, and changed-file lint reported zero issues. No broad suite was run. Task 03 atomic claims is the next sole active implementation errand using the Sol medium profile; it owns the build lock and must recover interrupted changes, complete transaction/admission integration, and execute actual PostgreSQL checks. The primary runs no concurrent builds. Hiding errand conversations from regular session tabs remains a proposal from the discussion, not an approved implementation change.
-
 
 ### Task 03 revision checkpoint
 
 Errand `33aee92f-c455-4198-a7c0-360d206bd7f1` finished a partial foundation: persisted result revisions and stable backfill, six focused tests including actual PostgreSQL, changed-Go lint, SQL guard, and whitespace checks passed. Task 03 remains in progress; admission fences, receipts/release recovery, ambiguous commits, independent-connection races, and conformance are still open. The next sole Sol errand implements the durable admission milestone; builds remain serialized. PostgreSQL from the completed errand was stopped.
 
-
 ### Task 03 admission packet narrowed
 
 Errand `81f641a6-02e0-4256-8ad2-567f7764a41e` produced only an integration trace; it made no production changes and ran no new tests. It identified enqueue-time supersession, legacy dispatch bypass, and missing release fences. The next sole Sol errand is narrowed to repository admission/reservation and exact claim-release transactions with tests. Real orchestrator/MCP admission wiring remains a subsequent required milestone; neither this trace nor repository-only work completes Task 03.
-
 
 ### Task 03 repository milestone and next integration
 
@@ -209,18 +204,15 @@ Repository admission generations/reservations, idempotent decisions, immutable c
 
 The user clarified that Option C applies consistently to all errand chat markers, not just completed waits. Remaining UI scope includes compact, subtle expandable start/wait/completion events; collapsed summaries omit repeated titles, expanded content exposes titles and outcomes, and completed historical events use static icons and historical wording. Live status belongs in the Errands panel. Preserve completed Option C behavior and cover desktop/mobile parity. This clarification must be incorporated into the UI specification/work order before that sequential implementation packet; it is not yet implemented. The user subsequently approved removing errands from regular session tabs; see the UI priority clarification below.
 
-
 ### Approved UI priority: sessions versus errands
 
 The user explicitly approved the proposed tab simplification and clarified ownership: normal sessions are conversations within a task; errands are delegated work inside a parent session. Immediately after the currently running backend integration errand, prioritize a sequential UI packet covering this distinction together with consistent compact historical markers. Update the relevant requirements/design and work order to reflect this approved behavior before implementation.
 
 Normal conversations remain in the regular session tabs. Errands are accessed through their parent session's Errands panel, with active work visible and completed history collapsed. Opening an errand displays its conversation temporarily with an explicit Back to parent action and does not permanently add a regular tab. Preserve transcripts and direct access; hiding tabs is not deletion or runtime cleanup. Apply desktop/native-mobile parity, reload/direct-navigation handling, and existing role/ownership action restrictions. Start, wait, and completion chat events share the subtle expandable historical presentation already selected for waits. No additional implementation errand or build runs alongside the current backend packet.
 
-
 ### Authorized cache cleanup at the next idle boundary
 
 The user requested cache cleanup because disk usage is high. Measurement: root filesystem 91% used, approximately 11 GiB available; `/home/luancm/.cache/go-build` alone occupies 35 GiB, Go modules 542 MiB, Playwright browsers 646 MiB, disposable PostgreSQL 375 MiB. The current integration errand has a focused race run active, so do not remove its caches while it builds. Before starting the next UI errand, acquire the shared build lock and reclaim expendable build caches, prioritizing Go build cache; inspect TypeScript/Vite/pnpm cache locations and remove only identified disposable caches. Preserve source, node_modules dependencies, live databases, transcripts, and test evidence. Report measured reclaimed space. Cleanup is authorized and pending, not completed.
-
 
 ### Dispatch integration receipt and cache cleanup
 
@@ -228,13 +220,11 @@ Errand `6a7fd5a8-aee1-44d7-bfcc-a9d686b17e4d` implemented durable admissions acr
 
 After all worker commands and disposable PostgreSQL stopped, authorized cleanup ran under the shared build lock: `go clean -cache -testcache`, plus the identified Vite cache and TypeScript incremental build metadata. Root filesystem usage fell from 91% (11 GiB available) to 61% (45 GiB available) after Go cleanup, approximately 34 GiB reclaimed. Dependencies, source, databases, transcripts and test evidence were preserved. Subsequent builds start with a cold Go cache and must remain sequential. The next priority is the approved session-versus-errand UI and consistent historical markers.
 
-
 ### Task 29 clarification: normal-session menus and architectural simplicity
 
 The user highlighted the desktop Agents/session reopen menu as another source of errand clutter and requested a simple architecture. This is the same approved navigation boundary, not a separate feature: all ordinary conversation tabs, reopen menus, normal-session pickers, counts and ordinals should use the existing session role to exclude errands. Preserve the complete session collection for transcripts, direct links, runtime state and parent-owned errand navigation. Reuse a shared existing navigation selector/helper where practical; do not change the global store/API to discard errands, add a new database model, migrate transcript/runtime storage, or duplicate the session lifecycle just to change navigation.
 
 Inspection during active Task29 found `apps/web/components/task/session-reopen-menu.tsx` still sorting all `useTaskSessions(taskId).sessions` without a role filter. Before accepting Task29, include that actual desktop +/Agents menu in the implementation and browser checks: mixed normal/errand sessions must show only normal conversations with consistent ordinals, including when the active view is an errand. Errands remain reachable from the parent panel and direct links. This gap is recorded for integration; no concurrent UI edits or additional worker was launched.
-
 
 ### Task 29 UI handoff and final integration
 
@@ -242,11 +232,9 @@ Errand `12b81a34-5ed2-493e-8ab8-ed857bbde1f5` implemented normal-only tabs, temp
 
 The sole next errand `8838dd25-ddb6-41cb-a729-522a98d23a6a` (Luna) owns the narrow menu/filter regression and fixture compatibility fixes, with serialized builds. The parent updated public coordination guidance for parent-owned navigation and expandable historical markers, preserving the existing task-wide Stop-all scope; public-doc validation remains pending until the worker releases validation ownership. Task21/22 reconciliation and Task25 dark-media acceptance remain open; do not infer their completion from the Task29 headline counts.
 
-
 ### Current UI integration status
 
 The +/Agents menu now excludes errands and keeps normal-session numbering, including after the feature is disabled; the follow-up passed 161 focused tests, full web typecheck, scoped lint/format and 2/2 desktop browser checks. Public coordination docs are reconciled and validated (63/63 tests, 54 pages). Original Task21/22 preview navigation and ownership-action acceptance is the next bounded sequential packet, adapting only obsolete child-tab/phone-picker selectors to the approved temporary-view design. Task29 stays in progress pending that reconciliation. Task25 media remains separately pending; no runtime/database redesign was introduced for navigation.
-
 
 ### UI implementation accepted; reconnect repair resumes
 
@@ -254,13 +242,11 @@ Tasks21, 22 and 29 are done. The approved normal-session/errand distinction now 
 
 Next sole implementation packet: Task19 reconnect freshness, recovering the partial hook/store changes left by the earlier interruption. Builds/tests remain serialized under the shared lock; no additional worker runs alongside it.
 
-
 ### Task19 complete; Task20 starts in bounded suborders
 
 Task19 reconnect freshness is done: 147 tests across ten files, scoped lint/format and full web typecheck passed. Regressions cover unmounted reconnects, task/auth-scope switching and hydration that retains cached rows while resetting runtime freshness maps. Task29 changes remain intact.
 
 Task20 now proceeds sequentially through its existing UI-F2a/b/c suborders. The next sole errand owns UI-F2a authoritative context-property/cache ingestion: explicit null must clear cached context, accepted values replace it, omission preserves it, and the hook remains passive. Context epochs, stale transport ownership and the missed-event browser acceptance remain later gates; no early completion claim is permitted.
-
 
 ### Resource-retention concern and proposed actions (not yet implemented)
 
@@ -270,13 +256,11 @@ Read-only inspection confirms existing executor idle parking already provides ex
 
 The remaining lifecycle package should evaluate this as a priority resource contract after user feedback. Validate sequential completed-errand bursts with real process-tree/PSS accounting and plateau behavior, repeated Open/Back without wake, exact-once follow-up resume, successor races, failed-stop retry and restart, and preserved result delivery/parent workspace. Keep active runtime admission, idle completed runtime retention and history/artifact disk growth distinct. Normal runtime caps should account for resident ready processes; no per-errand automatic compiler-cache deletion, transcript TTL, separate database model or parallel cleanup service is proposed. This turn changed no live runtime/settings or implementation; the existing UI-F2a errand continues alone.
 
-
 ### Task20 ingestion complete; snapshot fencing active
 
 UI-F2a completed with 39 focused tests, 119 adjacent tests, scoped lint/format and full web typecheck. Explicit context clears/replacements now atomically update session metadata, cache and task mirrors; the hook is passive and cannot resurrect cleared metadata. The initial default-heap typecheck exhausted Node's 2 GiB heap; the sequential 8 GiB-heap rerun passed.
 
 The next sole Luna errand implements UI-F2b context epochs and hydration fencing, preserving newer live updates against delayed snapshots. UI-F2c connection-generation response ownership and final missed-event desktop/phone acceptance remain open, so Task20 stays in progress. The completed-errand resource-retention policy remains a recorded proposal pending user feedback; no implementation or live cleanup was inferred from that discussion.
-
 
 ### Task20 snapshot fencing complete; final reconnect/browser packet
 
@@ -284,13 +268,11 @@ UI-F2b completed with 104 tests across nine files, scoped lint/format, full web 
 
 The sole next Luna errand implements UI-F2c full-session read ownership across connection generations and then executes the specified missed-event desktop/native-phone browser acceptance. Task20 remains in progress until those gates pass. Curated dark media and resource-retention policy remain distinct from this acceptance; no parallel builds or errands are started.
 
-
 ### Task20 accepted; Threads announcement repair next
 
 Task20 is done. Its final connection-generation packet passed 42 focused tests, typecheck, scoped lint/format, and both desktop Chromium and native Pixel5 missed-event cases on current assets. Browser evidence proves reconnect clears the context row without reload, keeps sibling context, avoids child detail activation, remains clear after reload and has no horizontal overflow. UI-F2a/b receipts remain recorded in the work order.
 
 The sole next Luna errand owns Task23: visible Threads status announcements with unchanged unread behavior and hidden-view silence. All checks remain serialized. Task25 curated media and remaining backend repairs stay open.
-
 
 ### Frontend repair packets complete; backend atomic-delivery acceptance resumes
 
@@ -298,13 +280,11 @@ Task23 is done: real desktop Threads 2/2, native-phone Threads 2/2, adjacent uni
 
 Resume Task03's remaining backend transaction work with one Sol errand: complete parent-inventory serialization, retained-token ambiguous-commit readback, bounded stale-snapshot retry and missing real service fault/concurrency coverage. The prior durable admission integration receipts remain valid for their tested scope and must be preserved. Task04 native offer/receipt work and downstream lifecycle repairs remain pending. Disk currently has approximately 41 GiB free (65% used); no cache cleanup is needed at this checkpoint.
 
-
 ### Task03 complete; Task04 begins with offer/abort outcomes
 
 Task03 is done. Final acceptance includes 664 top-level race-test passes across service/repository, dispatch/MCP/executor and queue boundaries, actual PostgreSQL, 14 task conformance scenarios, both-engine upgrade checks, SQL guard, build, zero lint issues, docs validation and clean whitespace. Immutable snapshots, full-inventory serialization, retained-token ambiguous-commit handling and bounded retries are implemented; PostgreSQL stopped and the writer released.
 
 Task04 proceeds through its approved 04A/04B/04C passes sequentially. The next sole Sol errand owns 04A: trusted attempt ownership, durable offered/error disposition and journal-backed abort recovery. Native receipt extraction/inbox reduction and revision-bound presentation remain later passes. The user's duplicate-prevention policy remains authoritative: uncertainty never authorizes automatic replay.
-
 
 ### Task04A accepted; native receipt integration active
 
@@ -312,13 +292,11 @@ The 04A errand's displayed result stopped before its final handoff, but the save
 
 The next sole Sol errand owns 04B supported native receipt extraction, bounded journal/event preservation and atomic authenticated inbox/receipt replay reduction. Offered success remains distinct from positive reception. Task04 stays in progress for 04B and the later 04C presentation pass; no automatic replay or resource-retention change is included.
 
-
 ### Task04B accepted; revision-bound projection next
 
 04B is done: both supported Codex native receipt paths preserve evidence through display truncation and journal replay, then reduce atomically with authenticated inbox/cursor acceptance. Final verification passed 85 boundary race tests (43 actual PostgreSQL), 716 native adapter tests, 87 journal tests, 14 conformance scenarios, lint, SQL guard, build and docs checks. One unrelated opt-in installed OpenCode compatibility test was skipped; neither supported receipt path was skipped. PostgreSQL stopped and writer released.
 
 04C is split sequentially to keep ownership and cost bounded: the next sole Sol errand implements backend uncertainty classification and revision-bound DTO/list/event projection; a subsequent cheaper UI packet will consume that exact contract and preserve the compact historical presentation. No warning is inferred from a live await, omitted data, zero-item waits or an unrelated turn. Task04 remains in progress; uncertainty never permits automatic replay.
-
 
 ### Parent-turn completion identity mismatch: open regression gate
 
@@ -326,14 +304,11 @@ User reported restart at04:04:44UTC and parent remaining working until Pause. Re
 
 After the active04C backend errand releases ownership, prioritize a bounded wakeup/terminal-correlation regression against the patched checkout, starting without restart and adding startup-replay coverage only where the evidence requires it. Preserve exact successor protection; do not repair this by completing arbitrary latest turns. The active errand remains undisturbed, and no extra build/worker or live mutation was introduced. This open gate must be resolved before declaring full repair completion.
 
-
 The user clarified that the parent already resumed at04:05 after the restart and then started04B. Recovery resumed work successfully; the observed stall is completion of that resumed parent turn, not failure to resume after restart. The stale captured turn identity remains confirmed, but restart as a necessary trigger is unproven. The investigation report and next regression scope reflect this distinction.
-
 
 ### Limited parallel preparation authorized
 
 The user permits additional parallel work when it does not require builds. Keep exactly one implementation/build/test owner, currently04C backend. A second lightweight Luna errand may perform read-only source tracing for the parent completion identity mismatch and write only a scratch regression handoff. It must not compile, run tests/linters/browser tools, launch services, change source/workorders, or touch the live instance. This updates the earlier blanket one-errand limit while preserving the one-heavy-command constraint; no additional implementation writer is authorized by this scheduling change.
-
 
 ### Read-only mismatch trace completed
 
@@ -341,108 +316,87 @@ The source trace is saved in `/tmp/errands-turn-mismatch-trace.md`. The old inci
 
 While04C remains the sole implementation/build owner, a lightweight Luna errand prepares the remaining work-order/evidence reconciliation for Task26 in a scratch report only. Task26 itself remains pending for its acceptance dependencies; no second build or source writer is introduced.
 
-
 ### Remaining-work reconciliation prepared
 
 Read-only handoff `/tmp/errands-remaining-work-handoff.md` records remaining dependency order and receipts. Task16 still needs actual PostgreSQL coverage including the >499-ID boundary; Tasks17/18 lack accepted completion receipts. Historical active-owner/design checkpoints remain history, not current status. The active implementation remains04C; both read-only errands have finished.
 
 The handoff repeated stale Task24 wording about a task-wide grouped panel. Primary corrected Task24 to the approved Task29 parent-owned UI: per-parent active/completed ordering, initially collapsed history, isolation and switching between parents, with task-wide Stop-all preserved. Task29 is now an explicit dependency/design reference. This is a work-order correction, not a product implementation or acceptance claim. Task24/25/26 remain pending; no tests/builds were run for this preparation.
 
-
 ### Current verification resource policy (2026-11-01)
 
 Two independent work orders may progress with disjoint ownership, while all heavy validation remains serialized under `/tmp/kandev-errands-repair-build.lock`. Go commands use shared `/home/luancm/.cache/go-build` and `/home/luancm/go/pkg/mod` caches, `GOMAXPROCS=2`, `GOFLAGS=-p=1`, explicit test `-p 1 -parallel 1`, and lint concurrency 1. Use a 3GiB Go soft memory target for light checks/lint, retaining the proven 8GiB setting for large compiler/export steps under the exclusive lock. These are concurrency and soft-memory controls, not per-build hard caps. The existing service cgroup remains unchanged. Full command guidance is in `/tmp/errands-verification-resource-policy.md`; include it in subsequent errand handoffs. No per-errand cache copies or concurrent cache cleanup. This supersedes the earlier one-active-implementation restriction while preserving one heavy validation owner.
-
 
 ### Second independent work order admitted (2026-11-01)
 
 Task18 fallback session identity is in progress alongside Task04C backend projection. Task18 owns only `internal/task/service/service_sessions.go`, its session-summary projection test and its work order; these are disjoint from the recorded Task04C inventory. Both workers share Go caches and the exclusive verification lock. Current work-order totals are 13 done, 3 in progress and 13 pending; Task16 is awaiting PostgreSQL validation, not an active worker.
 
-
 ### Task04C backend accepted; frontend handoff (2026-11-01)
 
 Backend04C is verified with 35 focused race passes (12 actual PostgreSQL), 14 conformance scenarios, DTO contracts, SQLguard, build and lint. Exact contract and receipts: `/tmp/errands-task04c-backend-handoff.md`. Task04 remains in progress for frontend/localization; that packet owns only web files and may run beside Task18 under the shared verification lock. Task18's own regression passed; its broader selector exposed unrelated pending Task17 CAS-summary failures, which remain open rather than counted as Task18 acceptance failures or silently fixed. A single additional DTO regression file is permitted for Task18 if existing tests do not cover the converter contract. The mobile session-tree refinement discussed with the user remains a proposal, separate from this uncertainty packet.
-
 
 ### Task18 accepted; Task16 validation resumed (2026-11-01)
 
 Task18 is done with four focused race tests covering real list/batch fallback through the DTO converter, formatting and patch-scoped lint. Its broader selector still fails pending Task17 CAS-summary regressions, and the package-level lint reports Task17 complexity at `service_status_summary_reconcile.go:56`; neither is counted as fixed. Current totals: 14 done, 2 in progress, 13 pending. Active packets are Task04C frontend/localization and Task16 actual PostgreSQL acceptance. They have disjoint ownership and serialize all heavy checks under the shared lock. Task16 may start and stop only the established disposable PostgreSQL fixture for its missing >499-ID boundary and dialect checks.
 
-
 ### Task16 accepted; Task17 resumed (2026-11-01)
 
 Task16 is done: six focused race tests passed, including both actual PostgreSQL tests without skips and the 500-ID boundary spanning two 499-ID chunks. No Go changes were needed; the disposable server is stopped and an unattributed pre-existing scratch schema was preserved. Task17 now owns recovery of the partial authoritative-summary repair, including CAS re-observation failures and the summary-reconcile complexity finding exposed by Task18. Active workers: Task17 backend and Task04C frontend, with one shared heavy-validation lock. Totals: 15 done, 2 in progress, 12 pending.
-
 
 ### Task17 accepted; Task07 started (2026-11-01)
 
 Task17 is done: fresh CAS observations and missing-row winner reconciliation passed 37 tests and 13 subtests under race detection, without skips; scoped lint and backend composition build passed. This closes the Task17 test/complexity findings exposed by Task18. Task07 now owns exact-turn settlement before successor reservation, including failure/retry and actual queue admission wiring under the existing task guard. Sol handles this higher-risk transactional integration; Luna continues frontend04C. Two disjoint workers, one heavy validation lock. Totals: 16 done, 2 in progress, 11 pending. The separately observed parent terminal identity mismatch still needs its own producer-path regression; Task07 completion alone must not be reported as fixing it.
 
-
 ### Task04C UI implemented; rendered acceptance follow-up (2026-11-01)
 
 The uncertainty UI and localized copy passed 86 focused tests, ESLint, Prettier, i18n checks/ratchet, full web typecheck and E2E Vite build. Managed desktop/phone cases stopped before execution because the mock-agent fixture predates Task17 source. Task04 remains in progress. A bounded UI follow-up may rebuild required backend/helper fixture artifacts under the shared lock, verify source freshness and run only the uncertainty desktop/phone cases; no freshness bypass or live-instance mutation. Task07 remains the sole backend source writer. Final Task24 combined acceptance remains separate.
-
 
 ### Emergency cache cleanup completed (2026-11-01)
 
 At the user's request, cleared the 45GiB shared Go build/test cache after verification released the shared lock and no compiler/test/lint process remained. Filesystem usage fell from 99% (1.3GiB free) to 60% (46GiB free). Source, dependencies, databases, transcripts, logs/evidence and current built artifacts were preserved. Workers may resume serialized checks with a cold cache; accepted checks do not need repeating. Receipt: `/tmp/errands-storage-cleanup-status.txt`.
 
-
 ### Task07 accepted; backend frozen for browser acceptance (2026-11-01)
 
 Task07 is done with exact durable terminal settlement and successor-admission fencing, including failure/recovery and stale event guards. Its work order records final race/actual PostgreSQL/conformance/build/lint receipts. The parent-terminal producer mismatch remains separate and unproven. Backend source is frozen while Task04C browser verification rebuilds a coherent current backend and required helpers; no new backend writer is admitted yet. The older Task17 backend must not be mixed with current helpers as current-source acceptance. Snapshot instructions: `/tmp/errands-backend-browser-checkpoint.md`. Totals: 17 done, 1 in progress, 11 pending.
-
 
 ### Task04 accepted; Task08 started (2026-11-01)
 
 Task04 A/B/C are done: rebuilt coherent current backend/helpers, desktop uncertainty 1/1 and native-phone 1/1 on diagnostic retry, fresh captures inspected, final scoped lint/format/diff clean. The intermediate phone Task unavailable route failure remains unexplained and is recorded for Task24, not silently counted as fixed. Backend browser freeze is released. Task08 now owns created/recovered errand workflow isolation; a separate lightweight read-only phone-route trace may overlap, with no builds or source edits. Totals: 18 done, 1 in progress, 10 pending.
 
-
 ### Phone route trace incorporated (2026-11-01)
 
 The lightweight phone-route trace is complete. Implicit primary/first-session selection versus the test's explicit parent expectation is a candidate, not a confirmed cause. Task24 now requires complete pre-navigation identity evidence and uniquely retained failure screenshots/route hydration state before retry. No code, builds or browser runs occurred. Task08 remains the active implementation; completion totals stay 18 done, 1 in progress, 10 pending.
-
 
 ### Task08 accepted; Task09 started (2026-11-01)
 
 Task08 is done: created/recovered errand launches retain profile and role/MCP mode, avoid workflow ownership effects, preserve accepted prompt context and refuse terminal redirection while retaining archive eligibility checks. Targeted orchestrator and executor race commands passed; selectors matched 49 and 25 top-level tests respectively. Scoped lint and formatting passed. Task09 is the sole schema/repository writer for durable exact teardown intent; Task10 will consume it for physical-stop retries. Totals: 19 done, 1 in progress, 9 pending. No new concurrent heavy work is admitted.
 
-
 ### Task09 accepted; Task10A started (2026-11-01)
 
 Task09 is done: private immutable teardown intents, replayable one-column storage and exact-ID/version transitions passed six model tests, eight SQLite and eight actual PostgreSQL repository tests, 14 task-conformance scenarios, both upgrade dialects, SQLguard and lint. No physical-stop implementation is claimed yet. Task10 is split as designed: Sol first owns 10A exact-target adapter and guard/acknowledgement behavior; 10B later integrates lifecycle cancellation and retries. No other backend writer or heavy validation runs concurrently. Totals: 20 done, 1 in progress, 8 pending.
-
 
 ### Task10A accepted; Task10B started (2026-11-01)
 
 The exact-target adapter is verified: 25 required race tests, seven compatibility tests, build, scoped lint and formatting passed. Existing synchronous StopExecution was sufficient; no executor changes were needed. Task10B now owns migration of cancellation callers, durable pending-intent recovery, generic-stop routing and reserved-launch cancellation fences. Physical provider behavior remains mocked-boundary evidence; automatic parking of successful errands remains a separate proposal. Totals unchanged: 20 done, 1 in progress, 8 pending. One backend writer and serialized heavy verification.
 
-
 ### Task10 accepted; Task11 started (2026-11-01)
 
 Task10 is done with exact-target cancellation, durable retries and initial launch/deletion fences. Final verification passed 124 top-level race tests (44 errands, 59 orchestrator, 21 executor), gateway caller regression, build, lint and formatting. Real provider behavior remains mocked. Task11 now reconstructs lost cascades from durable task/parent state before queued admission and through existing startup/sweep recovery. Single backend writer, serialized heavy checks. Totals: 21 done, 1 in progress, 7 pending.
-
 
 ### Cache cleanup before Task11 validation (2026-11-01)
 
 User-requested cleanup reclaimed about 42GiB from the shared Go build/test cache under the exclusive repair lock after confirming no active Go tools. Disk usage fell from 96% (4.7GiB free) to 59% (47GiB free). All source, dependencies, binaries, databases and test evidence were preserved. Task11 may proceed with a cold cache; accepted earlier checks remain valid.
 
-
 ### Task11 accepted; Task12 started (2026-11-01)
 
 Task11 is done: 51 errands and 71 orchestrator top-level race tests passed without skips or race reports, plus caller build, lint, formatting and whitespace. Final evidence is `/tmp/errands-task11-verification.json`; all handles consumed. Task12 now owns immutable reserved-launch provenance and a read-only recovery classifier. Runtime adoption remains Task13, with Task10 cancellation and Task11 ownership fences preserved. Totals: 22 done, 1 in progress, 6 pending. Single backend writer and serialized heavy validation.
-
 
 ### Task12 accepted; Task13 started (2026-11-01)
 
 Task12 is done: immutable launch authority is written with initial session insertion, and the pure classifier rejects incomplete/conflicting evidence. Eighteen top-level race tests and 124 subcases, caller build, scoped lint and formatting passed. Task13 now consumes the classifier under existing admission guards for adoption/continuation without replay, retaining Task10/11 cancellation and ownership fences. Totals: 23 done, 1 in progress, 5 pending. Single backend writer; heavy checks remain serialized.
 
-
 ### Task13 accepted; Task14 started (2026-11-01)
 
 Task13 is done: 98 race tests and 135 compatibility tests passed, plus caller build, lint and formatting. Twenty-nine optional PostgreSQL compatibility cases skipped without a DSN; those are not passes. No SQL/schema/dialect production behavior changed in this packet, so earlier storage acceptance remains applicable. Proven launches adopt without replay and prepared launches retain exact identities. Task14 now owns Send Now source-aware composition and durable receipt/transcript identity. Totals: 24 done, 1 in progress, 4 pending. One backend writer and serialized heavy validation.
-
 
 ### Task14 recovery-reader ownership resolved
 
@@ -551,7 +505,6 @@ All final local selectors passed with PostgreSQL skips recorded, but review foun
 ### Task15 accepted after review correction
 
 Task15 local backend acceptance is complete, including all eight legacy refusal/reopen regression cases and the final 47-test orchestrator selector. Review confirms both authoritative source-generation stamps resolve the last finding; all 35 source hashes match final tested evidence. Other required selectors, build, scoped lint and static checks pass; unchanged SQL guard/conformance receipts apply. PostgreSQL skips remain explicit, and browser/real-provider certification is not claimed. Evidence: `/tmp/errands-task15-legacy-generation-handoff.md` and `/tmp/errands-task15-ownership-handoff.md`. Totals: 26 done, three pending (24/25/26). Commit this coherent integration before the Task24 browser packet. Disk checkpoint has approximately 11 GiB free; invocation scratch is cleaned.
-
 
 ### Final acceptance resumed (2026-11-02)
 

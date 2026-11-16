@@ -10,6 +10,8 @@ owners:
 
 # Completed errand execution cleanup
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 ## Boundary and existing behavior
 
 This design implements [completed errand sessions](../requirements/errand-completion-cleanup.md), reusing the exact identity, durable settlement and admission boundaries in [errand recovery and delivery](errand-recovery-and-delivery.md). The [task-owned worktree decision](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md) remains authoritative. Conversation retention and execution lifetime are separate: completion releases execution resources, while explicit continuation may restore the retained conversation.

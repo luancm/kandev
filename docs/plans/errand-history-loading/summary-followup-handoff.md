@@ -17,7 +17,7 @@ The final candidate `ee0f077cb9d8061cf17437021f087326978aed05` includes the same
 | phone    | First switch back | 1334.2 ms   | 1353.8 ms        | 19.6 ms (+1.47%)   | 1381.3 ms     | 1571.9 ms        | No             |
 | phone    | Retained JS heap  | 52.116 MiB  | 52.919 MiB       | 0.802 MiB (+1.54%) | 52.988 MiB    | 52.237 MiB       | Yes            |
 
-The warning formula remains `reference p95 + max(3 × MAD, p95 − median)`. With seven samples, nearest-rank p95 is the maximum; it is not a confidence interval. Full observations, ranges, per-round paired deltas, requests, renderer times, resource totals and raw-sample hashes are retained in [the results JSON](summary-followup-results.json).
+The warning formula remains `reference p95 + max(3 × MAD, p95 − median)`. With seven samples, nearest-rank p95 is the maximum; it is not a confidence interval. Full observations, ranges, per-round paired deltas, requests, renderer times, resource totals and raw-sample hashes are retained in [the results JSON](../errands-simplification/evidence-index.md#summary-followup-results).
 
 ## First-delivery disposition
 

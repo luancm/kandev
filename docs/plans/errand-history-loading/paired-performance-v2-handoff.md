@@ -10,38 +10,38 @@ The zero-history cohort contains three ordinary sessions plus two outstanding Er
 
 Values below are nearest-rank p95 from seven samples per build/cohort. Memory is MiB; latency is milliseconds. Limits use the frozen formula on the contemporaneous baseline. Seven-run descriptive samples do not establish a formal confidence interval.
 
-| Platform | Finished children | Measure | Baseline | Candidate | Limit | Result |
-| --- | ---: | --- | ---: | ---: | ---: | --- |
-| desktop | 0 | coldParentInputAcceptedMs | 2349.320 | 2540.976 | 2484.660 | FAIL |
-| desktop | 0 | coldReloadInputAcceptedMs | 1591.181 | 1625.108 | 1688.622 | PASS |
-| desktop | 0 | postGcHeapAfterRepeatedNavigationBytes | 64.579 | 61.791 | 64.782 | PASS |
-| desktop | 0 | warmSwitchBackToHistoryTaskMs | 916.667 | 987.448 | 1072.687 | PASS |
-| desktop | 0 | warmSwitchToZeroErrandTaskMs | 1382.395 | 1504.148 | 1705.933 | PASS |
-| desktop | 100 | coldParentInputAcceptedMs | 2469.240 | 2336.752 | 2586.772 | PASS |
-| desktop | 100 | coldReloadInputAcceptedMs | 1870.429 | 1918.102 | 1971.054 | PASS |
-| desktop | 100 | postGcHeapAfterRepeatedNavigationBytes | 69.814 | 70.011 | 70.938 | PASS |
-| desktop | 100 | warmSwitchBackToHistoryTaskMs | 1002.665 | 1065.081 | 1116.498 | PASS |
-| desktop | 100 | warmSwitchToZeroErrandTaskMs | 1439.320 | 1448.108 | 1775.380 | PASS |
-| desktop | 1000 | coldParentInputAcceptedMs | 3421.211 | 3028.706 | 3502.225 | PASS |
-| desktop | 1000 | coldReloadInputAcceptedMs | 4858.269 | 2582.196 | 4922.196 | PASS |
-| desktop | 1000 | postGcHeapAfterRepeatedNavigationBytes | 146.636 | 70.165 | 194.357 | PASS |
-| desktop | 1000 | warmSwitchBackToHistoryTaskMs | 1467.639 | 1232.011 | 1624.005 | PASS |
-| desktop | 1000 | warmSwitchToZeroErrandTaskMs | 2573.609 | 1590.708 | 2762.734 | PASS |
-| phone | 0 | coldParentInputAcceptedMs | 1975.347 | 1951.579 | 2121.690 | PASS |
-| phone | 0 | coldReloadInputAcceptedMs | 1327.451 | 1318.479 | 1417.426 | PASS |
-| phone | 0 | postGcHeapAfterRepeatedNavigationBytes | 47.876 | 48.024 | 47.934 | FAIL |
-| phone | 0 | warmSwitchBackToHistoryTaskMs | 1346.762 | 1357.572 | 1373.191 | PASS |
-| phone | 0 | warmSwitchToZeroErrandTaskMs | 1343.377 | 1359.579 | 1385.629 | PASS |
-| phone | 100 | coldParentInputAcceptedMs | 1989.303 | 2003.699 | 2051.537 | PASS |
-| phone | 100 | coldReloadInputAcceptedMs | 1420.038 | 1338.282 | 1440.897 | PASS |
-| phone | 100 | postGcHeapAfterRepeatedNavigationBytes | 53.121 | 52.337 | 53.499 | PASS |
-| phone | 100 | warmSwitchBackToHistoryTaskMs | 1360.660 | 1329.712 | 1411.360 | PASS |
-| phone | 100 | warmSwitchToZeroErrandTaskMs | 1366.179 | 1382.171 | 1404.409 | PASS |
-| phone | 1000 | coldParentInputAcceptedMs | 3069.160 | 2304.980 | 3196.697 | PASS |
-| phone | 1000 | coldReloadInputAcceptedMs | 4026.894 | 1621.239 | 4225.113 | PASS |
-| phone | 1000 | postGcHeapAfterRepeatedNavigationBytes | 128.714 | 51.099 | 184.437 | PASS |
-| phone | 1000 | warmSwitchBackToHistoryTaskMs | 1288.122 | 1285.178 | 1313.197 | PASS |
-| phone | 1000 | warmSwitchToZeroErrandTaskMs | 3153.290 | 1366.195 | 3366.867 | PASS |
+| Platform | Finished children | Measure                                | Baseline | Candidate |    Limit | Result |
+| -------- | ----------------: | -------------------------------------- | -------: | --------: | -------: | ------ |
+| desktop  |                 0 | coldParentInputAcceptedMs              | 2349.320 |  2540.976 | 2484.660 | FAIL   |
+| desktop  |                 0 | coldReloadInputAcceptedMs              | 1591.181 |  1625.108 | 1688.622 | PASS   |
+| desktop  |                 0 | postGcHeapAfterRepeatedNavigationBytes |   64.579 |    61.791 |   64.782 | PASS   |
+| desktop  |                 0 | warmSwitchBackToHistoryTaskMs          |  916.667 |   987.448 | 1072.687 | PASS   |
+| desktop  |                 0 | warmSwitchToZeroErrandTaskMs           | 1382.395 |  1504.148 | 1705.933 | PASS   |
+| desktop  |               100 | coldParentInputAcceptedMs              | 2469.240 |  2336.752 | 2586.772 | PASS   |
+| desktop  |               100 | coldReloadInputAcceptedMs              | 1870.429 |  1918.102 | 1971.054 | PASS   |
+| desktop  |               100 | postGcHeapAfterRepeatedNavigationBytes |   69.814 |    70.011 |   70.938 | PASS   |
+| desktop  |               100 | warmSwitchBackToHistoryTaskMs          | 1002.665 |  1065.081 | 1116.498 | PASS   |
+| desktop  |               100 | warmSwitchToZeroErrandTaskMs           | 1439.320 |  1448.108 | 1775.380 | PASS   |
+| desktop  |              1000 | coldParentInputAcceptedMs              | 3421.211 |  3028.706 | 3502.225 | PASS   |
+| desktop  |              1000 | coldReloadInputAcceptedMs              | 4858.269 |  2582.196 | 4922.196 | PASS   |
+| desktop  |              1000 | postGcHeapAfterRepeatedNavigationBytes |  146.636 |    70.165 |  194.357 | PASS   |
+| desktop  |              1000 | warmSwitchBackToHistoryTaskMs          | 1467.639 |  1232.011 | 1624.005 | PASS   |
+| desktop  |              1000 | warmSwitchToZeroErrandTaskMs           | 2573.609 |  1590.708 | 2762.734 | PASS   |
+| phone    |                 0 | coldParentInputAcceptedMs              | 1975.347 |  1951.579 | 2121.690 | PASS   |
+| phone    |                 0 | coldReloadInputAcceptedMs              | 1327.451 |  1318.479 | 1417.426 | PASS   |
+| phone    |                 0 | postGcHeapAfterRepeatedNavigationBytes |   47.876 |    48.024 |   47.934 | FAIL   |
+| phone    |                 0 | warmSwitchBackToHistoryTaskMs          | 1346.762 |  1357.572 | 1373.191 | PASS   |
+| phone    |                 0 | warmSwitchToZeroErrandTaskMs           | 1343.377 |  1359.579 | 1385.629 | PASS   |
+| phone    |               100 | coldParentInputAcceptedMs              | 1989.303 |  2003.699 | 2051.537 | PASS   |
+| phone    |               100 | coldReloadInputAcceptedMs              | 1420.038 |  1338.282 | 1440.897 | PASS   |
+| phone    |               100 | postGcHeapAfterRepeatedNavigationBytes |   53.121 |    52.337 |   53.499 | PASS   |
+| phone    |               100 | warmSwitchBackToHistoryTaskMs          | 1360.660 |  1329.712 | 1411.360 | PASS   |
+| phone    |               100 | warmSwitchToZeroErrandTaskMs           | 1366.179 |  1382.171 | 1404.409 | PASS   |
+| phone    |              1000 | coldParentInputAcceptedMs              | 3069.160 |  2304.980 | 3196.697 | PASS   |
+| phone    |              1000 | coldReloadInputAcceptedMs              | 4026.894 |  1621.239 | 4225.113 | PASS   |
+| phone    |              1000 | postGcHeapAfterRepeatedNavigationBytes |  128.714 |    51.099 |  184.437 | PASS   |
+| phone    |              1000 | warmSwitchBackToHistoryTaskMs          | 1288.122 |  1285.178 | 1313.197 | PASS   |
+| phone    |              1000 | warmSwitchToZeroErrandTaskMs           | 3153.290 |  1366.195 | 3366.867 | PASS   |
 
 ## Remaining limits
 
@@ -54,7 +54,7 @@ Both remaining limits concern low-history fixed cost. All 100/1000-history limit
 ## Evidence and limits
 
 - Raw samples and runner receipts: `/tmp/kandev-history-paired-v2`; commands, durations and log paths are in `runs.json`.
-- Durable complete metrics, round deltas, original-limit comparisons and per-sample hashes: [paired-performance-v2-results.json](paired-performance-v2-results.json).
+- Durable complete metrics, round deltas, original-limit comparisons and per-sample hashes: [paired-performance-v2-results.json](../errands-simplification/evidence-index.md#paired-performance-v2-results).
 - Backend correction and checks: [parent-state-performance-handoff.md](parent-state-performance-handoff.md).
 - Candidate structural observations: ordinary membership is exactly three sessions with no child rows; history pages return at most 25 rows and cache at most 100 summaries; no complete-list fallback; no finished-child rich subscriptions; zero full child session/transcript/turn caches after Back.
 - Each run uses isolated local fixtures and SQLite for browser behavior. PostgreSQL semantics were checked separately; these are not Mac or live-provider performance measurements. SQL aggregates may still scan history. Small shared hydration bookkeeping maps have not been exhaustively audited; do not generalize the measured child-cache observations to every allocation in the application.

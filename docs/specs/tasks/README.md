@@ -158,12 +158,7 @@ and transcript anchors. Workspaces own checkouts; runtime owns ordered access.
 ### System design
 
 - [Bounded Session History Storage](system-design/bounded-session-history.md)
-- [Errands](system-design/errands.md)
-- [Recovery and delivery](system-design/errand-recovery-and-delivery.md)
-- [Errand conversations](system-design/errand-conversation-navigation.md)
-- [Context window](system-design/errand-context-window.md)
-- [Panel order](system-design/errand-panel-order.md)
-- [Await duration](system-design/errand-await-duration.md)
+- [Errands and companion designs](system-design/errands.md#errands-design-map)
 - [Initial task brief](system-design/initial-task-brief.md)
 
 - [Task completion and follow-ups](system-design/task-completion.md)

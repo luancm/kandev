@@ -24,6 +24,8 @@ owners:
 
 # Errand recovery and delivery boundaries
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 ## Scope and authority
 
 [Errand status and continuation](errand-status-and-continuation.md) owns recovery-attention projection and refusal presentation. Its attention reason is not a settlement decision and cannot relax this document's exact ownership gates.
@@ -34,16 +36,16 @@ The user-selected [await uncertainty ADR](../../../decisions/2026-10-30-errand-a
 
 ## Requirement mapping
 
-| Contract | Boundary |
-| --- | --- |
-| 001, 002, 008 | Reserved identity classification and idempotent admission |
-| 003, 004 | Exact-turn settlement, transactional claims, outcome recovery |
-| 005, 006 | Role-aware runtime authority and fail-closed workflow settlement |
-| 007 | Durable exact-target teardown and reconstructed cascades |
-| 009 | Existing authenticated parent identity and fixed child catalog remain authoritative |
-| 010, 011, CONTEXT-001, ORDER-001 | Authoritative summaries, reconnect/cache ownership and native navigation |
-| 012 | Disabled dispatch of retained prepared output; unconditional role isolation |
-| 013 | Publish/count only committed transitions; bounded label sets |
+| Contract                         | Boundary                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------- |
+| 001, 002, 008                    | Reserved identity classification and idempotent admission                           |
+| 003, 004                         | Exact-turn settlement, transactional claims, outcome recovery                       |
+| 005, 006                         | Role-aware runtime authority and fail-closed workflow settlement                    |
+| 007                              | Durable exact-target teardown and reconstructed cascades                            |
+| 009                              | Existing authenticated parent identity and fixed child catalog remain authoritative |
+| 010, 011, CONTEXT-001, ORDER-001 | Authoritative summaries, reconnect/cache ownership and native navigation            |
+| 012                              | Disabled dispatch of retained prepared output; unconditional role isolation         |
+| 013                              | Publish/count only committed transitions; bounded label sets                        |
 
 ## Result identity and settlement
 

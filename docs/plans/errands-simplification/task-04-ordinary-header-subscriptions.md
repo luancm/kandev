@@ -1,7 +1,7 @@
 ---
 id: 04-ordinary-header-subscriptions
 title: Bound ordinary Errand view-model subscription work
-status: in_progress
+status: done
 wave: 4
 depends_on:
   - 03-owned-await
@@ -50,7 +50,7 @@ Initial focused scope: `components/task/chat/errands/errand-header.test.tsx`, `c
 
 The parent accepted the source phase on 2026-11-15 after independent no-findings review, verification of all four source hashes and all 26 evidence-file hashes, and explicit writer/process release. The source checkpoint was committed and pushed as `90aaec3aee`; fresh desktop 3/3, phone 3/3 and all 28 comparison scenarios subsequently passed with unchanged source/artifacts and no retries. Independent numerical/protocol review found no errors. Performance acceptance remains open, so this work order stays in progress; the resource reduction alone is not latency proof.
 
-Source implementation and scoped review are complete on 2026-11-15; status remains `in_progress` for the separate browser/performance acceptance. The hook now selects one shallow-compared snapshot from current state, including the feature flag, and shares empty inputs only while unrecognized. Child recognition, task precedence and incomplete-child retention remain covered. The inspection-owner function, detail effect/dependencies and inspection invocation match the original bytes. Header and phone-picker production callers are unchanged. Independent read-only review reported no findings and confirmed all four frozen source/test hashes and the protected callers.
+Source implementation, scoped review and subsequent desktop/phone functional controls are complete and delivered. The final comparison is recorded; global release-performance acceptance remains open. The hook now selects one shallow-compared snapshot from current state, including the feature flag, and shares empty inputs only while unrecognized. Child recognition, task precedence and incomplete-child retention remain covered. The inspection-owner function, detail effect/dependencies and inspection invocation match the original bytes. Header and phone-picker production callers are unchanged. Independent read-only review reported no findings and confirmed all four frozen source/test hashes and the protected callers.
 
 The real-store resource RED measured 12 added subscriptions and 12 callbacks per unrelated update for each ordinary consumer, with the flag both on and off. GREEN measures 1/1 against the unchanged budget of at most two. Existing surface baselines are 1 listener for the header and 15 for the real phone picker; unmount returns to zero. Ordinary metadata/UI and absence of child inspection ownership also pass. This proves reduced subscription work, not a latency improvement.
 
@@ -58,4 +58,4 @@ The initial baseline was 26 passed / 7 failed because the mobile-picker tests ha
 
 Raw commands, complete logs, counts, source hashes and limitations are in the [Task04 source handoff](ordinary-header-subscriptions-handoff.md) and `/tmp/kandev-task04-subscriptions.xd_z_4rm/`. All check handles are terminal, the build lock is free, and no check process remains. Checkout/process ownership is released for the parent checkpoint; no staging, commit, push, build, browser run or live operation was performed. Free disk at release: 9,954,062,336 bytes (9.27 GiB).
 
-The [final verification receipt](ordinary-header-verification.md) and its byte-identical results preserve every current gate and paired delta. Phone switch-away p95 exceeds its boundary by 121.496 ms; its median cost is 46.612 ms (paired 62.894 ms). Desktop switch-away costs 175.806 ms by medians (paired 69.361 ms), despite passing its variance gate. Phone fixed heap still warns. The original desktop return warning, historical strict-limit misses and attribution limits remain recorded. No further unchanged runs or speculative tuning are planned. The isolated reliability pilot can continue while the release-performance decision remains open; pilot success cannot approve these costs.
+The [final verification receipt](ordinary-header-verification.md) and its byte-identical results preserve every current gate and paired delta. Phone switch-away p95 exceeds its boundary by 121.496 ms; its median cost is 46.612 ms (paired 62.894 ms). Desktop switch-away costs 175.806 ms by medians (paired 69.361 ms), despite passing its variance gate. Phone fixed heap still warns. The original desktop return warning, historical strict-limit misses and attribution limits remain recorded. No further unchanged runs or speculative tuning are planned. The [isolated reliability pilot is complete](../errands-remaining/bounded-pilot-receipt.md) with its qualified outcomes; it cannot approve these costs.

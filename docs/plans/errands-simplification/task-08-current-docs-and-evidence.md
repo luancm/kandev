@@ -1,7 +1,7 @@
 ---
 id: 08-current-docs-and-evidence
 title: Consolidate current Errand contracts and historical evidence
-status: pending
+status: done
 wave: 8
 depends_on:
   - 07-browser-read-owner
@@ -83,4 +83,10 @@ Run the repository documentation-coverage check using its actual supported invoc
 
 ## Results
 
-Pending.
+Implemented and accepted after independent documentation review; documentation status is `done`. The [handoff](task08-docs-handoff.md) records scope, validation and limits. No production/test/config/locale/SDK change, build, runtime operation or Git mutation was performed.
+
+Published base `55b5865a671d22036cd3dd4a3fd6836cf65611ae` matched all 17 archived originals byte-for-byte before pruning. The [evidence index](evidence-index.md) retains immutable commit/blob links and full hashes, extraction commands and verified durable locations for those originals, Task07 source receipts and accepted B4 artifacts/receipts. Eleven derived JSONs were removed only after that check and consumer/link audit; six completed narratives were condensed with immutable originals retained. Failed cohorts, caps, uncertainty and performance warnings remain.
+
+Repository-formatted umbrella/index are 31,634/16,015 bytes, below 32/16 KiB. All original headings survive, the missing inline-summary forwarding anchor is restored, and all ten companions link back to the owner map. Frontmatter and nine retained requirement/API/WS/status-block/prompt/security/metric/flag sections are unchanged except table formatting; Tasks01–03 pre-Results prefixes are byte-identical. Catalog validation passed (455 decisions, 2033 specifications), all-spec lint and whitespace checks passed, and the actual documentation-coverage API returned `exempt` for docs-only paths. The focused link check found no new broken links; three unrelated index targets were already absent at the published base and remain explicitly reported in the handoff. No new product-policy decision was required. Independent review is accepted. Parent delivery is tracked in the task plan; global numerical gates and review-history preparation remain open.
+
+Independent review accepted the remaining scope and identified one P2 omission in the condensed Start section: profile guidance must use the same eligibility/executor filter as launch validation. Restored that existing invariant without changing policy. The narrow correction and updated final manifest are retained beside the first frozen snapshot; independent narrow review accepted the correction with no remaining findings. Documentation status is `done`; global numerical acceptance and review-history preparation remain open.

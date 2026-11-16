@@ -10,6 +10,8 @@ owners:
 
 # Errand await reception evidence
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 This specifies positive reception and uncertainty for [result delivery](../requirements/errand-result-delivery.md), extending the transactional [recovery and delivery design](errand-recovery-and-delivery.md). It follows the accepted [uncertainty decision](../../../decisions/2026-10-30-errand-await-delivery-uncertainty.md). [Repair Task 04](../../../plans/errands-review-repairs/task-04-await-outcome-recovery.md) owns implementation and regression evidence. No supported provider promises a complete negative reception oracle.
 
 ### Attempt states and response identity
@@ -50,12 +52,12 @@ Only a current result actually claimed by such an unresolved attempt gets “Res
 
 ## Compatibility and acceptance
 
-| Source | Positive evidence | Missing or unsupported evidence |
-| --- | --- | --- |
-| Codex ACP | Tracked canonical MCP call and actual successful result with exact attempt/revisions | Retain unknown; do not infer from display labels, status-only updates or suppressed history |
-| Codex app-server | Owning-thread successful `mcpToolCall` item with actual result and exact identity | Retain unknown; no history crawl or private database dependency |
-| Other adapters and older producers | No positive recognizer is assumed | Conservatively uncertain after recovery/terminal classification; no automatic replay |
-| Legacy claims without attempt identity | Cannot establish exact token/revision receipt | Retain unknown for explicit inspection/recovery |
+| Source                                 | Positive evidence                                                                    | Missing or unsupported evidence                                                             |
+| -------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Codex ACP                              | Tracked canonical MCP call and actual successful result with exact attempt/revisions | Retain unknown; do not infer from display labels, status-only updates or suppressed history |
+| Codex app-server                       | Owning-thread successful `mcpToolCall` item with actual result and exact identity    | Retain unknown; no history crawl or private database dependency                             |
+| Other adapters and older producers     | No positive recognizer is assumed                                                    | Conservatively uncertain after recovery/terminal classification; no automatic replay        |
+| Legacy claims without attempt identity | Cannot establish exact token/revision receipt                                        | Retain unknown for explicit inspection/recovery                                             |
 
 Verification uses native-shaped fixtures, journal truncation/reopen/replay, authenticated SQL inbox transactions on SQLite/PostgreSQL, loss/duplicate/hash conflicts and terminal abort/receipt races. The real journal plus mocked provider boundary proves integration, not a live-provider crash guarantee. The work order owns exact regression names and commands. Backend admission failures never become permission to rerun the result.
 

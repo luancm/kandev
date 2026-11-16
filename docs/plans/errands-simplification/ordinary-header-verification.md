@@ -4,7 +4,7 @@ Candidate `90aaec3aee7b038cb3d650103d2384a9c4470534` was compared with matching 
 
 ## Measured cost
 
-Seven observations per arm/platform use the unchanged workload and boundary: `reference p95 + max(3 × MAD, p95 − median)`. With seven observations, nearest-rank p95 is the maximum. Exact values, paired vectors, raw identities, controls and prior-cohort comparisons are preserved in [the verification results](ordinary-header-verification.json).
+Seven observations per arm/platform use the unchanged workload and boundary: `reference p95 + max(3 × MAD, p95 − median)`. With seven observations, nearest-rank p95 is the maximum. Exact values, paired vectors, raw identities, controls and prior-cohort comparisons are preserved in [the verification results](evidence-index.md#ordinary-header-verification).
 
 | Observation               | Difference in medians | Median paired difference | Gate    |
 | ------------------------- | --------------------: | -----------------------: | ------- |

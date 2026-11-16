@@ -11,6 +11,8 @@ requirements:
 
 # Historical Errand result elapsed time
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 This focused extension of [Errands](errands.md) owns completion snapshot timing. REQ-TASKS-ERRANDS-010 maps to the snapshot and shared rendering contract; REQ-TASKS-ERRANDS-011 maps to phone containment. Existing settlement, delivery and navigation authority remains unchanged.
 
 ## Snapshot and rendering contract

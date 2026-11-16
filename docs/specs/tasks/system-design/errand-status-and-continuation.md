@@ -13,6 +13,8 @@ owners:
 
 # Errand status and continuation
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 ## Authority and mapping
 
 The task system owns status evidence, admission and capacity. This design implements [REQ-TASKS-ERRANDS-002](../requirements/errand-status-and-continuation.md). [Recovery settlement](errand-recovery-and-delivery.md) and the [settlement-authority ADR](../../../decisions/2026-11-09-errand-recovery-settlement-authority.md) remain authoritative for durable outcomes. Attention is a read-derived observation, never a settlement or replay authorization.

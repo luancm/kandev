@@ -10,6 +10,8 @@ owners:
 
 # Errand Context Window Design
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 ## Scope and requirement mapping
 
 Extend the task-owned panel from [Errands](errands.md) with passive per-child context information. Row composition, session-specific data and accessibility satisfy AC-001.1/001.4; shared context interpretation and restoration satisfy AC-001.2; existing workspace delivery and disabled detail subscriptions satisfy AC-001.3. The depth-one/shared-workspace and workflow boundaries in [the Errands ADR](../../../decisions/2026-10-23-errands-first-class-delegation.md) remain unchanged.
@@ -52,13 +54,13 @@ Use pure helper cases and existing hook/widget tests for known, unmeasured, unav
 
 Browser proof extends the existing desktop/phone Errands specs. Create real errands and settle the fixture children without opening them. Seed existing child metadata with `ApiClient.seedTaskSession(taskId, { sessionId: childId, ... })`, preserving state, completion timestamp and error fields. The existing test harness persists the metadata and broadcasts a real workspace session event. Demonstrate persisted reload, a subsequent sample while the panel remains open, and explicit `context_window: null` clearing across reload. Do not use the context-source helper's direct-store injection or its overridden clear handler for this proof. Synthetic metadata clear proves the consumer's invalidation behavior; it does not recertify the production reset command.
 
-| Existing telemetry | Panel behavior | Evidence |
-| --- | --- | --- |
-| ACP effective window | Child's measured percentage, or unmeasured state | Helper/widget tests and workspace-event browser fixture |
-| Existing API catalogue fallback | Same interpretation of the supplied sample | Existing source tests plus shared helper |
-| Missing or unreliable window | Omit the line | Helper and panel browser cases |
-| Persisted completed child | Retain supplied sample after reload | Errands desktop/phone browser cases |
-| Explicit null clear | Remove stale line until new data | Hook/event regressions and persisted browser clear |
+| Existing telemetry              | Panel behavior                                   | Evidence                                                |
+| ------------------------------- | ------------------------------------------------ | ------------------------------------------------------- |
+| ACP effective window            | Child's measured percentage, or unmeasured state | Helper/widget tests and workspace-event browser fixture |
+| Existing API catalogue fallback | Same interpretation of the supplied sample       | Existing source tests plus shared helper                |
+| Missing or unreliable window    | Omit the line                                    | Helper and panel browser cases                          |
+| Persisted completed child       | Retain supplied sample after reload              | Errands desktop/phone browser cases                     |
+| Explicit null clear             | Remove stale line until new data                 | Hook/event regressions and persisted browser clear      |
 
 This change does not extend provider certification. The [work order](../../../plans/errands/task-15-context-window.md) owns implementation and exact checks.
 

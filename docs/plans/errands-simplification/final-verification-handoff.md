@@ -8,7 +8,7 @@ The control is `/tmp/kandev-main-latest-control` at `585824a5d066d22785814c0394b
 
 ## Measurements and finding
 
-Each cell below is **median / p95 [minimum, maximum]**; heap is MiB, other values milliseconds. The warning boundary remains `reference p95 + max(3 × MAD, p95 − median)`. Seven observations make nearest-rank p95 the maximum, not a confidence interval. Exact values, original command receipts, all per-case/full log paths and hashes, raw samples, source/build identities and resource diagnostics are retained in [the results JSON](final-verification-results.json).
+Each cell below is **median / p95 [minimum, maximum]**; heap is MiB, other values milliseconds. The warning boundary remains `reference p95 + max(3 × MAD, p95 − median)`. Seven observations make nearest-rank p95 the maximum, not a confidence interval. Exact values, original command receipts, all per-case/full log paths and hashes, raw samples, source/build identities and resource diagnostics are retained in [the results JSON](evidence-index.md#final-verification-results).
 
 | Platform | Metric                 | Main                                 | Candidate                            | Difference in medians | Median paired delta | Main warning boundary | Result  |
 | -------- | ---------------------- | ------------------------------------ | ------------------------------------ | --------------------- | ------------------- | --------------------- | ------- |

@@ -10,6 +10,8 @@ owners:
 
 # Errand Await Duration Design
 
+[Errands design map](errands.md#errands-design-map) lists shared contracts and companion ownership.
+
 The current `AwaitResult` and `awaitErrandsResponse` carry no duration, and `KandevRendererProps` exposes no start or end time. Measure elapsed time with Go's monotonic clock inside the actual validated `Service.Await` operation, starting immediately before registering the waiter and ending on a successful `awaitLoop` return. Include an additive nonnegative `duration_ms` in the await response through the existing MCP result path; ensure zero is represented rather than omitted. Errors retain existing behavior and do not synthesize a duration. Successful immediate, timeout and parent-ended responses carry their real duration. Do not alter result claiming, cancellation, the timeout or authorization.
 
 The existing tool-result persistence and normalization must be verified end to end, including MCP transport and transcript reload, before relying on the field. Parse only finite nonnegative numeric milliseconds from the result; missing or malformed legacy data is unavailable. Render a concise localized elapsed label in the completed await card using existing duration formatting conventions. Do not derive time from maximum wait, child age, client receipt time or general turn duration. Running cards retain existing spinner without a speculative timer. The phone chat uses the same compact card and retains one transcript scroller, existing Open targets and viewport containment.

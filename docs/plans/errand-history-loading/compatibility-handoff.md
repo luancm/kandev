@@ -14,11 +14,11 @@ The final combined unit run recorded 310 passes and one failure caused by the st
 
 ## Performance gate
 
-The first candidate completed all 42 scenarios but failed five of thirty frozen budgets; [candidate-results.json](candidate-results.json) retains the measurements unchanged. Structural bounds passed across those samples: three ordinary rows, at most 100 history summaries, and no child subscriptions after Back. Structural success does not establish timing or heap acceptance.
+The first candidate completed all 42 scenarios but failed five of thirty frozen budgets; [candidate-results.json](../errands-simplification/evidence-index.md#candidate-results) retains the measurements unchanged. Structural bounds passed across those samples: three ordinary rows, at most 100 history summaries, and no child subscriptions after Back. Structural success does not establish timing or heap acceptance.
 
 Two lazy-import experiments did not meaningfully reduce retained heap and were removed. Temporary isolated profiling measured the ordinary reader below 1 ms while existing whole-boot projections took hundreds of milliseconds; this does not prove the source of the candidate regression. No diagnostic production code remains.
 
-Fresh original-source controls contain two desktop samples and seven phone zero-history samples, retained in [baseline-control-results.json](baseline-control-results.json). They also exceed the original frozen heap/reload limits. Frontend and fixture hashes match the original baseline; the backend binary hash differs. The user decision on retaining absolute limits versus a fresh paired comparison remains pending. Original caps and failed candidate samples remain unchanged; no regression-free claim is made.
+Fresh original-source controls contain two desktop samples and seven phone zero-history samples, retained in [baseline-control-results.json](../errands-simplification/evidence-index.md#baseline-control-results). They also exceed the original frozen heap/reload limits. Frontend and fixture hashes match the original baseline; the backend binary hash differs. The user decision on retaining absolute limits versus a fresh paired comparison remains pending. Original caps and failed candidate samples remain unchanged; no regression-free claim is made.
 
 ## Resume and resource state
 
