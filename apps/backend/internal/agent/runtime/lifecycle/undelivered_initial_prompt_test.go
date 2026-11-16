@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -95,4 +96,19 @@ func TestUndeliveredInitialPromptPreservesUncertainOrChangedReservation(t *testi
 			}
 		})
 	}
+}
+
+func TestUndeliveredInitialPromptKeepsNestedUncertainty(t *testing.T) {
+	sm, execution, repo, _ := initialDeliveryPersistenceFixture(t)
+	id := initialPromptDeliverySubmissionID(execution)
+	submission, err := sm.persistInitialDeliveryBeforeDispatch(t.Context(), execution, "initial instruction", nil, id)
+	require.NoError(t, err)
+	require.NotNil(t, submission)
+	notSent := (&agentctl.Client{}).PromptWithSubmissionID(t.Context(), "initial instruction", nil, 1, id)
+	cause := errors.Join(ErrUncertainPromptDelivery, notSent)
+	require.ErrorIs(t, sm.settleUnsentInitialDelivery(t.Context(), submission, cause), ErrUncertainPromptDelivery)
+	stored, err := repo.GetAgentDeliverySubmissionMetadata(t.Context(), submission.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionDispatching, stored.State)
+	require.Nil(t, stored.FullySettledAt)
 }

@@ -33,6 +33,7 @@ func TestDurablePromptBindingRetainsHistoricalProcessProof(t *testing.T) {
 	execution.DeliveryStreamID = "stream"
 	execution.promptGeneration = 3
 	execution.setPromptTurnID("turn")
+	execution.ACPSessionID = "native-original"
 	require.NoError(t, sm.persistDurablePromptTurnBinding(context.Background(), execution, "source"))
 	raw, err := json.Marshal(buildRunningFromExecution(execution, nil).Metadata)
 	require.NoError(t, err)
@@ -40,11 +41,13 @@ func TestDurablePromptBindingRetainsHistoricalProcessProof(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &metadata))
 	var saved struct {
 		OriginalRuntime  processidentity.Identity `json:"original_runtime"`
+		NativeSessionID  string                   `json:"native_session_id"`
 		PromptGeneration uint64                   `json:"prompt_generation"`
 	}
 	require.NoError(t, json.Unmarshal(metadata[deliveryPromptTurnBindingMetadataKey], &saved))
 	require.Equal(t, process, saved.OriginalRuntime)
 	require.EqualValues(t, 3, saved.PromptGeneration)
+	require.Equal(t, "native-original", saved.NativeSessionID)
 }
 
 func TestDeliveryRecordUsesPersistedHistoricalBinding(t *testing.T) {
@@ -57,7 +60,7 @@ func TestDeliveryRecordUsesPersistedHistoricalBinding(t *testing.T) {
 			manager := newTestManager(t)
 			binding := deliveryPromptTurnBinding{TaskID: "task", SessionID: "session", ExecutionID: "original",
 				IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream", SubmissionID: "prompt:old",
-				TurnID: "turn", OriginalRuntime: process, PromptGeneration: 3}
+				TurnID: "turn", OriginalRuntime: process, PromptGeneration: 3, NativeSessionID: "native-original"}
 			switch condition {
 			case "missing birth":
 				binding.OriginalRuntime = processidentity.Identity{}
@@ -70,6 +73,7 @@ func TestDeliveryRecordUsesPersistedHistoricalBinding(t *testing.T) {
 				TaskID: "task", SessionID: "session", AgentExecutionID: "replacement",
 				Metadata: map[string]interface{}{deliveryPromptTurnBindingMetadataKey: binding}}})
 			replacement := createTestExecution("replacement", "task", "session")
+			replacement.ACPSessionID = "native-replacement"
 			require.NoError(t, manager.executionStore.Add(replacement))
 			descriptor := journal.RecoveryDescriptor{SubmissionCount: 1, Submissions: []journal.SubmissionSummary{{
 				ID: "prompt:old", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream"}}}
@@ -83,6 +87,8 @@ func TestDeliveryRecordUsesPersistedHistoricalBinding(t *testing.T) {
 			require.Equal(t, "original", identity.ExecutionID)
 			require.Equal(t, process, identity.OriginalRuntime)
 			require.EqualValues(t, 3, identity.PromptGeneration)
+			require.Equal(t, "turn", identity.TurnID, "recovery must retain the exact admitted turn")
+			require.Equal(t, "native-original", identity.NativeSessionID, "replacement native identity is not original admission evidence")
 		})
 	}
 }

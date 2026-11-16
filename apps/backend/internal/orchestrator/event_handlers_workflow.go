@@ -6016,6 +6016,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if s.resumeAttemptStore().holdsInitialPromptForSession(sessionID) {
 		return queueDrainSkipped
 	}
+	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
+		return queueDrainSkipped
+	}
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
 	if err != nil {
 		return queueDrainSkipped
@@ -6580,6 +6583,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
+		ErrandSession:                  models.IsErrandSession(state.session),
 	}
 	return sysprompt.InjectKandevContextWithOptions(
 			state.taskID, state.sessionID, recordedPrompt, options,
@@ -6825,6 +6829,29 @@ func (s *Service) fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
 	promptReferencesPrepared bool,
 	lifecycleLockHeld bool,
 ) error {
+	return s.fallbackFreshLaunchOnMissingExecutionWithStartOptions(
+		ctx, taskID, sessionID, prompt, promptAlreadyComposed, retryPrompt, planMode,
+		promptReferenceContext, initialCreatePromptPassthrough, takenMsg, attachments,
+		references, promptReferencesPrepared, lifecycleLockHeld, nil, nil,
+	)
+}
+
+func (s *Service) fallbackFreshLaunchOnMissingExecutionWithStartOptions(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	promptAlreadyComposed bool,
+	retryPrompt string,
+	planMode bool,
+	promptReferenceContext string,
+	initialCreatePromptPassthrough bool,
+	takenMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+	lifecycleLockHeld bool,
+	fallbackStartOptions *startCreatedSessionOptions,
+	onFallbackStart func(),
+) error {
 	requeue := func() {
 		if takenMsg != nil {
 			s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
@@ -6851,18 +6878,36 @@ func (s *Service) fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
 		return err
 	}
 
+	if onFallbackStart != nil {
+		onFallbackStart()
+	}
 	var launchErr error
-	if promptAlreadyComposed {
-		_, launchErr = s.startCreatedSessionWithComposedPromptAndLifecycleOwnership(
-			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, retryPrompt, promptReferenceContext,
-			true, planMode, true, initialCreatePromptPassthrough, attachments, references,
-			promptReferencesPrepared, lifecycleLockHeld,
-		)
+	if fallbackStartOptions == nil {
+		if promptAlreadyComposed {
+			_, launchErr = s.startCreatedSessionWithComposedPromptAndLifecycleOwnership(
+				ctx, taskID, sessionID, fresh.AgentProfileID,
+				prompt, retryPrompt, promptReferenceContext,
+				true, planMode, true, initialCreatePromptPassthrough, attachments, references,
+				promptReferencesPrepared, lifecycleLockHeld,
+			)
+		} else {
+			_, launchErr = s.startCreatedSessionWithLifecycleOwnership(
+				ctx, taskID, sessionID, fresh.AgentProfileID,
+				prompt, true, planMode, true, attachments, references, promptReferenceContext, lifecycleLockHeld,
+			)
+		}
 	} else {
-		_, launchErr = s.startCreatedSessionWithLifecycleOwnership(
-			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, true, planMode, true, attachments, references, promptReferenceContext, lifecycleLockHeld,
+		options := *fallbackStartOptions
+		options.lifecycleLockHeld = lifecycleLockHeld
+		options.initialCreatePrompt = initialCreatePromptPassthrough
+		if promptAlreadyComposed {
+			options.skipTaskDescriptionFallback = true
+			options.promptAlreadyComposed = true
+			options.retryPrompt = retryPrompt
+		}
+		_, launchErr = s.startCreatedSession(
+			ctx, taskID, sessionID, fresh.AgentProfileID, prompt,
+			true, planMode, true, attachments, references, promptReferenceContext, options,
 		)
 	}
 	if launchErr != nil {
@@ -7823,6 +7868,8 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
+		models.AddSessionRoleFields(eventData, session)
+		s.addWaitingOnErrandsField(eventData, session)
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
@@ -7866,6 +7913,8 @@ func (s *Service) publishSessionCreatedEvent(ctx context.Context, taskID, sessio
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
+		models.AddSessionRoleFields(eventData, session)
+		s.addWaitingOnErrandsField(eventData, session)
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
 		events.TaskSessionStateChanged,
@@ -7964,7 +8013,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 			zap.String("task_id", taskID), zap.String("effect_key", effect.EffectKey))
 		return false
 	}
-	if models.IsCompletionFollowUpSession(session.Metadata) {
+	if models.IsWorkflowDetachedSession(session) {
 		if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
 			s.logger.Warn("failed to record non-workflow completion outcome",
 				zap.String("task_id", taskID), zap.Error(err))
@@ -8907,7 +8956,7 @@ func (s *Service) processOnTurnStartViaEngineResult(
 	taskID string,
 	session *models.TaskSession,
 ) (bool, error) {
-	if session == nil || models.IsCompletionFollowUpSession(session.Metadata) {
+	if session == nil || models.IsWorkflowDetachedSession(session) {
 		return false, nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)

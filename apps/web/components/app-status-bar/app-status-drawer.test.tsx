@@ -99,7 +99,12 @@ function renderConnectionOnlyDrawer() {
           ...defaultSettingsState.userSettings,
           systemMetricsDisplay: { showInTopbar: true, simplified: false },
         },
-        connection: { status: "reconnecting", error: null, issueSeverity: "unstable" },
+        connection: {
+          generation: 0,
+          status: "reconnecting",
+          error: null,
+          issueSeverity: "unstable",
+        },
       }}
     >
       <TooltipProvider>

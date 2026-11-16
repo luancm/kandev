@@ -784,6 +784,14 @@ func IsCompletionFollowUpSession(metadata map[string]interface{}) bool {
 	return ok && followUp
 }
 
+// IsWorkflowDetachedSession reports whether a session's turns are outside
+// workflow ownership: they never run workflow turn actions, complete a step,
+// or receive workflow-directed prompts. Errands are always detached; other
+// sessions are detached only while they carry the completion follow-up marker.
+func IsWorkflowDetachedSession(session *TaskSession) bool {
+	return session != nil && (IsErrandSession(session) || IsCompletionFollowUpSession(session.Metadata))
+}
+
 // WorkflowProfileSwitchStopIntent binds a deliberate parked-session stop to
 // one exact runtime execution. Stamp is compared before the metadata value is
 // marked consumed, so a delayed event cannot consume a newer switch intent.
@@ -2574,6 +2582,10 @@ type TaskSession struct {
 	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task
 	IsPassthrough bool         `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
 	ReviewStatus  ReviewStatus `json:"review_status,omitempty"` // zero value = no review needed
+	// Role and ParentSessionID are written when the row is inserted and never
+	// updated. An errand session has SessionRoleErrand and its parent's ID.
+	Role            SessionRole `json:"role,omitempty"`
+	ParentSessionID string      `json:"parent_session_id,omitempty"`
 	// LastReadMessageID is the id of the newest message the frontend has
 	// marked as read for this session — the Slack-style "read cursor" used
 	// to position the unread ("New") divider in the transcript. Advanced to
@@ -2730,6 +2742,7 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 		result["repository_snapshot"] = s.RepositorySnapshot
 	}
 	result["is_passthrough"] = s.IsPassthrough
+	s.addRoleAPI(result)
 	if s.TaskEnvironmentID != "" {
 		result["task_environment_id"] = s.TaskEnvironmentID
 	}

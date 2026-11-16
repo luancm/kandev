@@ -125,6 +125,7 @@ func provideGateway(
 	dataDir string,
 	registerCleanup func(func() error),
 	lspContinuityEnabled bool,
+	errandsEnabled bool,
 	acquireSessionFence func(string) func(),
 	webhookPrivateNetworksAllowed bool,
 	lspMaxConnections ...int,
@@ -375,6 +376,7 @@ func provideGateway(
 					Known:      observationErr == nil && observation.Known,
 				}), nil
 			},
+			LoadErrands: taskErrandsSummaryLoader(taskRepo, errandsEnabled),
 			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {
 				gate, err := taskRepo.GetTaskCompletionGate(ctx, taskID)
 				if err != nil {
@@ -399,6 +401,7 @@ func provideGateway(
 			Logger:             log,
 		})
 		taskSvc.SetTaskStatusSummaryEventProjector(projector)
+		taskSvc.SetTaskStatusSummaryErrandsReader(taskErrandsSummaryBatchReader(taskRepo, errandsEnabled))
 		if err := projector.Start(ctx); err != nil {
 			log.Error("failed to start task status summary projector", zap.Error(err))
 		}

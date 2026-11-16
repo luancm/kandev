@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DropdownMenu, DropdownMenuContent } from "@kandev/ui/dropdown-menu";
 import { SessionReopenMenuItems, shouldShowReopenStateIcon } from "./session-reopen-menu";
@@ -91,6 +91,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: null }] },
+      errands: { byTaskId: {} },
       messages: { bySession: mocks.messagesBySession },
       turns: { bySession: {} },
     }),
@@ -120,11 +121,11 @@ function session(id: string, overrides: Partial<TaskSession> = {}): TaskSession 
   } as TaskSession;
 }
 
-function renderMenu() {
+function renderMenu(onNewSession?: () => void) {
   return render(
     <DropdownMenu defaultOpen modal={false}>
       <DropdownMenuContent forceMount>
-        <SessionReopenMenuItems taskId={TASK_ID} />
+        <SessionReopenMenuItems taskId={TASK_ID} onNewSession={onNewSession} />
       </DropdownMenuContent>
     </DropdownMenu>,
   );
@@ -187,5 +188,18 @@ describe("SessionReopenMenuItems icon rendering (AC-51/52)", () => {
     const svgClass = row.querySelector("svg")?.getAttribute("class") ?? "";
     expect(svgClass).toContain("tabler-icon-message-question");
     expect(svgClass).not.toContain("tabler-icon-loader-2");
+  });
+});
+
+describe("SessionReopenMenuItems normal conversation list", () => {
+  it("omits errands and keeps New Agent available when no normal sessions exist", () => {
+    mocks.sessions = [session("errand-only", { role: "errand" })];
+    const onNewSession = vi.fn();
+
+    renderMenu(onNewSession);
+
+    expect(screen.queryByTestId("reopen-session-errand-only")).toBeNull();
+    fireEvent.click(screen.getByTestId("new-session-button"));
+    expect(onNewSession).toHaveBeenCalledOnce();
   });
 });

@@ -9,6 +9,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { isErrandConversation } from "@/lib/task-conversation-navigation";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
@@ -87,6 +88,7 @@ export function SessionReopenMenuItems({
 }) {
   const { t } = useTranslation();
   const { sessions } = useTaskSessions(taskId);
+  const errands = useAppStore((s) => s.errands.byTaskId[taskId]);
   const api = useDockviewStore((s) => s.api);
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
@@ -102,10 +104,10 @@ export function SessionReopenMenuItems({
 
   const sortedSessions = useMemo(
     () =>
-      [...sessions].sort(
-        (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-      ),
-    [sessions],
+      [...sessions]
+        .filter((session) => !isErrandConversation(session, errands))
+        .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime()),
+    [sessions, errands],
   );
 
   const handleClick = useCallback(

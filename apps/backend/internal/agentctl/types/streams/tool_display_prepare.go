@@ -209,6 +209,7 @@ func PrepareToolEvent(event AgentEvent) AgentEvent {
 // limit. The limit reserves delivery envelope space before display data is
 // accepted.
 func PrepareToolEventWithLimit(event AgentEvent, limit int64) AgentEvent {
+	event.ErrandAwaitReceipt = event.ErrandAwaitReceipt.Snapshot()
 	if event.Type != EventTypeToolCall && event.Type != EventTypeToolUpdate {
 		return event
 	}

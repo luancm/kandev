@@ -180,16 +180,8 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 
 // DeleteWorkspace deletes a workspace by ID
 func (r *Repository) DeleteWorkspace(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workspaces WHERE id = ?`), id)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return workspaceNotFoundError(id)
-	}
-	return nil
+	_, _, err := r.DeleteWorkspaceCascade(ctx, id)
+	return err
 }
 
 // DeleteWorkspaceCascade deletes a workspace and its task/workflow rows in one transaction.
@@ -296,6 +288,12 @@ func (r *Repository) deleteWorkspaceCascade(
 			return nil, nil, fmt.Errorf("guard cascade task row %s: %w", taskID, err)
 		}
 	}
+	for _, taskID := range lockIDs {
+		if err := lockErrandTask(ctx, tx, taskID); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err
 	}

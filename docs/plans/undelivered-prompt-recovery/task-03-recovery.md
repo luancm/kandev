@@ -3,7 +3,7 @@ id: "03-recovery"
 title: "Verify supported recovery"
 status: completed
 wave: 2
-depends_on: ['01-dispatch']
+depends_on: ["01-dispatch"]
 plan: "plan.md"
 requirements:
   - REQ-PLATFORM-UNDELIVERED-PROMPT-001

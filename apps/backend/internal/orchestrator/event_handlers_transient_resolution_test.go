@@ -7,7 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -80,6 +82,24 @@ func (s *transientRetryMessageServiceStub) DeleteMessage(_ context.Context, id s
 		}
 	}
 	return nil
+}
+
+func TestQueuedErrandDeliveryRequiresTranscriptPersistence(t *testing.T) {
+	svc := &Service{}
+	queued := &messagequeue.QueuedMessage{
+		ID: "queued-errand-delivery", TaskID: "task", SessionID: "session", Content: "hello",
+		Metadata: map[string]interface{}{
+			errandDeliveryKey: errands.DeliveryEnvelope{
+				Token: "token", Route: models.ErrandDeliveryTurnContext,
+				Items: []errands.DeliveryItem{{ErrandID: "errand-1", Title: "Review", Status: models.ErrandStatusDone}},
+			},
+			ErrandDeliveryTokenMetadataKey: "token",
+		},
+	}
+
+	err := svc.recordQueuedUserMessageWithPromptContent(context.Background(), queued, nil, nil)
+
+	require.ErrorContains(t, err, "message creator is unavailable for errand delivery snapshot")
 }
 
 func newPersistentTransientRetryTestService(t *testing.T) (*Service, *taskservice.Service, *recordingEventBus) {

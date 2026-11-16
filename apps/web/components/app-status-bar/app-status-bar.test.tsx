@@ -116,7 +116,7 @@ describe("AppStatusBar rendering", () => {
 
   it("shows the active connection warning in the bottom status bar", () => {
     renderBar({
-      connection: { status: "reconnecting", error: null, issueSeverity: "lost" },
+      connection: { generation: 0, status: "reconnecting", error: null, issueSeverity: "lost" },
     });
 
     expect(screen.getByTestId("app-status-connection").getAttribute("aria-label")).toBe(

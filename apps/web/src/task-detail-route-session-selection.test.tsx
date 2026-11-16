@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TaskDetailRoute } from "./task-detail-route";
@@ -9,12 +9,15 @@ import type { Task, TaskSession } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import type { StoreApi } from "zustand";
 
 const mocks = vi.hoisted(() => ({
   beginTaskNavigation: vi.fn(),
   isTaskNavigationCurrent: vi.fn(),
   readTaskNavigationIdentity: vi.fn(),
   fetchTaskNavigationEnrichment: vi.fn(),
+  inspectErrand: vi.fn(),
+  store: null as StoreApi<AppState> | null,
   deferRouteHydration: false,
   onHydrated: null as (() => void) | null,
   navigationReadState: {
@@ -25,6 +28,7 @@ const mocks = vi.hoisted(() => ({
     cycle: 0,
   },
 }));
+vi.mock("@/lib/api/domains/errand-api", () => ({ inspectErrand: mocks.inspectErrand }));
 const KANBAN_TASK_SHELL_TEST_ID = "kanban-task-shell";
 const STATE_HYDRATOR_TEST_ID = "state-hydrator";
 const TASK_DATA_ATTRIBUTE = "data-task-id";
@@ -70,7 +74,7 @@ vi.mock("@/components/state-hydrator", async () => {
 });
 
 vi.mock("@/app/tasks/[id]/kanban-task-shell", async () => {
-  const { useAppStore } = await import("@/components/state-provider");
+  const { useAppStore, useAppStoreApi } = await import("@/components/state-provider");
   const { useTaskRouteSessionHydrated } =
     await import("@/components/task/task-route-session-hydration");
   return {
@@ -83,6 +87,7 @@ vi.mock("@/app/tasks/[id]/kanban-task-shell", async () => {
       taskId: string;
       sessionId: string | null;
     }) => {
+      mocks.store = useAppStoreApi();
       const readCursor = useAppStore((state) =>
         sessionId ? (state.taskSessions.items[sessionId]?.last_read_message_id ?? "") : "",
       );
@@ -228,6 +233,7 @@ afterEach(() => {
   vi.clearAllMocks();
   mocks.deferRouteHydration = false;
   mocks.onHydrated = null;
+  mocks.store = null;
 });
 
 beforeEach(() => {
@@ -266,6 +272,55 @@ function renderTaskRoute(element: ReactElement, initialState?: Partial<AppState>
     ),
   });
 }
+
+it.each(["scope", "deletion", "current"] as const)(
+  "handles child enrichment with %s ownership during the later fetch",
+  async (invalidation) => {
+    const childId = "errand-child";
+    const identity = makeNavigationIdentity(TASK_ONE_ID, false);
+    mocks.readTaskNavigationIdentity.mockResolvedValueOnce(identity);
+    mocks.inspectErrand.mockResolvedValueOnce({
+      scope: { task_id: TASK_ONE_ID, child_session_id: childId },
+      errand: { task_id: TASK_ONE_ID, errand_id: childId, parent_session_id: "parent" },
+      child_session_exists: true,
+      parent: { available: false },
+    });
+    const enrichment = deferred<FetchedSessionData>();
+    mocks.fetchTaskNavigationEnrichment.mockReturnValueOnce(enrichment.promise);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId={childId} />);
+    await waitFor(() => expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledOnce());
+    const store = mocks.store!;
+    act(() => {
+      if (invalidation === "scope") store.getState().resetErrandReadScope();
+      else if (invalidation === "deletion")
+        store.getState().removeTaskSession(TASK_ONE_ID, childId);
+    });
+    const selectedAfterInvalidation = store.getState().tasks.activeSessionId;
+    const child = {
+      ...makeTaskSession("stale-message", childId),
+      role: "errand",
+      parent_session_id: "parent",
+    } as TaskSession;
+    await act(async () => {
+      enrichment.resolve({
+        ...makeFetchedData(),
+        sessionId: childId,
+        initialState: makeSessionHydrationState(child),
+      });
+      await enrichment.promise;
+    });
+    if (invalidation === "current") {
+      expect(store.getState().taskSessions.items[childId]?.last_read_message_id).toBe(
+        "stale-message",
+      );
+      expect(store.getState().errands.detailBySessionId[childId]).toBeDefined();
+    } else {
+      expect(store.getState().taskSessions.items[childId]).toBeUndefined();
+      expect(store.getState().errands.detailBySessionId[childId]).toBeUndefined();
+      expect(store.getState().tasks.activeSessionId).toBe(selectedAfterInvalidation);
+    }
+  },
+);
 
 describe("TaskDetailRoute session selection", () => {
   // @covers AC-AGENTS-MCP-MANAGEMENT-001.2

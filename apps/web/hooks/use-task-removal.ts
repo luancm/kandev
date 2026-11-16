@@ -310,7 +310,14 @@ function switchToSessionForTask(params: {
   const sessionIds = (state.taskSessionsByTask.itemsByTaskId[nextTask.id] ?? []).map(
     (session) => session.id,
   );
-  if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds);
+  if (newEnvId) {
+    performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds, {
+      sessionListRestoreState: {
+        loaded: state.taskSessionsByTask.loadedByTaskId[nextTask.id] ?? false,
+        knownForeignSessionIds: new Set(),
+      },
+    });
+  }
 }
 
 async function switchToNextTask(params: {

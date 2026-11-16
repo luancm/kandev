@@ -462,6 +462,32 @@ describe("PreviewSessionBody delivery", () => {
 });
 
 describe("PreviewSessionTabs tab label", () => {
+  it("shows an explicitly inspected child without adding it to ordinary tabs, then returns to its parent", () => {
+    mocks.sessions = [makeSession("session-a", { is_primary: true })];
+    mocks.taskSessionItems.child = makeSession("child", {
+      role: "errand",
+      parent_session_id: toSessionId("session-a"),
+      state: "WAITING_FOR_INPUT",
+    });
+    const { rerender } = render(<PreviewSessionTabs taskId={TASK_ID} sessionId="child" />);
+    expect(mocks.taskChatPanelProps?.sessionId).toBe("child");
+    expect(screen.queryByTestId("preview-session-tab-child")).toBeNull();
+    expect(screen.getByTestId(SESSION_A_TAB_TESTID).getAttribute("data-state")).toBe("active");
+    rerender(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
+    expect(mocks.taskChatPanelProps?.sessionId).toBe("session-a");
+  });
+
+  it("does not select a cached child belonging to a different task", () => {
+    mocks.sessions = [makeSession("session-a", { is_primary: true })];
+    mocks.taskSessionItems.child = makeSession("child", {
+      task_id: toTaskId(TASK_ID_B),
+      role: "errand",
+      parent_session_id: toSessionId("foreign-parent"),
+    });
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId="child" />);
+    expect(mocks.taskChatPanelProps?.sessionId).toBe("session-a");
+  });
+
   it("shows the session's custom name instead of the agent-derived label", () => {
     mocks.sessions = [makeSession("session-a", { state: "COMPLETED", name: "My renamed agent" })];
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
@@ -647,8 +673,12 @@ describe("PreviewSessionTabs delete session selection", () => {
     expect(onSessionChange).toHaveBeenCalledWith("session-b");
   });
 
-  it("calls onSessionChange with null when the last remaining session is deleted", async () => {
-    mocks.sessions = [makeSession("session-a", { state: "COMPLETED" })];
+  it("selects a normal replacement instead of a running errand after deletion", async () => {
+    mocks.sessions = [
+      makeSession("child", { role: "errand", state: "RUNNING" }),
+      makeSession("session-a", { state: "COMPLETED" }),
+      makeSession("session-b", { state: "COMPLETED" }),
+    ];
     const onSessionChange = vi.fn();
     render(
       <PreviewSessionTabs
@@ -663,8 +693,31 @@ describe("PreviewSessionTabs delete session selection", () => {
     await vi.waitFor(() =>
       expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
     );
-    expect(onSessionChange).toHaveBeenCalledWith(null);
+    expect(onSessionChange).toHaveBeenCalledWith("session-b");
   });
+
+  it.each([false, true])(
+    "clears selection after the last normal session is deleted (retained errand: %s)",
+    async (retained) => {
+      mocks.sessions = [makeSession("session-a", { state: "COMPLETED" })];
+      if (retained) mocks.sessions.push(makeSession("child", { role: "errand", state: "RUNNING" }));
+      const onSessionChange = vi.fn();
+      render(
+        <PreviewSessionTabs
+          taskId={TASK_ID}
+          sessionId="session-a"
+          onSessionChange={onSessionChange}
+        />,
+      );
+
+      await deleteViaContextMenu(SESSION_A_TAB_TESTID);
+
+      await vi.waitFor(() =>
+        expect(mocks.remove).toHaveBeenCalledWith("session-a", { feedback: "toast" }),
+      );
+      expect(onSessionChange).toHaveBeenCalledWith(null);
+    },
+  );
 });
 
 describe("PreviewSessionTabs deferred delete", () => {

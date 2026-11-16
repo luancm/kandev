@@ -104,3 +104,15 @@ it("requests bounded turn context alongside a message page when requested", asyn
     undefined,
   );
 });
+
+const { listTaskSessions, listOrdinaryTaskSessions } = await import("./session-api");
+
+it("keeps complete inventory reads separate from ordinary navigation reads", async () => {
+  fetchJson.mockClear();
+  const options = { cache: "no-store" as const };
+  await listTaskSessions("task-1", options);
+  await listOrdinaryTaskSessions("task-1", options);
+
+  expect(fetchJson).toHaveBeenNthCalledWith(1, "/api/v1/tasks/task-1/sessions", options);
+  expect(fetchJson).toHaveBeenNthCalledWith(2, "/api/v1/tasks/task-1/sessions/ordinary", options);
+});

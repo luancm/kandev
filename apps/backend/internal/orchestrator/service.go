@@ -973,6 +973,15 @@ type Service struct {
 	// boundary. It is optional so focused orchestrator tests and older callers
 	// retain the legacy runtime path.
 	mcpSelectionWriter MCPSelectionWriter
+	// mcpSelectionReader reads a parent session's MCP selections and filters
+	// definitions to those still enabled, for errand starts.
+	mcpSelectionReader MCPSelectionReader
+	// errands receives session lifecycle notifications and queue drain ticks.
+	// Nil leaves errand cleanup and queued admission off.
+	errands        ErrandController
+	errandsEnabled func() bool
+	// parentAwaits ends the in-flight awaits of a parent whose turn was cancelled.
+	parentAwaits ParentAwaitEnder
 
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
@@ -2160,6 +2169,18 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetErrandsEnabled binds the canonical gate to parent MCP tools and
+// selection of persisted errand queue sources.
+func (s *Service) SetErrandsEnabled(enabled func() bool) {
+	s.errandsEnabled = enabled
+	if s.messageQueue != nil {
+		s.messageQueue.SetDispatchSourcePolicy(s.errandQueueSourceSelection)
+	}
+	if s.executor != nil {
+		s.executor.SetErrandsEnabled(enabled)
 	}
 }
 
@@ -3599,6 +3620,10 @@ func (s *Service) subscribeStartupEvents() {
 }
 
 func (s *Service) startBackgroundRecovery(ctx context.Context) {
+	// Errand reconciliation reads session states that startup has already
+	// normalized, so it runs before any parent turn can start from delivery.
+	s.reconcileErrandsOnStartup(ctx)
+
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
@@ -4033,9 +4058,9 @@ func (s *Service) reconcileActiveSessionOnStartup(
 	// in-memory Add on the next launch, closing the divergence window we set out
 	// to fix in this refactor.
 
-	// Ensure task is in REVIEW state (not stuck IN_PROGRESS) -- skipped for a
-	// re-tracked session's task, per AC-EXECUTORS-SURVIVAL-003.5.
-	if !retracked && running.TaskID != "" {
+	// Only an ordinary session that was not re-tracked can move an unarchived,
+	// still IN_PROGRESS task to REVIEW.
+	if !retracked && running.TaskID != "" && !models.IsErrandSession(session) {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
@@ -4180,6 +4205,9 @@ func isTaskSessionNotFound(err error) bool {
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState, report *startupCleanupReport, scope interface{}) bool {
+	if s.errandOwnsStartupTeardown(ctx, session) {
+		return true
+	}
 	sessionID := session.ID
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
@@ -4208,8 +4236,9 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, report *startupCleanupReport, scope interface{}) {
 	sessionID := session.ID
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
-	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
-	if session.TaskID != "" {
+	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS);
+	// an errand never owns task runtime state.
+	if session.TaskID != "" && !models.IsErrandSession(session) {
 		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",

@@ -644,6 +644,15 @@ type TaskSessionSummaryObservationReader interface {
 	) ([]*models.TaskSessionSummaryObservation, error)
 }
 
+// OrdinaryTaskSessionSummaryObservationReader reads navigation membership
+// without materializing Errand child rows.
+type OrdinaryTaskSessionSummaryObservationReader interface {
+	ListOrdinaryTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskID string,
+	) ([]*models.TaskSessionSummaryObservation, error)
+}
+
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -838,6 +847,14 @@ type SessionUnreadStateRepository interface {
 	// unread-qualifying rank after it (or the cursor rank when none qualifies).
 	// Missing sessions are absent.
 	ListSessionUnreadState(ctx context.Context, sessionIDs []string) (map[string]statussummary.SessionUnreadState, error)
+}
+
+// ErrandBrowserReadRepository exposes bounded browser projections while the
+// complete Errand inventory methods remain available to lifecycle callers.
+type ErrandBrowserReadRepository interface {
+	GetErrandBrowserSummary(ctx context.Context, taskID string) (models.ErrandBrowserSummary, error)
+	GetErrandHistoryPage(ctx context.Context, request models.ErrandHistoryPageRequest) (models.ErrandHistoryPage, error)
+	GetErrandInspection(ctx context.Context, taskID, childSessionID string) (models.ErrandBrowserInspection, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over

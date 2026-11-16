@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -273,6 +276,10 @@ func (s *Service) loadSendNowSelection(
 	if err != nil {
 		return "", "", nil, err
 	}
+	entries = s.messageQueue.SelectDispatchSources(ctx, entries)
+	if len(entries) == 0 {
+		return "", "", nil, ErrSendNowQueueEmpty
+	}
 	if err := messagequeue.ValidateSendNowEntries(entries); err != nil {
 		return "", "", nil, err
 	}
@@ -361,8 +368,18 @@ func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID strin
 }
 
 func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *messagequeue.QueueSessionIdentity, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
+	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
+		return false, err
+	}
 	var claim *messagequeue.SendNowClaim
 	var err error
+	if identity == nil && s.sendNowHasErrandContext(&messagequeue.SendNowClaim{Sources: entries}) {
+		resolved, resolveErr := s.parentQueueIdentity(ctx, sessionID)
+		if resolveErr != nil {
+			return false, resolveErr
+		}
+		identity = &resolved
+	}
 	if identity != nil {
 		claim, err = s.messageQueue.ClaimSendNowForSession(ctx, *identity, entries)
 	} else {
@@ -556,16 +573,16 @@ func (s *Service) executeSendNowClaimWithContext(
 		}
 	}
 	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
-	if isBuiltinIntentError(err) {
+	if isBuiltinIntentError(err) || errors.Is(err, errLifecyclePromptMessagePersistence) {
 		allowFollowupDrain = false
 	}
-	if errors.Is(err, errSendNowInitialPromptUncertain) {
+	if errors.Is(err, errSendNowInitialPromptUncertain) || errors.Is(err, agentruntime.ErrUncertainPromptDelivery) {
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
 		defer cancel()
 		recoveryErr := s.recordSessionRecoveryBlock(recoveryCtx, sessionID, "send_now", &sessionRecoveryRequiredError{
 			Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
 		})
-		s.logger.Warn("retained initial Send Now claim with uncertain acceptance",
+		s.logger.Warn("retained Send Now claim with uncertain acceptance",
 			zap.String("session_id", sessionID), zap.Error(errors.Join(err, recoveryErr)))
 		return
 	}
@@ -628,6 +645,18 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	}
 	sessionID := claim.Dispatch.SessionID
 	deliveryAttempted := false
+	keepErrandClaim := false
+	var errandToken string
+	defer func() {
+		s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(ctx), errandToken, keepErrandClaim)
+	}()
+	if s.sendNowHasErrandContext(claim) {
+		input, inputErr := s.prepareSendNowErrandInput(ctx, claim)
+		if inputErr != nil {
+			return false, inputErr
+		}
+		ctx = context.WithValue(ctx, sendNowErrandInputKey{}, input)
+	}
 	attachments := queuedMessageAttachmentsToV1(claim.Dispatch.Attachments)
 	references := entityrefs.NormalizePersisted(claim.Dispatch.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(claim.Dispatch.Content, references)
@@ -686,16 +715,46 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		return false, fmt.Errorf("load session before send now launch: %w", err)
 	} else if session != nil && session.State == models.TaskSessionStateCreated {
 		startOptions := startCreatedSessionOptions{
+			errandParentSources:  claim.Sources,
 			deliveryProtocol:     deliveryProtocol,
 			deliverySubmissionID: deliverySubmissionID,
 			deliveryPayloadHash:  deliveryPayloadHash,
-			deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
-				return s.messageQueue.SetPendingSendNowClaimDelivery(
-					updateCtx, claim, protocol, submissionID, payloadHash,
-				)
-			},
+			deliveryClaimUpdater: s.sendNowDeliveryClaimUpdater(claim),
 		}
 		waitForAdmission := s.configureSendNowInitialAdmission(ctx, claim, &startOptions)
+		if s.sendNowHasErrandContext(claim) {
+			startOptions.cacheEffectivePromptForTransientRetry = true
+			startOptions.prepareInitialPrompt = func(prepareCtx context.Context, prompt string) (string, bool, error) {
+				compositionOptions := promptTaskOptions{
+
+					queuedMessage:        &claim.Dispatch,
+					deliverySubmissionID: deliverySubmissionID,
+					directMessageContent: claim.Dispatch.Content,
+				}
+				preparedPrompt, token, composeErr := s.composeErrandTurn(
+					prepareCtx, sessionID, prompt, &compositionOptions,
+				)
+				errandToken = token
+				if composeErr != nil {
+					return "", false, composeErr
+				}
+				if !hasQueuedErrandDelivery(&claim.Dispatch) && claim.Dispatch.Metadata[errands.SendNowDeliveryMetadataKey] == nil {
+					return preparedPrompt, false, nil
+				}
+				sourceIDs := make([]string, 0, len(claim.Sources))
+				for i := range claim.Sources {
+					sourceIDs = append(sourceIDs, claim.Sources[i].ID)
+				}
+				if err := s.recordQueuedUserMessage(prepareCtx, &claim.Dispatch, attachments, sourceIDs...); err != nil {
+					return "", false, fmt.Errorf("%w: record Send Now errand delivery before created-session launch: %w", errLifecyclePromptMessagePersistence, err)
+				}
+				markSendNowSourcesRecorded(claim)
+				if err := s.persistSendNowErrandSnapshot(prepareCtx, claim); err != nil {
+					return "", false, err
+				}
+				return preparedPrompt, true, nil
+			}
+		}
 		createdPrompt := promptContent
 		createdSkipMessageRecord := false
 		createdPlanMode := claim.Dispatch.PlanMode
@@ -734,8 +793,8 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 				startOptions.retryPrompt = input.retryPrompt
 				startOptions.preserveDirectPrompt = input.preserveDirectPrompt
 				if input.recordQueueMessage {
-					if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
-						return false, fmt.Errorf("record Send Now continuation before created-session launch: %w", err)
+					if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sendNowSourceIDs(claim)...); err != nil {
+						return false, fmt.Errorf("%w: record Send Now continuation before created-session launch: %w", errLifecyclePromptMessagePersistence, err)
 					}
 					markSendNowSourcesRecorded(claim)
 				}
@@ -757,11 +816,18 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		)
 		if startErr != nil {
 			var acceptedDispatch *acceptedPromptDispatchError
-			if ceilingClaim != nil && errors.As(startErr, &acceptedDispatch) {
+			accepted := errors.As(startErr, &acceptedDispatch)
+			if accepted {
+				keepErrandClaim = true
+			}
+			if ceilingClaim != nil && accepted {
 				// The created-session path can return a handled post-dispatch
 				// error after agentctl accepted the prompt. The exact ceiling
 				// record is no longer replayable once that boundary was crossed.
 				ceilingClaim.settle(ctx)
+			}
+			if errors.Is(startErr, errErrandNotificationEmpty) {
+				return false, nil
 			}
 			return false, startErr
 		}
@@ -769,8 +835,12 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 			return false, errors.New("send-now launch did not dispatch a created session")
 		}
 		if admissionErr := waitForAdmission(); admissionErr != nil {
+			if errors.Is(admissionErr, errSendNowInitialPromptUncertain) {
+				keepErrandClaim = true
+			}
 			return false, admissionErr
 		}
+		keepErrandClaim = true
 		if ceilingClaim != nil {
 			ceilingClaim.settle(ctx)
 		}
@@ -778,27 +848,60 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		return true, nil
 	}
 
+	fallbackStartOptions := startCreatedSessionOptions{
+		errandParentSources:                   claim.Sources,
+		deliveryProtocol:                      deliveryProtocol,
+		deliverySubmissionID:                  deliverySubmissionID,
+		deliveryPayloadHash:                   deliveryPayloadHash,
+		deliveryClaimUpdater:                  s.sendNowDeliveryClaimUpdater(claim),
+		cacheEffectivePromptForTransientRetry: true,
+	}
+	waitForFallbackAdmission := s.configureSendNowInitialAdmission(ctx, claim, &fallbackStartOptions)
+	var fallbackStarted atomic.Bool
 	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
+			errandParentSources:    claim.Sources,
 			capacityIntent:         turnCapacityOverride,
 			claimEntryID:           claim.Dispatch.ID,
 			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),
 			afterDispatchAdmission: s.sendNowDeliveryBoundary(ctx, claim, durablePlanComments, &deliveryAttempted),
 			disableDispatchRetry:   durablePlanComments,
+
+			queuedMessage:                 &claim.Dispatch,
+			fallbackUsesEffectivePrompt:   true,
+			fallbackPromptAlreadyComposed: true,
+			fallbackStartOptions:          &fallbackStartOptions,
+			onFallbackStart:               func() { fallbackStarted.Store(true) },
+			errandClaimToken:              &errandToken,
+			deferErrandClaimRelease:       true,
 			afterDispatch: func() error {
 				return s.markSendNowClaimAcceptedWithRetry(ctx, claim)
 			},
 			deliveryProtocol:     deliveryProtocol,
 			deliverySubmissionID: deliverySubmissionID,
 			deliveryPayloadHash:  deliveryPayloadHash,
-			deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
-				return s.messageQueue.SetPendingSendNowClaimDelivery(
-					updateCtx, claim, protocol, submissionID, payloadHash,
-				)
-			},
+			deliveryClaimUpdater: s.sendNowDeliveryClaimUpdater(claim),
 		})
+	if fallbackStarted.Load() {
+		var acceptedDispatch *acceptedPromptDispatchError
+		if err != nil && !errors.As(err, &acceptedDispatch) && fallbackStartOptions.onInitialPromptAdmissionFailed != nil {
+			fallbackStartOptions.onInitialPromptAdmissionFailed(err)
+		}
+		if admissionErr := waitForFallbackAdmission(); admissionErr != nil {
+			if errors.Is(admissionErr, errSendNowInitialPromptUncertain) {
+				keepErrandClaim = true
+			}
+			return false, errors.Join(err, admissionErr)
+		}
+		deliveryAttempted = true
+		keepErrandClaim = true
+	}
+	if errors.Is(err, errErrandNotificationEmpty) {
+		return false, nil
+	}
 	var acceptedDispatch *acceptedPromptDispatchError
-	if err == nil || deliveryAttempted || errors.As(err, &acceptedDispatch) {
+	if err == nil || deliveryAttempted || errors.As(err, &acceptedDispatch) || errors.Is(err, agentruntime.ErrUncertainPromptDelivery) {
+		keepErrandClaim = true
 		if ceilingClaim != nil {
 			ceilingClaim.settle(ctx)
 		}

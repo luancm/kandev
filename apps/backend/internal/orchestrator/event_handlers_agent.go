@@ -17,6 +17,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -831,6 +832,7 @@ func (s *Service) drainQueuedBeforeWorkflowTransition(
 	taskID string,
 	sessionID string,
 	session *models.TaskSession,
+	noTaskState ...bool,
 ) bool {
 	if s.messageQueue == nil {
 		return false
@@ -842,7 +844,11 @@ func (s *Service) drainQueuedBeforeWorkflowTransition(
 	if !status.AutoRun || len(status.Entries) == 0 {
 		return false
 	}
-	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+	if models.IsErrandSession(session) || (len(noTaskState) > 0 && noTaskState[0]) {
+		s.setSessionWaitingForInputWithoutTaskState(ctx, taskID, sessionID, session)
+	} else {
+		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+	}
 	outcome := s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
 		ctx, taskID, sessionID, nil, workflowEffectFromContext(ctx),
 	)
@@ -898,6 +904,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// dispatch before acquiring it, so LIFO defer ordering releases the guard
 	// first. Keeping execution in this handler preserves the legacy ready-event
 	// completion boundary while still using the normal delivery pipeline.
+	var completionCleanupSessionID string
+	defer func() {
+		if completionCleanupSessionID != "" {
+			s.scheduleErrandCompletionRetry(ctx, completionCleanupSessionID)
+		}
+	}()
 	var deferredLifecycleDispatch *messagequeue.QueuedMessage
 	var deferredLifecycleReservation *queuedDispatchReservation
 	defer func() {
@@ -1190,7 +1202,19 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	if s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session) {
+	outstanding := false
+	var settleErr error
+	if models.IsWorkflowDetachedSession(session) {
+		if models.IsErrandSession(session) {
+			completionCleanupSessionID = data.SessionID
+		}
+		if err := s.settleDetachedAgentReadyTurn(ctx, completionCtx, data, turnAtEventFire, session); err != nil {
+			return
+		}
+	} else {
+		outstanding, settleErr = s.settleParentTurn(completionCtx, data.SessionID, errands.SettleCauseTurnDone)
+	}
+	if s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session, outstanding || settleErr != nil) {
 		return
 	}
 	settlementCtx := context.WithoutCancel(completionCtx)
@@ -1198,50 +1222,30 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
 	}
 	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
-	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
+	if err := s.reconcileAgentDeliverySubmissionSettlements(settlementCtx, data.SessionID, data.DeliverySubmissionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		s.setSessionWaitingForInputWithoutTaskState(completionCtx, data.TaskID, data.SessionID, session)
+		return
 	}
 
-	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
-	if completionFollowUp {
-		// A completed task's explicit follow-up turn is conversational only. It
-		// must become promptable again without re-evaluating the final step's
-		// workflow actions or changing the task's completed state.
-		if err := s.recordNotRequiredDeliveryWorkflowOutcome(completionCtx, data.TaskID, workflowEffectFromContext(completionCtx)); err != nil {
-			s.logger.Warn("failed to record non-workflow completion outcome",
-				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
-		}
-		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
-	} else {
-		// Check for workflow transition based on session's current step.
-		// Uses the engine when available; falls back to legacy evaluation.
-		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-		transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
-		cause := turnCompletionCauseAgentTurn
-		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
-			cause = turnCompletionCauseUserCancellation
-		}
-		transitioned := s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
-		settlementCtx := context.WithoutCancel(completionCtx)
-		if guardLocked {
-			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
-		}
-		if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
-			s.logger.Warn("failed to reconcile terminal delivery after workflow evaluation",
-				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
-		}
-
+	if settleErr != nil {
+		s.setSessionWaitingForInputWithoutTaskState(completionCtx, data.TaskID, data.SessionID, session)
+		return
+	}
+	if outstanding {
+		s.settleOutstandingAgentReadyTurn(completionCtx, data, session)
+		return
+	}
+	if !models.IsWorkflowDetachedSession(session) && s.evaluateAgentReadyWorkflow(completionCtx, data, session, guardLocked) {
 		// When a workflow transition occurred (e.g. Work → Review), the new step's
 		// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
 		// Skip the queued-message check to avoid racing with that auto-start goroutine —
 		// both would try to call PromptTask and the loser's queued message would be lost.
-		if transitioned {
-			s.logger.Debug("workflow transition occurred, skipping queued message check",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID))
-			return
-		}
+		s.logger.Debug("workflow transition occurred, skipping queued message check",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
 	}
 
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
@@ -1445,6 +1449,9 @@ func (s *Service) queuedMessageHasDispatchInput(ctx context.Context, queuedMsg *
 	if queuedMsg == nil {
 		return false, nil
 	}
+	if isErrandNotificationEntry(queuedMsg) {
+		return true, nil
+	}
 	if present, ok := queuedMsg.Metadata[metaKeyWorkflowDispatchInputPresent].(bool); ok {
 		return present, nil
 	}
@@ -1558,17 +1565,23 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 	preparedPromptContent *string,
 	sourceIDs ...string,
 ) error {
-	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
-	if alreadyRecorded {
-		return nil
+	if snapshot, present, err := errands.DecodeSendNowDelivery(queuedMsg.Metadata); err != nil {
+		return err
+	} else if present {
+		sourceIDs = snapshot.SourceIDs
 	}
-	// Handler-originated comment sends commit the transcript and queue receipt
-	// in one transaction. The marker is only written by that boundary.
-	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
-		markQueuedUserMessageRecorded(queuedMsg)
-		return nil
+	if len(sourceIDs) == 0 {
+		sourceIDs = []string{queuedMsg.ID}
+	}
+	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string)
+	if alreadyRecorded || transcriptID != "" {
+		return s.updateRecordedQueuedErrandDelivery(ctx, queuedMsg, transcriptID, sourceIDs)
 	}
 	if s.messageCreator == nil {
+		if hasQueuedErrandDelivery(queuedMsg) || queuedMsg.Metadata[errands.SendNowDeliveryMetadataKey] != nil {
+			return errors.New("message creator is unavailable for errand delivery snapshot")
+		}
 		if queuedMsg.IsDurablePlanComment() {
 			return errors.New("message creator is unavailable for durable plan-comment delivery")
 		}
@@ -2050,6 +2063,8 @@ func (s *Service) executeQueuedMessageWithReservation(
 		claimEntryID:         claimEntryID,
 		lifecyclePrompt:      lifecyclePrompt,
 		afterClaim:           afterClaim,
+		errandNotification:   isErrandNotificationEntry(queuedMsg),
+		queuedMessage:        queuedMsg,
 		afterDispatch:        afterDispatch,
 		beforeDispatch:       beforeDispatch,
 		disableDispatchRetry: queuedMsg.IsDurablePlanComment() || managedInput,
@@ -2093,6 +2108,10 @@ func (s *Service) executeQueuedMessageWithReservation(
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		launchOriginAutomatic,
 		options)
+	if errors.Is(err, errErrandNotificationEmpty) {
+		// Another turn took the results; the entry has nothing left to announce.
+		err = nil
+	}
 	if err != nil {
 		if _, refusedForCapacity := messageTurnCapacityRefusalOf(err); refusedForCapacity {
 			// The refusal restores the head and registers a capacity wait. An
@@ -2172,14 +2191,14 @@ func (s *Service) queuedMessageAfterClaim(
 		if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(ctx, queuedMsg) {
 			return errLifecyclePromptReservationSuperseded
 		}
-		if queuedMsg.IsDurablePlanComment() {
+		if queuedMsg.IsDurablePlanComment() && !hasQueuedErrandDelivery(queuedMsg) {
 			return nil
 		}
-		if !alreadyRecorded {
+		if !alreadyRecorded || hasQueuedErrandDelivery(queuedMsg) {
 			if err := s.recordQueuedUserMessageWithPromptContent(
 				ctx, queuedMsg, attachments, preparedPromptContent,
 			); err != nil {
-				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() {
+				if lifecyclePrompt || queuedMsg.IsDurablePlanComment() || hasQueuedErrandDelivery(queuedMsg) {
 					return err
 				}
 			} else if userMessageRecorded != nil && s.messageCreator != nil {
@@ -2725,6 +2744,14 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 		s.handleAgentCompletedLocked(ctx, data, nil)
 		return
 	}
+	if data.TurnID == "" {
+		turnID, err := s.peekActiveTurnID(ctx, data.SessionID)
+		if err != nil {
+			return
+		}
+		data.TurnID = turnID
+		ctx = context.WithValue(ctx, completedTurnObservationKey{}, turnID)
+	}
 
 	// Reconcile task_session_commits before acquiring the per-session
 	// cancel-in-flight mutex below. This must still run before
@@ -2781,6 +2808,9 @@ func (s *Service) handleAgentCompletedAfterGuard(ctx context.Context, data watch
 // with no cancel guard ever acquired); every unlock/relock is a safe no-op on
 // a nil guard.
 func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.AgentEventData, guard *lockedCancelInFlightGuard) {
+	if !s.completedEventOwnsObservedTurn(ctx, data) {
+		return
+	}
 	s.logger.Info("handling agent completed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -2866,6 +2896,59 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	s.finishAgentCompleted(ctx, data, session, guard)
 }
 
+// settleDetachedAgentReadyTurn completes a workflow-detached turn (an errand,
+// or a completed task's explicit follow-up). The turn is conversational only:
+// the session becomes promptable again without evaluating the step's workflow
+// actions, and an errand also leaves the task's runtime state untouched.
+func (s *Service) settleDetachedAgentReadyTurn(
+	ctx, completionCtx context.Context,
+	data watcher.AgentEventData,
+	turnID string,
+	session *models.TaskSession,
+) error {
+	if err := s.recordNotRequiredDeliveryWorkflowOutcome(completionCtx, data.TaskID, workflowEffectFromContext(completionCtx)); err != nil {
+		s.logger.Warn("failed to record non-workflow completion outcome",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+	}
+	if models.IsErrandSession(session) {
+		err := s.settleCompletedErrandTurn(completionCtx, data, session, turnID)
+		s.setSessionWaitingForInputWithoutTaskState(ctx, data.TaskID, data.SessionID, session)
+		return err
+	}
+	s.settleDetachedSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+	return nil
+}
+
+// evaluateAgentReadyWorkflow runs on_turn_complete for the session's current
+// step and reports whether the step transitioned. Uses the engine when
+// available; falls back to legacy evaluation. The ViaEngine method handles
+// setSessionWaitingForInput internally when no transition occurs.
+func (s *Service) evaluateAgentReadyWorkflow(
+	completionCtx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	guardHeld bool,
+) bool {
+	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
+	transitioned := s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, agentTurnCompletionCause(data))
+	settlementCtx := context.WithoutCancel(completionCtx)
+	if guardHeld {
+		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+	}
+	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
+		s.logger.Warn("failed to reconcile terminal delivery after workflow evaluation",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+	}
+	return transitioned
+}
+
+func agentTurnCompletionCause(data watcher.AgentEventData) turnCompletionCause {
+	if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
+		return turnCompletionCauseUserCancellation
+	}
+	return turnCompletionCauseAgentTurn
+}
+
 func (s *Service) finishAgentCompleted(
 	ctx context.Context,
 	data watcher.AgentEventData,
@@ -2873,13 +2956,13 @@ func (s *Service) finishAgentCompleted(
 	guard *lockedCancelInFlightGuard,
 ) {
 	s.clearKeywordFailureHistory(data.SessionID)
-	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
+	workflowDetached := models.IsWorkflowDetachedSession(session)
 	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
 	s.resetDynamicCircuitFailuresForCompletion(ctx, data, session)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
-	if !completionFollowUp {
+	if !workflowDetached {
 		s.scheduler.HandleTaskCompleted(data.TaskID, true)
 		s.scheduler.RemoveTask(data.TaskID)
 	}
@@ -2888,7 +2971,7 @@ func (s *Service) finishAgentCompleted(
 	// session. `session` was read above, so the guard costs nothing.
 	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
 
-	if !completionFollowUp {
+	if !workflowDetached {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
 	completionCtx := withWorkflowEffect(context.WithoutCancel(ctx), workflowEffectForEvent(data))
@@ -2923,37 +3006,37 @@ func (s *Service) finishAgentCompleted(
 	}
 
 	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
+	var errandCompletionSettlementErr error
+	if workflowDetached && models.IsErrandSession(session) {
+		err := s.settleCompletedErrandTurn(completionCtx, data, session, data.TurnID)
+		errandCompletionSettlementErr = err
+	}
 	settlementCtx := completionCtx
 	if guard != nil && guard.locked {
 		settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
 	}
 	settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
-	if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
-		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
-			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
-	}
-	var transitioned bool
-	if completionFollowUp {
-		if err := s.recordNotRequiredDeliveryWorkflowOutcome(completionCtx, data.TaskID, workflowEffectFromContext(completionCtx)); err != nil {
-			s.logger.Warn("failed to record non-workflow completion outcome",
+	if errandCompletionSettlementErr == nil {
+		if err := s.reconcileAgentDeliverySettlements(settlementCtx, data.SessionID); err != nil {
+			s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 		}
-	} else if !s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session) {
-		cause := turnCompletionCauseAgentTurn
-		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
-			cause = turnCompletionCauseUserCancellation
-		}
-		transitioned = s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
+	} else {
+		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(errandCompletionSettlementErr))
 	}
 	postSettlementCtx := completionCtx
+	transitioned, deferTaskWorkflow := s.evaluateCompletedAgentWorkflow(completionCtx, transitionCtx, data, session)
 	if guard != nil && guard.locked {
 		postSettlementCtx = withSettledDeliverySessionStateGuardHeld(postSettlementCtx)
 	}
-	if err := s.reconcileAgentDeliverySettlements(postSettlementCtx, data.SessionID); err != nil {
+	if errandCompletionSettlementErr != nil {
+		transitioned, deferTaskWorkflow = false, true
+	} else if err := s.reconcileAgentDeliverySettlements(postSettlementCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to reconcile terminal delivery after completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
-	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
+	s.finishAgentCompletedTurn(ctx, data, session, transitioned, deferTaskWorkflow, workflowDetached, guard)
 }
 
 // agentCompletionTransitionAttribution carries the immutable run identity
@@ -2991,7 +3074,8 @@ func (s *Service) finishAgentCompletedTurn(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 	transitioned bool,
-	completionFollowUp bool,
+	deferTaskWorkflow bool,
+	workflowDetached bool,
 	guard *lockedCancelInFlightGuard,
 ) {
 	// Agent-exit path: processOnTurnCompleteViaEngine handles normal
@@ -3005,17 +3089,15 @@ func (s *Service) finishAgentCompletedTurn(
 		zap.Bool("workflow_transitioned", transitioned))
 
 	if !transitioned && session.State != models.TaskSessionStateWaitingForInput {
-		// Terminal-receipt path. Only flip the session to WAITING_FOR_INPUT
-		// when the most recent agent-authored message actually asked the
-		// user for input. Sibling sessions (root task, ParentID empty)
-		// keep the original affordance so a finishing session on a
-		// multi-session task still flips to WAITING — only subtasks
-		// (ParentID non-empty) get the guard. setSessionWaitingForInputIfRequested
-		// itself inspects the task row to pick the path; for sibling
-		// sessions the call is a no-op pass-through to the unconditional
-		// helper, preserving the pre-fix behavior.
+		// Errands and deferred parent workflows settle without changing task
+		// state. Root-task sessions become promptable unconditionally;
+		// subtasks do so only when the latest agent message requests input.
 		guard.unlock()
-		s.setSessionWaitingForInputIfRequested(ctx, data.TaskID, data.SessionID, session)
+		if models.IsErrandSession(session) || deferTaskWorkflow {
+			s.setSessionWaitingForInputWithoutTaskState(ctx, data.TaskID, data.SessionID, session)
+		} else {
+			s.setSessionWaitingForInputIfRequested(ctx, data.TaskID, data.SessionID, session)
+		}
 		guard.relock()
 	}
 
@@ -3024,11 +3106,13 @@ func (s *Service) finishAgentCompletedTurn(
 	s.captureGitStatusSnapshot(ctx, data.SessionID)
 
 	// Clean up the agent execution (stop agentctl, release port)
-	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+	if !models.IsErrandSession(session) || s.errands == nil {
+		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+	}
 
 	// Finalize the automation run: mark status=succeeded so the automation's
 	// concurrency slot is released. The worktree stays.
-	if !completionFollowUp {
+	if !workflowDetached {
 		s.finalizeAutomationRun(ctx, data.TaskID, true, "")
 	}
 
@@ -3051,7 +3135,12 @@ func (s *Service) finishAgentCompletedTurn(
 	// Some runtimes report completion without a matching agent.ready event.
 	// Once completion has settled the session, give an enabled queue its normal
 	// promptable drain instead of leaving its head parked indefinitely.
-	s.drainQueuedMessageForPromptableSession(context.WithoutCancel(ctx), data.SessionID)
+	if !models.IsErrandSession(session) || !deferTaskWorkflow {
+		s.drainQueuedMessageForPromptableSession(context.WithoutCancel(ctx), data.SessionID)
+	}
+	if models.IsErrandSession(session) {
+		s.scheduleErrandCompletionRetry(context.WithoutCancel(ctx), data.SessionID)
+	}
 }
 
 // handleAgentFailed handles agent failure events
@@ -3604,9 +3693,11 @@ func (s *Service) handleRecoverableFailure(ctx context.Context, data watcher.Age
 // run after the guard is released. Deletion uses the same guard, so an active
 // error event cannot publish after the deleted-session inactive event.
 func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data watcher.AgentEventData, stopReason string) func(context.Context) {
-	completionFollowUp := false
+	workflowDetached := false
+	errandSession := false
 	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil && session != nil {
-		completionFollowUp = models.IsCompletionFollowUpSession(session.Metadata)
+		workflowDetached = models.IsWorkflowDetachedSession(session)
+		errandSession = models.IsErrandSession(session)
 	}
 	s.logger.Warn("handling recoverable agent failure",
 		zap.String("task_id", data.TaskID),
@@ -3619,6 +3710,13 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// this same turn instead of lazily opening a second empty turn — otherwise
 	// both turns would emit a spurious empty-turn notice.
 	failedTurnID := s.markTurnErrorTerminated(ctx, data.SessionID)
+	deferTaskWorkflow := false
+	if errandSession {
+		_ = s.settleErrandTurn(ctx, data.SessionID, failedTurnID, models.ErrandOutcomeFailed, data.ErrorMessage, data.DeliverySubmissionID)
+	} else if !workflowDetached {
+		outstanding, settleErr := s.settleParentTurn(ctx, data.SessionID, errands.SettleCauseTurnDone)
+		deferTaskWorkflow = outstanding || settleErr != nil
+	}
 	if failedTurnID != "" && data.AgentExecutionID != "" {
 		state := messagequeue.ManagedInputStateUncertain
 		outcome := "execution_failed_effects_unknown"
@@ -3636,7 +3734,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	}
 
 	// Complete the current turn.
-	if !completionFollowUp {
+	if !workflowDetached {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
 	s.completeTurnForSession(ctx, data.SessionID)
@@ -3664,14 +3762,17 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	}
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 
-	// Ensure task is in REVIEW state unless another session is still working.
+	// Ensure task is in REVIEW state unless another session is still working;
+	// an errand never writes it.
 	// Unlike the success path (processOnTurnCompleteViaEngine runs first and
 	// skips this write entirely on a transition), REVIEW is written before the
 	// reconciliation below runs. A pending signal that reconciles into a
 	// transition here is a transient REVIEW flash a watching client could
 	// observe; that's accepted as the price of keeping this failure path
 	// simple, since the agent genuinely did fail.
-	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
+	if !deferTaskWorkflow {
+		s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
+	}
 
 	// Give the ADR 0015 reconciler a second chance: a step_complete_kandev
 	// call that landed mid-turn (session still RUNNING) is never picked up
@@ -3680,7 +3781,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	// the session's metadata bag until it's silently cleared on resume.
 	// Office sessions go FAILED, not WAITING_FOR_INPUT, and must not
 	// advance the step here.
-	if !completionFollowUp && nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
+	if !workflowDetached && !deferTaskWorkflow && nextState == models.TaskSessionStateWaitingForInput && data.SessionID != "" {
 		session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 		if err != nil {
 			s.logger.Warn("failed to reload session for step-completion reconciliation; "+
@@ -3701,7 +3802,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 			stopReason) {
 			return
 		}
-		if !completionFollowUp && workerCtx.Err() == nil {
+		if !workflowDetached && !deferTaskWorkflow && workerCtx.Err() == nil {
 			s.dispatchKanbanAgentErrorTriggerRecovered(workerCtx, data)
 		}
 	}
@@ -3854,7 +3955,7 @@ func (s *Service) handleLaunchFailed(
 	if !found || lastError.IsDismissed() {
 		return
 	}
-	if !launchFailureIsTaskOwned(lastError, launchErr) {
+	if models.IsErrandSession(session) || !launchFailureIsTaskOwned(lastError, launchErr) {
 		if err := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, session.AgentExecutionID, lastError); err != nil {
 			s.logger.Warn("failed to persist session-owned launch failure history",
 				zap.String("task_id", taskID),

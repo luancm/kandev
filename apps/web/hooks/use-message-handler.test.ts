@@ -631,6 +631,26 @@ describe("useMessageHandler input routing", () => {
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 
+  it("sends an explicit follow-up to a completed errand directly", async () => {
+    selectedSession("COMPLETED");
+    const selected = storeState.current.taskSessions.items[SESSION_ID] as Record<string, unknown>;
+    selected.role = "errand";
+    const { result } = renderMessageHandler();
+
+    await act(async () => {
+      await expect(
+        result.current.handleSendMessage(submit("continue this errand")),
+      ).resolves.not.toBe(false);
+    });
+
+    expect(getWebSocketClientMock().request).toHaveBeenCalledWith(
+      MESSAGE_ADD_ACTION,
+      expect.objectContaining({ session_id: SESSION_ID, content: "continue this errand" }),
+      expect.anything(),
+    );
+    expect(queueMock).not.toHaveBeenCalled();
+  });
+
   it.each(["FAILED", "CANCELLED"])(
     "rejects a %s selected session with the actionable ended-session copy",
     async (state) => {

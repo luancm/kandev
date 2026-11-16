@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
+import { defaultErrandsState } from "@/lib/state/slices/errands/errands-slice";
 import {
   buildGroupedRenderItems,
   insertLastAgentErrorItem,
@@ -28,6 +29,9 @@ const priorTranscriptMessage = {
 } as unknown as Message;
 
 const appStoreState = {
+  features: { errands: false },
+  taskSessionsByTask: { itemsByTaskId: {} },
+  errands: { ...defaultErrandsState.errands, byTaskId: {} },
   connection: { status: "connected" },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },

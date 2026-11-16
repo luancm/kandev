@@ -15,6 +15,11 @@ const deliveryPromptTurnBindingMetadataKey = models.SessionMetaKeyDeliveryPrompt
 type deliveryPromptTurnBinding = models.AgentDeliveryPromptTurnBinding
 
 func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, execution *AgentExecution, submissionID string) error {
+	if sm.preserveInterruptedDelegation != nil {
+		if err := sm.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
+			return err
+		}
+	}
 	// Clear a predecessor's binding even when the next prompt is legacy or
 	// has no Kandev turn. Missing evidence must not resurrect an older turn.
 	execution.setMetadataValue(deliveryPromptTurnBindingMetadataKey, nil)
@@ -34,7 +39,7 @@ func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, e
 			TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID,
 			IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: execution.DeliveryHarnessGeneration,
 			StreamID: execution.DeliveryStreamID, SubmissionID: deliverySubmissionIdentityForPrompt(submissionID, ""),
-			TurnID: turnID,
+			TurnID: turnID, NativeSessionID: execution.ACPSessionID,
 		})
 	}
 	if sm.persistPromptTurnBinding != nil {

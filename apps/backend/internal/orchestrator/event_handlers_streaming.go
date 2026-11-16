@@ -1432,6 +1432,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if !changed {
 		return session, false
 	}
+	s.notifyErrandSessionStateChanged(ctx, sessionID)
 	if onChanged != nil {
 		onChanged()
 	}
@@ -1477,6 +1478,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	s.onSessionTerminalForErrands(sessionID, nextState)
 	return session, true
 }
 
@@ -1905,6 +1907,7 @@ func (s *Service) publishAcceptedTaskSessionState(
 	)
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	s.onSessionTerminalForErrands(sessionID, nextState)
 }
 
 // persistStrictTaskSessionState is transitionTaskSessionState's persistence
@@ -2155,6 +2158,8 @@ func (s *Service) publishTaskSessionStateChanged(
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
 	}
+	models.AddSessionRoleFields(eventData, session)
+	s.addWaitingOnErrandsField(eventData, session)
 	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
 		projection := dto.TaskSessionDTO{}
 		if err := dto.EnrichSessionRecoveryBlocks(ctx, &projection, session, reader); err == nil {
@@ -2729,6 +2734,27 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, nil, preloadedSession...)
 }
 
+// setSessionWaitingForInputWithoutTaskState settles a session that does not
+// own task runtime state, such as an errand: the session becomes promptable
+// and the task state is left exactly as it was.
+func (s *Service) setSessionWaitingForInputWithoutTaskState(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	updated := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, preloadedSession...)
+	if updated != nil && len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updated {
+		*preloadedSession[0] = *updated
+	}
+}
+
+// settleDetachedSessionWaitingForInput settles a workflow-detached session.
+// Errands never write task state; a completion follow-up keeps the ordinary
+// settle and its guarded task-state reconciliation.
+func (s *Service) settleDetachedSessionWaitingForInput(ctx context.Context, taskID, sessionID string, session *models.TaskSession) {
+	if models.IsErrandSession(session) {
+		s.setSessionWaitingForInputWithoutTaskState(ctx, taskID, sessionID, session)
+		return
+	}
+	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
+}
+
 // setSessionWaitingForInputWithHook is the state transition path used by a
 // stream completion that owns the RUNNING-to-WAITING decision. The callback
 // runs after the CAS succeeds and before publication, so the caller can
@@ -2899,14 +2925,8 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
-	if completedSessionID != "" {
-		if session, err := s.repo.GetTaskSession(ctx, completedSessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
-			s.logger.Debug("skipping task REVIEW state because completed session is active again",
-				zap.String("task_id", taskID),
-				zap.String("session_id", completedSessionID),
-				zap.String("session_state", string(session.State)))
-			return
-		}
+	if s.settledSessionKeepsTaskState(ctx, taskID, completedSessionID) {
+		return
 	}
 
 	blockingSessionID, sessionsReadable := s.otherWorkingSessionID(ctx, taskID, completedSessionID)
@@ -3040,7 +3060,9 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 		return "", false
 	}
 	for _, session := range sessions {
-		if session == nil {
+		// An errand never owns task runtime state, so its work cannot hold
+		// the task out of REVIEW either.
+		if session == nil || models.IsErrandSession(session) {
 			continue
 		}
 		if currentSessionID != "" && session.ID == currentSessionID {
@@ -3051,6 +3073,33 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 		}
 	}
 	return "", true
+}
+
+// settledSessionKeepsTaskState reports whether a REVIEW reconcile for the
+// settled session must leave the task state alone: an errand never owns it,
+// and a session that is working again still does.
+func (s *Service) settledSessionKeepsTaskState(ctx context.Context, taskID, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	if models.IsErrandSession(session) {
+		s.logger.Debug("skipping task REVIEW state for errand session",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return true
+	}
+	if isWorkingSessionState(session.State) {
+		s.logger.Debug("skipping task REVIEW state because settled session is active again",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(session.State)))
+		return true
+	}
+	return false
 }
 
 // writeTaskReviewStateOnCancel clears the kanban "actively working" task
@@ -3082,14 +3131,8 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
-	if sessionID != "" {
-		if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
-			s.logger.Debug("skipping task REVIEW state after cancel because session is active again",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("session_state", string(session.State)))
-			return
-		}
+	if s.settledSessionKeepsTaskState(ctx, taskID, sessionID) {
+		return
 	}
 
 	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, taskID, sessionID); !ok {
@@ -3297,7 +3340,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if err != nil {
 		return err
 	}
-	if state == v1.TaskStateInProgress && models.IsCompletionFollowUpSession(session.Metadata) {
+	if state == v1.TaskStateInProgress && models.IsWorkflowDetachedSession(session) {
 		return nil
 	}
 	if !runtimeSessionOwnsTaskState(session, state) {
@@ -3317,7 +3360,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 }
 
 func runtimeSessionOwnsTaskState(session *models.TaskSession, state v1.TaskState) bool {
-	if session == nil {
+	if session == nil || models.IsErrandSession(session) {
 		return false
 	}
 	switch state {
@@ -4809,15 +4852,13 @@ func (s *Service) persistModelSelectionWarningMessage(
 	if s.messageCreator == nil {
 		return nil
 	}
-	if err := s.messageCreator.CreateSessionMessage(
+	if err := s.messageCreator.CreateLifecycleSessionMessage(
 		ctx,
 		taskID,
 		"The executor could not use the saved model selection.",
 		sessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(sessionID),
 		modelSelectionWarningMetadata(warning),
-		false,
 	); err != nil {
 		s.logger.Warn("failed to persist model selection warning",
 			zap.String("task_id", taskID),

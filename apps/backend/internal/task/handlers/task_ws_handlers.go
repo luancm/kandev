@@ -29,14 +29,35 @@ func (h *TaskHandlers) wsListTaskSessions(ctx context.Context, msg *ws.Message) 
 	if err := msg.ParsePayload(&req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	return h.doListTaskSessions(ctx, msg, req.TaskID)
+	return h.doListTaskSessionsWithScope(ctx, msg, req.TaskID, false)
+}
+
+func (h *TaskHandlers) wsListOrdinaryTaskSessions(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsListTaskSessionsRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	return h.doListTaskSessionsWithScope(ctx, msg, req.TaskID, true)
 }
 
 func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, taskID string) (*ws.Message, error) {
+	return h.doListTaskSessionsWithScope(ctx, msg, taskID, false)
+}
+
+func (h *TaskHandlers) doListTaskSessionsWithScope(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID string,
+	ordinaryOnly bool,
+) (*ws.Message, error) {
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	sessions, err := h.service.ListTaskSessionSummaryObservations(ctx, taskID)
+	list := h.service.ListTaskSessionSummaryObservations
+	if ordinaryOnly {
+		list = h.service.ListOrdinaryTaskSessionSummaryObservations
+	}
+	sessions, err := list(ctx, taskID)
 	if err != nil {
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)

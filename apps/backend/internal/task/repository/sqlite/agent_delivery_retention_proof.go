@@ -32,7 +32,7 @@ const agentDeliveryRetainedTerminalProofSQL = `EXISTS (
     AND wf.stream_id = latest.stream_id AND wf.sequence = latest.sequence
     AND wf.session_id = latest.session_id AND wf.incarnation_id = latest.incarnation_id
     AND wf.harness_generation = latest.harness_generation AND wf.submission_id = latest.submission_id
-    AND wf.turn_id = latest.turn_id AND wf.outcome IN ('applied', 'no_automatic_transition', 'not_required')
+    AND wf.turn_id = latest.turn_id AND wf.outcome IN ('applied', 'no_automatic_transition', 'not_required', 'errands_outstanding')
   )
   AND settled.terminal_stream_id = terminal.stream_id AND settled.terminal_sequence >= terminal.sequence
   AND term.effect_type = 'agent_delivery.terminal_settlement' AND term.state = 'completed'
@@ -49,7 +49,7 @@ const agentDeliveryRetainedTerminalProofSQL = `EXISTS (
   AND workflow.completed_at IS NOT NULL AND workflow.stream_id = term.stream_id AND workflow.sequence = term.sequence
   AND workflow.session_id = term.session_id AND workflow.incarnation_id = term.incarnation_id
   AND workflow.harness_generation = term.harness_generation AND workflow.submission_id = term.submission_id
-  AND workflow.turn_id = term.turn_id AND workflow.outcome IN ('applied', 'no_automatic_transition', 'not_required')
+  AND workflow.turn_id = term.turn_id AND workflow.outcome IN ('applied', 'no_automatic_transition', 'not_required', 'errands_outstanding')
   AND NOT EXISTS (
    SELECT 1 FROM session_recovery_blocks blocked WHERE blocked.session_id = settled.session_id
     AND blocked.incarnation_id = settled.incarnation_id AND blocked.expected_generation = settled.harness_generation

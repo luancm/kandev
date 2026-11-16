@@ -281,6 +281,16 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// recreates task_sessions from an explicit column list and would drop a
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
+	r.migrateTaskSessionErrandColumns()
+	if err := r.migrateErrandResultRevisions(ctx); err != nil {
+		return err
+	}
+	if err := r.migrateErrandDelivery(); err != nil {
+		return err
+	}
+	if err := r.migrateErrandTeardownIntent(); err != nil {
+		return err
+	}
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
 	r.migrate.Apply("repository_secret_bindings.table", `
 		CREATE TABLE IF NOT EXISTS repository_secret_bindings (
@@ -995,10 +1005,10 @@ func jsonText(postgres bool, column, parent, key string) string {
 
 // timestampColumn normalizes a timestamp column for comparison. SQLite stores
 // timestamps as text and would compare them lexically, so it needs Julian days;
-// on Postgres the column is already a timestamp.
+// PostgreSQL timestamp columns store UTC without a timezone.
 func timestampColumn(postgres bool, column string) string {
 	if postgres {
-		return "(" + column + ")::timestamptz"
+		return "(" + column + " AT TIME ZONE 'UTC')"
 	}
 	return "julianday(" + column + ")"
 }

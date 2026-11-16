@@ -202,7 +202,9 @@ func (s *Service) retryRetainedRuntimePrompt(
 				}
 				return nil
 			},
-			beforeDispatch: beforeDispatch,
+			beforeDispatch:        beforeDispatch,
+			promptAlreadyComposed: prompt.promptAlreadyComposed,
+			skipErrandComposition: prompt.skipErrandComposition,
 		})
 	if err == nil || ctx.Err() != nil {
 		return

@@ -130,6 +130,7 @@ function loadedRouteMetadata(state: TaskDetailRouteState | null) {
     return {
       navigationContext: undefined,
       enrichmentIdentity: undefined,
+      inspectionIsCurrent: undefined,
       turnWindowObservationsAtRequestStart: undefined,
       hydrationEpochsAtRequestStart: undefined,
     };
@@ -137,6 +138,7 @@ function loadedRouteMetadata(state: TaskDetailRouteState | null) {
   return {
     navigationContext: state.navigationContext,
     enrichmentIdentity: state.enrichmentIdentity,
+    inspectionIsCurrent: state.inspectionIsCurrent,
     turnWindowObservationsAtRequestStart: state.turnWindowObservationsAtRequestStart,
     hydrationEpochsAtRequestStart: state.hydrationEpochsAtRequestStart,
   };

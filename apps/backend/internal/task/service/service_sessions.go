@@ -331,13 +331,59 @@ func (s *Service) ListTaskSessionSummaryObservations(
 	return result, nil
 }
 
+// ListOrdinaryTaskSessionSummaryObservations returns navigation rows without
+// Errand child sessions. Repositories with a filtered projection exclude them
+// before materialization; legacy repositories retain compatible behavior.
+func (s *Service) ListOrdinaryTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if reader, ok := s.sessions.(repository.OrdinaryTaskSessionSummaryObservationReader); ok {
+		return reader.ListOrdinaryTaskSessionSummaryObservations(ctx, taskID)
+	}
+	if reader, ok := s.sessions.(repository.TaskSessionSummaryObservationReader); ok {
+		observations, err := reader.ListTaskSessionSummaryObservations(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		return ordinaryTaskSessionSummaryObservations(observations), nil
+	}
+	full, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*models.TaskSessionSummaryObservation, 0, len(full))
+	for _, session := range full {
+		if session != nil && session.Role != models.SessionRoleErrand {
+			result = append(result, taskSessionSummaryObservation(session))
+		}
+	}
+	return result, nil
+}
+
+func ordinaryTaskSessionSummaryObservations(
+	observations []*models.TaskSessionSummaryObservation,
+) []*models.TaskSessionSummaryObservation {
+	result := make([]*models.TaskSessionSummaryObservation, 0, len(observations))
+	for _, observation := range observations {
+		if observation != nil && observation.Role != models.SessionRoleErrand {
+			result = append(result, observation)
+		}
+	}
+	return result
+}
+
 func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSessionSummaryObservation {
 	if session == nil {
 		return nil
 	}
 	observation := &models.TaskSessionSummaryObservation{
-		ID: session.ID, TaskID: session.TaskID, QueueIncarnationID: session.QueueIncarnationID,
-		Name: session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
+		ID: session.ID, TaskID: session.TaskID, Role: session.Role, ParentSessionID: session.ParentSessionID,
+		QueueIncarnationID: session.QueueIncarnationID,
+		Name:               session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
 		AgentProfileID: session.AgentProfileID, ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration: session.RouteGeneration, RouteState: session.RouteState, RouteReason: session.RouteReason,
 		ExecutorID: session.ExecutorID, ExecutorProfileID: session.ExecutorProfileID,
@@ -352,6 +398,9 @@ func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSess
 	}
 	if raw, ok := session.Metadata[models.SessionMetaKeyLastAgentError]; ok {
 		observation.Metadata[models.SessionMetaKeyLastAgentError] = raw
+	}
+	for key, value := range models.ProjectSessionContextMetadata(session.Metadata) {
+		observation.Metadata[key] = value
 	}
 	if label := models.ProjectSessionModelLabel(session.Metadata); label != nil {
 		observation.Metadata[models.SessionMetaKeyACPModelState] = label

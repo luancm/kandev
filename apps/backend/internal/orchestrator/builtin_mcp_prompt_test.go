@@ -36,8 +36,10 @@ func TestBuiltinPromptProducersUsePreparedSelection(t *testing.T) {
 	require.NoError(t, repo.UpdateTask(context.Background(), task))
 	ctx, err := svc.executor.PrepareMCPLaunch(context.Background(), "task", session, true)
 	require.NoError(t, err)
+	createdPrompt, err := svc.wrapCreatedSessionPrompt(ctx, "request", "task", "session", session, task, false, false, false, false, nil, "")
+	require.NoError(t, err)
 	prompts := []string{
-		svc.wrapCreatedSessionPrompt(ctx, "request", "task", "session", session, task, false, false, false, false, nil, ""),
+		createdPrompt,
 		svc.applyLaunchPromptContext(ctx, launchPromptContext{prompt: "request", taskID: "task", sessionID: "session"}),
 	}
 	for _, prompt := range prompts {

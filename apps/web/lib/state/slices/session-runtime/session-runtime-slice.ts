@@ -1,12 +1,12 @@
 import type { SliceCreator, SliceSet } from "@/lib/state/slice-creator";
 
-import type { SessionRuntimeSlice, SessionRuntimeSliceState } from "./types";
+import type { ContextWindowEntry, SessionRuntimeSlice, SessionRuntimeSliceState } from "./types";
+import type { TaskSession } from "@/lib/types/http";
+import type { ErrandsSliceState } from "@/lib/state/slices/errands/types";
+import { updateContextWindowMetadata } from "./context-window";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
-import {
-  invalidateGitStatusInventory as invalidateInventoryState,
-  reconcileGitStatusInventory as reconcileInventoryState,
-} from "./git-status-inventory";
+import { buildGitInventoryActions } from "./git-status-inventory";
 import {
   beginWorkspaceRestoration,
   clearWorkspaceRestoration,
@@ -45,6 +45,76 @@ function appendTerminalChunk(output: string[], data: string) {
   while (output.length > 1 && total > maxShellOutputBytes) {
     total -= output[0].length;
     output.shift();
+  }
+}
+
+type ContextWindowSessionState = {
+  taskSessions?: {
+    items: Record<string, TaskSession>;
+    contextWindowEpochBySession?: Record<string, number>;
+  };
+  taskSessionsByTask?: { itemsByTaskId: Record<string, TaskSession[]> };
+  errands?: ErrandsSliceState["errands"];
+};
+
+type ContextWindowSessionTarget = {
+  canonical?: TaskSession;
+  session?: TaskSession;
+  taskList?: TaskSession[];
+};
+
+function findSessionContextTarget(
+  state: ContextWindowSessionState,
+  sessionId: string,
+): ContextWindowSessionTarget {
+  const canonical = state.taskSessions?.items[sessionId];
+  if (canonical) {
+    return {
+      canonical,
+      session: canonical,
+      taskList: state.taskSessionsByTask?.itemsByTaskId[canonical.task_id],
+    };
+  }
+
+  for (const items of Object.values(state.taskSessionsByTask?.itemsByTaskId ?? {})) {
+    const session = items.find((candidate) => candidate.id === sessionId);
+    if (session) return { session, taskList: items };
+  }
+  return {};
+}
+
+function updateSessionContextMetadata(
+  state: ContextWindowSessionState,
+  sessionId: string,
+  entry: ContextWindowEntry | null,
+): void {
+  const target = findSessionContextTarget(state, sessionId);
+  const { canonical, session, taskList } = target;
+  if (!session) return;
+
+  session.metadata = updateContextWindowMetadata(session.metadata, entry);
+  if (!canonical && state.taskSessions?.items) {
+    state.taskSessions.items[sessionId] = session;
+  }
+  if (taskList) {
+    const index = taskList.findIndex((candidate) => candidate.id === sessionId);
+    if (index >= 0) taskList[index] = session;
+  }
+}
+
+function incrementContextWindowEpoch(state: ContextWindowSessionState, sessionId: string): void {
+  if (!state.taskSessions) return;
+  const epochs = (state.taskSessions.contextWindowEpochBySession ??= {});
+  epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+}
+
+function advanceErrandBrowserContextRevision(state: ContextWindowSessionState, sessionId: string) {
+  const session = state.taskSessions?.items[sessionId];
+  if (!session || session.role !== "errand" || !state.errands) return;
+  const revisions = (state.errands.browserRevisionByTaskId ??= {});
+  revisions[session.task_id] = (revisions[session.task_id] ?? 0) + 1;
+  for (const chain of Object.values(state.errands.historyByOwnerId ?? {})) {
+    if (chain.taskId === session.task_id) chain.stale = true;
   }
 }
 
@@ -365,11 +435,19 @@ function buildContextWindowActions(set: ImmerSet) {
       contextWindow: Parameters<SessionRuntimeSlice["setContextWindow"]>[1],
     ) =>
       set((draft) => {
+        const sessionState = draft as unknown as ContextWindowSessionState;
+        incrementContextWindowEpoch(sessionState, sessionId);
         draft.contextWindow.bySessionId[sessionId] = contextWindow;
+        updateSessionContextMetadata(sessionState, sessionId, contextWindow);
+        advanceErrandBrowserContextRevision(sessionState, sessionId);
       }),
     clearContextWindow: (sessionId: string) =>
       set((draft) => {
+        const sessionState = draft as unknown as ContextWindowSessionState;
+        incrementContextWindowEpoch(sessionState, sessionId);
         delete draft.contextWindow.bySessionId[sessionId];
+        updateSessionContextMetadata(sessionState, sessionId, null);
+        advanceErrandBrowserContextRevision(sessionState, sessionId);
       }),
   };
 }
@@ -414,27 +492,6 @@ function buildWorkspaceRestorationActions(set: ImmerSet) {
         cleared = clearWorkspaceRestoration(draft.workspaceRestoration, attempt);
       });
       return cleared;
-    },
-  };
-}
-
-function buildGitInventoryActions(set: ImmerSet) {
-  return {
-    invalidateGitStatusInventory: (sessionId: string) =>
-      set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-        invalidateInventoryState(draft, envKey);
-      }),
-    reconcileGitStatusInventory: (
-      environmentId: string,
-      generation: number,
-      scopes: readonly string[],
-    ) => {
-      let applied = false;
-      set((draft) => {
-        applied = reconcileInventoryState(draft, environmentId, generation, scopes);
-      });
-      return applied;
     },
   };
 }

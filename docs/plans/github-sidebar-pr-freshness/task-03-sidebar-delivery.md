@@ -176,4 +176,3 @@ Lint and documentation:
 
 The paired discovery requirement and system design keep their `draft`
 lifecycle; this repair does not promote the whole capability.
-

@@ -29,7 +29,11 @@ import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspac
 import { useTranslation } from "react-i18next";
 import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import type { TaskPlanCommentRef } from "@/lib/types/http";
-import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
+import {
+  isErrandRecoveryRefusal,
+  isMessageSendError,
+  MessageSendError,
+} from "@/lib/chat/message-send-error";
 import { t as translate } from "@/lib/i18n";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
 import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
@@ -364,15 +368,17 @@ export function useSendPassthroughMessage({
         }
         console.error("Failed to send passthrough message:", sanitizeSessionErrorDetails(error));
         let title = t("task:failedToSendMessage");
-        if (isMessageSendError(error)) title = t("task:messageNotSent");
+        const errandRecoveryRefusal = isErrandRecoveryRefusal(error);
+        if (isMessageSendError(error) || errandRecoveryRefusal) title = t("task:messageNotSent");
         else if (conflict?.code === "plan_comments_changed") {
           title = t("task:planCommentsChangedRetry");
         }
+        let description: string | undefined;
+        if (errandRecoveryRefusal) description = t("task:errandRecoverySendRefused");
+        else if (isMessageSendError(error)) description = sanitizeSessionErrorDetails(error, 240);
         toast({
           title,
-          ...(isMessageSendError(error)
-            ? { description: sanitizeSessionErrorDetails(error, 240) }
-            : {}),
+          ...(description ? { description } : {}),
           variant: "error",
         });
         throw error;

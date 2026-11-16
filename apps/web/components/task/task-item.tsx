@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import type {
+  TaskStatusSummaryErrands,
   TaskStatusSummaryLaunchQueue,
   TaskStatusSummaryQuotaWait,
 } from "@/lib/types/task-status-summary";
@@ -122,6 +123,7 @@ type TaskItemProps = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   /** Destination-resident WIP queue status, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
@@ -241,6 +243,7 @@ type TaskItemContentProps = {
   repositoryPath?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
@@ -267,6 +270,7 @@ function TaskItemContent({
   repositoryPath,
   prInfo,
   queuedCount,
+  errandsSummary,
   wipQueue,
   launchQueue,
   issueInfo,
@@ -326,6 +330,7 @@ function TaskItemContent({
           prInfo={resolvedTaskRow.showPullRequestNumber ? prInfo : undefined}
           primarySessionId={primarySessionId}
           queuedCount={queuedCount}
+          errandsSummary={errandsSummary}
           wipQueue={wipQueue}
           launchQueue={launchQueue}
           detailOrder={resolvedTaskRow.detailOrder}
@@ -417,6 +422,7 @@ export const TaskItem = memo(function TaskItem({
   showRepository = true,
   prInfo,
   queuedCount,
+  errandsSummary,
   wipQueue,
   launchQueue,
   issueInfo,
@@ -495,6 +501,7 @@ export const TaskItem = memo(function TaskItem({
         repositoryPath={repositoryPath}
         prInfo={prInfo}
         queuedCount={queuedCount}
+        errandsSummary={errandsSummary}
         wipQueue={wipQueue}
         launchQueue={launchQueue}
         issueInfo={issueInfo}

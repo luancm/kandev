@@ -30,7 +30,7 @@ func (e *Executor) PrepareTaskSessionMCPProfile(ctx context.Context, taskID stri
 	switch profile.Surface {
 	case p.SurfaceAutomation:
 		return e.prepareAutomationMCPProfile(ctx, taskID, session, profile)
-	case p.SurfaceExternal, p.SurfaceCoordinator, p.SurfaceManagedConversation:
+	case p.SurfaceExternal, p.SurfaceCoordinator, p.SurfaceManagedConversation, p.SurfaceErrand:
 		return profile, nil
 	}
 	if session == nil || session.TaskID != taskID || session.ID == "" {

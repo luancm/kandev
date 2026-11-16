@@ -884,6 +884,8 @@ func TestAcceptedReservedPromptFailureDoesNotStartFreshExecution(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
+	outcome := &promptDispatchOutcome{}
+	outcome.recordAccepted(nil)
 	_, err = svc.finishPromptDispatchFailure(
 		ctx,
 		"task1",
@@ -903,8 +905,7 @@ func TestAcceptedReservedPromptFailureDoesNotStartFreshExecution(t *testing.T) {
 		promptTaskOptions{},
 		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
 		nil,
-		true,
-		nil,
+		outcome,
 	)
 	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
 	require.Zero(t, launchCalls.Load(), "accepted prompt must not start duplicate execution")
@@ -930,6 +931,8 @@ func TestAcceptedOrdinaryPromptFailureDoesNotStartFreshExecution(t *testing.T) {
 	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateInProgress}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
+	outcome := &promptDispatchOutcome{}
+	outcome.recordAccepted(nil)
 	_, err = svc.finishPromptDispatchFailure(
 		ctx,
 		"task1",
@@ -942,8 +945,7 @@ func TestAcceptedOrdinaryPromptFailureDoesNotStartFreshExecution(t *testing.T) {
 		promptTaskOptions{},
 		fmt.Errorf("accepted transport failure: %w", executor.ErrExecutionNotFound),
 		nil,
-		true,
-		nil,
+		outcome,
 	)
 	require.ErrorIs(t, err, executor.ErrExecutionNotFound)
 	require.Zero(t, launchCalls.Load(), "accepted ordinary prompt must not start duplicate execution")

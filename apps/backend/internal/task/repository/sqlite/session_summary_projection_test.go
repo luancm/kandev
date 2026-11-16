@@ -16,16 +16,69 @@ type taskSessionSummaryProjectionReader interface {
 	ListTaskSessionSummaryObservations(context.Context, string) ([]*models.TaskSessionSummaryObservation, error)
 }
 
+type ordinaryTaskSessionSummaryReader interface {
+	ListOrdinaryTaskSessionSummaryObservations(context.Context, string) ([]*models.TaskSessionSummaryObservation, error)
+}
+
+func TestOrdinarySessionSummaryProjectionFiltersErrands(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	assertOrdinarySessionSummaryProjection(t, repo)
+}
+
+func assertOrdinarySessionSummaryProjection(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	const taskID = "task-ordinary-session-summary"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Ordinary session summary"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for _, session := range []*models.TaskSession{
+		{ID: "ordinary-session", TaskID: taskID, IsPrimary: true, State: models.TaskSessionStateWaitingForInput},
+		{ID: "errand-session", TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: "ordinary-session", State: models.TaskSessionStateCompleted},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatalf("create session %s: %v", session.ID, err)
+		}
+	}
+	reader, ok := any(repo).(ordinaryTaskSessionSummaryReader)
+	if !ok {
+		t.Fatal("task repository does not implement ordinary session summary projections")
+	}
+	rows, err := reader.ListOrdinaryTaskSessionSummaryObservations(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list ordinary session summaries: %v", err)
+	}
+	complete, err := repo.ListTaskSessionSummaryObservations(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list complete session summaries: %v", err)
+	}
+	var want []*models.TaskSessionSummaryObservation
+	for _, observation := range complete {
+		if observation.Role != models.SessionRoleErrand {
+			want = append(want, observation)
+		}
+	}
+	if len(complete) != 2 || len(want) != 1 || want[0].ID != "ordinary-session" {
+		t.Fatalf("complete summary observations = %+v, want ordinary and Errand controls", complete)
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("ordinary session summaries = %+v, want complete-reader ordinary projection %+v", rows, want)
+	}
+}
+
 func TestSessionSummaryProjectionExcludesUnrelatedMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	assertSessionSummaryProjection(t, repo)
 	assertSessionSummaryProviderModel(t, repo)
+	assertSessionSummaryContextWindowShapes(t, repo)
 }
 
 func TestSessionSummaryProjectionPostgres(t *testing.T) {
 	repo := openPostgresRepo(t)
+	assertOrdinarySessionSummaryProjection(t, repo)
 	assertSessionSummaryProjection(t, repo)
 	assertSessionSummaryProviderModel(t, repo)
+	assertSessionSummaryContextWindowShapes(t, repo)
 }
 
 func TestSessionSummaryProjectionSelectsOnlySummaryFields(t *testing.T) {
@@ -83,6 +136,12 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 		RepositorySnapshot:   map[string]interface{}{"path": "/repo/summary", "irrelevant": strings.Repeat("c", 1<<20)},
 		EnvironmentSnapshot:  map[string]interface{}{"irrelevant": strings.Repeat("d", 1<<20)},
 		Metadata: map[string]interface{}{
+			models.SessionMetaKeyContextWindow: map[string]interface{}{
+				"size": 200, "used": 200, "remaining": 0, "efficiency": 100,
+				"source": "acp", "timestamp": "2026-10-09T12:00:00Z",
+				"provider_catalogue": strings.Repeat("p", 1<<20),
+			},
+			models.SessionMetaKeyContextCompactionCount: 3,
 			models.SessionMetaKeyACPModelState: map[string]interface{}{
 				"current_model_id": "model-old",
 				"models":           []interface{}{map[string]interface{}{"model_id": "model-current", "name": "Current model"}},
@@ -111,6 +170,12 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 		RepositorySnapshot:   map[string]interface{}{"path": "/repo/summary", "irrelevant": strings.Repeat("c", 4<<10)},
 		EnvironmentSnapshot:  map[string]interface{}{"irrelevant": strings.Repeat("d", 4<<10)},
 		Metadata: map[string]interface{}{
+			models.SessionMetaKeyContextWindow: map[string]interface{}{
+				"size": 200, "used": 200, "remaining": 0, "efficiency": 100,
+				"source": "acp", "timestamp": "2026-10-09T12:00:00Z",
+				"provider_catalogue": strings.Repeat("p", 4<<10),
+			},
+			models.SessionMetaKeyContextCompactionCount: 3,
 			models.SessionMetaKeyACPModelState: map[string]interface{}{
 				"current_model_id": "model-old",
 				"models":           []interface{}{map[string]interface{}{"model_id": "model-current", "name": "Current model"}},
@@ -175,6 +240,17 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 	}
 	if _, ok := got.Metadata["unrelated_blob"]; ok {
 		t.Fatal("narrow summary observation returned unrelated session metadata")
+	}
+	contextWindow, ok := got.Metadata[models.SessionMetaKeyContextWindow].(map[string]interface{})
+	wantContextWindow := map[string]interface{}{
+		"size": float64(200), "used": float64(200), "remaining": float64(0), "efficiency": float64(100),
+		"source": "acp", "timestamp": "2026-10-09T12:00:00Z",
+	}
+	if !ok || !reflect.DeepEqual(contextWindow, wantContextWindow) {
+		t.Fatalf("context-window projection = %#v, want fixed full-window scalars %#v", got.Metadata[models.SessionMetaKeyContextWindow], wantContextWindow)
+	}
+	if got.Metadata[models.SessionMetaKeyContextCompactionCount] != float64(3) {
+		t.Fatalf("context compaction count = %#v, want 3", got.Metadata[models.SessionMetaKeyContextCompactionCount])
 	}
 	encoded, err := json.Marshal(got)
 	if err != nil {
@@ -265,4 +341,96 @@ func assertSessionSummaryProviderModel(t *testing.T, repo *Repository) {
 	if label["current_model_id"] != "observed" {
 		t.Fatalf("provider projection = %#v, want observed", label)
 	}
+}
+
+func assertSessionSummaryContextWindowShapes(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	const taskID = "summary-context-window-shapes"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Context shapes"}); err != nil {
+		t.Fatalf("create context-shape task: %v", err)
+	}
+	fixtures := []struct {
+		id       string
+		metadata map[string]interface{}
+		want     map[string]interface{}
+	}{
+		{
+			id:       "summary-context-missing",
+			metadata: map[string]interface{}{models.SessionMetaKeyContextCompactionCount: 2},
+			want:     map[string]interface{}{models.SessionMetaKeyContextCompactionCount: float64(2)},
+		},
+		{
+			id:       "summary-context-null",
+			metadata: map[string]interface{}{models.SessionMetaKeyContextWindow: nil, models.SessionMetaKeyContextCompactionCount: 3},
+			want:     map[string]interface{}{models.SessionMetaKeyContextWindow: nil, models.SessionMetaKeyContextCompactionCount: float64(3)},
+		},
+		{
+			id:       "summary-context-invalid-root",
+			metadata: map[string]interface{}{models.SessionMetaKeyContextWindow: "not-an-object", models.SessionMetaKeyContextCompactionCount: "invalid"},
+			want:     map[string]interface{}{models.SessionMetaKeyContextWindow: nil},
+		},
+		{
+			id: "summary-context-invalid-fields",
+			metadata: map[string]interface{}{
+				models.SessionMetaKeyContextWindow:          map[string]interface{}{"size": "100", "used": 10, "source": []interface{}{"invalid"}},
+				models.SessionMetaKeyContextCompactionCount: 2.5,
+			},
+			want: map[string]interface{}{
+				models.SessionMetaKeyContextWindow:          map[string]interface{}{"used": float64(10)},
+				models.SessionMetaKeyContextCompactionCount: float64(2.5),
+			},
+		},
+		{
+			id: "summary-context-unmeasured",
+			metadata: map[string]interface{}{models.SessionMetaKeyContextWindow: map[string]interface{}{
+				"size": 100, "used": 0, "remaining": 100,
+			}},
+			want: map[string]interface{}{models.SessionMetaKeyContextWindow: map[string]interface{}{
+				"size": float64(100), "used": float64(0), "remaining": float64(100),
+			}},
+		},
+	}
+	for _, fixture := range fixtures {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: fixture.id, TaskID: taskID, State: models.TaskSessionStateWaitingForInput, Metadata: fixture.metadata,
+		}); err != nil {
+			t.Fatalf("create %s: %v", fixture.id, err)
+		}
+	}
+	observations, err := repo.ListTaskSessionSummaryObservations(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list context-shape summaries: %v", err)
+	}
+	if len(observations) != len(fixtures) {
+		t.Fatalf("context-shape summary count = %d, want %d", len(observations), len(fixtures))
+	}
+	byID := make(map[string]*models.TaskSessionSummaryObservation, len(observations))
+	for _, observation := range observations {
+		byID[observation.ID] = observation
+	}
+	for _, fixture := range fixtures {
+		observation := byID[fixture.id]
+		if observation == nil || !reflect.DeepEqual(observation.Metadata[models.SessionMetaKeyContextWindow], fixture.want[models.SessionMetaKeyContextWindow]) && hasMetadataKey(fixture.want, models.SessionMetaKeyContextWindow) {
+			t.Errorf("%s context-window projection = %#v, want %#v", fixture.id, observation, fixture.want[models.SessionMetaKeyContextWindow])
+			continue
+		}
+		if _, expected := fixture.want[models.SessionMetaKeyContextCompactionCount]; expected {
+			if observation.Metadata[models.SessionMetaKeyContextCompactionCount] != fixture.want[models.SessionMetaKeyContextCompactionCount] {
+				t.Errorf("%s compaction-count projection = %#v, want %#v", fixture.id, observation.Metadata[models.SessionMetaKeyContextCompactionCount], fixture.want[models.SessionMetaKeyContextCompactionCount])
+			}
+		} else if _, exists := observation.Metadata[models.SessionMetaKeyContextCompactionCount]; exists {
+			t.Errorf("%s projected invalid or missing compaction count: %#v", fixture.id, observation.Metadata[models.SessionMetaKeyContextCompactionCount])
+		}
+		if _, expected := fixture.want[models.SessionMetaKeyContextWindow]; !expected {
+			if _, exists := observation.Metadata[models.SessionMetaKeyContextWindow]; exists {
+				t.Errorf("%s projected absent context window: %#v", fixture.id, observation.Metadata[models.SessionMetaKeyContextWindow])
+			}
+		}
+	}
+}
+
+func hasMetadataKey(metadata map[string]interface{}, key string) bool {
+	_, exists := metadata[key]
+	return exists
 }

@@ -211,6 +211,10 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 		if err := json.Unmarshal(stored.Payload, &agentEvent); err != nil {
 			return fmt.Errorf("decode canonical agent event: %w", err)
 		}
+		agentEvent, err = r.resolveCanonicalAgentDeliveryEventTx(ctx, tx, &stored, agentEvent)
+		if err != nil {
+			return err
+		}
 		initializeBoundary()
 		if agentEvent.Type == streams.EventTypeToolCall && agentEvent.ParentToolCallID == "" {
 			if err := flushGroup(); err != nil {
@@ -368,6 +372,7 @@ func (r *Repository) markCanonicalDeliveryBatchProjectedTx(
 			return err
 		}
 		if terminalEffect != nil {
+			terminalEffect.TurnID = item.agentEvent.TurnID
 			if _, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, terminalEffect); err != nil {
 				return err
 			}
@@ -582,7 +587,19 @@ func (r *Repository) canonicalDeliveryTurnWithCreationTx(
 	sessionID, taskID, requestedTurnID string,
 	event *models.AgentDeliveryEvent,
 ) (string, bool, error) {
-	if requestedTurnID != "" {
+	turn, errand, ownershipErr := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
+	if ownershipErr != nil {
+		return "", false, ownershipErr
+	}
+	if turn != "" && event.SubmissionID != "" {
+		return turn, false, nil
+	}
+	if errand && taskID == "" {
+		if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT task_id FROM task_sessions WHERE id=?`), sessionID).Scan(&taskID); err != nil {
+			return "", false, err
+		}
+	}
+	if !errand && requestedTurnID != "" {
 		return requestedTurnID, false, nil
 	}
 	var turnID string
@@ -590,16 +607,24 @@ func (r *Repository) canonicalDeliveryTurnWithCreationTx(
 		SELECT id FROM task_session_turns
 		WHERE task_session_id = ? AND completed_at IS NULL
 		ORDER BY started_at DESC, id DESC LIMIT 1`), sessionID).Scan(&turnID)
-	if err == nil {
+	if err == nil && !errand {
 		return turnID, false, nil
 	}
-	if err != sql.ErrNoRows {
+	if err != nil && err != sql.ErrNoRows {
 		return "", false, fmt.Errorf("load canonical delivery turn: %w", err)
 	}
 	turnID = fmt.Sprintf("agent-delivery-turn-%s-%d", event.StreamID, event.Sequence)
 	metadata, err := r.canonicalDeliveryTurnMetadataTx(ctx, tx, taskID)
 	if err != nil {
 		return "", false, err
+	}
+	if errand {
+		turnID = turn
+		raw, encodeErr := json.Marshal(map[string]any{"agent_delivery_unowned_v1": map[string]any{"stream_id": event.StreamID, "first_sequence": event.Sequence, "incarnation_id": event.IncarnationID, "harness_generation": event.HarnessGeneration}})
+		if encodeErr != nil {
+			return "", false, encodeErr
+		}
+		metadata = string(raw)
 	}
 	now := r.nowUTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`

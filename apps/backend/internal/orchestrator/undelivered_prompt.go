@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -15,22 +14,17 @@ type unsentDeliveryStore interface {
 	FailUnsentAgentDeliverySubmission(context.Context, *models.AgentDeliverySubmission, time.Time) (bool, error)
 }
 
-func (s *Service) settlePromptDispatchError(ctx context.Context, sessionID string, delivery *agentDeliverySubmissionRuntime, accepted bool, cause error) error {
-	if delivery == nil {
+func (s *Service) retainUnresolvedPromptDispatch(ctx context.Context, sessionID string, delivery *agentDeliverySubmissionRuntime, outcome promptDispatchResolution, cause error) error {
+	if delivery == nil || outcome.refused() {
 		return cause
-	}
-	var notSent *agentruntime.RequestNotSentError
-	if !accepted && errors.As(cause, &notSent) {
-		if err := delivery.failUnsent(ctx); err == nil {
-			return cause
-		} else {
-			cause = errors.Join(cause, err)
-		}
 	}
 	return errors.Join(cause, delivery.markInterrupted(ctx, "prompt_dispatch_failed"), s.deliveryRecoveryError(ctx, sessionID, unknownPromptOutcome, delivery))
 }
 
 func (r *agentDeliverySubmissionRuntime) failUnsent(ctx context.Context) error {
+	if r.completed {
+		return nil
+	}
 	writer, ok := r.store.(unsentDeliveryStore)
 	if !ok {
 		return fmt.Errorf("unsent delivery settlement is unavailable")
@@ -48,6 +42,19 @@ func (r *agentDeliverySubmissionRuntime) failUnsent(ctx context.Context) error {
 	}
 	r.completed = true
 	return nil
+}
+
+func (r *agentDeliverySubmissionRuntime) unsentReceipt(ctx context.Context) (bool, error) {
+	if r == nil || r.expected == nil || r.expected.SessionID != r.sessionID {
+		return false, nil
+	}
+	reader, ok := r.store.(interface {
+		AgentDeliverySubmissionWasUnsent(context.Context, *models.AgentDeliverySubmission) (bool, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("unsent delivery receipt storage is unavailable")
+	}
+	return reader.AgentDeliverySubmissionWasUnsent(ctx, r.expected)
 }
 
 // Unknown outcomes cannot be displaced by a later admission's recovery block.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -118,9 +119,31 @@ func (s *Service) prepareSendNowTranscript(
 	return nil
 }
 
-func markSendNowSourcesRecorded(claim *messagequeue.SendNowClaim) {
+func sendNowSourceIDs(claim *messagequeue.SendNowClaim) []string {
+	ids := make([]string, 0, len(claim.Sources))
 	for i := range claim.Sources {
-		markQueuedUserMessageRecorded(&claim.Sources[i])
+		ids = append(ids, claim.Sources[i].ID)
+	}
+	return ids
+}
+
+func markSendNowSourcesRecorded(claim *messagequeue.SendNowClaim) {
+	represented := map[string]bool{}
+	if snapshot, present, err := errands.DecodeSendNowDelivery(claim.Dispatch.Metadata); present && err == nil {
+		for _, id := range snapshot.SourceIDs {
+			represented[id] = true
+		}
+	} else if !present {
+		for i := range claim.Sources {
+			if sendNowSourceHasInput(&claim.Sources[i]) {
+				represented[claim.Sources[i].ID] = true
+			}
+		}
+	}
+	for i := range claim.Sources {
+		if represented[claim.Sources[i].ID] {
+			markQueuedUserMessageRecorded(&claim.Sources[i])
+		}
 	}
 }
 
@@ -135,17 +158,35 @@ func (s *Service) sendNowAfterClaim(
 			return errLifecyclePromptReservationSuperseded
 		}
 		if durablePlanComments {
-			return nil
+			if hasQueuedErrandDelivery(&claim.Dispatch) || claim.Dispatch.Metadata[errands.SendNowDeliveryMetadataKey] != nil {
+				if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sendNowSourceIDs(claim)...); err != nil {
+					return fmt.Errorf("%w: update Send Now errand delivery transcript: %w", errLifecyclePromptMessagePersistence, err)
+				}
+			}
+			return s.persistSendNowErrandSnapshot(ctx, claim)
 		}
-		if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
+		if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments, sendNowSourceIDs(claim)...); err != nil {
+			if hasQueuedErrandDelivery(&claim.Dispatch) || claim.Dispatch.Metadata[errands.SendNowDeliveryMetadataKey] != nil {
+				return fmt.Errorf("%w: record Send Now errand delivery transcript: %w", errLifecyclePromptMessagePersistence, err)
+			}
 			s.logger.Warn("failed to record send-now user message after prompt claim",
 				zap.String("session_id", claim.Dispatch.SessionID), zap.Error(err))
 		} else if s.messageCreator != nil {
 			markSendNowSourcesRecorded(claim)
 		}
 		s.processSendNowTurnStart(ctx, claim)
+		return s.persistSendNowErrandSnapshot(ctx, claim)
+	}
+}
+
+func (s *Service) persistSendNowErrandSnapshot(ctx context.Context, claim *messagequeue.SendNowClaim) error {
+	if _, present, err := errands.DecodeSendNowDelivery(claim.Dispatch.Metadata); err != nil {
+		return err
+	} else if !present {
 		return nil
 	}
+	protocol, submissionID, payloadHash := claim.DeliverySubmission()
+	return s.messageQueue.SetPendingSendNowClaimDelivery(ctx, claim, protocol, submissionID, payloadHash)
 }
 
 func (s *Service) sendNowDeliveryBoundary(
@@ -197,8 +238,16 @@ func (s *Service) restoreSendNowClaimWithRetry(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
 ) error {
+	updates, err := restoredPreparedSourceMetadata(claim)
+	if err != nil {
+		return err
+	}
 	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
-		return s.messageQueue.RestoreSendNowClaim(recoveryCtx, claim)
+		normalizedCtx, err := messagequeue.WithRestoredSourceMetadata(recoveryCtx, claim, updates)
+		if err != nil {
+			return err
+		}
+		return s.messageQueue.RestoreSendNowClaim(normalizedCtx, claim)
 	})
 }
 
@@ -451,6 +500,9 @@ func (s *Service) reconcilePendingSendNowClaimOnStartup(
 			zap.String("session_id", sessionID))
 		return nil
 	}
+	if s.sendNowClaimOwnsErrandSources(claim) {
+		return nil
+	}
 	if err := s.restoreSendNowClaimWithRetry(ctx, claim); err != nil {
 		if !errors.Is(err, messagequeue.ErrSendNowClaimChanged) {
 			return fmt.Errorf("recover pending Send Now claim for session %s: %w", sessionID, err)
@@ -487,6 +539,9 @@ func (s *Service) restorePendingSendNowClaimsForRecovery(ctx context.Context, se
 					return fmt.Errorf("discard superseded Send Now claim for session %s: %w", sessionID, discardErr)
 				}
 			}
+			continue
+		}
+		if s.sendNowClaimOwnsErrandSources(claim) {
 			continue
 		}
 		if err := s.restoreSendNowClaimWithRetry(context.WithoutCancel(ctx), claim); err != nil {

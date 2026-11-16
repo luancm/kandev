@@ -74,6 +74,9 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if err != nil {
 		return err
 	}
+	if err := m.preserveInterruptedDelegation(ctx, sessionID); err != nil {
+		return err
+	}
 	for _, id := range ids {
 		if missingPeer, missing := missingPeerByID[id]; missing {
 			err = m.deliveryJournalReleaser().retireMissingUnknown(ctx, client, missingPeer)
@@ -102,7 +105,10 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if err != nil {
 		return fmt.Errorf("confirm native resume retirement evidence: %w", err)
 	}
-	return m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, true)
+	if err := m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, true); err != nil {
+		return err
+	}
+	return m.ReconcileInterruptedErrandDelivery(ctx, sessionID)
 }
 
 func nativeResumeMissingPeerRefusalReason(err error) string {

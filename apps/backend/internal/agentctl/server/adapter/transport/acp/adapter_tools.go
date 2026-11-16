@@ -183,6 +183,8 @@ func (a *Adapter) convertToolCallUpdateForGeneration(
 		parentToolCallID = a.copilotSubagentParentToolCallID(sessionID, emittedToolCallID, tc.Meta)
 	}
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
+	a.trackActiveToolOwner(emittedToolCallID, toolCallOwner{sessionID, parentToolCallID, promptGeneration})
+	a.trackAwaitReceiptCall(sessionID, toolCallID, tc, parentToolCallID)
 
 	return &AgentEvent{
 		Type:              eventType,
@@ -220,7 +222,12 @@ func (a *Adapter) trackToolCallPayload(
 		a.trackCodexSubagentControlLocked(sessionID, toolCallID, payload)
 		a.trackCopilotSubagentCallLocked(sessionID, toolCallID, payload)
 		a.applyPendingCursorTaskMetaLocked(sessionID, toolCallID, payload)
-		a.activeToolCalls[toolCallID] = payload
+		if initiallyTerminalTool(string(call.Status)) {
+			delete(a.activeToolCalls, toolCallID)
+			a.forgetPromptHandoffToolLocked(toolCallID)
+		} else {
+			a.activeToolCalls[toolCallID] = payload
+		}
 		return payload, eventType, signal, toolCallID, "", false
 	}
 
@@ -241,6 +248,7 @@ func (a *Adapter) trackToolCallPayload(
 	}
 	if correlation.terminalSeen {
 		delete(a.activeToolCalls, correlation.emittedToolCallID)
+		a.forgetPromptHandoffToolLocked(correlation.emittedToolCallID)
 	} else if active := a.activeToolCalls[correlation.emittedToolCallID]; sameCodexSubagentChild(active, correlation.payload) {
 		a.activeToolCalls[correlation.emittedToolCallID] = correlation.payload
 	}
@@ -916,7 +924,9 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		parentToolCallID = a.toolCallParents[emittedToolCallID]
 	}
 
+	receipt := a.codexAwaitReceiptLocked(sessionID, toolCallID, parentToolCallID, status, tcu.RawOutput, tcu.RawInput)
 	if isTerminal {
+		delete(a.awaitReceiptCalls, toolCallID)
 		if payload == nil || !payload.IsActiveBackgroundWork() {
 			delete(a.activeToolCalls, emittedToolCallID)
 			a.forgetPromptHandoffToolLocked(emittedToolCallID)
@@ -929,6 +939,10 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 		}
 	}
 	emittedPayload := cloneSubagentPayload(payload)
+	emittedToolName := ""
+	if canonicalMCPUpdate {
+		emittedToolName = payload.Generic().Name
+	}
 	a.mu.Unlock()
 	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
@@ -975,16 +989,18 @@ func (a *Adapter) convertToolCallResultUpdateForGeneration(
 	}
 
 	return &AgentEvent{
-		Type:              streams.EventTypeToolUpdate,
-		SessionID:         sessionID,
-		ToolCallID:        emittedToolCallID,
-		ParentToolCallID:  parentToolCallID,
-		ToolTitle:         title,
-		ToolStatus:        status,
-		ToolStatusMissing: statusMissing,
-		NormalizedPayload: emittedPayload,
-		ToolCallContents:  convertedContents,
-		BackgroundWork:    claudeTerminalObservation,
+		Type:               streams.EventTypeToolUpdate,
+		SessionID:          sessionID,
+		ToolCallID:         emittedToolCallID,
+		ParentToolCallID:   parentToolCallID,
+		ToolTitle:          title,
+		ToolStatus:         status,
+		ToolName:           emittedToolName,
+		ErrandAwaitReceipt: receipt,
+		NormalizedPayload:  emittedPayload,
+		ToolCallContents:   convertedContents,
+		ToolStatusMissing:  statusMissing,
+		BackgroundWork:     claudeTerminalObservation,
 	}
 }
 

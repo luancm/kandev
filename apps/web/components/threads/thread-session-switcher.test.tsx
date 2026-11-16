@@ -2,9 +2,11 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
+import type { Errand } from "@/lib/types/errands";
 import { agentProfileId, sessionId, taskId } from "@/lib/types/ids";
 import type { ResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
+const PICKER_TRIGGER = "thread-session-picker-trigger";
 const responsiveMocks = vi.hoisted(() => ({
   useResponsiveBreakpoint: vi.fn(),
 }));
@@ -63,7 +65,7 @@ beforeEach(() => {
   responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktop());
   storeMocks.useAppStore.mockImplementation(
     (selector: (state: { agentProfiles: { items: AgentProfileOption[] } }) => unknown) =>
-      selector({ agentProfiles: { items: AGENT_PROFILES } }),
+      selector({ agentProfiles: { items: AGENT_PROFILES }, features: { errands: false } } as never),
   );
 });
 
@@ -216,7 +218,7 @@ describe("ThreadSessionSwitcher — phone picker", () => {
     );
 
     expect(screen.queryByRole("tab")).toBeNull();
-    fireEvent.click(screen.getByTestId("thread-session-picker-trigger"));
+    fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
 
     const row = screen.getByTestId(`thread-session-row-${SESSION_B}`);
     expect(row.className).toContain("min-h-11");
@@ -244,11 +246,112 @@ describe("ThreadSessionSwitcher — phone picker", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("thread-session-picker-trigger"));
+    fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
 
     const runningRow = screen.getByTestId(`thread-session-row-${SESSION_A}`);
     const settledRow = screen.getByTestId(`thread-session-row-${SESSION_B}`);
     expect(within(runningRow).getByRole("status", { name: "Loading" })).not.toBeNull();
     expect(within(settledRow).getByTestId(`thread-session-agent-icon-${SESSION_B}`)).not.toBeNull();
   });
+});
+
+// @covers AC-TASKS-ERRANDS-010.5 AC-TASKS-ERRANDS-011.1
+it.each([false, true])(
+  "omits errands from phone normal conversations with errands=%s",
+  (enabled) => {
+    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobile());
+    storeMocks.useAppStore.mockImplementation((selector) =>
+      selector({
+        agentProfiles: { items: AGENT_PROFILES },
+        features: { errands: enabled },
+        errands: { byTaskId: {} },
+      }),
+    );
+    const onSelect = vi.fn();
+    render(
+      <ThreadSessionSwitcher
+        sessions={[
+          session("child", "Child", { role: "errand", parent_session_id: sessionId(SESSION_A) }),
+          session(SESSION_B, "Other", { state: "WAITING_FOR_INPUT" }),
+          session(SESSION_A, "Parent", { is_primary: true }),
+        ]}
+        selectedSessionId="child"
+        onSelect={onSelect}
+      />,
+    );
+    expect(screen.getByTestId(PICKER_TRIGGER).textContent).toContain("Parent");
+    expect(screen.getByTestId(PICKER_TRIGGER).textContent).toContain("1/2");
+    fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
+    expect(screen.queryByTestId("thread-session-row-child")).toBeNull();
+    expect(
+      screen.getAllByTestId(/^thread-session-row-/).map((row) => row.getAttribute("data-testid")),
+    ).toEqual([`thread-session-row-${SESSION_A}`, `thread-session-row-${SESSION_B}`]);
+    const parent = screen.getByTestId(`thread-session-row-${SESSION_A}`);
+    expect(parent.getAttribute("aria-current")).toBe("true");
+    expect(within(parent).getByText("Primary")).toBeTruthy();
+    fireEvent.click(screen.getByTestId(`thread-session-row-${SESSION_B}`));
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith(SESSION_B);
+  },
+);
+
+it("keeps desktop normal conversation tabs without a retained child tab", () => {
+  render(
+    <ThreadSessionSwitcher
+      sessions={[
+        session("child", "Child", { role: "errand", parent_session_id: sessionId(SESSION_A) }),
+        session(SESSION_A, "Parent", { is_primary: true }),
+        session(SESSION_B, "Other"),
+      ]}
+      selectedSessionId="child"
+      onSelect={vi.fn()}
+    />,
+  );
+  expect(screen.queryByTestId("thread-session-tab-child")).toBeNull();
+  expect(screen.getByTestId(`thread-session-tab-${SESSION_A}`)).toBeTruthy();
+  expect(screen.getByTestId(`thread-session-tab-${SESSION_A}`).getAttribute("data-state")).toBe(
+    "active",
+  );
+  expect(screen.getByTestId(`thread-session-tab-${SESSION_B}`)).toBeTruthy();
+});
+
+it("omits an enabled cache-known errand before its session role is hydrated", () => {
+  const errand: Errand = {
+    errand_id: "child",
+    task_id: "task-1",
+    parent_session_id: SESSION_A,
+    title: "Audit",
+    objective: "Audit the API",
+    agent_profile_id: PROFILE_FAST,
+    status: "running",
+    result_state: "none",
+    result_preview: "",
+    result_truncated: false,
+    created_at: "2026-08-27T10:00:00Z",
+    updated_at: "2026-08-27T12:00:00Z",
+    settled_at: null,
+  };
+  storeMocks.useAppStore.mockImplementation((selector) =>
+    selector({
+      agentProfiles: { items: AGENT_PROFILES },
+      features: { errands: true },
+      errands: { byTaskId: { "task-1": { child: errand } } },
+    }),
+  );
+  render(
+    <ThreadSessionSwitcher
+      sessions={[
+        session("child", "Audit"),
+        session(SESSION_B, "Other"),
+        session(SESSION_A, "Parent"),
+      ]}
+      selectedSessionId="child"
+      onSelect={vi.fn()}
+    />,
+  );
+
+  expect(screen.getAllByRole("tab")).toHaveLength(2);
+  expect(screen.queryByTestId("thread-session-tab-child")).toBeNull();
+  expect(screen.getByTestId(`thread-session-tab-${SESSION_A}`).getAttribute("data-state")).toBe(
+    "active",
+  );
 });

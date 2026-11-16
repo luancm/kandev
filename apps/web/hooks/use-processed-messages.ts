@@ -7,7 +7,11 @@ import {
   type MessageType,
   type TaskPendingAction,
 } from "@/lib/types/http";
-import { isContextCompactionMessage, isRichOutputMessage } from "@/components/task/chat/types";
+import {
+  isContextCompactionMessage,
+  isRichOutputMessage,
+  isStandaloneErrandToolMessage,
+} from "@/components/task/chat/types";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import {
   findPendingClarification,
@@ -303,7 +307,8 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
       ACTIVITY_MESSAGE_TYPES.has(message.type) &&
       !isSubagentMessage(message) &&
       !isContextCompactionMessage(message) &&
-      !isRichOutputMessage(message);
+      !isRichOutputMessage(message) &&
+      !isStandaloneErrandToolMessage(message);
     const messageTurnId = message.turn_id ?? null;
     if (isActivity && messageTurnId) {
       if (currentGroup.length > 0 && currentTurnId === messageTurnId) {

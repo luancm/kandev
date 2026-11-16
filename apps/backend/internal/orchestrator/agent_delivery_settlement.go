@@ -11,9 +11,29 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+type queuedTerminalEffectReader interface {
+	GetAgentDeliveryEffect(context.Context, string) (*models.AgentDeliveryEffect, error)
+}
+
+type queuedTerminalIdentityRepairer interface {
+	RepairAgentDeliveryTerminalIdentity(context.Context, *models.AgentDeliveryEffect) (*models.AgentDeliveryEffect, error)
+}
+
 func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, sessionID string) error {
+	return s.reconcileAgentDeliverySettlementScope(ctx, sessionID, "")
+}
+
+func (s *Service) reconcileAgentDeliverySubmissionSettlements(ctx context.Context, sessionID, submissionID string) error {
+	if submissionID == "" {
+		return nil
+	}
+	return s.reconcileAgentDeliverySettlementScope(ctx, sessionID, submissionID)
+}
+
+func (s *Service) reconcileAgentDeliverySettlementScope(ctx context.Context, sessionID, submissionID string) error {
 	settlements, ok := s.repo.(repository.AgentDeliverySettlementRepository)
 	if !ok {
 		return nil
@@ -26,13 +46,34 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 	if !ok && len(effects) > 0 {
 		return errors.New("agent delivery submission repository is unavailable")
 	}
+	var identityErr error
 	for _, effect := range effects {
-		if effect != nil {
-			if err := s.settleAgentDeliveryEffect(ctx, settlements, submissions, effect); err != nil {
-				return err
-			}
+		if effect == nil || submissionID != "" && effect.SubmissionID != submissionID {
+			continue
 		}
+		err := s.settleAgentDeliveryEffect(ctx, settlements, submissions, effect)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityMismatch) {
+			return err
+		}
+		// Independent submissions can settle while unresolved identities remain
+		// visible to session-scoped callers. No refused effect gains authority.
+		if sessionID != "" {
+			identityErr = errors.Join(identityErr, err)
+		}
+		s.logger.Warn("retaining delivery terminal with unresolved identity",
+			zap.String("effect_key", effect.EffectKey), zap.String("session_id", effect.SessionID),
+			zap.Error(err))
 	}
+	if identityErr != nil {
+		return identityErr
+	}
+	return s.convergeSettledDeliverySessionStates(ctx, settlements, sessionID)
+}
+
+func (s *Service) convergeSettledDeliverySessionStates(ctx context.Context, settlements repository.AgentDeliverySettlementRepository, sessionID string) error {
 	if sessionID != "" {
 		// Completed effects in older installations can still leave a stale
 		// coarse row. The current persisted terminal binding is the only
@@ -57,11 +98,48 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 
 func (s *Service) settleQueuedDeliveryPredecessor(ctx context.Context, taskID, sessionID string, effect *models.AgentDeliveryEffect) error {
 	ctx = withSettledDeliverySessionStateConvergenceSkipped(context.WithoutCancel(ctx))
+	effect, err := s.repairQueuedTerminalIdentity(ctx, effect)
+	if err != nil {
+		return err
+	}
+	if effect == nil || effect.TurnID == "" {
+		return errors.New("terminal identity is unavailable before queued successor")
+	}
 	// The queue owns the successor, so this terminal intentionally has no workflow transition.
 	if err := s.recordNotRequiredDeliveryWorkflowOutcome(ctx, taskID, effect); err != nil {
 		return err
 	}
-	return s.reconcileAgentDeliverySettlements(ctx, sessionID)
+	return s.reconcileAgentDeliverySubmissionSettlements(ctx, sessionID, effect.SubmissionID)
+}
+
+func (s *Service) repairQueuedTerminalIdentity(
+	ctx context.Context,
+	effect *models.AgentDeliveryEffect,
+) (*models.AgentDeliveryEffect, error) {
+	if effect == nil || effect.StreamID == "" || effect.Sequence <= 0 || effect.SubmissionID == "" {
+		return effect, nil
+	}
+	reader, readOK := s.repo.(queuedTerminalEffectReader)
+	repairer, repairOK := s.repo.(queuedTerminalIdentityRepairer)
+	if !readOK || !repairOK {
+		return effect, nil
+	}
+	key := fmt.Sprintf("agent_delivery.terminal:%s:%d", effect.StreamID, effect.Sequence)
+	terminal, err := reader.GetAgentDeliveryEffect(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("load terminal identity before queued successor: %w", err)
+	}
+	repaired, err := repairer.RepairAgentDeliveryTerminalIdentity(ctx, terminal)
+	if err != nil {
+		return nil, fmt.Errorf("repair terminal identity before queued successor: %w", err)
+	}
+	if repaired == nil || repaired.TurnID == "" || effect.TurnID != "" && effect.TurnID != repaired.TurnID {
+		return nil, errors.New("terminal identity is unavailable before queued successor")
+	}
+	workflowEffect := *effect
+	workflowEffect.TurnID = repaired.TurnID
+	workflowEffect.EffectKey = workflowEffectKey(repaired.TurnID)
+	return &workflowEffect, nil
 }
 
 func (s *Service) settleAgentDeliveryEffect(
@@ -104,7 +182,9 @@ func (s *Service) settleAgentDeliveryEffect(
 	); err != nil {
 		return fmt.Errorf("converge settled session state for submission %q: %w", effect.SubmissionID, err)
 	}
-	if _, err := settlements.CompleteAgentDeliveryTerminalSettlement(ctx, effect.EffectKey, time.Now().UTC()); err != nil {
+	s.publishAgentDeliveryRecoveryState(ctx, effect.SessionID)
+	_, err = settlements.CompleteAgentDeliveryTerminalSettlement(ctx, effect.EffectKey, time.Now().UTC())
+	if err != nil {
 		return fmt.Errorf("complete delivery terminal outbox %q: %w", effect.EffectKey, err)
 	}
 	return nil

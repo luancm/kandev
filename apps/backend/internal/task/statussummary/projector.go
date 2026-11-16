@@ -125,6 +125,7 @@ type ProjectorConfig struct {
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
 	LoadCompletionGate      CompletionGateLoader
+	LoadErrands             ErrandsLoader
 	// LoadSessionUnreadState reads unread ranks for sessions when an event
 	// needs them. Nil keeps the stored unread aggregate as the projection.
 	LoadSessionUnreadState SessionUnreadStateLoader
@@ -173,6 +174,7 @@ type Projector struct {
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
 	loadCompletionGate      CompletionGateLoader
+	loadErrands             ErrandsLoader
 	loadSessionUnreadState  SessionUnreadStateLoader
 	loadQuotaWait           QuotaWaitLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
@@ -231,6 +233,7 @@ type projectionState struct {
 	launchQueueObserved    bool
 	completionGate         *CompletionGateSummary
 	completionGateObserved bool
+	errands                *ErrandsSummary
 	// unreadObserved means every session's unread ranks come from an
 	// authoritative read; otherwise unreadBaseline is the projected list.
 	unreadObserved    bool
@@ -307,6 +310,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
 		loadCompletionGate:      cfg.LoadCompletionGate,
+		loadErrands:             cfg.LoadErrands,
 		loadSessionUnreadState:  cfg.LoadSessionUnreadState,
 		loadQuotaWait:           cfg.LoadQuotaWait,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
@@ -404,6 +408,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.GitHubTaskPRDeleted,
 		events.GitHubTaskCIOptionsUpdated,
 		events.MessageQueueStatusChanged,
+		events.ErrandUpdated,
 		events.TaskSessionReadCursorChanged,
 	}
 	for _, pattern := range patterns {
@@ -576,6 +581,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		}
 	}
 
+	errandsChanged, err := p.refreshErrandsLocked(ctx, taskID, state, event.Type)
+	if err != nil {
+		return err
+	}
+
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
 		pendingChanged := false
@@ -596,14 +606,14 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || quotaWaitChanged || unreadDiffersFromCurrent(state)
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged || quotaWaitChanged || unreadDiffersFromCurrent(state)
 		if changed && p.holdUnreadRiseLocked(taskID, state) {
 			return nil
 		}
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || quotaWaitChanged || unreadDiffersFromCurrent(state)
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || turnErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || errandsChanged || quotaWaitChanged || unreadDiffersFromCurrent(state)
 	if !changed || p.holdUnreadRiseLocked(taskID, state) {
 		return nil
 	}

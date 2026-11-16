@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/errands"
 	"net/http"
 	"strconv"
 	"strings"
@@ -299,6 +300,7 @@ func (h *MessageHandlers) injectMessageContext(
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
+		ErrandSession:                  sessionResp.Session.Role == models.SessionRoleErrand,
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
 }
 
@@ -896,7 +898,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	steer := h.orchestrator != nil &&
 		h.orchestrator.SteerEligible(sessionResp.Session.ID, sessionResp.Session.State)
 	if !steer {
-		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
+		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session); wsErr != nil {
 			return wsErr, nil
 		}
 	}
@@ -1206,6 +1208,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		if errors.Is(err, messagequeue.ErrQueueIDConflict) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
 		}
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
+		}
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
@@ -1453,7 +1458,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 			zap.Error(err))
 		return nil, errors.New("failed to reload submitted session after on_turn_start")
 	}
-	if reloaded.State != models.TaskSessionStateCompleted {
+	if reloaded.State != models.TaskSessionStateCompleted || models.IsErrandSession(reloaded) {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
@@ -1497,11 +1502,14 @@ func (h *MessageHandlers) enrichWorkspaceRecovery(
 	dto.EnrichWorkspaceRecovery(projection, operation, runnerLive)
 }
 
-func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
-	switch state {
+func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session dto.TaskSessionDTO) *ws.Message {
+	if session.State == models.TaskSessionStateCompleted && session.Role == models.SessionRoleErrand {
+		return nil
+	}
+	switch session.State {
 	case models.TaskSessionStateRunning:
 		if h.orchestrator != nil &&
-			h.orchestrator.ForegroundActivity(sessionID) == v1.ForegroundActivityBackground {
+			h.orchestrator.ForegroundActivity(session.ID) == v1.ForegroundActivityBackground {
 			return nil
 		}
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
@@ -1650,6 +1658,11 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
 		return nil, wsErr
 	}
+	if models.IsErrandSession(session) {
+		if refusal := h.errandContinuationRefusal(ctx, msg, sessionID); refusal != nil {
+			return nil, refusal
+		}
+	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
@@ -1667,7 +1680,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		h.orchestrator.SteerEligible(sessionID, sessionDTO.State) {
 		return resp, nil
 	}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
+	if wsErr := h.errorForBlockedMessageSession(msg, sessionDTO); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
 		}

@@ -459,6 +459,9 @@ func handlePrompt(e *emitter, prompt, model string) {
 	} else if scenario, ok := parseOfficeScenarioDirective(prompt); ok {
 		cmd = "/e2e:" + scenario
 	}
+	if handleErrandsScenario(e, prompt, cmd) {
+		return
+	}
 	if handleAutopilotParentQuestion(e, cmd) {
 		return
 	}

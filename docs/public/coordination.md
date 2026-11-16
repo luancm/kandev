@@ -9,7 +9,7 @@ Kandev can coordinate several agents without turning every unit of work into a s
 
 ## Quick path
 
-1. Use another session for parallel work in the same task environment.
+1. With Errands enabled, ask the agent for an errand when bounded work should report back within the task. Use another named session for a peer conversation in the same task environment.
 2. Use a subtask when work needs its own workflow state.
 3. Choose an isolated workspace for concurrent writers or a different repository.
 4. Send bounded messages and keep the human review gate explicit.
@@ -32,6 +32,47 @@ Start with the smallest boundary that preserves shared context. Increase the bou
 | One deliverable spanning repositories                                | Multi-repository task                     | Separate worktree per attachment           | No; one task workflow      |
 
 Shared files make handoff cheap but allow concurrent edits to collide. Separate environments isolate file state, but only the executor determines whether host processes and credentials are also isolated.
+
+## Use agent-created errands (experimental)
+
+Errands are opt-in child conversations within one task. Ask the task's agent to start an errand for a bounded objective, then keep talking to the parent while the child works. Each child has its own transcript and uses the task's existing workspace; it has no separate board card or workflow step.
+
+1. Enable **Errands** in **Settings > System > Feature Toggles**, then restart Kandev. Alternatively, set `KANDEV_FEATURES_ERRANDS=true` in the environment used by your launcher and restart it. An explicit environment value takes precedence over the settings override.
+2. Open a task with a compatible structured agent profile and an existing task workspace. Ask the agent, for example: "Start an errand to review the error handling in this task's changed files. Report its findings, and keep this parent conversation available."
+3. Watch the **Errands** pill in the parent chat's status bar. Open it for that conversation's errands, with active work visible and completed history initially collapsed. Choose **Open** to inspect a child's full conversation temporarily within its parent's chat surface; **Back to parent** returns to the parent conversation. On phones, the pill opens a bottom drawer and the child conversation fills the screen.
+4. A delivered result appears as a compact, expandable completion entry in the parent transcript. The parent receives it through an optional await, its next turn, or a notification turn. With queue Auto-run off, the notification waits for manual Send now or the next parent turn.
+
+Start, wait and completion entries share a compact historical presentation. Expand an entry for its recorded titles, outcomes and available result text. A completed wait shows how long it waited and why it ended when that information is available; older entries may omit these details. Historical entries do not animate as running or change when an errand later finishes. Use the Errands panel for current progress.
+
+Finished history loads when you expand it. Use **Load more** to browse older entries; the panel shows the retained range and offers **Start again** after earlier pages leave the view. If the list changes while you browse, use **Refresh** before continuing. A failed history request offers **Retry** while live actions remain available. Regular task conversations keep their existing tabs and loading behavior.
+
+Completed results show recorded elapsed time when available, from errand creation to that result, including queued and idle time. This value stays unchanged after reload or later follow-up turns. Older results without a recorded duration omit it.
+
+Regular session tabs and session pickers are for normal task conversations. Errands remain accessible from their parent's panel and through direct conversation links, without accumulating permanent tabs. Their transcripts remain available after completion. Successful errands close their runtime after the result is saved and retain a completed conversation. Opening that history does not start an agent. Use the child composer to send an explicit follow-up in the same conversation; restoration follows the selected provider's supported recovery behavior.
+
+The pill remains available after all errands finish. Its panel offers **Stop all errands** while any errand is live; this action retains task-wide scope, including errands belonging to other parent conversations.
+
+The pill shows separate nonzero counts for running, queued and attention errands in the selected parent conversation. Every live row has its own named **Stop** beside **Open**, including queued and recovery-attention work. Stopping one errand keeps its transcript in the panel's completed history and leaves sibling errands running; the panel updates from the authoritative status. On phones, **Open** and **Stop** are separate touch controls.
+
+Errand rows also show used and total context tokens with a usage bar when a reliable reading is available, or say that usage is not measured when the window is known but has no positive sample. Rows without a usable window omit the readout. Open the child to inspect the full usage, source, and compaction details.
+
+An opened child offers **Stop** while live, a follow-up composer, and **Send result to parent** when a user-initiated result is eligible. Cancelling the parent's current turn leaves its errands running; stopping or deleting the parent/task cascades to its errands.
+
+Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.
+
+After a restart, Kandev can report an errand as interrupted when it verifies the original process ended and reconciles the saved delegation records. The parent receives an interruption result; this does not establish whether external commands completed or had side effects. Kandev does not resend the uncertain instruction. A new follow-up requires verified settlement of all earlier work. Older records with missing or conflicting evidence can remain blocked, so restarting with an updated build does not guarantee repair of every previously stranded errand.
+
+When recovery cannot verify earlier work, an idle errand shows **Recovery needs verification** instead of running. Open its conversation to inspect the transcript. You can stop the errand, but stopping does not establish what earlier commands did or repair missing evidence. It remains a live errand for capacity accounting while recovery is unresolved.
+
+Continuing is blocked until all earlier work has verified settlement. Once an interruption is settled, send a new instruction through the existing composer; Kandev restores the same conversation where supported and does not replay the uncertain instruction. These explanations and actions are available in both the desktop panel and phone drawer.
+
+Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
+
+All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands snapshot the parent's session MCP additions and exclusions at start; later parent selection changes do not rewrite that snapshot. Removed or disabled servers are omitted at launch.
+
+Errands remain disabled in every shipped profile. To roll back an opt-in installation, disable the override (or set the explicit environment value to `false`) and restart. Retained child sessions stay inspectable and detached from workflow ownership. Provider/executor certification is specific to the tested installation; enabling the flag does not establish universal provider support.
+
+See [Errand tools](agent-communication.md#errand-tools) for the agent contract.
 
 ## Run parallel sessions in one task
 

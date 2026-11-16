@@ -72,6 +72,9 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 	req.EntryOptions = entryOptions
 	req.Prompt = ""
+	if refusal := h.errandCallerRefusal(ctx, msg, req.SenderSessionID, "errand sessions cannot move tasks"); refusal != nil {
+		return refusal, nil
+	}
 	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
 		return response, err
 	}

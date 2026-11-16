@@ -1,6 +1,43 @@
 import type { ContextCompactionReporting, ContextWindowEntry } from "./types";
 
-function normalizeCompactionCount(value: unknown): number {
+export type ContextWindowMetadata = {
+  present: false;
+};
+
+export type PresentContextWindowMetadata = {
+  present: true;
+  contextWindow: unknown;
+  compactionCount: unknown;
+};
+
+export type ContextWindowMetadataRead = ContextWindowMetadata | PresentContextWindowMetadata;
+
+export function readContextWindowMetadata(metadata: unknown): ContextWindowMetadataRead {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return { present: false };
+  }
+
+  const record = metadata as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, "context_window")) {
+    return { present: false };
+  }
+
+  return {
+    present: true,
+    contextWindow: record.context_window,
+    compactionCount: record.context_compaction_count,
+  };
+}
+
+export function readContextWindowMetadataFromAliases(
+  metadata: unknown,
+  sessionMetadata: unknown,
+): ContextWindowMetadataRead {
+  const primary = readContextWindowMetadata(metadata);
+  return primary.present ? primary : readContextWindowMetadata(sessionMetadata);
+}
+
+export function normalizeContextCompactionCount(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.trunc(value));
 }
@@ -49,10 +86,38 @@ export function parseContextWindowEntry(
     used: (contextWindow.used as number) ?? 0,
     remaining: (contextWindow.remaining as number) ?? 0,
     efficiency: (contextWindow.efficiency as number) ?? 0,
-    compactionCount: normalizeCompactionCount(compactionCount),
+    compactionCount: normalizeContextCompactionCount(compactionCount),
     compactionReporting: normalizeCompactionReporting(compactionReporting),
     source,
     timestamp: timestamp ?? (contextWindow.timestamp as string | undefined),
+  };
+}
+
+export function updateContextWindowMetadata(
+  metadata: unknown,
+  entry: ContextWindowEntry | null,
+): Record<string, unknown> {
+  const current =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : {};
+  if (!entry) return { ...current, context_window: null };
+
+  const contextWindow = {
+    size: entry.size,
+    used: entry.used,
+    remaining: entry.remaining,
+    efficiency: entry.efficiency,
+    ...(entry.source ? { source: entry.source } : {}),
+    ...(entry.timestamp !== undefined ? { timestamp: entry.timestamp } : {}),
+  };
+  return {
+    ...current,
+    context_window: contextWindow,
+    context_compaction_count: normalizeContextCompactionCount(entry.compactionCount),
+    ...(entry.compactionReporting
+      ? { context_compaction_reporting: entry.compactionReporting }
+      : {}),
   };
 }
 
@@ -76,7 +141,10 @@ function newerReporting(
  */
 export function mergeCompactionCountValue(current: unknown, incoming: unknown): number | undefined {
   if (current === undefined && incoming === undefined) return undefined;
-  return Math.max(normalizeCompactionCount(current), normalizeCompactionCount(incoming));
+  return Math.max(
+    normalizeContextCompactionCount(current),
+    normalizeContextCompactionCount(incoming),
+  );
 }
 
 export function mergeCompactionReportingValue(
@@ -142,7 +210,7 @@ function metadataIsNewer(
   reporting: unknown,
 ): boolean {
   if (!current) return true;
-  const metadataCount = normalizeCompactionCount(count);
+  const metadataCount = normalizeContextCompactionCount(count);
   const metadataRevision = normalizeCompactionReporting(reporting)?.revision ?? -1;
   const cacheRevision = current.compactionReporting?.revision ?? -1;
   return metadataCount > current.compactionCount || metadataRevision > cacheRevision;
@@ -226,7 +294,7 @@ export function patchContextWindowCompaction(
   timestamp?: string,
 ): ContextWindowEntry | null {
   if (!existing) return null;
-  const count = normalizeCompactionCount(compactionCount);
+  const count = normalizeContextCompactionCount(compactionCount);
   const reporting = normalizeCompactionReporting(compactionReporting);
   return {
     ...existing,

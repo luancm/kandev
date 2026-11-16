@@ -617,6 +617,12 @@ type FeaturesConfig struct {
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`
 
+	// Errands gates agent-started errand sessions: the errand MCP tools,
+	// WebSocket actions, parent turn composition, and result delivery. Off in
+	// every shipped profile. Existing errand sessions stay workflow-detached
+	// whatever its value.
+	Errands bool `mapstructure:"errands" json:"errands"`
+
 	// OpenCodePlugin supplies the Kandev integration plugin to supported
 	// OpenCode v2 launches. Off in every shipped profile and restart-required.
 	OpenCodePlugin bool `mapstructure:"opencode_plugin" json:"opencodePlugin"`
@@ -1051,9 +1057,12 @@ func validate(cfg *Config) error {
 
 // DSN returns the PostgreSQL connection string.
 func (d *DatabaseConfig) DSN() string {
+	quote := func(value string) string {
+		return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
+	}
 	return fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		d.Host, d.Port, d.User, d.Password, d.DBName, d.SSLMode,
+		quote(d.Host), d.Port, quote(d.User), quote(d.Password), quote(d.DBName), quote(d.SSLMode),
 	)
 }
 

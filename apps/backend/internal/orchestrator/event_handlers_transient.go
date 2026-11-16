@@ -97,11 +97,13 @@ func transientRetryDelayFor(classified *routingerr.Error, attempt int, now time.
 
 // capturedPrompt is the minimal context needed to re-drive a failed turn.
 type capturedPrompt struct {
-	text        string
-	model       string
-	planMode    bool
-	attachments []v1.MessageAttachment
-	onAccepted  func(turnID string)
+	text                  string
+	model                 string
+	planMode              bool
+	attachments           []v1.MessageAttachment
+	onAccepted            func(turnID string)
+	promptAlreadyComposed bool
+	skipErrandComposition bool
 }
 
 // transientRetryEntry tracks one session's in-progress retry loop: the current
@@ -188,6 +190,23 @@ func (s *Service) rememberTurnPromptWithAccepted(
 		planMode:    planMode,
 		attachments: attachments,
 		onAccepted:  onAccepted,
+	})
+}
+
+func (s *Service) rememberComposedTurnPrompt(
+	sessionID, text, model string, planMode bool, attachments []v1.MessageAttachment, onAccepted func(turnID string),
+) {
+	if sessionID == "" {
+		return
+	}
+	s.lastTurnPrompt.Store(sessionID, capturedPrompt{
+		text:                  text,
+		model:                 model,
+		planMode:              planMode,
+		attachments:           attachments,
+		onAccepted:            onAccepted,
+		promptAlreadyComposed: true,
+		skipErrandComposition: true,
 	})
 }
 
@@ -583,6 +602,8 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		capacityIntent:                 turnCapacityOverride,
 		onAccepted:                     cp.onAccepted,
 		initialCreatePromptPassthrough: initialCreatePromptPassthrough,
+		promptAlreadyComposed:          cp.promptAlreadyComposed,
+		skipErrandComposition:          cp.skipErrandComposition,
 	}); err != nil {
 		if ctx.Err() != nil {
 			return

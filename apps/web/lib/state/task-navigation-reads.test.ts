@@ -17,7 +17,7 @@ import {
 
 const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
-  listTaskSessions: vi.fn(),
+  listOrdinaryTaskSessions: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => apiMocks);
@@ -29,7 +29,7 @@ afterEach(() => {
 describe("task navigation canonical overview refresh", () => {
   afterEach(() => {
     apiMocks.fetchTask.mockReset();
-    apiMocks.listTaskSessions.mockReset();
+    apiMocks.listOrdinaryTaskSessions.mockReset();
   });
 
   function makeStore() {
@@ -66,7 +66,7 @@ describe("task navigation canonical overview refresh", () => {
   it("repairs shared placement after a move missed before websocket connection", async () => {
     const store = makeStore();
     apiMocks.fetchTask.mockResolvedValue(refreshedTask());
-    apiMocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
+    apiMocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
 
     await readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
 
@@ -82,7 +82,7 @@ describe("task navigation canonical overview refresh", () => {
     const store = makeStore();
     const response = deferred<TaskNavigationIdentity["task"]>();
     apiMocks.fetchTask.mockReturnValue(response.promise);
-    apiMocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
+    apiMocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
     const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
     await Promise.resolve();
     store.setState((state) =>
@@ -110,7 +110,7 @@ describe("task navigation canonical overview refresh", () => {
     const store = makeStore();
     const response = deferred<TaskNavigationIdentity["task"]>();
     apiMocks.fetchTask.mockReturnValue(response.promise);
-    apiMocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
+    apiMocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
     const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
     const outcome = read.catch((error: unknown) => error);
     await Promise.resolve();
@@ -132,7 +132,7 @@ describe("task navigation store scope", () => {
       id: "task-a",
       primary_session_id: "session-a",
     } as TaskNavigationIdentity["task"]);
-    apiMocks.listTaskSessions.mockRejectedValue(new Error("session list unavailable"));
+    apiMocks.listOrdinaryTaskSessions.mockRejectedValue(new Error("session list unavailable"));
     const store = createAppStore();
 
     const result = await readTaskNavigationIdentity(store, "task-a");
@@ -153,7 +153,7 @@ describe("task navigation store scope identity", () => {
     apiMocks.fetchTask.mockImplementation((id: string) =>
       id === "task-a" ? taskA.promise : taskB.promise,
     );
-    apiMocks.listTaskSessions.mockImplementation((id: string) =>
+    apiMocks.listOrdinaryTaskSessions.mockImplementation((id: string) =>
       id === "task-a" ? sessionsA.promise : sessionsB.promise,
     );
     const store = createAppStore();

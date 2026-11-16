@@ -367,6 +367,11 @@ func calculateJournalAccounting(tx *bolt.Tx) (total, legacyEventOnly int64, err 
 	}); err != nil {
 		return 0, 0, ErrJournalCorrupt
 	}
+	if b := tx.Bucket(bucketAwaitAborts); b != nil {
+		if err := b.ForEach(func(_, value []byte) error { total += int64(len(value)); return nil }); err != nil {
+			return 0, 0, ErrJournalCorrupt
+		}
+	}
 	return total, legacyEventOnly, nil
 }
 

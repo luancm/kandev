@@ -246,6 +246,18 @@ export function isRichOutputMessage(message: Message): boolean {
   return message.type === "tool_call" && kandevToolStemOf(message) === "show_rich_output";
 }
 
+const STANDALONE_ERRAND_TOOL_STEMS: ReadonlySet<string> = new Set([
+  "start_errand",
+  "await_errands",
+]);
+
+/** Errand start and await cards show delegated work, so they stay visible at rest. */
+export function isStandaloneErrandToolMessage(message: Message): boolean {
+  if (message.type !== "tool_call") return false;
+  const stem = kandevToolStemOf(message);
+  return stem !== null && STANDALONE_ERRAND_TOOL_STEMS.has(stem);
+}
+
 /** A subagent is another agent's turn, so it remains standalone in the transcript. */
 export function isSubagentMessage(message: Message): boolean {
   const metadata = message.metadata as ToolCallMetadata | undefined;
@@ -262,13 +274,17 @@ export type TaskLaunchErrorIdentity = Pick<TaskStatusSummaryActiveError, "sessio
 export function shouldRenderStoppedSessionBanner(input: {
   isFailed: boolean;
   isCompleted: boolean;
+  sessionRole?: string;
   executorUnavailable: boolean;
   launchErrorOwned?: boolean;
   uncertainDelivery?: boolean;
 }): boolean {
+  // i18n-exempt: internal persisted session role discriminator.
+  const canContinue = input.isCompleted && input.sessionRole === "errand";
   return (
-    (input.uncertainDelivery && !input.isCompleted) ||
-    (!input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable))
+    (Boolean(input.uncertainDelivery) && (!input.isCompleted || canContinue)) ||
+    (!input.launchErrorOwned &&
+      (input.isFailed || (input.isCompleted && !canContinue) || input.executorUnavailable))
   );
 }
 

@@ -145,7 +145,9 @@ export function storeReadScopeIdentity(store: StoreApi<AppState>): string {
   return stateReadScopeIdentity(store.getState());
 }
 
-export function stateReadScopeIdentity(state: AppState): string {
+export function stateReadScopeIdentity(
+  state: Partial<Pick<AppState, "auth" | "workspaceContextGeneration">>,
+): string {
   return JSON.stringify([
     getBackendConfig().apiBaseUrl,
     state?.auth?.mode ?? "optional",

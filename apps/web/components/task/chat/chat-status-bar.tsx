@@ -34,6 +34,7 @@ import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
 import { AgentGoalChip } from "./agent-goal-chip";
 import { BackgroundWorkChip } from "./background-work/background-work-chip";
+import { ErrandsChip } from "./errands/errands-chip";
 import { shouldShowProceed } from "./types";
 import { getAgentGoal } from "@/lib/agent-goal";
 import { useComposerDisclosureContext } from "./composer-disclosure";
@@ -171,6 +172,30 @@ export function ComposerCIStatus({
       <MRStatusChip taskId={taskId} />
       <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
     </div>
+  );
+}
+
+/** Chips for work running beside the conversation: background jobs and errands. */
+function WorkChips({
+  taskId,
+  sessionId,
+  detailActive,
+  onRequestComposerFocus,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  detailActive: boolean;
+  onRequestComposerFocus?: () => void;
+}) {
+  return (
+    <>
+      <BackgroundWorkChip
+        sessionId={sessionId}
+        detailActive={detailActive}
+        onRequestComposerFocus={onRequestComposerFocus}
+      />
+      <ErrandsChip taskId={taskId} sessionId={sessionId} />
+    </>
   );
 }
 
@@ -415,7 +440,8 @@ export function ChatStatusBar({
         <TaskDependencyChip taskId={taskId} />
         {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
         {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-        <BackgroundWorkChip
+        <WorkChips
+          taskId={taskId}
           sessionId={sessionId}
           detailActive={detailActive}
           onRequestComposerFocus={onFocusComposer}

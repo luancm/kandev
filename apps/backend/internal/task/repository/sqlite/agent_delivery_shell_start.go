@@ -29,7 +29,7 @@ func (r *Repository) persistCanonicalShellStartTx(ctx context.Context, tx *sqlx.
 	if shell == nil || shell.Background || agent.ToolCallID == "" {
 		return false, nil
 	}
-	_, _, err := loadShellOutputMessageTx(ctx, tx, event.SessionID, agent.ToolCallID)
+	_, _, err := loadShellOutputMessageTx(ctx, tx, event.SessionID, agent)
 	if err == nil {
 		return true, nil
 	}
@@ -44,7 +44,7 @@ func (r *Repository) persistCanonicalShellStartTx(ctx context.Context, tx *sqlx.
 	if err != nil {
 		return false, err
 	}
-	identity, err := json.Marshal([]any{event.SessionID, event.StreamID, agent.ToolCallID, agent.ParentToolCallID, agent.PromptGeneration})
+	identity, err := json.Marshal([]any{event.SessionID, event.StreamID, turnID, agent.ToolCallID, agent.ParentToolCallID, agent.PromptGeneration})
 	if err != nil {
 		return false, err
 	}

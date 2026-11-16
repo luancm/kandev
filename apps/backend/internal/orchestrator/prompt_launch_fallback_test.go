@@ -209,6 +209,117 @@ func TestPromptTask_InitialTaskBriefAfterRecovery(t *testing.T) {
 	require.Len(t, agentMgr.capturedPromptCalls, priorPromptAttempts+1)
 }
 
+func TestErrandMissingExecutionFallbackPreservesErrandIdentityAndPrompt(t *testing.T) {
+	ctx := context.Background()
+	f := newErrandLaunchFixture(t)
+	seedCreatedErrand(t, f, v1.TaskStateInProgress)
+	session, err := f.repo.GetTaskSession(ctx, createdErrandSessionID)
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentProfileID = "errand-profile"
+	session.AgentExecutionID = "exec-before-restart"
+	require.NoError(t, f.repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, f.repo, createdErrandSessionID, f.taskID, "exec-before-restart")
+	task, err := f.repo.GetTask(ctx, f.taskID)
+	require.NoError(t, err)
+	task.State = v1.TaskStateInProgress
+	require.NoError(t, f.repo.UpdateTask(ctx, task))
+	f.taskRepo.tasks[f.taskID].State = v1.TaskStateInProgress
+	f.taskRepo.tasks[f.taskID].Description = "TASK-DESCRIPTION-MUST-NOT-REPLACE-ERRAND-PROMPT"
+
+	var launchCalls atomic.Int32
+	launchRequests := make(chan *executor.LaunchAgentRequest, 4)
+	f.manager.repoForExecutionLookup = f.repo
+	f.manager.promptErr = lifecycle.ErrExecutionNotFound
+	f.svc.executor.SetErrandsEnabled(func() bool { return false })
+	f.manager.isAgentRunningFn = func(context.Context, string) bool { return launchCalls.Load() > 0 }
+	f.manager.isAgentReadyFn = func(context.Context, string) bool { return launchCalls.Load() > 0 }
+	f.manager.launchAgentFunc = func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		call := launchCalls.Add(1)
+		launchRequests <- request
+		if call == 1 {
+			launchSessionID := request.SessionID
+			go func() {
+				tick := time.NewTicker(5 * time.Millisecond)
+				defer tick.Stop()
+				timeout := time.After(5 * time.Second)
+				for {
+					select {
+					case <-tick.C:
+						current, getErr := f.repo.GetTaskSession(context.Background(), launchSessionID)
+						if getErr == nil && current != nil && current.State == models.TaskSessionStateStarting {
+							current.State = models.TaskSessionStateWaitingForInput
+							current.UpdatedAt = time.Now().UTC()
+							_ = f.repo.UpdateTaskSession(context.Background(), current)
+							return
+						}
+					case <-timeout:
+						return
+					}
+				}
+			}()
+		}
+		return &executor.LaunchAgentResponse{
+			AgentExecutionID: fmt.Sprintf("errand-fallback-%d", call), Status: v1.AgentStatusStarting,
+		}, nil
+	}
+
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	acceptedDefinition, err := promptService.CreatePrompt(ctx, "errand-rules", "Accepted errand rules v1.")
+	require.NoError(t, err)
+	preparedPrompt, acceptedPromptContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, createdErrandPrompt+"\n\nFollow @errand-rules.", nil,
+	)
+	require.NotEmpty(t, acceptedPromptContext)
+	reference := v1.EntityReference{
+		Version: v1.EntityReferenceVersion,
+		Ref:     "kandev://workspace/ws1/task/related", Provider: "kandev", Kind: "task", ID: "related",
+		Title: "Related task", URL: "/t/related", Scope: "ws1",
+	}
+	references := []v1.EntityReference{reference}
+	acceptedEntityContext := EntityReferenceContext(references)
+	preparedPrompt = AppendEntityReferenceContext(preparedPrompt, references)
+	preparedPrompt = sysprompt.InjectKandevContextWithOptions(
+		f.taskID, createdErrandSessionID, preparedPrompt, sysprompt.KandevContextOptions{},
+		acceptedEntityContext, acceptedPromptContext,
+	)
+	f.svc.promptExpander = promptService
+	changedDefinition := "Changed errand rules v2."
+	_, err = promptService.UpdatePrompt(ctx, acceptedDefinition.ID, nil, &changedDefinition)
+	require.NoError(t, err)
+
+	_, err = f.svc.ResumeTaskSessionAndPromptWithPromptContext(
+		ctx, f.taskID, createdErrandSessionID, preparedPrompt, "", true, nil,
+		acceptedPromptContext, true, references, true,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), launchCalls.Load(), "lazy resume is followed by a fresh launch after ErrExecutionNotFound")
+	resumeRequest := <-launchRequests
+	fallbackRequest := <-launchRequests
+	require.Equal(t, createdErrandSessionID, resumeRequest.SessionID)
+	require.Equal(t, createdErrandSessionID, fallbackRequest.SessionID)
+	require.Equal(t, "errand-profile", fallbackRequest.AgentProfileID)
+	require.Equal(t, executor.McpModeErrand, fallbackRequest.McpMode)
+	require.Contains(t, fallbackRequest.TaskDescription, createdErrandPrompt)
+	require.Equal(t, 1, strings.Count(fallbackRequest.TaskDescription, createdErrandPrompt))
+	require.Contains(t, fallbackRequest.TaskDescription, "Accepted errand rules v1.")
+	require.Equal(t, 1, strings.Count(fallbackRequest.TaskDescription, "Accepted errand rules v1."))
+	require.NotContains(t, fallbackRequest.TaskDescription, changedDefinition)
+	require.Contains(t, fallbackRequest.TaskDescription, acceptedEntityContext)
+	require.Contains(t, fallbackRequest.TaskDescription, "errand of session parent-1")
+	require.NotContains(t, fallbackRequest.TaskDescription, "WORKFLOW-PREFIX-SENTINEL")
+	require.NotContains(t, fallbackRequest.TaskDescription, "TASK-DESCRIPTION-MUST-NOT-REPLACE-ERRAND-PROMPT")
+	require.NotContains(t, strings.ToLower(fallbackRequest.TaskDescription), "step_complete_kandev")
+	require.NotEqual(t, "ordinary-sibling", fallbackRequest.SessionID)
+	f.taskRepo.mu.Lock()
+	require.Zero(t, f.taskRepo.stateWrites[f.taskID], "the errand fallback leaves task scheduling state alone")
+	f.taskRepo.mu.Unlock()
+	task, err = f.repo.GetTask(ctx, f.taskID)
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateInProgress, task.State)
+	require.Contains(t, task.Metadata, models.MetaKeyDeferredLaunch)
+}
+
 type failedPromptReferenceExpander struct{}
 
 func (failedPromptReferenceExpander) AppendReferenceExpansionsWithContext(

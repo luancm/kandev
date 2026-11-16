@@ -173,7 +173,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     submitKey: panelState.chatSubmitKey,
     hasAgentCommands: !!(panelState.agentCommands && panelState.agentCommands.length > 0),
     isFailed: panelState.isFailed,
-    isCompleted: panelState.isCompleted,
+    ...completedComposerProps(panelState),
     sessionErrorMessage: panelState.session?.error_message,
     ...recoveryPresentation,
     needsRecovery: needsRecovery || requiresRecovery,
@@ -190,4 +190,8 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hideAgentControls,
     hidePlanMode,
   };
+}
+
+function completedComposerProps(panelState: ChatPanelState) {
+  return { isCompleted: panelState.isCompleted, sessionRole: panelState.session?.role };
 }

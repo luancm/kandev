@@ -1,13 +1,11 @@
 import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/model-hydration";
-import { resolveTaskRoute } from "@/lib/routing/resolve-task-route";
 import {
   listWorkflowSteps,
-  fetchTask,
   listAgents,
   listWorkflows,
   listRepositories,
   listTaskSessionMessages,
-  listTaskSessions,
+  listOrdinaryTaskSessions,
   listWorkspaces,
 } from "@/lib/api";
 import { toSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
@@ -47,6 +45,7 @@ import {
 } from "@/hooks/journey-metadata-resources";
 
 import { hydrateSessionTerminals } from "@/lib/ssr/session-terminal-hydration";
+import { matchingActiveSession, resolveTaskSessionId } from "@/lib/ssr/task-session-route-identity";
 
 export { OPTIONAL_HYDRATION_TIMEOUT_MS } from "@/lib/ssr/optional-hydration";
 
@@ -301,109 +300,21 @@ export type FetchedSessionData = {
   sidebarTaskPage?: SidebarTaskPageResponse;
 };
 
-/**
- * SSR entry point for a session route: fetches the full session, its task, and
- * the task's session list, then runs the shared optional-enrichment pipeline to
- * produce the initial page state.
- */
-export async function fetchSessionData(sessionId: string): Promise<FetchedSessionData> {
-  const { fetchTaskSession } = await import("@/lib/api");
-  const sessionResponse = await fetchTaskSession(sessionId, { cache: "no-store" });
-  const activeSession = sessionResponse.session ?? null;
-  if (!activeSession?.task_id) throw new Error("No task_id found for session");
-  const [task, allSessionsResponse] = await Promise.all([
-    fetchTask(activeSession.task_id, { cache: "no-store" }),
-    listTaskSessions(activeSession.task_id, { cache: "no-store" }),
-  ]);
-
-  const optionalHydration = beginOptionalHydration();
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
-    activeSessionResponse: Promise.resolve({
-      status: "fulfilled",
-      value: { session: activeSession },
-    }),
-    optionalHydration,
-  });
-}
-
-/**
- * SSR entry point for a task route: resolves the primary (or first) session,
- * seeding task-only data when no session exists yet and otherwise enriching via
- * the shared optional-hydration pipeline.
- */
-export async function fetchSessionDataForTask(
-  taskId: string,
-  requestedSessionId?: string,
-): Promise<FetchedSessionData> {
-  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
-    taskId,
-    requestedSessionId,
-  );
-  if (!sessionId) {
-    return fetchTaskDataOnly(task, allSessionsResponse);
-  }
-
-  const optionalHydration = beginOptionalHydration();
-  const { fetchTaskSession } = await import("@/lib/api");
-  const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
-    fetchTaskSession(sessionId, { cache: "no-store" }),
-  );
-  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
-    activeSessionResponse,
-    optionalHydration,
-  });
-}
-
-/** Client navigation leaves optional enrichment to the mounted domain hooks. */
-export async function fetchTaskNavigationData(
-  taskId: string,
-  requestedSessionId?: string,
-): Promise<FetchedSessionData> {
-  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
-    taskId,
-    requestedSessionId,
-  );
-  return {
-    task,
-    sessionId: sessionId ?? null,
-    initialState: buildSessionPageState({
-      task,
-      sessionId: sessionId ?? null,
-      allSessions: allSessionsResponse.sessions,
-      activeSession: null,
-    }),
-    initialTerminals: [],
-  };
-}
-
-function resolveTaskSessionId(
-  task: Task,
-  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
-  requestedSessionId?: string,
-) {
-  const sessions = allSessionsResponse.sessions ?? [];
-  const ownedSessions = sessions.filter((session) => session.task_id === task.id);
-  const requestedSession = requestedSessionId
-    ? ownedSessions.find((session) => session.id === requestedSessionId)
-    : undefined;
-  const primarySession = task.primary_session_id
-    ? ownedSessions.find((session) => session.id === task.primary_session_id)
-    : undefined;
-  return requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id ?? null;
-}
-
 /** Builds task identity and lightweight session state before optional resources settle. */
 export function buildTaskNavigationShellData(
   identity: TaskNavigationIdentity,
   requestedSessionId?: string,
 ): FetchedSessionData {
   const { task, allSessionsResponse } = identity;
+  const sessions = allSessionsResponse.sessions ?? [];
   const allSessions = (allSessionsResponse.sessions ?? []).filter(
     (session) => session.task_id === task.id,
   );
-  const sessionId = identity.sessionListUnavailable
-    ? (requestedSessionId ?? task.primary_session_id ?? null)
-    : resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  const sessionId =
+    resolveTaskSessionId(task, sessions, requestedSessionId, identity.selectedErrandInspection) ??
+    (identity.sessionListUnavailable && !requestedSessionId
+      ? (task.primary_session_id ?? null)
+      : null);
   return {
     task,
     sessionId,
@@ -428,9 +339,14 @@ export async function fetchTaskNavigationEnrichment(
   const allSessionsResponse = identity.sessionListUnavailable
     ? await (options.store
         ? fetchSharedTaskSessions(options.store, task.id)
-        : listTaskSessions(task.id, { cache: "no-store" }))
+        : listOrdinaryTaskSessions(task.id, { cache: "no-store" }))
     : identity.allSessionsResponse;
-  const sessionId = resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  const sessionId = resolveTaskSessionId(
+    task,
+    allSessionsResponse.sessions ?? [],
+    requestedSessionId,
+    identity.selectedErrandInspection,
+  );
   const loadAgentList = options.store
     ? () => getAgentListResourceScope(options.store!).ensure()
     : () => listAgents({ cache: "no-store" });
@@ -445,6 +361,8 @@ export async function fetchTaskNavigationEnrichment(
     );
     data = await fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
       activeSessionResponse,
+      sessionEnvironmentId: identity.selectedErrandInspection?.parent.task_environment_id,
+      expectedErrandParentSessionId: identity.selectedErrandInspection?.errand.parent_session_id,
       optionalHydration,
       loadAgentList,
       store: options.store,
@@ -497,7 +415,7 @@ function routeMetadataReads(
 
 async function fetchTaskDataOnly(
   task: Task,
-  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  allSessionsResponse: Awaited<ReturnType<typeof listOrdinaryTaskSessions>>,
   loadAgentList: () => Promise<AgentListResponse> = () => listAgents({ cache: "no-store" }),
   store?: StoreApi<AppState>,
 ): Promise<FetchedSessionData> {
@@ -545,7 +463,7 @@ async function fetchSharedTaskSessions(store: StoreApi<AppState>, taskId: string
   const release = reads.retain(taskId);
   try {
     return await reads.read(taskId, (signal) =>
-      listTaskSessions(taskId, { cache: "no-store", init: { signal } }),
+      listOrdinaryTaskSessions(taskId, { cache: "no-store", init: { signal } }),
     );
   } finally {
     release();
@@ -561,9 +479,11 @@ async function fetchSharedTaskSessions(store: StoreApi<AppState>, taskId: string
 async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
-  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  allSessionsResponse: Awaited<ReturnType<typeof listOrdinaryTaskSessions>>,
   options: {
     activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>;
+    sessionEnvironmentId?: string;
+    expectedErrandParentSessionId?: string;
     optionalHydration: ReturnType<typeof beginOptionalHydration>;
     loadAgentList?: () => Promise<AgentListResponse>;
     store?: StoreApi<AppState>;
@@ -576,7 +496,9 @@ async function fetchSessionDataFromTask(
   // the terminal SSR fetch; the boot-time heal pass + WS-driven user_shell.list
   // will populate it once the env mapping lands.
   const sessionEnvId =
-    allSessionsResponse.sessions?.find((s) => s.id === sessionId)?.task_environment_id ?? "";
+    allSessionsResponse.sessions?.find((s) => s.id === sessionId)?.task_environment_id ??
+    options.sessionEnvironmentId ??
+    "";
 
   const results = await Promise.all([
     ...routeMetadataReads(task, optionalHydration, loadAgentList, store),
@@ -612,7 +534,13 @@ async function fetchSessionDataFromTask(
   const workflows = optionalValue(workflowsResponse)?.workflows;
   const terminals = optionalValue(terminalsResponse) ?? [];
   const messages = optionalValue(messagesResponse);
-  const activeSession = optionalValue(activeSessionResult)?.session ?? null;
+  const sessionCandidate = optionalValue(activeSessionResult)?.session ?? null;
+  const activeSession = matchingActiveSession(
+    sessionCandidate,
+    task,
+    sessionId,
+    options.expectedErrandParentSessionId,
+  );
   const { turns, turnCoverage } = await resolveMessageTurnWindow(
     sessionId,
     messages,

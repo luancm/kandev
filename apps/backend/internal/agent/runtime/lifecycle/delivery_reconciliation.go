@@ -46,6 +46,8 @@ const (
 // accepted the prompt. RuntimeEpoch is local-runtime fencing only; remote
 // executor identity is independent of that local generation.
 type DeliveryReconciliationIdentity struct {
+	TurnID            string
+	NativeSessionID   string
 	OriginalRuntime   processidentity.Identity
 	SessionID         string
 	ExecutionID       string
@@ -190,7 +192,8 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 	originalRuntime := boundAgentProcessGroup(execution, client.RuntimeProcessIdentity(), submissionID)
 	return DeliveryReconciliationIdentity{
 		OriginalRuntime: originalRuntime,
-		SessionID:       execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
+		TurnID:          execution.promptTurnIDSnapshot(), NativeSessionID: execution.ACPSessionID,
+		SessionID: execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
 		IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: execution.DeliveryHarnessGeneration,
 		StreamID: execution.DeliveryStreamID, SubmissionID: submissionID, RuntimeEpoch: execution.runtimeEpoch,
 		StartupGeneration: execution.startupAttemptSnapshot(), PromptGeneration: execution.promptGenerationSnapshot(),

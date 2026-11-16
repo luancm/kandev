@@ -56,7 +56,7 @@ func TestBuiltinPolicySurfaceBoundaries(t *testing.T) {
 	require.NoError(t, err)
 	require.ElementsMatch(t, []p.PackageID{p.PackageCore, p.PackageConfiguration}, manifest.Packages)
 	require.Equal(t, "required", manifest.Origins[p.PackageConfiguration])
-	for _, surface := range []p.Surface{p.SurfaceExternal, p.SurfaceAutomation, p.SurfaceCoordinator, p.SurfaceManagedConversation} {
+	for _, surface := range []p.Surface{p.SurfaceExternal, p.SurfaceAutomation, p.SurfaceCoordinator, p.SurfaceManagedConversation, p.SurfaceErrand} {
 		manifest, err = ResolveBuiltinPackages("workspace", "task", surface, nil, nil)
 		require.NoError(t, err)
 		require.Nil(t, manifest, surface)

@@ -117,7 +117,7 @@ async function openTranscript() {
     return response.promise;
   });
   const initialState: HydrationState = {
-    connection: { status: "connected", error: null, issueSeverity: "none" },
+    connection: { generation: 0, status: "connected", error: null, issueSeverity: "none" },
     taskSessions: {
       ...defaultSessionState.taskSessions,
       items: {

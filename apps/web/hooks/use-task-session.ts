@@ -56,7 +56,7 @@ export function useTaskSession(taskId: string | null) {
           isLoading: true,
         }));
         const response = await client.request<{ sessions: Array<{ id: string }> }>(
-          "task.session.list",
+          "task.session.list_ordinary",
           { task_id: taskId },
           10000,
         );

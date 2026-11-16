@@ -6,7 +6,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
-import { TaskChatPanel, type PendingMessageScrollTarget } from "../task-chat-panel";
+import { TaskConversationChat, type PendingMessageScrollTarget } from "../task-chat-panel";
+import { TaskConversationPanel } from "../task-conversation-view";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
@@ -19,7 +20,7 @@ import {
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
 import { MobileTerminalPane } from "./mobile-terminal-pane";
-import { MobileSessionsPicker } from "./mobile-sessions-section";
+import { MobileSessionPickerRow } from "./mobile-session-picker-row";
 import { BackgroundWorkMobilePanel } from "../chat/background-work/background-work-mobile-surface";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
@@ -190,31 +191,39 @@ function MobileChatPanelContent({
     <div className="flex-1 min-h-0 flex flex-col">
       <LaunchQueueStatus queue={launchStatusSummary?.launch_queue} />
       <WipQueueStatus taskId={activeTaskId} />
-      <div className="flex items-center px-1 py-2">
-        <MobileSessionsPicker taskId={activeTaskId} sessionId={effectiveSessionId} fullWidth />
-      </div>
       {isPassthroughMode ? (
-        <div className="flex-1 min-h-0">
-          <PassthroughToolbar
-            key={effectiveSessionId}
-            sessionId={effectiveSessionId}
-            taskId={activeTaskId}
-          />
-        </div>
+        <>
+          <MobileSessionPickerRow taskId={activeTaskId} sessionId={effectiveSessionId} />
+          <div className="flex-1 min-h-0">
+            <PassthroughToolbar
+              key={effectiveSessionId}
+              sessionId={effectiveSessionId}
+              taskId={activeTaskId}
+            />
+          </div>
+        </>
       ) : (
-        <TaskChatPanel
-          sessionId={effectiveSessionId}
-          taskId={effectiveSessionId ? activeTaskId : null}
-          statusTaskId={activeTaskId}
-          onOpenFile={onOpenFile}
-          onOpenHistoricalDiff={onOpenHistoricalDiff}
-          pendingScrollTarget={scrollTarget}
-          isVisible={isVisible}
-          detailActive={isVisible}
-          onPendingScrollConsumed={onScrollTargetConsumed}
-          hideLaunchQueueStatus
-          hideWipQueueStatus
-        />
+        <TaskConversationPanel taskId={activeTaskId} sessionId={effectiveSessionId}>
+          {(sessionId, inactive) => (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <MobileSessionPickerRow taskId={activeTaskId} sessionId={sessionId} />
+              <TaskConversationChat
+                sessionId={sessionId}
+                inactive={inactive}
+                taskId={sessionId ? activeTaskId : null}
+                statusTaskId={activeTaskId}
+                onOpenFile={onOpenFile}
+                onOpenHistoricalDiff={onOpenHistoricalDiff}
+                pendingScrollTarget={scrollTarget}
+                isVisible={isVisible}
+                detailActive={isVisible}
+                onPendingScrollConsumed={onScrollTargetConsumed}
+                hideLaunchQueueStatus
+                hideWipQueueStatus
+              />
+            </div>
+          )}
+        </TaskConversationPanel>
       )}
     </div>
   );

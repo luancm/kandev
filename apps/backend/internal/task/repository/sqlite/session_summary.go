@@ -78,6 +78,57 @@ func (r *Repository) ListTaskSessionSummaryObservations(
 	return observations, nil
 }
 
+// ListOrdinaryTaskSessionSummaryObservations reads task navigation rows while
+// excluding Errand children before scanning or enriching their projections.
+func (r *Repository) ListOrdinaryTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	if taskID == "" {
+		return []*models.TaskSessionSummaryObservation{}, nil
+	}
+	query := `SELECT ` + taskSessionSummarySelectCols(r.ro.DriverName()) + ` ` + taskSessionSummaryFromClause(r.ro.DriverName()) +
+		` LEFT JOIN executors e ON e.id = ts.executor_id` +
+		` WHERE ts.task_id = ? AND (ts.role IS NULL OR ts.role <> ?)` +
+		` ORDER BY ts.started_at DESC`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), taskID, models.SessionRoleErrand)
+	if err != nil {
+		return nil, fmt.Errorf("query ordinary task session summaries: %w", err)
+	}
+	observations := make([]*models.TaskSessionSummaryObservation, 0)
+	for rows.Next() {
+		observation, err := scanTaskSessionSummaryObservation(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan ordinary task session summary: %w", err)
+		}
+		observations = append(observations, observation)
+	}
+	rowsErr := rows.Err()
+	closeErr := rows.Close()
+	if rowsErr != nil {
+		return nil, fmt.Errorf("iterate ordinary task session summaries: %w", rowsErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close ordinary task session summaries: %w", closeErr)
+	}
+	if len(observations) == 0 {
+		return observations, nil
+	}
+	sessions := make([]*models.TaskSession, len(observations))
+	for index, observation := range observations {
+		sessions[index] = observation.ToTaskSession()
+	}
+	loaded, err := r.loadWorktreesBatch(ctx, sessions)
+	if err != nil {
+		return nil, err
+	}
+	for index := range observations {
+		observations[index].Worktrees = loaded[index].Worktrees
+	}
+	return observations, nil
+}
+
 func uniqueSessionSummaryTaskIDs(taskIDs []string) []string {
 	seen := make(map[string]struct{}, len(taskIDs))
 	ids := make([]string, 0, len(taskIDs))
@@ -102,22 +153,24 @@ func taskSessionSummarySelectCols(driver string) string {
 		lastAgentErrorJSON  string
 		modelID             string
 		modelName           string
+		metadata            string
 	)
 	if dialect.IsPostgres(driver) {
+		metadata = "mm.meta"
 		agentProfileName = "ms.prof ->> 'name'"
 		agentProfileAgentID = "ms.prof ->> 'agent_id'"
 		repositoryPath = "ms.repo ->> 'path'"
 		lastAgentErrorJSON = "mm.meta ->> '" + models.SessionMetaKeyLastAgentError + "'"
 		modelID, modelName = postgresSessionSummaryModelColumns()
 	} else {
-		metadata := "(CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END)"
+		metadata = "(CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}' ELSE ts.metadata END)"
 		agentProfileName = dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name")
 		agentProfileAgentID = dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "agent_id")
 		repositoryPath = dialect.JSONExtract(driver, "ts.repository_snapshot", "path")
 		lastAgentErrorJSON = dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError)
 		modelID, modelName = sessionSummaryModelColumns(metadata)
 	}
-	return strings.Join([]string{
+	columns := []string{
 		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
 		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')", "COALESCE(er.runtime, '')",
 		"ts.agent_profile_id", "ts.execution_profile_id", "ts.route_generation", "ts.route_state", "ts.route_reason",
@@ -129,9 +182,75 @@ func taskSessionSummarySelectCols(driver string) string {
 		"e.type AS executor_type", "e.name AS executor_name",
 		repositoryPath,
 		"ts.state", "ts.error_message", lastAgentErrorJSON, modelID, modelName,
+	}
+	columns = append(columns, sessionSummaryContextWindowColumns(driver, metadata)...)
+	columns = append(columns,
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
-	}, ", ")
+		"ts.role", "ts.parent_session_id",
+	)
+	return strings.Join(columns, ", ")
+}
+
+func sessionSummaryContextWindowColumns(driver, metadata string) []string {
+	contextWindowPath := []string{models.SessionMetaKeyContextWindow}
+	columns := []string{dialect.JSONType(driver, metadata, contextWindowPath...)}
+	for _, field := range []string{"size", "used", "remaining", "efficiency"} {
+		path := append(append([]string(nil), contextWindowPath...), field)
+		columns = append(columns, sessionSummaryJSONScalar(driver, metadata, true, path...))
+	}
+	for _, field := range []string{"source", "timestamp"} {
+		path := append(append([]string(nil), contextWindowPath...), field)
+		columns = append(columns, sessionSummaryJSONScalar(driver, metadata, false, path...))
+	}
+	columns = append(columns, sessionSummaryJSONScalar(driver, metadata, true, models.SessionMetaKeyContextCompactionCount))
+	return columns
+}
+
+func sessionSummaryJSONScalar(driver, metadata string, number bool, path ...string) string {
+	var typeExpression string
+	if number {
+		typeExpression = dialect.JSONTypeIsNumber(driver, metadata, path...)
+	} else {
+		typeExpression = dialect.JSONTypeIsStringPath(driver, metadata, path...)
+	}
+	return "CASE WHEN " + typeExpression + " THEN " + dialect.JSONExtractPath(driver, metadata, path...) + " ELSE NULL END"
+}
+
+type sessionSummaryContextWindowProjection struct {
+	typeName   string
+	size       sql.NullFloat64
+	used       sql.NullFloat64
+	remaining  sql.NullFloat64
+	efficiency sql.NullFloat64
+	source     sql.NullString
+	timestamp  sql.NullString
+}
+
+func (projection sessionSummaryContextWindowProjection) metadataValue() interface{} {
+	if projection.typeName != "object" {
+		return nil
+	}
+	window := make(map[string]interface{})
+	if projection.size.Valid {
+		window["size"] = projection.size.Float64
+	}
+	if projection.used.Valid {
+		window["used"] = projection.used.Float64
+	}
+	if projection.remaining.Valid {
+		window["remaining"] = projection.remaining.Float64
+	}
+	if projection.efficiency.Valid {
+		window["efficiency"] = projection.efficiency.Float64
+	}
+	if projection.source.Valid {
+		window["source"] = projection.source.String
+	}
+	if projection.timestamp.Valid {
+		window["timestamp"] = projection.timestamp.String
+	}
+	return window
 }
 
 // taskSessionSummaryFromClause returns the FROM clause that pairs with
@@ -160,7 +279,6 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		workspacePath       sql.NullString
 		agentWorkspacePath  sql.NullString
 		agentProfileName    sql.NullString
-		agentProfileAgentID sql.NullString
 		executorType        sql.NullString
 		executorName        sql.NullString
 		repositoryPath      sql.NullString
@@ -169,6 +287,14 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		modelID             sql.NullString
 		modelName           sql.NullString
 		lastAgentErrorJSON  sql.NullString
+		contextWindowType   sql.NullString
+		contextWindowSize   sql.NullFloat64
+		contextWindowUsed   sql.NullFloat64
+		contextRemaining    sql.NullFloat64
+		contextEfficiency   sql.NullFloat64
+		contextSource       sql.NullString
+		contextTimestamp    sql.NullString
+		compactionCount     sql.NullFloat64
 		completedAt         sql.NullTime
 		isPrimary           int
 		reviewStatus        sql.NullString
@@ -176,6 +302,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		taskEnvironmentID   sql.NullString
 		name                sql.NullString
 		lastReadMessageID   sql.NullString
+		agentProfileAgentID sql.NullString
 	)
 	if err := rows.Scan(
 		&observation.ID, &observation.TaskID, &queueIncarnationID,
@@ -185,8 +312,11 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath, &agentWorkspacePath,
 		&agentProfileName, &agentProfileAgentID, &executorType, &executorName, &repositoryPath,
 		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
+		&contextWindowType, &contextWindowSize, &contextWindowUsed, &contextRemaining,
+		&contextEfficiency, &contextSource, &contextTimestamp, &compactionCount,
 		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
 		&reviewStatus, &isPassthrough, &taskEnvironmentID, &name, &lastReadMessageID,
+		&observation.Role, &observation.ParentSessionID,
 	); err != nil {
 		return nil, err
 	}
@@ -219,9 +349,22 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	if completedAt.Valid {
 		observation.CompletedAt = &completedAt.Time
 	}
+	contextMetadata := make(map[string]interface{})
+	if contextWindowType.Valid {
+		contextMetadata[models.SessionMetaKeyContextWindow] = sessionSummaryContextWindowProjection{
+			typeName: contextWindowType.String, size: contextWindowSize, used: contextWindowUsed,
+			remaining: contextRemaining, efficiency: contextEfficiency, source: contextSource, timestamp: contextTimestamp,
+		}.metadataValue()
+	}
+	if compactionCount.Valid {
+		contextMetadata[models.SessionMetaKeyContextCompactionCount] = compactionCount.Float64
+	}
 	metadata, err := sessionSummaryMetadata(lastAgentErrorJSON, modelID.String, modelName.String)
 	if err != nil {
 		return nil, err
+	}
+	for key, value := range models.ProjectSessionContextMetadata(contextMetadata) {
+		metadata[key] = value
 	}
 	observation.Metadata = metadata
 	return &observation, nil

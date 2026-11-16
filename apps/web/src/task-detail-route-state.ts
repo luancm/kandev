@@ -19,6 +19,7 @@ export type TaskDetailRouteState =
       turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
       hydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
       enrichmentIdentity?: TaskNavigationIdentity;
+      inspectionIsCurrent?: () => boolean;
     }
   | {
       routeKey: string;

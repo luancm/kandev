@@ -686,8 +686,20 @@ func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
+	h.httpListTaskSessionSummaries(c, false)
+}
+
+func (h *TaskHandlers) httpListOrdinaryTaskSessions(c *gin.Context) {
+	h.httpListTaskSessionSummaries(c, true)
+}
+
+func (h *TaskHandlers) httpListTaskSessionSummaries(c *gin.Context, ordinaryOnly bool) {
 	ctx := c.Request.Context()
-	sessions, err := h.service.ListTaskSessionSummaryObservations(ctx, c.Param("id"))
+	list := h.service.ListTaskSessionSummaryObservations
+	if ordinaryOnly {
+		list = h.service.ListOrdinaryTaskSessionSummaryObservations
+	}
+	sessions, err := list(ctx, c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return

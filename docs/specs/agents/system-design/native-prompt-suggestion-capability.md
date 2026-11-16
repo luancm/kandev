@@ -367,4 +367,3 @@ independent controls.
 - [Custom ACP restoration](../requirements/custom-acp-agents.md)
 - [Implementation plan](../../../plans/native-prompt-suggestion-capability/plan.md)
 - [Original delivered work](../../../plans/composer-prompt-suggestions/plan.md)
-

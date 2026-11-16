@@ -1,5 +1,8 @@
 "use client";
 
+import { useInspectedErrandSession } from "@/hooks/domains/session/use-inspected-errand-session";
+
+import { conversationTabSessionId } from "@/lib/task-conversation-navigation";
 import {
   IconAlertCircle,
   IconCheck,
@@ -13,6 +16,8 @@ import {
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 import { useTranslation } from "react-i18next";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import type { Errand } from "@/lib/types/errands";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -31,6 +36,8 @@ export type ThreadSessionView = {
   agentName: string | null;
   isPrimary: boolean;
 };
+
+const SELECT_SESSION_KEY = "threads:selectSession";
 
 const LABEL_SEPARATOR = " \u2022 ";
 
@@ -60,9 +67,12 @@ export function buildThreadSessionViews(
   sessions: readonly TaskSession[],
   agentProfiles: readonly AgentProfileOption[] = [],
   fallbackLabel = "",
+  errands?: Record<string, Errand>,
 ): ThreadSessionView[] {
   const profilesById = Object.fromEntries(agentProfiles.map((profile) => [profile.id, profile]));
-  return sortSessions(sessions).map((session, index) => {
+  const sorted = sortSessions(sessions);
+  const ordered = sorted.filter((session) => session.role !== "errand" && !errands?.[session.id]);
+  return ordered.map((session, index) => {
     const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : undefined;
     const snapshotAgentName = session.agent_profile_snapshot?.agent_id;
     return {
@@ -264,19 +274,19 @@ function MobileSessionPicker({
   return (
     <>
       <MobilePillButton
-        label={selected?.label ?? t("threads:selectSession")}
+        label={selected?.label ?? t(SELECT_SESSION_KEY)}
         count={`${selectedIndex + 1}/${views.length}`}
         compact={false}
         fullWidth
         isOpen={open}
         onClick={() => setOpen(true)}
         data-testid="thread-session-picker-trigger"
-        ariaLabel={t("threads:selectSession")}
+        ariaLabel={t(SELECT_SESSION_KEY)}
       />
       <MobilePickerSheet
         open={open}
         onOpenChange={setOpen}
-        title={t("threads:selectSession")}
+        title={t(SELECT_SESSION_KEY)}
         description={t("threads:selectSessionDescription")}
         contentTestId="thread-session-picker-sheet"
       >
@@ -325,9 +335,23 @@ export function ThreadSessionSwitcher({
   onSelect: (sessionId: string) => void;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
+  const enabled = useFeature("errands");
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const views = buildThreadSessionViews(sessions, agentProfiles);
+  const errands = useAppStore((state) => state.errands?.byTaskId[sessions[0]?.task_id ?? ""]);
+  const views = buildThreadSessionViews(
+    sessions,
+    agentProfiles,
+    "",
+    enabled ? (errands ?? {}) : undefined,
+  );
+  const inspectedChild = useInspectedErrandSession(sessions[0]?.task_id ?? "", selectedSessionId);
   if (views.length <= 1) return null;
+  const selectedConversationId = conversationTabSessionId(
+    selectedSessionId,
+    sessions,
+    errands,
+    inspectedChild ?? undefined,
+  );
 
   return isMobile ? (
     <div
@@ -336,13 +360,17 @@ export function ThreadSessionSwitcher({
     >
       <MobileSessionPicker
         views={views}
-        selectedSessionId={selectedSessionId}
+        selectedSessionId={selectedConversationId}
         onSelect={onSelect}
       />
     </div>
   ) : (
     <div className="min-w-0 max-w-[52%] shrink" data-testid="thread-session-switcher">
-      <DesktopSessionTabs views={views} selectedSessionId={selectedSessionId} onSelect={onSelect} />
+      <DesktopSessionTabs
+        views={views}
+        selectedSessionId={selectedConversationId}
+        onSelect={onSelect}
+      />
     </div>
   );
 }

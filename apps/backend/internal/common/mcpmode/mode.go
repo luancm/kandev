@@ -12,6 +12,9 @@ const (
 	Automation       = "automation"
 	// Coordinator identifies a workspace coordinator's conversation session.
 	Coordinator = "coordinator"
+	// Errand identifies a child session started by a parent agent. Its tool
+	// catalog is fixed and read-only.
+	Errand = "errand"
 )
 
 var instanceModes = [...]string{
@@ -21,6 +24,7 @@ var instanceModes = [...]string{
 	Office,
 	Automation,
 	Coordinator,
+	Errand,
 }
 
 // InstanceModes returns the modes accepted by the agentctl instance API.
