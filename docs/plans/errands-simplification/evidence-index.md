@@ -1,6 +1,6 @@
 # Errands historical evidence index
 
-The [package plan](plan.md) owns current delivery status. These exact originals preserve measurements, protocols, failures and completed implementation narratives before Task08 consolidation; they do not grant new acceptance. Global release-performance acceptance remains open: the historical phone switch-away p95 misses its unchanged boundary by 121.496 ms, phone retained heap still warns, and desktop switching has a measured fixed cost. Earlier failed cohorts and frozen caps remain unchanged. See [current measurement disposition](ordinary-header-verification.md) and [first-delivery exceptions](../errand-history-loading/summary-followup-handoff.md).
+The [package plan](plan.md) owns delivery status. These exact originals preserve measurements, protocols, failures and implementation narratives before Task08 consolidation; they grant no new acceptance. Global performance acceptance remains open. See the [current measured disposition](../errands-remaining/code-quality-roadmap.md#current-measured-disposition-2026-11-16), [Task09 results and verified current archives](task-09-ordinary-recognition-experiment.md#results), [historical ordinary receipt](ordinary-header-verification.md) and [first-delivery exceptions](../errand-history-loading/summary-followup-handoff.md). Earlier failed cohorts and frozen caps remain unchanged.
 
 ## Recovery and verification
 
