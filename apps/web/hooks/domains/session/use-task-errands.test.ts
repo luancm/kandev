@@ -1,4 +1,4 @@
-import { createElement, useEffect, type ReactNode } from "react";
+import { createElement, useEffect, useMemo, type ReactNode } from "react";
 import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/domains/errand-api", () => api);
 
+import { ErrandHistoryOwner } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
 import { useTaskErrands } from "./use-task-errands";
 
 const TASK_ID = ERRAND_TASK_ID;
@@ -25,15 +26,17 @@ const PARENT_ID = ERRAND_PARENT_ID;
 const SECOND_PARENT_ID = "errand-parent-2";
 
 function useSharedOwnerParentConsumers() {
+  const store = useAppStoreApi();
+  const owner = useMemo(() => new ErrandHistoryOwner(store), [store]);
   return {
-    store: useAppStoreApi(),
+    store,
     first: useTaskErrands(TASK_ID, {
       parentSessionId: PARENT_ID,
-      historyOwnerId: "shared-panel-history",
+      historyOwner: owner,
     }),
     second: useTaskErrands(TASK_ID, {
       parentSessionId: SECOND_PARENT_ID,
-      historyOwnerId: "shared-panel-history",
+      historyOwner: owner,
     }),
   };
 }
@@ -74,10 +77,12 @@ function wrapperFor(errandsEnabled: boolean) {
   };
 }
 
-function useConsumer(taskId: string | null = TASK_ID, owner = "history-owner") {
+function useConsumer(taskId: string | null = TASK_ID) {
+  const store = useAppStoreApi();
+  const owner = useMemo(() => new ErrandHistoryOwner(store), [store]);
   return {
-    store: useAppStoreApi(),
-    value: useTaskErrands(taskId, { parentSessionId: PARENT_ID, historyOwnerId: owner }),
+    store,
+    value: useTaskErrands(taskId, { parentSessionId: PARENT_ID, historyOwner: owner }),
   };
 }
 
@@ -105,10 +110,13 @@ beforeEach(() => {
 
 it("coalesces summary reads and does not request finished history on mount", async () => {
   function useTwoConsumers() {
+    const store = useAppStoreApi();
+    const first = useMemo(() => new ErrandHistoryOwner(store), [store]);
+    const second = useMemo(() => new ErrandHistoryOwner(store), [store]);
     return {
-      store: useAppStoreApi(),
-      first: useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwnerId: "first" }),
-      second: useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwnerId: "second" }),
+      store,
+      first: useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwner: first }),
+      second: useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwner: second }),
     };
   }
   const { result } = renderHook(useTwoConsumers, { wrapper: wrapperFor(true) });
@@ -253,7 +261,9 @@ describe("shared history read ownership", () => {
       owner: string;
       onValue: (value: ReturnType<typeof useTaskErrands>) => void;
     }) {
-      const value = useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwnerId: owner });
+      const store = useAppStoreApi();
+      const historyOwner = useMemo(() => new ErrandHistoryOwner(store), [store, owner]);
+      const value = useTaskErrands(TASK_ID, { parentSessionId: PARENT_ID, historyOwner });
       useEffect(() => onValue(value), [onValue, value]);
       return null;
     }

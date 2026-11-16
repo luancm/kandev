@@ -335,21 +335,23 @@ function useTaskDetailRouteEnrichment(args: {
 
     const routeKey = view.routeKey;
     const navigationContext = view.navigationContext;
-    if (!navigationContext || !isTaskNavigationCurrent(store, navigationContext)) return;
+    if (!navigationContext) return;
+    const isCurrent = () =>
+      isTaskNavigationCurrent(store, navigationContext) && (view.inspectionIsCurrent?.() ?? true);
+    if (!isCurrent()) return;
     const shellState: TaskDetailRouteState = {
       routeKey,
       status: "loaded",
       data: view.data,
       forceMergeSession: false,
       navigationContext,
+      inspectionIsCurrent: view.inspectionIsCurrent,
       hydrationEpochsAtRequestStart: view.hydrationEpochsAtRequestStart,
       turnWindowObservationsAtRequestStart: view.turnWindowObservationsAtRequestStart,
     };
     previousLoadedRouteRef.current = shellState;
     setRouteState((current) =>
-      current.routeKey === routeKey &&
-      current.status === "loaded" &&
-      isTaskNavigationCurrent(store, navigationContext)
+      current.routeKey === routeKey && current.status === "loaded" && isCurrent()
         ? shellState
         : current,
     );
@@ -362,7 +364,7 @@ function useTaskDetailRouteEnrichment(args: {
     );
     void fetchTaskNavigationEnrichment(identity, view.data.sessionId ?? undefined, { store })
       .then((enriched) => {
-        if (!isTaskNavigationCurrent(store, navigationContext)) return;
+        if (!isCurrent()) return;
         const loadedState: TaskDetailRouteState = {
           ...shellState,
           data: enriched,
@@ -381,7 +383,7 @@ function useTaskDetailRouteEnrichment(args: {
           current.routeKey === routeKey &&
           current.status === "loaded" &&
           current.navigationContext === navigationContext &&
-          isTaskNavigationCurrent(store, navigationContext)
+          isCurrent()
             ? loadedState
             : current,
         );
@@ -400,6 +402,7 @@ function useTaskDetailRouteEnrichment(args: {
     view.data,
     view.displayedRouteKey,
     view.enrichmentIdentity,
+    view.inspectionIsCurrent,
     view.hydrationEpochsAtRequestStart,
     view.turnWindowObservationsAtRequestStart,
     view.navigationContext,
@@ -529,13 +532,10 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
     })
       .then(async (identity) => {
         if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
-        const selectedErrandInspection = await assertRequestedSession(identity, taskId, sessionId);
+        const admission = await assertRequestedSession(store, identity, taskId, sessionId);
         if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
-        if (selectedErrandInspection) {
-          store
-            .getState()
-            .retainErrandInspection(errandInspectionOwnerId, selectedErrandInspection);
-        }
+        if (admission && !admission.retain(errandInspectionOwnerId)) return;
+        const selectedErrandInspection = admission?.inspection;
         const routeIdentity = selectedErrandInspection
           ? { ...identity, selectedErrandInspection }
           : identity;
@@ -547,6 +547,7 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
           navigationContext,
           hydrationEpochsAtRequestStart: hydrationEpochsAtRequestStartRef.current,
           enrichmentIdentity: routeIdentity,
+          inspectionIsCurrent: admission?.isCurrent,
         };
         previousLoadedRouteRef.current = shellState;
         setRouteState((current) =>

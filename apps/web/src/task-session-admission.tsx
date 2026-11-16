@@ -1,8 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
-import { inspectErrand } from "@/lib/api/domains/errand-api";
-import type { ErrandInspection } from "@/lib/types/errands";
+import {
+  InvalidErrandInspectionError,
+  readErrandInspection,
+} from "@/lib/state/slices/errands/errand-browser-read-coordinator";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
 
 export class TaskSessionAdmissionError extends Error {
   constructor(readonly reason: "unavailable" | "read_failed") {
@@ -11,10 +15,11 @@ export class TaskSessionAdmissionError extends Error {
 }
 
 export async function assertRequestedSession(
+  store: StoreApi<AppState>,
   identity: TaskNavigationIdentity,
   taskId: string,
   sessionId?: string,
-): Promise<ErrandInspection | undefined> {
+) {
   if (!sessionId) return undefined;
   if (
     identity.allSessionsResponse.sessions.some(
@@ -24,24 +29,24 @@ export async function assertRequestedSession(
   ) {
     return undefined;
   }
-  let inspection: ErrandInspection;
+  const read = readErrandInspection(store, taskId, sessionId);
   try {
-    inspection = await inspectErrand(taskId, sessionId);
-  } catch {
+    const inspection = await read.promise;
+    return {
+      inspection,
+      retain: (ownerId: string) => read.retain(ownerId, inspection),
+      isCurrent: read.isCurrent,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
     throw new TaskSessionAdmissionError(
-      identity.sessionListUnavailable ? "read_failed" : "unavailable",
+      identity.sessionListUnavailable && !(error instanceof InvalidErrandInspectionError)
+        ? "read_failed"
+        : "unavailable",
     );
+  } finally {
+    read.release();
   }
-  if (
-    inspection.scope.task_id !== taskId ||
-    inspection.scope.child_session_id !== sessionId ||
-    inspection.errand.task_id !== taskId ||
-    inspection.errand.errand_id !== sessionId ||
-    !inspection.child_session_exists
-  ) {
-    throw new TaskSessionAdmissionError("unavailable");
-  }
-  return inspection;
 }
 
 export function TaskSessionUnavailable({ retry }: { retry?: () => void }) {

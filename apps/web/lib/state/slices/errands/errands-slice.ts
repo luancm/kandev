@@ -530,7 +530,11 @@ export const createErrandsSlice = (set: ImmerSet): ErrandsSlice => ({
       const epochs = Object.fromEntries(
         [...taskIds].map((taskId) => [taskId, (draft.errands.resetEpochByTaskId[taskId] ?? 0) + 1]),
       );
-      draft.errands = { ...defaultErrandsState.errands, resetEpochByTaskId: epochs };
+      draft.errands = {
+        ...defaultErrandsState.errands,
+        resetEpochByTaskId: epochs,
+        scopeResetEpoch: (draft.errands.scopeResetEpoch ?? 0) + 1,
+      };
     }),
   ...createOperationalErrandActions(set),
   ...createBrowserSummaryActions(set),

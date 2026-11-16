@@ -1,4 +1,5 @@
 import type { SliceCreator } from "@/lib/state/slice-creator";
+import { clearConversationCache } from "./conversation-cache";
 import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 /* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
 
@@ -932,40 +933,15 @@ function nextPair(
 function buildRemoveTaskSessionAction(set: ImmerSet) {
   return (taskId: string, sessionId: string) =>
     set((draft) => {
-      delete draft.taskSessions.items[sessionId];
-      delete draft.taskSessions.activityEpochBySession?.[sessionId];
-      delete draft.taskSessions.readCursorEpochBySession?.[sessionId];
-      delete draft.taskSessions.contextWindowEpochBySession?.[sessionId];
-      delete draft.taskSessions.workspaceRecoveryEpochBySession?.[sessionId];
+      clearConversationCache(draft, sessionId);
       const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
       if (sessionsByTask) {
         draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
           (s) => s.id !== sessionId,
         );
       }
-      delete draft.pendingActionProjectionsBySessionId[sessionId];
-      delete draft.queue.bySessionId[sessionId];
-      delete draft.queue.metaBySessionId[sessionId];
-      delete draft.queue.activeOperationBySessionId[sessionId];
-      // Drop the conversation history owned by this session.
-      delete draft.messages.bySession[sessionId];
-      delete draft.messages.metaBySession[sessionId];
-      delete draft.messagePrompts.bySession[sessionId];
-      delete draft.messagePrompts.metaBySession[sessionId];
-      delete draft.messagePrompts.authoritativeBySession[sessionId];
-      delete draft.messagePrompts.observedBySession[sessionId];
-      delete draft.messagePrompts.deletedIdsBySession[sessionId];
       const generations = (draft.messagePrompts.generationBySession ??= {});
       generations[sessionId] = (generations[sessionId] ?? 0) + 1;
-      delete draft.turns.bySession[sessionId];
-      delete draft.turns.activeBySession[sessionId];
-      delete draft.turns.windowCoverageBySession?.[sessionId];
-      delete draft.turns.loadedBySession[sessionId];
-      delete draft.turns.reconcileEpochBySession[sessionId];
-      delete draft.turns.settledBoundaryBySession[sessionId];
-      delete draft.turnChanges.bySession[sessionId];
-      delete draft.turnChanges.nextOffsetBySession[sessionId];
-      delete draft.turnChanges.loadedBySession[sessionId];
       // Cascade into the runtime slice (shell/process/git buffers + per-session
       // maps); this also removes the environmentIdBySessionId mapping.
       purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);

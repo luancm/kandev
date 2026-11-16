@@ -2,9 +2,11 @@ import { useEffect, useId, useLayoutEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { inspectErrand } from "@/lib/api/domains/errand-api";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
-import { errandBrowserReadCoordinator } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
+import {
+  readErrandInspection,
+  retainCurrentErrandInspection,
+} from "@/lib/state/slices/errands/errand-browser-read-coordinator";
 import {
   selectErrandBySessionId,
   selectErrandBrowserRowBySessionId,
@@ -57,46 +59,15 @@ function useErrandInspectionOwner(args: {
   useEffect(() => {
     if (!enabled || !taskId || !sessionId || !isErrand) return;
     let released = false;
-    const existing = selectErrandInspection(store.getState(), sessionId);
-    const retainedRevision =
-      store.getState().errands.detailObservationRevisionBySessionId?.[sessionId];
-    if (
-      existing?.scope.task_id === taskId &&
-      existing.scope.child_session_id === sessionId &&
-      (retainedRevision ?? observationRevision) === observationRevision
-    ) {
-      store.getState().retainErrandInspection(ownerId, existing);
+    if (retainCurrentErrandInspection(store, taskId, sessionId, ownerId)) {
       return () => store.getState().releaseErrandInspection(ownerId);
     }
     if (connectionStatus !== "connected") return;
 
-    const lease = errandBrowserReadCoordinator(store).acquire(
-      {
-        kind: "inspection",
-        readScopeIdentity,
-        taskId,
-        childSessionId: sessionId,
-        connectionGeneration,
-        taskResetEpoch,
-      },
-      observationRevision,
-      (signal) => inspectErrand(taskId, sessionId, signal),
-    );
+    const lease = readErrandInspection(store, taskId, sessionId);
     void lease.promise
       .then((result) => {
-        if (
-          released ||
-          stateReadScopeIdentity(store.getState()) !== readScopeIdentity ||
-          (store.getState().errands.browserRevisionByTaskId[taskId] ?? 0) !== observationRevision ||
-          result.scope.task_id !== taskId ||
-          result.scope.child_session_id !== sessionId ||
-          result.errand.task_id !== taskId ||
-          result.errand.errand_id !== sessionId ||
-          !result.child_session_exists
-        ) {
-          return;
-        }
-        store.getState().retainErrandInspection(ownerId, result);
+        if (!released) lease.retain(ownerId, result);
       })
       .catch(() => undefined)
       .finally(lease.release);

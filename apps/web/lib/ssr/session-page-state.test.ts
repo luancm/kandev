@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- hydration scenarios share the production-shaped route fixtures. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, useEffect, useState, type ReactNode } from "react";
@@ -9,6 +10,7 @@ import type { AppState } from "@/lib/state/store";
 import { sessionId, taskId, workflowId } from "@/lib/types/ids";
 import type { Message, Task, TaskSession, Turn } from "@/lib/types/http";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import { assertRequestedSession } from "@/src/task-session-admission";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   clearInFlightTurnsLoadForTest,
@@ -65,11 +67,39 @@ vi.mock("@/lib/api/domains/user-shell-api", () => ({
 
 import {
   buildTaskNavigationShellData,
-  fetchSessionDataForTask,
-  fetchTaskNavigationData,
   fetchTaskNavigationEnrichment,
   OPTIONAL_HYDRATION_TIMEOUT_MS,
 } from "./session-page-state";
+
+async function testIdentity(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<TaskNavigationIdentity> {
+  const [task, allSessionsResponse] = await Promise.all([
+    mocks.fetchTask(taskId, { cache: "no-store" }),
+    mocks.listOrdinaryTaskSessions(taskId, { cache: "no-store" }),
+  ]);
+  const identity = { task, allSessionsResponse };
+  const admission = await assertRequestedSession(
+    createAppStore(),
+    identity,
+    taskId,
+    requestedSessionId,
+  );
+  return admission ? { ...identity, selectedErrandInspection: admission.inspection } : identity;
+}
+
+async function readEnrichment(taskId: string, requestedSessionId?: string) {
+  const identity = await testIdentity(taskId, requestedSessionId);
+  return fetchTaskNavigationEnrichment(identity, requestedSessionId);
+}
+
+async function readShell(taskId: string, requestedSessionId?: string) {
+  return buildTaskNavigationShellData(
+    await testIdentity(taskId, requestedSessionId),
+    requestedSessionId,
+  );
+}
 
 const NOW = "2026-07-16T12:00:00Z";
 const TASK_ID = "task-1";
@@ -339,9 +369,9 @@ describe("task navigation shell turn hydration", () => {
   });
 });
 
-describe("fetchSessionDataForTask initial hydration", () => {
+describe("readEnrichment initial hydration", () => {
   it("preserves the Office workflow ID in task-route state", async () => {
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as unknown as Partial<AppState>;
 
     expect(initialState.workspaces?.items[0]?.office_workflow_id).toBe("workflow-office");
@@ -354,7 +384,7 @@ describe("fetchSessionDataForTask initial hydration", () => {
     mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [primary, requested], total: 2 });
     mocks.fetchTaskSession.mockResolvedValue({ session: requested });
 
-    const result = await fetchSessionDataForTask(TASK_ID, requested.id);
+    const result = await readEnrichment(TASK_ID, requested.id);
 
     expect(mocks.fetchTaskSession).toHaveBeenCalledWith(requested.id, { cache: "no-store" });
     expect(result.sessionId).toBe(requested.id);
@@ -372,15 +402,15 @@ describe("fetchSessionDataForTask initial hydration", () => {
     });
     mocks.fetchTaskSession.mockResolvedValue({ session: primary });
 
-    await expect(fetchSessionDataForTask(TASK_ID, sessionId("other-task-session"))).rejects.toThrow(
-      "requested task session is unavailable",
-    );
+    await expect(readEnrichment(TASK_ID, sessionId("other-task-session"))).rejects.toMatchObject({
+      reason: "unavailable",
+    });
 
     expect(mocks.fetchTaskSession).not.toHaveBeenCalled();
   });
 });
 
-describe("fetchSessionDataForTask per-turn hydration", () => {
+describe("readEnrichment per-turn hydration", () => {
   it("hydrates turn coverage from the bounded message window without claiming full history", async () => {
     const session = makeSession();
     const message = {
@@ -405,7 +435,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
       cursor: message.id,
     });
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const hydratedState = mergeInitialState(result.initialState);
 
     expect(mocks.listTaskSessionMessages).toHaveBeenCalledWith(
@@ -458,7 +488,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
     });
     mocks.listTaskSessionMessages.mockResolvedValue(null);
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const hydratedState = mergeInitialState(result.initialState);
 
     expect(hydratedState.turns.bySession[session.id]?.[0]?.metadata).toEqual({
@@ -479,7 +509,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
     mocks.listSessionTurns.mockRejectedValue(new Error("turns unavailable"));
     mocks.listTaskSessionMessages.mockResolvedValue(null);
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const hydratedState = mergeInitialState(result.initialState);
 
     expect(hydratedState.turns.bySession[SESSION_ID]).toBeUndefined();
@@ -488,7 +518,7 @@ describe("fetchSessionDataForTask per-turn hydration", () => {
   });
 });
 
-describe("fetchSessionDataForTask agent hydration", () => {
+describe("readEnrichment agent hydration", () => {
   it("renders core task and session state when optional agent hydration never settles", async () => {
     vi.useFakeTimers();
     const session = makeSession();
@@ -498,15 +528,20 @@ describe("fetchSessionDataForTask agent hydration", () => {
     mocks.listSessionTurns.mockResolvedValue({ turns: [], total: 0 });
     mocks.listTaskSessionMessages.mockResolvedValue(null);
 
-    let result: Awaited<ReturnType<typeof fetchSessionDataForTask>> | undefined;
-    void fetchSessionDataForTask(TASK_ID).then((next) => {
+    const identity = await testIdentity(TASK_ID);
+    const shell = buildTaskNavigationShellData(identity);
+    let result: Awaited<ReturnType<typeof readEnrichment>> | undefined;
+    void fetchTaskNavigationEnrichment(identity).then((next) => {
       result = next;
     });
 
     await vi.advanceTimersByTimeAsync(OPTIONAL_HYDRATION_TIMEOUT_MS);
 
     expect(result).toBeDefined();
-    const hydratedState = mergeInitialState(result!.initialState);
+    const store = createAppStore();
+    store.getState().hydrate(shell.initialState);
+    store.getState().hydrate(result!.initialState);
+    const hydratedState = store.getState();
 
     expect(hydratedState.taskSessionsByTask.itemsByTaskId[TASK_ID]?.[0]?.id).toBe(SESSION_ID);
   });
@@ -514,20 +549,20 @@ describe("fetchSessionDataForTask agent hydration", () => {
   it("renders core task state when optional agent hydration fails", async () => {
     mocks.listAgents.mockRejectedValue(new Error("agents unavailable"));
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
 
     expect(result.task.id).toBe(TASK_ID);
   });
 });
 
-describe("fetchSessionDataForTask optional enrichment", () => {
+describe("readEnrichment optional enrichment", () => {
   it("omits failed optional workflow, agent, and repository state for client recovery", async () => {
     mocks.fetchTask.mockResolvedValue(makeTask({ workflow_id: workflowId(WORKFLOW_ID) }));
     mocks.listWorkflowSteps.mockRejectedValue(new Error("workflow unavailable"));
     mocks.listAgents.mockRejectedValue(new Error("agents unavailable"));
     mocks.listRepositories.mockRejectedValue(new Error("repositories unavailable"));
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as Partial<AppState>;
 
     expect(initialState.kanban).toBeUndefined();
@@ -538,7 +573,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
   it("keeps the destination workspace active when workspace enrichment fails", async () => {
     mocks.listWorkspaces.mockRejectedValue(new Error("workspaces unavailable"));
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as Partial<AppState>;
 
     expect(initialState.workspaces).toEqual({ activeId: WORKSPACE_ID });
@@ -548,7 +583,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
     vi.useFakeTimers();
     mocks.listWorkspaces.mockReturnValue(new Promise(() => {}));
 
-    const resultPromise = fetchSessionDataForTask(TASK_ID);
+    const resultPromise = readEnrichment(TASK_ID);
     await vi.advanceTimersByTimeAsync(OPTIONAL_HYDRATION_TIMEOUT_MS);
 
     const result = await resultPromise;
@@ -558,7 +593,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
   });
 
   it("hydrates workspace items alongside the destination workspace when enrichment succeeds", async () => {
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as Partial<AppState>;
 
     expect(initialState.workspaces).toMatchObject({
@@ -575,7 +610,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
       tasks: [],
     });
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as Partial<AppState>;
 
     expect(initialState.kanban?.workflowId).toBe(WORKFLOW_ID);
@@ -590,7 +625,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
     mocks.listAgents.mockReturnValue(new Promise(() => {}));
     mocks.listRepositories.mockReturnValue(new Promise(() => {}));
 
-    const resultPromise = fetchSessionDataForTask(TASK_ID);
+    const resultPromise = readEnrichment(TASK_ID);
     await vi.advanceTimersByTimeAsync(OPTIONAL_HYDRATION_TIMEOUT_MS);
 
     const result = await resultPromise;
@@ -604,7 +639,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
   });
 });
 
-describe("fetchSessionDataForTask timeout behavior", () => {
+describe("readEnrichment timeout behavior", () => {
   it("uses one deadline when active-session and enrichment requests both stall", async () => {
     vi.useFakeTimers();
     const session = makeSession();
@@ -618,8 +653,8 @@ describe("fetchSessionDataForTask timeout behavior", () => {
     mocks.listSessionTurns.mockResolvedValue({ turns: [], total: 0 });
     mocks.listTaskSessionMessages.mockResolvedValue(null);
 
-    let result: Awaited<ReturnType<typeof fetchSessionDataForTask>> | undefined;
-    const resultPromise = fetchSessionDataForTask(TASK_ID).then((next) => {
+    let result: Awaited<ReturnType<typeof readEnrichment>> | undefined;
+    const resultPromise = readEnrichment(TASK_ID).then((next) => {
       result = next;
     });
 
@@ -644,7 +679,7 @@ describe("fetchSessionDataForTask timeout behavior", () => {
       }),
     );
 
-    const resultPromise = fetchSessionDataForTask(TASK_ID);
+    const resultPromise = readEnrichment(TASK_ID);
     await vi.advanceTimersByTimeAsync(1);
     expect(rejectWorkspaces).toBeTypeOf("function");
     await vi.advanceTimersByTimeAsync(OPTIONAL_HYDRATION_TIMEOUT_MS - 1);
@@ -660,11 +695,11 @@ describe("fetchSessionDataForTask timeout behavior", () => {
   });
 });
 
-describe("fetchTaskNavigationData", () => {
+describe("readShell", () => {
   it("hydrates only essential task/session state without optional boot requests", async () => {
     const session = makeSession();
     mocks.listOrdinaryTaskSessions.mockResolvedValue({ sessions: [session] });
-    const result = await fetchTaskNavigationData(TASK_ID);
+    const result = await readShell(TASK_ID);
     expect(result.sessionId).toBe(SESSION_ID);
     expect(result.initialState.taskSessions?.items[SESSION_ID]).toEqual(session);
     expect(result.initialState.taskSessionsByTask?.loadedByTaskId[TASK_ID]).toBe(true);
@@ -681,13 +716,13 @@ describe("fetchTaskNavigationData", () => {
     mocks.listOrdinaryTaskSessions.mockResolvedValue({
       sessions: [{ ...session, id: "foreign-session", task_id: "foreign-task" }, session],
     });
-    await expect(fetchTaskNavigationData(TASK_ID, "foreign-session")).rejects.toThrow(
-      "requested task session is unavailable",
-    );
+    await expect(readShell(TASK_ID, "foreign-session")).rejects.toMatchObject({
+      reason: "unavailable",
+    });
   });
 
   it("keeps a sessionless task sessionless without waiting for enrichment", async () => {
-    const result = await fetchTaskNavigationData(TASK_ID);
+    const result = await readShell(TASK_ID);
     expect(result.sessionId).toBeNull();
     expect(result.initialState.taskSessionsByTask?.itemsByTaskId[TASK_ID]).toEqual([]);
     expect(result.initialState.messages).toBeUndefined();

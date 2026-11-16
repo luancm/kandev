@@ -1,7 +1,9 @@
 "use client";
 
 import { IconLoader2, IconPlayerStop, IconX } from "@tabler/icons-react";
-import { useCallback, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef } from "react";
+import { useAppStoreApi } from "@/components/state-provider";
+import { ErrandHistoryOwner } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -166,7 +168,9 @@ function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
   const { t } = useTranslation();
   const { outstanding, summary, taskId, nowMs, drawer, onClose, summaryStatus, onRetrySummary } =
     props;
-  const historyOwnerId = `errand-history-${useId()}`;
+  const store = useAppStoreApi();
+  const historyOwner = useMemo(() => new ErrandHistoryOwner(store), [store]);
+  useEffect(() => () => historyOwner.dispose(), [historyOwner]);
   const listRef = useRef<HTMLDivElement>(null);
   const resetScrollToTop = useCallback(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
@@ -230,7 +234,7 @@ function PanelList(props: ErrandsPanelProps & { nowMs: number }) {
               parentSessionId={parentId}
               taskId={taskId}
               totalFinished={counts.finished}
-              historyOwnerId={historyOwnerId}
+              historyOwner={historyOwner}
               nowMs={nowMs}
               drawer={drawer}
               onClose={onClose}

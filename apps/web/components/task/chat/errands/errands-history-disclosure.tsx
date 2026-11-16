@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskErrands } from "@/hooks/domains/session/use-task-errands";
 import type { ErrandHistoryChain } from "@/lib/state/slices/errands/types";
+import type { ErrandHistoryOwner } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
 import type { ErrandBrowserRow } from "@/lib/types/errands";
 import { cn } from "@/lib/utils";
 import { selectSessionTabTitle } from "../../session-tab-title";
@@ -34,7 +35,7 @@ export function ErrandsHistoryGroup({
   parentSessionId,
   taskId,
   totalFinished,
-  historyOwnerId,
+  historyOwner,
   nowMs,
   drawer,
   onClose,
@@ -43,7 +44,7 @@ export function ErrandsHistoryGroup({
   parentSessionId: string;
   taskId: string;
   totalFinished: number;
-  historyOwnerId: string;
+  historyOwner: ErrandHistoryOwner;
   nowMs: number;
   drawer: boolean;
   onClose: () => void;
@@ -54,7 +55,7 @@ export function ErrandsHistoryGroup({
       <HistoryRows
         taskId={taskId}
         parentSessionId={parentSessionId}
-        historyOwnerId={historyOwnerId}
+        historyOwner={historyOwner}
         totalFinished={totalFinished}
         nowMs={nowMs}
         drawer={drawer}
@@ -68,7 +69,7 @@ export function ErrandsHistoryGroup({
 function HistoryRows({
   taskId,
   parentSessionId,
-  historyOwnerId,
+  historyOwner,
   totalFinished,
   nowMs,
   drawer,
@@ -77,7 +78,7 @@ function HistoryRows({
 }: {
   taskId: string;
   parentSessionId: string;
-  historyOwnerId: string;
+  historyOwner: ErrandHistoryOwner;
   totalFinished: number;
   nowMs: number;
   drawer: boolean;
@@ -86,7 +87,7 @@ function HistoryRows({
 }) {
   const { t } = useTranslation();
   const parentHeadingId = useId();
-  const historyState = useTaskErrands(taskId, { parentSessionId, historyOwnerId });
+  const historyState = useTaskErrands(taskId, { parentSessionId, historyOwner });
   const chain = historyState.history;
   const isActiveHistory = chain?.taskId === taskId && chain.parentSessionId === parentSessionId;
   const history = isActiveHistory ? chain : undefined;

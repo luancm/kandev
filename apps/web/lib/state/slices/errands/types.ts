@@ -39,6 +39,7 @@ export type ErrandsSliceState = {
     /** Live operational errands per task, keyed by their reserved session ID. */
     byTaskId: Record<string, Record<string, Errand>>;
     resetEpochByTaskId: Record<string, number>;
+    scopeResetEpoch?: number;
     /** Removed session IDs block late browser reads and live errand events from restoring a row. */
     removedSessionIdsByTaskId: Record<string, Record<string, true>>;
     /** Authority that owns all compact browser reads; never hydrated. */

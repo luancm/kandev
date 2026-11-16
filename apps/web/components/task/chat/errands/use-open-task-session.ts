@@ -15,11 +15,9 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { clearHiddenSessionPanel } from "../../dockview-hidden-session-panels";
 import { markSessionTabUserActivationIntent } from "../../session-tab-activation-intent";
-import { inspectErrand } from "@/lib/api/domains/errand-api";
 import { fetchTaskSession } from "@/lib/api";
 import type { ErrandInspection } from "@/lib/types/errands";
-import { errandBrowserReadCoordinator } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
-import { storeReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import { readErrandInspection } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
 
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
 type OpenSession = (target: OpenTaskSessionTarget) => Promise<boolean>;
@@ -28,20 +26,6 @@ type TaskSessionList = ReturnType<
   AppStoreApi["getState"]
 >["taskSessionsByTask"]["itemsByTaskId"][string];
 type ErrandCache = ReturnType<AppStoreApi["getState"]>["errands"]["byTaskId"][string];
-
-function isValidInspection(
-  inspection: ErrandInspection,
-  taskId: string,
-  sessionId: string,
-): boolean {
-  return (
-    inspection.scope.task_id === taskId &&
-    inspection.scope.child_session_id === sessionId &&
-    inspection.errand.errand_id === sessionId &&
-    inspection.errand.task_id === taskId &&
-    inspection.child_session_exists
-  );
-}
 
 function focusParentSurface(hostId: string | null) {
   const dock = useDockviewStore.getState();
@@ -62,6 +46,9 @@ async function inspectAndOpenErrand(args: {
   ownerOpen: ((target: OpenTaskSessionTarget) => void) | null;
   usesDesktopWorkbench: boolean;
   isCurrent: () => boolean;
+  isLatest: () => boolean;
+  onRetained: () => void;
+  onTransfer: () => void;
 }): Promise<boolean> {
   const {
     store,
@@ -75,22 +62,30 @@ async function inspectAndOpenErrand(args: {
     ownerOpen,
     usesDesktopWorkbench,
     isCurrent,
+    isLatest,
+    onRetained,
+    onTransfer,
   } = args;
+  const read = readErrandInspection(store, taskId, sessionId);
+  const observationCurrent = () => isCurrent() && read.isCurrent();
+  let opened = false;
   try {
-    const inspection = await readErrandInspection(store, taskId, sessionId);
-    if (!isCurrent() || !isValidInspection(inspection, taskId, sessionId)) return false;
-    store.getState().retainErrandInspection(ownerId, inspection);
+    const inspection = await read.promise;
+    if (!observationCurrent() || !read.retain(ownerId, inspection)) return false;
+    onRetained();
     const child = await resolveErrandSession({
       store,
       taskId,
       sessionId,
       parentSessionId: inspection.errand.parent_session_id,
       sessions,
-      isCurrent,
+      isCurrent: observationCurrent,
+      publish: (publish) => read.publishSession(ownerId, inspection, publish),
     });
     if (!child) return false;
-    if (!isCurrent()) return false;
-    return openInspectedErrand({
+    if (!observationCurrent()) return false;
+    onTransfer();
+    opened = openInspectedErrand({
       store,
       target,
       taskId,
@@ -103,34 +98,15 @@ async function inspectAndOpenErrand(args: {
       ownerOpen,
       usesDesktopWorkbench,
     });
+    return opened;
   } catch {
     return false;
-  }
-}
-
-async function readErrandInspection(
-  store: AppStoreApi,
-  taskId: string,
-  sessionId: string,
-): Promise<ErrandInspection> {
-  const current = store.getState();
-  const observationRevision = current.errands.browserRevisionByTaskId[taskId] ?? 0;
-  const lease = errandBrowserReadCoordinator(store).acquire(
-    {
-      kind: "inspection",
-      readScopeIdentity: storeReadScopeIdentity(store),
-      taskId,
-      childSessionId: sessionId,
-      connectionGeneration: current.connection.generation ?? 0,
-      taskResetEpoch: current.errands.resetEpochByTaskId[taskId] ?? 0,
-    },
-    observationRevision,
-    (signal) => inspectErrand(taskId, sessionId, signal),
-  );
-  try {
-    return await lease.promise;
   } finally {
-    lease.release();
+    read.release();
+    if (!opened && isLatest()) {
+      onTransfer();
+      store.getState().releaseErrandInspection(ownerId);
+    }
   }
 }
 
@@ -156,8 +132,9 @@ async function resolveErrandSession(args: {
   parentSessionId: string;
   sessions: TaskSessionList;
   isCurrent: () => boolean;
+  publish: (publish: () => void) => boolean;
 }): Promise<TaskSession | undefined> {
-  const { store, taskId, sessionId, parentSessionId, sessions, isCurrent } = args;
+  const { store, taskId, sessionId, parentSessionId, sessions, isCurrent, publish } = args;
   const existing =
     store.getState().taskSessions.items[sessionId] ??
     sessions.find((item) => item.id === sessionId);
@@ -166,7 +143,7 @@ async function resolveErrandSession(args: {
   if (!isCurrent() || !isValidErrandSession(response.session, taskId, sessionId, parentSessionId)) {
     return undefined;
   }
-  store.getState().setTaskSession(response.session);
+  if (!publish(() => store.getState().setTaskSession(response.session))) return undefined;
   return response.session;
 }
 
@@ -286,6 +263,7 @@ export function useOpenTaskSession(): OpenSession {
   const requestAttemptRef = useRef(0);
   const navigationGenerationRef = useRef(0);
   const mountedRef = useRef(false);
+  const provisionalAttemptRef = useRef<number | null>(null);
   const ownerOpenRef = useRef(ownerOpen);
   if (ownerOpenRef.current !== ownerOpen) {
     ownerOpenRef.current = ownerOpen;
@@ -300,6 +278,10 @@ export function useOpenTaskSession(): OpenSession {
         state.tasks.activeSessionId !== previousState.tasks.activeSessionId
       ) {
         navigationGenerationRef.current++;
+        if (provisionalAttemptRef.current !== null) {
+          provisionalAttemptRef.current = null;
+          store.getState().releaseErrandInspection(ownerId);
+        }
       }
     });
     return () => {
@@ -315,6 +297,8 @@ export function useOpenTaskSession(): OpenSession {
     async (target: OpenTaskSessionTarget) => {
       const { taskId, sessionId, title } = target;
       const requestAttempt = ++requestAttemptRef.current;
+      provisionalAttemptRef.current = null;
+      store.getState().releaseErrandInspection(ownerId);
       const navigationGeneration = navigationGenerationRef.current;
       const state = store.getState();
       const selectedTaskId = state.tasks.activeTaskId;
@@ -352,6 +336,9 @@ export function useOpenTaskSession(): OpenSession {
           ownerOpen: capturedOwner,
           usesDesktopWorkbench,
           isCurrent,
+          isLatest: () => requestAttemptRef.current === requestAttempt,
+          onRetained: () => (provisionalAttemptRef.current = requestAttempt),
+          onTransfer: () => (provisionalAttemptRef.current = null),
         });
       }
 

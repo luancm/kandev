@@ -45,6 +45,9 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({ errands: { historyByOwnerId: {} }, closeErrandHistory: vi.fn() }),
+  }),
   useAppStore: <T,>(selector: (state: Record<string, unknown>) => T) =>
     useSyncExternalStore(
       (listener) => {
@@ -359,9 +362,9 @@ it("uses one history-chain owner across parent groups in the same panel", async 
   await screen.findByTestId(POPOVER);
 
   const parentOwners = mocks.useTaskErrands.mock.calls
-    .map(([, options]) => options as { parentSessionId?: string; historyOwnerId?: string })
+    .map(([, options]) => options as { parentSessionId?: string; historyOwner?: object })
     .filter((options) => options.parentSessionId)
-    .map((options) => options.historyOwnerId);
+    .map((options) => options.historyOwner);
 
   expect(parentOwners).toHaveLength(2);
   expect(new Set(parentOwners).size).toBe(1);

@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   inspectErrand: vi.fn(),
   fetchTaskSession: vi.fn(),
   setTaskSession: vi.fn(),
+  browserRevisionByTaskId: {} as Record<string, number>,
+  detailBySessionId: {} as Record<string, unknown>,
+  detailOwnersBySessionId: {} as Record<string, Record<string, boolean>>,
+  detailObservationRevisionBySessionId: {} as Record<string, number>,
+  retainInspection: vi.fn(),
+  releaseInspection: vi.fn(),
   clearHiddenSessionPanel: vi.fn(),
   markIntent: vi.fn(),
   setActiveSession: vi.fn(),
@@ -60,15 +66,18 @@ vi.mock("@/components/state-provider", () => ({
       setActiveSession: mocks.setActiveSession,
       setPrimary: mocks.setPrimary,
       setTaskSession: mocks.setTaskSession,
-      retainErrandInspection: vi.fn(),
-      releaseErrandInspection: vi.fn(),
+      retainErrandInspection: mocks.retainInspection,
+      releaseErrandInspection: mocks.releaseInspection,
       taskSessions: mocks.taskSessions,
       taskSessionsByTask: {
         itemsByTaskId: { [mocks.taskId]: Object.values(mocks.taskSessions.items) },
       },
       errands: {
         byTaskId: {},
-        browserRevisionByTaskId: {},
+        browserRevisionByTaskId: mocks.browserRevisionByTaskId,
+        detailBySessionId: mocks.detailBySessionId,
+        detailOwnersBySessionId: mocks.detailOwnersBySessionId,
+        detailObservationRevisionBySessionId: mocks.detailObservationRevisionBySessionId,
         resetEpochByTaskId: {},
       },
       connection: { generation: 1, status: "connected" },
@@ -143,6 +152,26 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.browserRevisionByTaskId = {};
+  mocks.detailBySessionId = {};
+  mocks.detailOwnersBySessionId = {};
+  mocks.detailObservationRevisionBySessionId = {};
+  mocks.retainInspection.mockImplementation(
+    (owner: string, inspection: ReturnType<typeof inspectionFor>) => {
+      const id = inspection.errand.errand_id;
+      mocks.detailBySessionId[id] = inspection;
+      (mocks.detailOwnersBySessionId[id] ??= {})[owner] = true;
+      mocks.detailObservationRevisionBySessionId[id] =
+        mocks.browserRevisionByTaskId[inspection.scope.task_id] ?? 0;
+    },
+  );
+  mocks.releaseInspection.mockImplementation((owner: string) => {
+    for (const owners of Object.values(mocks.detailOwnersBySessionId)) delete owners[owner];
+  });
+  mocks.setTaskSession.mockImplementation((session: { task_id: string }) => {
+    mocks.browserRevisionByTaskId[session.task_id] =
+      (mocks.browserRevisionByTaskId[session.task_id] ?? 0) + 1;
+  });
   mocks.appListeners.clear();
   mocks.taskSessions.items = {
     [mocks.parentId]: { id: mocks.parentId, task_id: mocks.taskId },
