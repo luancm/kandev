@@ -1,6 +1,6 @@
 ---
 created: 2026-11-08
-status: in_progress
+status: done
 requirements:
   - REQ-TASKS-ERRANDS-002
   - REQ-TASKS-ERRANDS-003
@@ -21,7 +21,7 @@ Repair restart recovery that leaves an idle Errand reporting running indefinitel
 
 Core recovery commit `9db45d3e75` was integrated by parent as `b2bbe9d5b764223c0dc100b9075a670159e1e9a8`, the base of this worktree. Recovery attention, capacity parity, stable refusal, exact explicit continuation and localized desktop/phone presentation are now implemented and accepted. Real isolated browser checks passed desktop 2/2 and phone 2/2 with repository global setup enabled; direct passthrough refusal tests passed 17/17. Era Sol final review `60481218` found no actionable findings. All writers released ownership; stale running projections are completion transport failures and must not be resumed as writers.
 
-[Recovery status checkpoint](recovery-status-checkpoint.md) owns the acceptance map and verification limits. Primary is preparing the normal-hook commit and push. Overall work remains `in_progress` pending delivery and integration with the parent-owned terminal identity correction. Parent review accepted that correction and direct automatic notification coverage; its final lint/commit receipt is pending. Parent also owns successful completion cleanup and result-card duration, excluded here. The parent checkout remains untouched.
+[Recovery status checkpoint](recovery-status-checkpoint.md) owns this package's acceptance map and verification limits. The recovery package was committed and pushed at `f71b9e09d4446fe62393a0d65662ebc99ecb5917`, then integrated with the parent terminal-identity correction and direct automatic-notification coverage. The combined delivery is recorded in the [integration handoff](../errands-remaining/final-integration-handoff.md) and is included in parent delivery `d08b07c5b3`. This package is delivered. Successful completion cleanup and result-card duration were separate packages; their results do not expand this package's historical incident evidence.
 
 Original incident outcome and historical repair eligibility remain unproven. Attention exposes that uncertainty without success inference or replay. PostgreSQL runtime checks were skipped without a DSN; a previously reproduced Send Now baseline/intermittent failure remains documented. Browser provider coverage uses mock ACP and fixture-authorized exact domain settlement after browser Stop, not live historical recovery proof.
 
@@ -49,7 +49,7 @@ The orchestrator integration exercises admission through durable recovery, resul
 
 ## Work orders
 
-- [ ] [Task 01: Preserve exact settlement across recovery](task-01-recovery-settlement.md)
+- [x] [Task 01: Preserve exact settlement across recovery](task-01-recovery-settlement.md)
 
 ## Verification results
 

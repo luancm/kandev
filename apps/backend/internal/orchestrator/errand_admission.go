@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -36,7 +35,6 @@ type errandParentDispatch struct {
 	svc        *Service
 	controller errandParentAdmitter
 	identity   models.ErrandParentAdmission
-	accepted   atomic.Bool
 }
 
 func errandQueuedParentOrigin(sources []messagequeue.QueuedMessage, parentID, submissionID string) errands.ParentPromptOrigin {
@@ -116,9 +114,6 @@ func (s *Service) reserveErrandParentDispatch(ctx context.Context, session *mode
 func (d *errandParentDispatch) decide(ctx context.Context, state models.ErrandAdmissionState) error {
 	if d == nil {
 		return nil
-	}
-	if state == models.ErrandAdmissionAccepted {
-		d.accepted.Store(true)
 	}
 	decisionCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
 	defer cancel()

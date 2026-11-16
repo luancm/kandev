@@ -434,7 +434,7 @@ func (m *outcomeSendNowManager) PromptAgentWithAdmissionCallback(ctx context.Con
 	}
 	switch m.outcome {
 	case "refused":
-		return nil, markPromptAdmissionRejected(errors.New("definite provider refusal"))
+		return nil, errors.New("ordinary prompt dispatch refused")
 	case "uncertain":
 		return nil, agentruntime.ErrUncertainPromptDelivery
 	default:

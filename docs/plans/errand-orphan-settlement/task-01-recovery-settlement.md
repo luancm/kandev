@@ -1,7 +1,7 @@
 ---
 id: "01-recovery-settlement"
 title: "Preserve exact settlement across recovery"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -28,7 +28,7 @@ system_design:
 
 ## Summary
 
-Recovery status/continuation checkpoint (2026-11-11): AC002.4–002.8 implementation and scoped acceptance are complete, including real desktop/phone admission and passthrough refusal coverage. Era Sol reviews found no remaining actionable findings. See [accepted checkpoint](recovery-status-checkpoint.md) for the acceptance map and verification limits. This work order remains `in_progress` only for delivery and integration of the parent-owned terminal-identity regression correction; historical live repair eligibility is not claimed. Earlier summaries below record prior checkpoints.
+Recovery status/continuation checkpoint (2026-11-11): AC002.4–002.8 implementation and scoped acceptance are complete, including real desktop/phone admission and passthrough refusal coverage. Era Sol reviews found no remaining actionable findings. See [accepted checkpoint](recovery-status-checkpoint.md) for the acceptance map and verification limits. The package was delivered at `f71b9e09d4` and integrated with the parent terminal-identity correction; the [combined integration handoff](../errands-remaining/final-integration-handoff.md) records that result, now included in parent delivery `d08b07c5b3`. This work order is done. Historical live repair eligibility remains unproven. Earlier summaries below are historical checkpoints and do not override this status.
 
 Reproduce the captured orphan-settlement gap, then connect authoritative recovery decisions to exact Errand settlement. Ensure eligible stranded records converge without synthesizing successful completion or replaying an uncertain prompt.
 

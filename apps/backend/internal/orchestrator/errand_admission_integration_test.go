@@ -95,7 +95,7 @@ func TestErrandAdmissionRealDispatchReservesBeforeProvider(t *testing.T) {
 					wireID = normalizeDeliverySubmissionID(options.deliverySubmissionID)
 				}
 				_, _, err := f.svc.dispatchPreparedPrompt(t.Context(), f.taskID, f.session, f.session.AgentExecutionID,
-					"next", nil, true, options, wireID, nil, func() {}, nil)
+					"next", nil, true, options, wireID, nil, func() {}, protocol, nil, &promptDispatchOutcome{})
 				require.NoError(t, err)
 				after, err := f.repo.GetErrand(t.Context(), f.row.ID)
 				require.NoError(t, err)

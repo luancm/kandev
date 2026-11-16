@@ -142,7 +142,7 @@ func TestErrandAdmissionInitialAndFallbackBindBothProtocols(t *testing.T) {
 					options.errandParentOrigin = errandPromptOrigin(ctx, f.session, options)
 					_, err := f.svc.finishPromptDispatchFailure(ctx, f.taskID, f.session.ID, "next", false, true, nil,
 						promptClaimRollback{previousSessionState: models.TaskSessionStateWaitingForInput}, options,
-						executor.ErrExecutionNotFound, nil, false, nil)
+						executor.ErrExecutionNotFound, nil, nil)
 					require.NoError(t, err)
 				}
 				select {

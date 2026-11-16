@@ -37,7 +37,7 @@ func dispatchAdmissionFixture(t *testing.T, f *admissionIntegrationFixture, opti
 		wireID = normalizeDeliverySubmissionID(options.deliverySubmissionID)
 	}
 	_, _, err := f.svc.dispatchPreparedPrompt(t.Context(), f.taskID, f.session, f.session.AgentExecutionID,
-		"next", nil, true, options, wireID, nil, nil, nil)
+		"next", nil, true, options, wireID, nil, nil, options.deliveryProtocol, nil, &promptDispatchOutcome{})
 	return err
 }
 

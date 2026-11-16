@@ -81,7 +81,7 @@ func TestHandlePromptDispatchFailure_ComposedPromptSurvivesInternalFallback(t *t
 		true, true,
 		nil,
 		promptClaimRollback{},
-		false, false,
+		false, promptDispatchResolution{},
 		executor.ErrExecutionNotFound,
 		true, sysprompt.InjectPlanMode(composedPrompt), composedPrompt,
 		"", false, nil,

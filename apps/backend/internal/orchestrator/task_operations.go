@@ -157,24 +157,6 @@ var ErrSessionNotPromptable = errors.New("session not promptable")
 // executeQueuedMessage's internal call passes a claim token that can
 // trigger this.
 var errQueuedDispatchSuperseded = errors.New("queued dispatch superseded by a newer one for this session")
-var errPromptAdmissionRejected = errors.New("prompt admission rejected")
-
-type promptAdmissionRejection struct {
-	cause error
-}
-
-func (rejection promptAdmissionRejection) Error() string { return rejection.cause.Error() }
-
-func (rejection promptAdmissionRejection) Unwrap() []error {
-	return []error{errPromptAdmissionRejected, rejection.cause}
-}
-
-func markPromptAdmissionRejected(err error) error {
-	if err == nil {
-		return nil
-	}
-	return promptAdmissionRejection{cause: err}
-}
 
 var (
 	// Backend restart recovery can restore the session state before the ACP
@@ -784,6 +766,7 @@ type startCreatedSessionOptions struct {
 	onInitialPromptAccepted        func(executionID string)
 	onInitialPromptFailed          func()
 	onInitialPromptAdmissionFailed func(error)
+	initialPromptOutcome           *promptDispatchOutcome
 	skipTaskDescriptionFallback    bool
 	promptAlreadyComposed          bool
 	noInitialTurn                  bool
@@ -7025,10 +7008,10 @@ type promptTaskOptions struct {
 	// waits for the turn to finish. Automation callers use it to bind durable
 	// attempt identity to the exact turn.
 	onAccepted func(turnID string)
-	// promptAccepted is owned by promptTask and keeps the replay cache alive
-	// only when this prompt reaches provider acceptance. It is process-local
-	// plumbing and is never passed to a caller.
-	promptAccepted          *atomic.Bool
+	// retainPromptPayload owns cache/claim retention across fallback attempts
+	// and asynchronous model-switch handoff. Attempt evidence stays in the
+	// captured promptDispatchOutcome; this flag is not rollback authority.
+	retainPromptPayload     *atomic.Bool
 	expectedSessionIdentity *messagequeue.QueueSessionIdentity
 	cancellationFence       *promptCancellationFence
 	// configModeOverride preserves the launch-time mode for a deferred
@@ -7115,33 +7098,6 @@ type promptTaskLiveExecutionFence struct {
 	workflowStepID string
 }
 
-type promptDispatchOutcome struct {
-	mu             sync.Mutex
-	accepted       bool
-	publicationErr error
-	turnID         string
-	onAccepted     func(turnID string)
-}
-
-func (o *promptDispatchOutcome) recordAccepted(publicationErr error) {
-	if o == nil {
-		return
-	}
-	o.mu.Lock()
-	o.accepted = true
-	o.publicationErr = publicationErr
-	o.mu.Unlock()
-}
-
-func (o *promptDispatchOutcome) snapshot() (bool, error) {
-	if o == nil {
-		return false, nil
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.accepted, o.publicationErr
-}
-
 // acceptedPromptDispatchError means agentctl accepted the prompt, but durable
 // publication or later transport handling failed. Detached clarification
 // callers must not reopen the already-delivered answer on this error.
@@ -7156,20 +7112,6 @@ func (e *acceptedPromptDispatchError) Error() string {
 func (e *acceptedPromptDispatchError) Unwrap() error { return e.err }
 
 func (*acceptedPromptDispatchError) DetachedResumeAccepted() bool { return true }
-
-func wrapAcceptedPromptDispatchFailure(
-	dispatchAccepted bool,
-	failureErr, publicationErr error,
-) error {
-	if !dispatchAccepted {
-		return failureErr
-	}
-	combined := errors.Join(failureErr, publicationErr)
-	if combined == nil {
-		return nil
-	}
-	return &acceptedPromptDispatchError{err: combined}
-}
 
 func (options promptTaskOptions) executorContext(ctx context.Context) context.Context {
 	if options.preservePromptContext {
@@ -7376,7 +7318,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		if options.deferErrandClaimRelease {
 			return
 		}
-		accepted := options.promptAccepted != nil && options.promptAccepted.Load()
+		accepted := options.retainPromptPayload != nil && options.retainPromptPayload.Load()
 		s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(resumePromptCtx), errandToken, accepted)
 	}()
 	if options.fallbackUsesEffectivePrompt {
@@ -7408,10 +7350,10 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Keep the replay payload only after this provider attempt is accepted.
 	// Admission and dispatch failures must not retain prompt attachments until
 	// a later session event happens to replace or consume the cache.
-	var promptAccepted atomic.Bool
-	options.promptAccepted = &promptAccepted
+	var retainPromptPayload atomic.Bool
+	options.retainPromptPayload = &retainPromptPayload
 	defer func() {
-		if !promptAccepted.Load() {
+		if !retainPromptPayload.Load() {
 			s.lastTurnPrompt.Delete(sessionID)
 		}
 	}()
@@ -7477,7 +7419,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	)
 	if switchHandled {
 		if switchErr == nil {
-			promptAccepted.Store(true)
+			retainPromptPayload.Store(true)
 		}
 		return switchResult, switchErr
 	}
@@ -7600,7 +7542,7 @@ func (s *Service) runPromptTurn(
 	result, delivery, execErr := s.dispatchPreparedPrompt(
 		promptCtx, taskID, session, activityExecutionID, effectivePrompt, attachments,
 		dispatchOnly, options, submissionID, validateAdmission, onDispatched,
-		rollback.dispatchGuard,
+		protocol, rollback.dispatchGuard, dispatchOutcome,
 	)
 	return s.finishPromptExecutorDispatch(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
@@ -7630,7 +7572,7 @@ func (s *Service) preparePromptAdmissionCallback(
 	return func() error {
 		if guard != nil {
 			if err := guard.relockWithContext(ctx); err != nil {
-				return markPromptAdmissionRejected(err)
+				return err
 			}
 		}
 		if guard != nil {
@@ -7638,7 +7580,7 @@ func (s *Service) preparePromptAdmissionCallback(
 				ctx, taskID, sessionID, session, rollback, options, resumeAttempt,
 			); err != nil {
 				guard.unlock()
-				return markPromptAdmissionRejected(err)
+				return err
 			}
 		}
 		if options.liveExecutionFence != nil {
@@ -7646,7 +7588,7 @@ func (s *Service) preparePromptAdmissionCallback(
 				if guard != nil {
 					guard.unlock()
 				}
-				return markPromptAdmissionRejected(err)
+				return err
 			}
 		}
 		if options.retireInitialSubmissionReplay {
@@ -7660,7 +7602,7 @@ func (s *Service) preparePromptAdmissionCallback(
 				if guard != nil {
 					guard.unlock()
 				}
-				return markPromptAdmissionRejected(err)
+				return err
 			}
 		}
 		if options.beforeProviderAdmission != nil {
@@ -7668,7 +7610,7 @@ func (s *Service) preparePromptAdmissionCallback(
 				if guard != nil {
 					guard.unlock()
 				}
-				return markPromptAdmissionRejected(err)
+				return err
 			}
 		}
 		return nil
@@ -7948,7 +7890,9 @@ func (s *Service) finishPromptExecutorDispatch(
 	result *executor.PromptResult, execErr error, dispatchOutcome *promptDispatchOutcome,
 	resumeAttempt *resumeAttempt, delivery *agentDeliverySubmissionRuntime,
 ) (*PromptResult, error) {
-	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
+	rollback.dispatchOutcome = dispatchOutcome
+	resolution := dispatchOutcome.snapshot()
+	dispatchAccepted, publicationErr := resolution.accepted(), resolution.publicationErr
 	if options.retireInitialSubmissionReplay && !dispatchAccepted {
 		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
 		if err := s.restoreInitialSubmissionReplayAfterRejectedPrompt(
@@ -7959,12 +7903,9 @@ func (s *Service) finishPromptExecutorDispatch(
 		}
 		cancel()
 	}
-	if dispatchAccepted && options.promptAccepted != nil {
-		options.promptAccepted.Store(true)
-	}
 	if execErr != nil {
 		execErr = s.persistRuntimeReplacementRecoveryBlock(ctx, sessionID, delivery, execErr)
-		execErr = s.settlePromptDispatchError(context.WithoutCancel(ctx), sessionID, delivery, dispatchAccepted, execErr)
+		execErr = s.retainUnresolvedPromptDispatch(context.WithoutCancel(ctx), sessionID, delivery, resolution, execErr)
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.
 		if releaseDispatchGuard != nil {
@@ -7980,7 +7921,7 @@ func (s *Service) finishPromptExecutorDispatch(
 		}
 		return s.finishPromptDispatchFailure(
 			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
-			rollback, options, execErr, foregroundDispatch, dispatchAccepted, publicationErr,
+			rollback, options, execErr, foregroundDispatch, dispatchOutcome,
 		)
 	}
 	if resumeErr := s.validateResumeAttempt(resumeAttempt); resumeErr != nil {
@@ -8071,7 +8012,7 @@ func (s *Service) validateAndRunDispatchBoundary(
 		}
 		result, err := s.finishPromptDispatchFailure(
 			ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
-			rollback, options, identityValidationErr, foregroundDispatch, false, nil,
+			rollback, options, identityValidationErr, foregroundDispatch, nil,
 		)
 		return promptCtx, nil, result, err
 	}
@@ -8149,10 +8090,10 @@ func (s *Service) preparePromptDispatchCallback(
 			}
 		}
 	}
-	if options.promptAccepted != nil {
+	if options.retainPromptPayload != nil {
 		originalOnAccepted := dispatchOutcome.onAccepted
 		dispatchOutcome.onAccepted = func(turnID string) {
-			options.promptAccepted.Store(true)
+			options.retainPromptPayload.Store(true)
 			if originalOnAccepted != nil {
 				originalOnAccepted(turnID)
 			}
@@ -8167,8 +8108,7 @@ func (s *Service) preparePromptDispatchCallback(
 		onDispatched = func() {
 			durableOutcomeErr := options.afterDispatch()
 			originalOnDispatched()
-			_, publicationErr := dispatchOutcome.snapshot()
-			dispatchOutcome.recordAccepted(errors.Join(durableOutcomeErr, publicationErr))
+			dispatchOutcome.recordPublicationError(durableOutcomeErr)
 		}
 	}
 	if resumeAttempt != nil {
@@ -8222,17 +8162,13 @@ func (s *Service) finishPromptDispatchFailure(
 	options promptTaskOptions,
 	promptErr error,
 	foregroundDispatch *foregroundDispatch,
-	dispatchAccepted bool,
-	publicationErr error,
+	dispatchOutcome *promptDispatchOutcome,
 ) (*PromptResult, error) {
 	failureCtx, cancel := options.failureContext(ctx)
 	defer cancel()
 	s.rollbackForegroundDispatchOnFailure(failureCtx, taskID, sessionID, foregroundDispatch)
-	if dispatchAccepted && rollback.reservedTurn != nil {
-		// Agentctl acceptance made the turn authoritative. A later completion
-		// error may reconcile session state, but must not delete this turn.
-		rollback.reservedTurnAccepted = true
-	}
+	rollback.dispatchOutcome = dispatchOutcome
+	resolution := dispatchOutcome.snapshot()
 	fallbackStartOptions := options.fallbackStartOptions
 	if options.errandParentOrigin.SenderSessionID != "" {
 		copied := startCreatedSessionOptions{}
@@ -8246,30 +8182,26 @@ func (s *Service) finishPromptDispatchFailure(
 		copied.deliveryClaimUpdater = options.deliveryClaimUpdater
 		fallbackStartOptions = &copied
 	}
-	if fallbackStartOptions != nil && options.promptAccepted != nil {
+	if fallbackStartOptions != nil && options.retainPromptPayload != nil {
 		copied := *fallbackStartOptions
 		accepted := copied.onInitialPromptAccepted
 		copied.onInitialPromptAccepted = func(executionID string) {
 			if accepted != nil {
 				accepted(executionID)
 			}
-			options.promptAccepted.Store(true)
+			options.retainPromptPayload.Store(true)
 		}
 		fallbackStartOptions = &copied
 	}
 	failureResult, failureErr := s.handlePromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt && !options.disableDispatchRetry,
-		attachments, rollback, options.lifecyclePrompt || options.internalContinuation, dispatchAccepted, promptErr,
+		attachments, rollback, options.lifecyclePrompt || options.internalContinuation, resolution, promptErr,
 		options.promptAlreadyComposed || options.fallbackPromptAlreadyComposed,
 		options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
 		options.promptReferenceContext, options.promptReferencesPrepared, options.entityReferences,
 		options.resumeAttempt != nil, fallbackStartOptions, options.onFallbackStart,
 	)
-	return failureResult, wrapAcceptedPromptDispatchFailure(
-		dispatchAccepted,
-		failureErr,
-		publicationErr,
-	)
+	return failureResult, resolution.failure(failureErr)
 }
 
 func (s *Service) reloadPromptSession(
@@ -8920,20 +8852,20 @@ func (s *Service) newModelSwitchAdmissionGate(
 		defer cancel()
 		guard, err := s.lockCancelInFlightGuardAfterCancellation(waitCtx, sessionID)
 		if err != nil {
-			return markPromptAdmissionRejected(err)
+			return err
 		}
 		err = s.validateModelSwitchDispatchOwnership(
 			waitCtx, taskID, sessionID, executionID, session, options, resumeAttempt,
 		)
 		if err != nil {
 			guard.release()
-			return markPromptAdmissionRejected(err)
+			return err
 		}
 		mu.Lock()
 		if admissionGuard != nil {
 			mu.Unlock()
 			guard.release()
-			return markPromptAdmissionRejected(errors.New("model-switch prompt admission was already acquired"))
+			return errors.New("model-switch prompt admission was already acquired")
 		}
 		admissionGuard = guard
 		mu.Unlock()
@@ -9050,7 +8982,7 @@ type promptClaimRollback struct {
 	turnID               string
 	createdTurn          bool
 	reservedTurn         *models.Turn
-	reservedTurnAccepted bool
+	dispatchOutcome      *promptDispatchOutcome
 	dispatchGuardRelease func()
 	dispatchGuard        *lockedCancelInFlightGuard
 }
@@ -9288,7 +9220,7 @@ func (s *Service) rollbackPromptClaim(
 	}
 	if rollback.createdTurn {
 		if rollback.reservedTurn != nil {
-			if !rollback.reservedTurnAccepted {
+			if rollback.dispatchOutcome == nil || rollback.dispatchOutcome.snapshot().rollbackEligible() {
 				s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
 			}
 		} else {
@@ -9437,7 +9369,7 @@ func (s *Service) handlePromptDispatchFailure(
 	attachments []v1.MessageAttachment,
 	rollback promptClaimRollback,
 	lifecyclePrompt bool,
-	dispatchAccepted bool,
+	resolution promptDispatchResolution,
 	promptErr error,
 	promptAlreadyComposed bool,
 	fallbackLaunchPrompt string,
@@ -9449,11 +9381,11 @@ func (s *Service) handlePromptDispatchFailure(
 	fallbackStartOptions *startCreatedSessionOptions,
 	onFallbackStart func(),
 ) (*PromptResult, error) {
-	if errors.Is(promptErr, errPromptAdmissionRejected) {
+	if resolution.refused() {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
 	}
-	if resumedForPrompt && !dispatchAccepted && !rollback.reservedTurnAccepted && rollback.reservedTurn == nil &&
+	if resumedForPrompt && !resolution.accepted() && !rollback.dispatchOutcome.snapshot().accepted() && rollback.reservedTurn == nil &&
 		errors.Is(promptErr, executor.ErrExecutionNotFound) {
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
@@ -9476,8 +9408,8 @@ func (s *Service) handlePromptDispatchFailure(
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
 	}
-	if rollback.createdTurn && rollback.reservedTurn != nil && !rollback.reservedTurnAccepted &&
-		!errors.Is(promptErr, lifecycle.ErrUncertainPromptDelivery) {
+	if rollback.createdTurn && rollback.reservedTurn != nil && !rollback.dispatchOutcome.snapshot().accepted() &&
+		(rollback.dispatchOutcome == nil || resolution.rollbackEligible()) {
 		s.rollbackReservedPromptTurn(ctx, sessionID, rollback.turnID)
 	}
 	return nil, s.handlePromptError(ctx, taskID, sessionID, rollback.previousSessionState, promptErr)
@@ -9869,7 +9801,7 @@ func (s *Service) validatePromptTurnOwnership(
 	if rollback.turnID == "" || s.turnService == nil {
 		return nil
 	}
-	if rollback.reservedTurn != nil && !rollback.reservedTurnAccepted {
+	if rollback.reservedTurn != nil && !rollback.dispatchOutcome.snapshot().accepted() {
 		if s.reservedPromptTurnID(sessionID) == rollback.turnID {
 			return nil
 		}

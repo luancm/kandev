@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -15,17 +14,9 @@ type unsentDeliveryStore interface {
 	FailUnsentAgentDeliverySubmission(context.Context, *models.AgentDeliverySubmission, time.Time) (bool, error)
 }
 
-func (s *Service) settlePromptDispatchError(ctx context.Context, sessionID string, delivery *agentDeliverySubmissionRuntime, accepted bool, cause error) error {
-	if delivery == nil {
+func (s *Service) retainUnresolvedPromptDispatch(ctx context.Context, sessionID string, delivery *agentDeliverySubmissionRuntime, outcome promptDispatchResolution, cause error) error {
+	if delivery == nil || outcome.refused() {
 		return cause
-	}
-	var notSent *agentruntime.RequestNotSentError
-	if !accepted && !errors.Is(cause, agentruntime.ErrUncertainPromptDelivery) && errors.As(cause, &notSent) {
-		if err := delivery.failUnsent(ctx); err == nil {
-			return cause
-		} else {
-			cause = errors.Join(cause, err)
-		}
 	}
 	return errors.Join(cause, delivery.markInterrupted(ctx, "prompt_dispatch_failed"), s.deliveryRecoveryError(ctx, sessionID, unknownPromptOutcome, delivery))
 }
