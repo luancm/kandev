@@ -52,7 +52,7 @@ import (
 
 // ClarificationService defines the interface for clarification operations.
 type ClarificationService interface {
-	CreateRequest(req *clarification.Request) (string, bool)
+	CreateRequest(req *clarification.Request) (string, bool, error)
 	WaitForResponse(ctx context.Context, pendingID string) (*clarification.Response, error)
 	CancelRequest(pendingID string) bool
 }

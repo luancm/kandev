@@ -985,7 +985,9 @@ func (r *Resolver) restoreFailedClarificationClaim(
 			zap.String("pending_id", pendingID))
 		return false
 	}
-	r.store.ClearDeliveryMiss(pendingID)
+	if len(claimedMessages) > 0 && claimedMessages[0] != nil {
+		r.store.ClearSessionDeliveryMiss(pendingID, claimedMessages[0].TaskSessionID)
+	}
 	if err := r.messages.PublishClarificationBundleUpdates(persistenceCtx, restoredMessages); err != nil {
 		r.logger.Error("failed to converge restored clarification state",
 			zap.String("pending_id", pendingID), zap.Error(err))

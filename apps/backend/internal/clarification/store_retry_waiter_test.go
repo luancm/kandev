@@ -13,7 +13,7 @@ func TestRetryWaiterKeepsConfirmedEntryAfterMapRemoval(t *testing.T) {
 	store := NewStore(time.Minute)
 	req := &Request{PendingID: "retry-pin", SessionID: "session", Questions: []Question{{Prompt: "Continue?"}}}
 	store.CreateRetryRequest(req)
-	_, created, missed, wait := store.CreateRetryRequestWithWaiter(req)
+	_, created, missed, wait, _ := store.CreateRetryRequestWithWaiter(req)
 	require.False(t, created)
 	require.False(t, missed)
 	response := &Response{Answers: []Answer{{QuestionID: "q1", CustomText: "yes"}}}
@@ -27,7 +27,7 @@ func TestRetryWaiterKeepsConfirmedEntryAfterMapRemoval(t *testing.T) {
 	require.NoError(t, store.RespondWithDeliveryConfirmation(context.Background(), req.PendingID, response, func() error { confirmations++; return nil }))
 	require.NoError(t, <-original)
 	replacement := &Request{PendingID: req.PendingID, SessionID: "replacement", Questions: []Question{{Prompt: "Replacement?"}}}
-	_, isNew := store.CreateRequest(replacement)
+	_, isNew, _ := store.CreateRequest(replacement)
 	require.True(t, isNew)
 	got, err := wait(context.Background(), nil)
 	require.NoError(t, err)
@@ -42,7 +42,7 @@ func TestRetryWaiterKeepsConfirmedEntryAfterMapRemoval(t *testing.T) {
 func TestRetryWaiterRechecksDetachedOwnershipBeforeRecordedReplay(t *testing.T) {
 	store := NewStore(time.Minute)
 	req := &Request{PendingID: "retry-missed", SessionID: "session", Questions: []Question{{Prompt: "Continue?"}}}
-	_, _, missed, wait := store.CreateRetryRequestWithWaiter(req)
+	_, _, missed, wait, _ := store.CreateRetryRequestWithWaiter(req)
 	require.False(t, missed)
 	store.CancelRequest(req.PendingID)
 	err := store.RespondWithDeliveryConfirmation(context.Background(), req.PendingID, &Response{}, func() error { t.Fatal("detached response invoked live confirmation"); return nil })
@@ -81,7 +81,7 @@ func TestRetryWaiterJoinsConfirmationClaimedDuringSessionCancellation(t *testing
 	<-confirming
 	close(release)
 	ids := <-cancelled
-	_, created, missed, wait := store.CreateRetryRequestWithWaiter(req)
+	_, created, missed, wait, _ := store.CreateRetryRequestWithWaiter(req)
 	close(finish)
 	require.NoError(t, <-original)
 	require.NoError(t, <-responding)

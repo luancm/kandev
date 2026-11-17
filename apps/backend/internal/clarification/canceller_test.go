@@ -211,7 +211,7 @@ func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, repo, _ := newTestCanceller(t, msgs)
 
-	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
+	pendingID, _, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
@@ -246,7 +246,7 @@ func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, repo, _ := newTestCanceller(t, msgs)
 
-	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
+	pendingID, _, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
@@ -385,7 +385,7 @@ func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 	c, _, eventBus := newTestCanceller(t, msgs)
 	updatedAt := time.Date(2026, time.August, 2, 20, 0, 0, 123456789, time.UTC)
 
-	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
+	pendingID, _, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
@@ -418,7 +418,7 @@ func TestCanceller_MultiQuestion_MarksAllMessagesDetached(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, _, eventBus := newTestCanceller(t, msgs)
 
-	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
+	pendingID, _, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{
 		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID, "question_id": "q1"}},
 		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID, "question_id": "q2"}},
@@ -486,7 +486,7 @@ func TestCanceller_SupersededStoreBundleDoesNotCount(t *testing.T) {
 	}
 	c, repo, eventBus := newTestCanceller(t, msgs)
 	repo.activeBySession = map[string][]*taskmodels.Message{"s1": {}}
-	if _, created := c.store.CreateRequest(&Request{
+	if _, created, _ := c.store.CreateRequest(&Request{
 		PendingID: pendingID,
 		SessionID: "s1",
 	}); !created {
@@ -518,7 +518,7 @@ func TestCanceller_RepeatedDetachIsNoOp(t *testing.T) {
 		}},
 	}
 	c, repo, eventBus := newTestCanceller(t, msgs)
-	if _, created := c.store.CreateRequest(&Request{
+	if _, created, _ := c.store.CreateRequest(&Request{
 		PendingID: pendingID,
 		SessionID: "s1",
 	}); !created {
@@ -549,7 +549,7 @@ func TestCanceller_RepeatedExpiryIsNoOp(t *testing.T) {
 		}},
 	}
 	c, repo, eventBus := newTestCanceller(t, msgs)
-	if _, created := c.store.CreateRequest(&Request{
+	if _, created, _ := c.store.CreateRequest(&Request{
 		PendingID: pendingID,
 		SessionID: "s1",
 	}); !created {
@@ -573,7 +573,7 @@ func TestCanceller_Idempotent_SkipsAnsweredMessages(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, repo, _ := newTestCanceller(t, msgs)
 
-	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
+	pendingID, _, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{
 		{ID: "m1", TaskSessionID: "s1", Metadata: map[string]any{"status": "answered", "pending_id": pendingID}},
 		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "pending_id": pendingID}},

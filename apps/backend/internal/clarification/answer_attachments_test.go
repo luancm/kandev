@@ -218,7 +218,7 @@ func (r *recordingDetachedResumer) ResumeDetachedClarification(
 // file bytes or executor paths.
 func TestResumeDetachedClarificationCarriesAnswerAttachments(t *testing.T) {
 	store := NewStore(time.Minute)
-	pendingID, _ := store.CreateRequest(&Request{
+	pendingID, _, _ := store.CreateRequest(&Request{
 		SessionID: "session-1",
 		TaskID:    "task-1",
 		Questions: []Question{{ID: "q1", Prompt: "Which layout?"}},

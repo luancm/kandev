@@ -334,7 +334,12 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 		Context:   body.Context,
 	}
 
-	pendingID, isNew := h.store.CreateRequest(req)
+	pendingID, isNew, err := h.store.CreateRequest(req)
+	if err != nil {
+		h.logger.Error("failed to register clarification waiter", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register clarification request"})
+		return
+	}
 
 	// Create one message per question in the database; all share the same
 	// pending_id and are rendered as a stacked group on the frontend. The

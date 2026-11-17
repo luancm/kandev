@@ -11,7 +11,7 @@ import (
 
 func TestWaitForResponseConfirmsDurableDeliveryBeforeReturning(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	confirmationStarted := make(chan struct{})
 	releaseConfirmation := make(chan struct{})
 	var releaseOnce sync.Once
@@ -69,7 +69,7 @@ func TestWaitForResponseConfirmsDurableDeliveryBeforeReturning(t *testing.T) {
 
 func TestWaitForResponseRejectsFailedDeliveryConfirmation(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	wantErr := errors.New("database unavailable")
 	waitDone := make(chan error, 1)
 	go func() {
@@ -97,7 +97,7 @@ func TestWaitForResponseRejectsFailedDeliveryConfirmation(t *testing.T) {
 
 func TestRespondWithDeliveryConfirmationAbandonsUnconsumedResponse(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	confirmed := false
@@ -120,7 +120,7 @@ func TestRespondWithDeliveryConfirmationAbandonsUnconsumedResponse(t *testing.T)
 func TestRespondWithDeliveryConfirmationUsesStoreTimeoutWithoutWaiter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewStore(time.Second)
-		id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+		id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 		respondDone := make(chan error, 1)
 		go func() {
 			respondDone <- s.RespondWithDeliveryConfirmation(
@@ -155,7 +155,7 @@ func TestRespondWithDeliveryConfirmationUsesStoreTimeoutWithoutWaiter(t *testing
 
 func TestRespondWithDeliveryConfirmationReturnsNotFoundWhenCancellationWinsAfterLookup(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	respondLoaded := make(chan struct{})
 	releaseRespond := make(chan struct{})
 	var releaseOnce sync.Once
@@ -200,7 +200,7 @@ func TestRespondWithDeliveryConfirmationReturnsNotFoundWhenCancellationWinsAfter
 
 func TestRespondWithDeliveryConfirmationFinishesStartedConfirmationAfterDeadline(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	confirmationStarted := make(chan struct{})
@@ -241,7 +241,7 @@ func TestRespondWithDeliveryConfirmationFinishesStartedConfirmationAfterDeadline
 func TestRespondWithDeliveryConfirmationBoundsStartedConfirmationAfterDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewStore(time.Second)
-		id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+		id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		confirmationStarted := make(chan struct{})
@@ -298,7 +298,7 @@ func TestRespondWithDeliveryConfirmationBoundsStartedConfirmationAfterDeadline(t
 func TestRespondWithDeliveryConfirmationCapsStartedConfirmationBelowStoreTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewStore(10 * time.Minute)
-		id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+		id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 		confirmationStarted := make(chan struct{})

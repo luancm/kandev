@@ -39,13 +39,13 @@ func TestStoreDoesNotDeduplicateDifferentCustomTextPolicies(t *testing.T) {
 	}
 	first := base
 	first.AllowCustomText = &denyText
-	firstID, firstCreated := store.CreateRequest(&Request{SessionID: "session-1", Questions: []Question{first}})
+	firstID, firstCreated, _ := store.CreateRequest(&Request{SessionID: "session-1", Questions: []Question{first}})
 	if !firstCreated {
 		t.Fatal("first request was not created")
 	}
 	second := base
 	second.AllowCustomText = &allowText
-	secondID, secondCreated := store.CreateRequest(&Request{SessionID: "session-1", Questions: []Question{second}})
+	secondID, secondCreated, _ := store.CreateRequest(&Request{SessionID: "session-1", Questions: []Question{second}})
 	if !secondCreated || firstID == secondID {
 		t.Fatalf("different custom text policies deduplicated: first=%q second=%q created=%v", firstID, secondID, secondCreated)
 	}

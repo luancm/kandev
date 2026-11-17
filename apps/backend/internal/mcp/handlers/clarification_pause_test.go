@@ -56,8 +56,8 @@ type immediateClarificationService struct {
 	waitErr  error
 }
 
-func (s *immediateClarificationService) CreateRequest(*clarification.Request) (string, bool) {
-	return "pending-race", true
+func (s *immediateClarificationService) CreateRequest(*clarification.Request) (string, bool, error) {
+	return "pending-race", true, nil
 }
 
 func (s *immediateClarificationService) WaitForResponse(context.Context, string) (*clarification.Response, error) {
@@ -71,9 +71,9 @@ type recordingImmediateClarificationService struct {
 	response *clarification.Response
 }
 
-func (s *recordingImmediateClarificationService) CreateRequest(req *clarification.Request) (string, bool) {
+func (s *recordingImmediateClarificationService) CreateRequest(req *clarification.Request) (string, bool, error) {
 	s.request = req
-	return "pending-native-question", true
+	return "pending-native-question", true, nil
 }
 
 func (s *recordingImmediateClarificationService) WaitForResponse(context.Context, string) (*clarification.Response, error) {

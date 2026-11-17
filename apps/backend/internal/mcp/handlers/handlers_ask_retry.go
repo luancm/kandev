@@ -25,7 +25,7 @@ type clarificationReattacher interface {
 }
 
 type clarificationRetryRegistrar interface {
-	CreateRetryRequestWithWaiter(req *clarification.Request) (string, bool, bool, func(context.Context, *clarification.Response) (*clarification.Response, error))
+	CreateRetryRequestWithWaiter(req *clarification.Request) (string, bool, bool, func(context.Context, *clarification.Response) (*clarification.Response, error), error)
 }
 
 // clarificationBundlePublisher is an optional message-creator extension that

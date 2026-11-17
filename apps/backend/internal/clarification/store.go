@@ -26,7 +26,7 @@ const maxStartedDeliveryConfirmationWait = 5 * time.Minute
 type Store struct {
 	mu             sync.RWMutex
 	pending        map[string]*PendingClarification
-	deliveryMisses map[string]time.Time
+	deliveryMisses map[deliveryMissKey]time.Time
 	timeout        time.Duration
 
 	// onWaitEntered, if non-nil, is invoked inside WaitForResponse after the
@@ -60,6 +60,11 @@ type Store struct {
 	onRespondLoaded func(pendingID string)
 }
 
+type deliveryMissKey struct {
+	pendingID string
+	scope     WaiterScope
+}
+
 // NewStore creates a new clarification store.
 func NewStore(timeout time.Duration) *Store {
 	if timeout == 0 {
@@ -67,7 +72,7 @@ func NewStore(timeout time.Duration) *Store {
 	}
 	return &Store{
 		pending:        make(map[string]*PendingClarification),
-		deliveryMisses: make(map[string]time.Time),
+		deliveryMisses: make(map[deliveryMissKey]time.Time),
 		timeout:        timeout,
 	}
 }
@@ -93,7 +98,7 @@ func (s *Store) SetOnRespondLoaded(fn func(pendingID string)) {
 // existing one was reused (false). If a pending entry for the same session
 // with identical normalised questions already exists, the existing pending ID
 // is returned and isNew is false.
-func (s *Store) CreateRequest(req *Request) (string, bool) {
+func (s *Store) CreateRequest(req *Request) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.createRequestLocked(req, true)
@@ -104,7 +109,7 @@ func (s *Store) CreateRequest(req *Request) (string, bool) {
 // live waiter and therefore chose detached delivery. That receipt makes the
 // handoff linearizable: the retry must not open a second waiter or return the
 // same answer through the tool call while detached delivery is in flight.
-func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliveryMissed bool) {
+func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliveryMissed bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.createRetryRequestLocked(req)
@@ -115,25 +120,27 @@ func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliv
 // A recorded response must already have its durable delivery marker cleared.
 func (s *Store) CreateRetryRequestWithWaiter(req *Request) (
 	pendingID string, isNew, deliveryMissed bool,
-	wait func(context.Context, *Response) (*Response, error),
+	wait func(context.Context, *Response) (*Response, error), err error,
 ) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	pendingID, isNew, deliveryMissed = s.createRetryRequestLocked(req)
-	if deliveryMissed {
-		return pendingID, isNew, deliveryMissed, nil
+	pendingID, isNew, deliveryMissed, err = s.createRetryRequestLocked(req)
+	if err != nil || deliveryMissed {
+		return pendingID, isNew, deliveryMissed, nil, err
 	}
 	pending := s.pending[pendingID]
 	wait = func(ctx context.Context, recorded *Response) (*Response, error) {
 		return s.waitForRetryResponse(ctx, pendingID, pending, recorded)
 	}
-	return pendingID, isNew, deliveryMissed, wait
+	return pendingID, isNew, deliveryMissed, wait, nil
 }
 
 func (s *Store) waitForRetryResponse(ctx context.Context, pendingID string, pending *PendingClarification, recorded *Response) (*Response, error) {
 	if recorded != nil {
 		s.mu.RLock()
-		_, deliveryMissed := s.deliveryMisses[pendingID]
+		_, deliveryMissed := s.deliveryMisses[deliveryMissKey{pendingID: pendingID, scope: pending.scope}]
+		_, unknownMiss := s.deliveryMisses[deliveryMissKey{pendingID: pendingID}]
+		deliveryMissed = deliveryMissed || unknownMiss
 		s.mu.RUnlock()
 		if deliveryMissed && !recorded.Rejected {
 			return nil, fmt.Errorf("%w: detached clarification delivery owns %s", ErrNotFound, pendingID)
@@ -148,27 +155,44 @@ func (s *Store) waitForRetryResponse(ctx context.Context, pendingID string, pend
 	return s.waitForRegisteredResponse(ctx, pendingID, pending)
 }
 
-func (s *Store) createRetryRequestLocked(req *Request) (pendingID string, isNew, deliveryMissed bool) {
+func (s *Store) createRetryRequestLocked(req *Request) (pendingID string, isNew, deliveryMissed bool, err error) {
+	scope, err := requestWaiterScope(req)
+	if err != nil {
+		return "", false, false, err
+	}
 	s.pruneDeliveryMissesLocked(time.Now())
 	if req.PendingID != "" {
-		if _, missed := s.deliveryMisses[req.PendingID]; missed {
-			return req.PendingID, false, true
+		if existing := s.pending[req.PendingID]; existing != nil && existing.scope != scope {
+			return "", false, false, ErrWaiterScopeCollision
+		}
+		if _, missed := s.deliveryMisses[deliveryMissKey{pendingID: req.PendingID, scope: scope}]; missed {
+			return req.PendingID, false, true, nil
+		}
+		if _, missed := s.deliveryMisses[deliveryMissKey{pendingID: req.PendingID}]; missed {
+			if scope.Kind == WaiterScopeErrand {
+				return "", false, false, ErrWaiterScopeUnknownDelivery
+			}
+			return req.PendingID, false, true, nil
 		}
 	}
 	// A preset retry identity is already the complete idempotency key. Broad
 	// question-only deduplication would alias distinct transport calls whose
 	// context, question IDs, or titles differ.
-	pendingID, isNew = s.createRequestLocked(req, req.PendingID == "")
-	return pendingID, isNew, false
+	pendingID, isNew, err = s.createRequestLocked(req, req.PendingID == "")
+	return pendingID, isNew, false, err
 }
 
-// ClearDeliveryMiss removes a detached-delivery receipt after durable
-// delivery recovery restored the bundle to pending. A later exact retry can
-// then adopt the restored question normally.
-func (s *Store) ClearDeliveryMiss(pendingID string) {
+// ClearSessionDeliveryMiss clears the verified session's receipt and any
+// ownerless receipt after its durable bundle has been restored. Known receipts
+// for other scopes remain untouched.
+func (s *Store) ClearSessionDeliveryMiss(pendingID, sessionID string) {
+	if pendingID == "" || sessionID == "" {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.deliveryMisses, pendingID)
+	delete(s.deliveryMisses, deliveryMissKey{pendingID: pendingID, scope: WaiterScope{Kind: WaiterScopeSession, SessionID: sessionID}})
+	delete(s.deliveryMisses, deliveryMissKey{pendingID: pendingID})
 }
 
 // HasWaiter reports whether an in-memory pending entry exists for pendingID.
@@ -181,7 +205,11 @@ func (s *Store) HasWaiter(pendingID string) bool {
 	return ok
 }
 
-func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool) {
+func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool, error) {
+	scope, err := requestWaiterScope(req)
+	if err != nil {
+		return "", false, err
+	}
 
 	// Normalise in-place so dedup keys are stable even when the caller
 	// hasn't assigned IDs yet.
@@ -191,7 +219,10 @@ func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (st
 	// entry would orphan waiters on a done channel nobody closes.
 	if req.PendingID != "" {
 		if existing, ok := s.pending[req.PendingID]; ok {
-			return existing.Request.PendingID, false
+			if existing.scope != scope {
+				return "", false, ErrWaiterScopeCollision
+			}
+			return existing.Request.PendingID, false, nil
 		}
 	}
 
@@ -199,8 +230,8 @@ func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (st
 	// normalised questions already exists, return the existing pending ID.
 	if deduplicateQuestions {
 		for _, existing := range s.pending {
-			if existing.Request.SessionID == req.SessionID && questionsEqual(existing.Request.Questions, req.Questions) {
-				return existing.Request.PendingID, false
+			if existing.scope == scope && questionsEqual(existing.Request.Questions, req.Questions) {
+				return existing.Request.PendingID, false, nil
 			}
 		}
 	}
@@ -212,12 +243,13 @@ func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (st
 
 	s.pending[req.PendingID] = &PendingClarification{
 		Request:   req,
+		scope:     scope,
 		done:      make(chan struct{}),
 		CancelCh:  make(chan struct{}),
 		CreatedAt: time.Now(),
 	}
 
-	return req.PendingID, true
+	return req.PendingID, true, nil
 }
 
 func (s *Store) pruneDeliveryMissesLocked(now time.Time) {
@@ -386,7 +418,7 @@ func (s *Store) respond(
 	if !ok && confirm != nil {
 		now := time.Now()
 		s.pruneDeliveryMissesLocked(now)
-		s.deliveryMisses[pendingID] = now
+		s.deliveryMisses[deliveryMissKey{pendingID: pendingID}] = now
 	}
 	s.mu.Unlock()
 	if hook != nil {
@@ -486,8 +518,8 @@ func (s *Store) recordDeliveryMissAfterCancellation(
 	defer s.mu.Unlock()
 	now := time.Now()
 	s.pruneDeliveryMissesLocked(now)
-	s.deliveryMisses[pendingID] = now
-	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded {
+	s.deliveryMisses[deliveryMissKey{pendingID: pendingID, scope: loaded.scope}] = now
+	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded && replacement.scope == loaded.scope {
 		s.cancelPendingLocked(pendingID, replacement)
 	}
 }
@@ -595,10 +627,25 @@ func (s *Store) ListPending() []*Request {
 // An in-flight delivery confirmation stays discoverable until its waiter
 // consumes it, so exact retries join that confirmation instead of replaying early.
 func (s *Store) CancelSession(sessionID string) []string {
+	if sessionID == "" {
+		return nil
+	}
+	return s.cancelScope(WaiterScope{Kind: WaiterScopeSession, SessionID: sessionID})
+}
+
+// CancelErrand cancels waiters for exactly one Errand execution generation.
+func (s *Store) CancelErrand(errandID string, generation uint64) []string {
+	if errandID == "" || generation == 0 {
+		return nil
+	}
+	return s.cancelScope(WaiterScope{Kind: WaiterScopeErrand, ErrandID: errandID, Generation: generation})
+}
+
+func (s *Store) cancelScope(scope WaiterScope) []string {
 	s.mu.RLock()
 	var toCancel []*PendingClarification
 	for _, pending := range s.pending {
-		if pending.Request.SessionID == sessionID {
+		if pending.scope == scope {
 			toCancel = append(toCancel, pending)
 		}
 	}
