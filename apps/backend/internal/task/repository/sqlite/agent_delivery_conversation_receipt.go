@@ -28,6 +28,9 @@ func (r *Repository) beginCanonicalConversationChanges(ctx context.Context, tx *
 			return nil, fmt.Errorf("canonical delivery batch contains multiple sessions")
 		}
 	}
+	if _, ok := errandDeliveryIdentity(sessionID); ok {
+		return &canonicalConversationChanges{sessionID: sessionID, seen: make(map[canonicalConversationRow]bool)}, nil
+	}
 	base, err := r.ensureConversationRevisionTx(ctx, tx, sessionID)
 	if err != nil {
 		return nil, err

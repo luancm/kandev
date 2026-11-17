@@ -67,6 +67,9 @@ func (sm *StreamManager) finishErrandAwaitRecovery(ctx context.Context, executio
 
 func (sm *StreamManager) classifyErrandAwaitTerminal(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, prepared preparedAgentEvent) error {
 	store, ok := delivery.(errandAwaitRecoveryRepository)
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand {
+		return nil
+	}
 	if !ok || prepared.durableEvent == nil || !prepared.durableEvent.Terminal {
 		return nil
 	}

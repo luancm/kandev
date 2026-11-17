@@ -14,6 +14,13 @@ func (r *Repository) validateAgentDeliveryEventAdmissionTx(
 	tx *sqlx.Tx,
 	event *models.AgentDeliveryEvent,
 ) error {
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok {
+		if event.TaskID == "" || event.ExecutionID == "" || event.OwnerGeneration != event.HarnessGeneration || event.ExpectedStreamID != event.StreamID {
+			return repoerrors.ErrAgentDeliveryIdentityMismatch
+		}
+		_, err := r.errandDeliveryEventAdmissionTx(ctx, tx, errandID, event)
+		return err
+	}
 	if isLegacyAgentDeliveryEventOwner(event) {
 		return r.ensureAgentDeliverySessionNotRetired(ctx, tx, event.SessionID, event.IncarnationID)
 	}

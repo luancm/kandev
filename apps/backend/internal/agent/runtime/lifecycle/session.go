@@ -326,6 +326,9 @@ func (sm *SessionManager) publishNegotiatedDeliveryMode(
 	if decision.Mode == DurableDeliveryBlocked {
 		return fmt.Errorf("durable delivery negotiation blocked: %s", decision.Reason)
 	}
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && decision.Mode != DurableDeliveryV1 {
+		return errors.New("errand requires durable delivery")
+	}
 	if execution != nil {
 		execution.DeliveryMode = decision.Mode
 		attempt.finishNegotiation(nil)
@@ -626,6 +629,10 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
 
 	execution.ACPSessionID = result.SessionID
+	if err := sm.completeErrandNativeSession(ctx, execution); err != nil {
+		attempt.fail(err)
+		return err
+	}
 	for _, accepted := range setupAccepted {
 		accepted(result.AttachmentAttemptID)
 	}
@@ -2067,7 +2074,10 @@ func (sm *SessionManager) sendPrompt(
 			return nil, err
 		}
 	}
-	initialDelivery, err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID)
+	var initialDelivery *models.AgentDeliverySubmission
+	if execution.Owner.Kind != ExecutionOwnerErrand {
+		initialDelivery, err = sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID)
+	}
 	if err != nil {
 		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
 		return nil, err
@@ -2076,6 +2086,13 @@ func (sm *SessionManager) sendPrompt(
 	if err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
+	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		initialDelivery, err = sm.persistErrandDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID, promptGeneration)
+		if err != nil {
+			sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+			return nil, err
+		}
 	}
 	if callbacks.deliverySubmissionID != "" {
 		execution.setDeliverySubmissionID(deliverySubmissionIdentityForPrompt(callbacks.deliverySubmissionID, ""))

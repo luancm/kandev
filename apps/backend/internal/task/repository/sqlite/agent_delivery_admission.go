@@ -81,6 +81,14 @@ func (r *Repository) retainPromptAdmissionTx(ctx context.Context, tx *sqlx.Tx, r
 // agentDeliveryEventAdmissionTx resolves a submission's exact admitted turn.
 // Its boolean reports the session role and remains independent of attribution.
 func (r *Repository) agentDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, bool, error) {
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok {
+		turn, err := r.errandDeliveryEventAdmissionTx(ctx, tx, errandID, event)
+		return turn, false, err
+	}
+	return r.taskDeliveryEventAdmissionTx(ctx, tx, event)
+}
+
+func (r *Repository) taskDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, bool, error) {
 	var role, taskID string
 	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT role,task_id FROM task_sessions WHERE id=?`), event.SessionID).Scan(&role, &taskID)
 	if err == sql.ErrNoRows {

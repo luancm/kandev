@@ -160,6 +160,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
+	if err := m.sessionManager.bindErrandDelivery(ctx, execution); err != nil {
+		return err
+	}
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err

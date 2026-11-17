@@ -99,6 +99,9 @@ func (r *Repository) SettleAgentDeliveryTerminal(
 	if err != nil {
 		return false, err
 	}
+	if errandID, ok := errandDeliveryIdentity(sessionID); ok {
+		return r.settleErrandDeliveryTerminal(ctx, tx, errandID, streamID, sequence, outcome, settledAt)
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, err
 	}

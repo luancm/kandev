@@ -128,3 +128,30 @@ func appendErrandHarnessBindingTx(ctx context.Context, tx *sqlx.Tx, binding *mod
 	}
 	return uint64(next), nil
 }
+
+func (r *Repository) LatestErrandHarnessSequence(ctx context.Context, errandID string, generation uint64) (uint64, error) {
+	if errandID == "" || generation == 0 || generation > math.MaxInt64 {
+		return 0, fmt.Errorf("invalid errand generation")
+	}
+	var sequence int64
+	err := r.ro.GetContext(ctx, &sequence, r.ro.Rebind(`SELECT COALESCE(MAX(binding_sequence),0) FROM errand_harness_bindings WHERE errand_id=? AND owner_generation=?`), errandID, int64(generation))
+	if err != nil {
+		return 0, err
+	}
+	if sequence < 0 {
+		return 0, fmt.Errorf("invalid errand harness sequence")
+	}
+	return uint64(sequence), nil
+}
+
+func (r *Repository) ErrandHarnessBindingStale(ctx context.Context, taskID string, binding *models.ErrandHarnessBinding) (bool, error) {
+	if !validErrandHarnessBinding(binding, 0) || taskID == "" {
+		return false, fmt.Errorf("invalid errand harness identity")
+	}
+	var sequence, currentOwner, currentBinding int64
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT b.binding_sequence,(SELECT MAX(g.generation) FROM errand_execution_generations g WHERE g.errand_id=b.errand_id),(SELECT MAX(n.binding_sequence) FROM errand_harness_bindings n WHERE n.errand_id=b.errand_id AND n.owner_generation=b.owner_generation) FROM errand_harness_bindings b JOIN task_session_errands e ON e.id=b.errand_id WHERE b.errand_id=? AND e.task_id=? AND b.owner_generation=? AND b.execution_id=? AND b.incarnation_id=? AND b.harness_generation=? AND b.stream_id=?`), binding.ErrandID, taskID, int64(binding.Generation), binding.ExecutionID, binding.IncarnationID, binding.HarnessGeneration, binding.StreamID).Scan(&sequence, &currentOwner, &currentBinding)
+	if err != nil {
+		return false, err
+	}
+	return currentOwner != int64(binding.Generation) || currentBinding != sequence, nil
+}

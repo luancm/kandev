@@ -472,6 +472,9 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 	if agentEvent.Role == authorKindUser {
 		return false, nil
 	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok {
+		return r.persistErrandCanonicalMessageTx(ctx, tx, errandID, event, agentEvent)
+	}
 	content := agentEvent.Text
 	messageType := "message"
 	if agentEvent.Type == streams.EventTypeReasoning {

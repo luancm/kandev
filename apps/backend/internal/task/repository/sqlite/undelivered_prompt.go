@@ -46,7 +46,16 @@ func (r *Repository) FailUnsentAgentDeliverySubmission(ctx context.Context, expe
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), expected.SessionID); err != nil {
+	errandID, isErrand := errandDeliveryIdentity(expected.SessionID)
+	if isErrand {
+		var taskID string
+		if err := tx.GetContext(ctx, &taskID, tx.Rebind(`SELECT task_id FROM task_session_errands WHERE id=?`), errandID); err != nil {
+			return false, err
+		}
+		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+			return false, err
+		}
+	} else if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), expected.SessionID); err != nil {
 		return false, err
 	}
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{expected.SessionID}, nil); err != nil {
@@ -63,6 +72,11 @@ func (r *Repository) FailUnsentAgentDeliverySubmission(ctx context.Context, expe
 	count, err := result.RowsAffected()
 	if err != nil {
 		return false, err
+	}
+	if isErrand && count == 1 {
+		if err := r.releaseUnsentErrandClaimTx(ctx, tx, errandID, expected); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err

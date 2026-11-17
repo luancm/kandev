@@ -15,6 +15,9 @@ const deliveryPromptTurnBindingMetadataKey = models.SessionMetaKeyDeliveryPrompt
 type deliveryPromptTurnBinding = models.AgentDeliveryPromptTurnBinding
 
 func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, execution *AgentExecution, submissionID string) error {
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return nil
+	}
 	if sm.preserveInterruptedDelegation != nil {
 		if err := sm.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
 			return err

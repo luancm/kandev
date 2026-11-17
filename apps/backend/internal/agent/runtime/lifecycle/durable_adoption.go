@@ -40,7 +40,13 @@ func initialPromptSubmissionID(sessionID string, generation uint64) string {
 }
 
 func initialPromptDeliverySubmissionID(execution *AgentExecution) string {
-	if execution == nil || execution.SessionID == "" || execution.DeliveryMode != DurableDeliveryV1 {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return ""
+	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey])
+	}
+	if execution.SessionID == "" {
 		return ""
 	}
 	if submissionID := models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey]); submissionID != "" {

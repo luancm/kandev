@@ -475,6 +475,9 @@ func deliveryEventIsStale(
 	if event == nil || event.HarnessGeneration == 0 || event.IncarnationID == "" {
 		return false, nil
 	}
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand {
+		return errandDeliveryEventIsStale(ctx, execution, event, repository)
+	}
 	authenticated := event.TaskID != "" || event.ExecutionID != "" || event.OwnerGeneration != 0 || event.ExpectedStreamID != ""
 	reader, ok := repository.(harnessGenerationReader)
 	if !ok {
@@ -631,6 +634,9 @@ func durableAgentEventWithPromptTurn(execution *AgentExecution, event agentctl.A
 	sessionID := ""
 	if execution != nil {
 		sessionID = execution.SessionID
+		if execution.Owner.Kind == ExecutionOwnerErrand {
+			sessionID = models.ErrandExecutionIdentity(execution.Owner.ErrandID)
+		}
 	}
 	if sessionID == "" {
 		sessionID = event.SessionID
@@ -683,6 +689,9 @@ func durableAgentEventWithPromptTurn(execution *AgentExecution, event agentctl.A
 func durableEventTaskID(execution *AgentExecution) string {
 	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
 		return ""
+	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return execution.Owner.TaskID
 	}
 	return execution.TaskID
 }
