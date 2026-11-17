@@ -308,6 +308,11 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 			return 0, err
 		}
 	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && event.EventType == streams.EventTypeToolCall {
+		if err := r.retainErrandAdmittedToolSourceTx(ctx, tx, errandID, event, turn); err != nil {
+			return 0, err
+		}
+	}
 	if err := r.retainUnownedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
 		return 0, err
 	}
@@ -610,6 +615,14 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 			return false, fmt.Errorf("decode agent tool boundary event: %w", err)
 		}
 		topLevelToolStart = agentEvent.Type == streams.EventTypeToolCall && agentEvent.ParentToolCallID == ""
+	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && (stored.EventType == streams.EventTypeToolCall || stored.EventType == streams.EventTypeToolUpdate) {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("errand tool event sequence gap")
+		}
+		if err := r.persistErrandToolEventTx(ctx, tx, errandID, &stored); err != nil {
+			return false, err
+		}
 	}
 	if topLevelToolStart {
 		if stored.Sequence != projectedSequence+1 {

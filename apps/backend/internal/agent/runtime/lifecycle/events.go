@@ -452,6 +452,12 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		Data:                            eventData,
 	}
 
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate) {
+		payload.TaskID = execution.Owner.TaskID
+		payload.DeliverySubmissionID = event.DeliverySubmissionID
+		payload.PromptGeneration = event.PromptGeneration
+		payload.TurnID = event.TurnID
+	}
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
 	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
 		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID, execution.Owner.ErrandID,

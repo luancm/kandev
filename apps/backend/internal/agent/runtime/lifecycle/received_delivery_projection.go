@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -32,9 +33,21 @@ func (sm *StreamManager) projectReceivedDeliveryEvent(ctx context.Context, execu
 			return ErrDeliveryRecoveryBlocked
 		}
 	}
-	event, _, err := resolveRetainedEventTurn(ctx, delivery, retained, event)
-	if err != nil {
-		return err
+	var origin *models.ErrandToolOrigin
+	var err error
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeToolCall) {
+		origin, err = resolveErrandToolOrigin(ctx, delivery, retained)
+		if err != nil {
+			return err
+		}
+		event.TurnID = origin.TurnID
+		event.DeliverySubmissionID = origin.SubmissionID
+		event.PromptGeneration = origin.PromptGeneration
+	} else {
+		event, _, err = resolveRetainedEventTurn(ctx, delivery, retained, event)
+		if err != nil {
+			return err
+		}
 	}
 	effect := deliveryEffectForDeliveryEvent(retained)
 	applied, err := sm.deliveryEffectAlreadyApplied(ctx, delivery, effect)
@@ -42,7 +55,7 @@ func (sm *StreamManager) projectReceivedDeliveryEvent(ctx context.Context, execu
 		return err
 	}
 	return sm.processPreparedAgentEvent(ctx, execution, nil, delivery, preparedAgentEvent{
-		event: event, durableEvent: retained, deliveryEffect: effect,
+		event: event, durableEvent: retained, deliveryEffect: effect, errandToolOrigin: origin,
 		skipAcknowledgement: true, skipCallback: retained.Terminal || applied,
 	}, execution.startupAttemptSnapshot())
 }

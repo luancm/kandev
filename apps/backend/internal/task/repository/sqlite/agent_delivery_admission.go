@@ -18,6 +18,7 @@ import (
 const promptAdmissionEffect = "agent_delivery.prompt_admission.v1"
 
 type promptAdmission struct {
+	ErrandGeneration  uint64 `json:"errand_generation,omitempty"`
 	NativeSessionID   string `json:"native_session_id,omitempty"`
 	TaskID            string `json:"task_id"`
 	SessionID         string `json:"session_id"`

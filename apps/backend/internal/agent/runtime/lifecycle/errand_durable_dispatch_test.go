@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -216,19 +217,162 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	}
 	message := agentctl.AgentEvent{Type: streams.EventTypeMessageChunk, Text: "answer", SessionID: execution.ACPSessionID, DeliveryStreamID: "stream-vertical", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliverySequence: 1, DeliverySubmissionID: "prompt:first-vertical", PromptGeneration: 1, TurnID: "turn-vertical"}
 	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, message, 0))
+	tool := message
+	tool.Type = streams.EventTypeToolCall
+	tool.Text = ""
+	tool.DeliverySequence = 2
+	tool.ToolCallID = "tool-read"
+	tool.ProtocolMessageID = "source-first"
+	tool.ToolTitle = "Read file"
+	tool.ToolStatus = "pending"
+	tool.NormalizedPayload = streams.NewReadFile("/repo/a.go", 0, 0)
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, tool, 0))
+	update := tool
+	update.Type = streams.EventTypeToolUpdate
+	update.DeliverySequence = 3
+	update.ToolStatus = "completed"
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, update, 0))
 	terminal := message
 	terminal.Type = streams.EventTypeComplete
 	terminal.Text = ""
-	terminal.DeliverySequence = 2
+	terminal.DeliverySequence = 4
 	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, terminal, 0))
 	messages, _, err := repo.ListErrandMessages(ctx, "child-vertical", "", 10)
 	require.NoError(t, err)
-	require.Len(t, messages, 1)
+	require.Len(t, messages, 2)
 	require.Equal(t, "answer", messages[0].Content)
+	require.Equal(t, models.MessageTypeToolRead, messages[1].Type)
+	require.Equal(t, "completed", messages[1].Metadata["status"])
 	submission, err := repo.GetAgentDeliverySubmission(ctx, "prompt:first-vertical")
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionCompleted, submission.State)
+	secondPayload := []byte(`{"text":"second"}`)
+	second := &models.AgentDeliverySubmission{ID: "prompt:second-vertical", Payload: secondPayload, PayloadHash: journal.SubmissionHash(secondPayload), State: models.DeliverySubmissionDispatching, DispatchAttemptID: execution.ID}
+	admitted, err := repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{ErrandID: "child-vertical", Generation: 1, ExecutionID: execution.ID, IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream-vertical", NativeSessionID: execution.ACPSessionID, PromptGeneration: 2, TurnID: "turn-vertical", Submission: second})
+	require.NoError(t, err)
+	require.True(t, admitted)
+	execution.promptLifecycleMu.Lock()
+	execution.promptGeneration = 2
+	execution.promptTurnID = "turn-vertical"
+	execution.promptLifecycleMu.Unlock()
+	execution.setDeliverySubmissionID(second.ID)
+	callbacks := 0
+	var notification agentctl.AgentEvent
+	mgr.streamManager.callbacks.OnAgentEventWithGeneration = func(_ *AgentExecution, event agentctl.AgentEvent, _ uint64) { callbacks++; notification = event }
+	delayed := tool
+	delayed.ToolCallID = "old-delayed"
+	delayed.ProtocolMessageID = "source-delayed"
+	delayed.DeliverySequence = 5
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, delayed, 0))
+	require.Zero(t, callbacks, "historical tool start must not update successor activity")
+	next := tool
+	next.ToolCallID = "tool-next"
+	next.ProtocolMessageID = "source-next"
+	next.DeliverySequence = 6
+	next.DeliverySubmissionID = second.ID
+	next.PromptGeneration = 2
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, next, 0))
+	require.Equal(t, 1, callbacks)
+	late := update
+	late.DeliverySequence = 7
+	late.DeliverySubmissionID = ""
+	late.PromptGeneration = 0
+	late.TurnID = ""
+	late.ToolTitle = "late first"
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, late, 0))
+	require.Equal(t, 1, callbacks, "historical tool must not update successor activity")
+	current := next
+	current.Type = streams.EventTypeToolUpdate
+	current.DeliverySequence = 8
+	current.ToolStatus = "completed"
+	current.DeliverySubmissionID = ""
+	current.PromptGeneration = 0
+	current.TurnID = ""
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, current, 0))
+	require.Equal(t, 2, callbacks, "current tool must still notify")
+	require.Equal(t, second.ID, notification.DeliverySubmissionID)
+	require.EqualValues(t, 2, notification.PromptGeneration)
+	require.Equal(t, "turn-vertical", notification.TurnID)
+	var raw []byte
+	require.NoError(t, db.GetContext(ctx, &raw, db.Rebind(`SELECT payload FROM agent_delivery_inbox WHERE stream_id=? AND sequence=?`), "stream-vertical", 8))
+	var retained streams.AgentEvent
+	require.NoError(t, json.Unmarshal(raw, &retained))
+	require.Empty(t, retained.TurnID)
+	require.Zero(t, retained.PromptGeneration)
+	require.Empty(t, retained.DeliverySubmissionID)
+	var active string
+	require.NoError(t, db.GetContext(ctx, &active, db.Rebind(`SELECT active_submission_id FROM errand_execution_generations WHERE errand_id=? AND generation=1`), "child-vertical"))
+	require.Equal(t, second.ID, active)
+	messages, _, err = repo.ListErrandMessages(ctx, "child-vertical", "", 10)
+	require.NoError(t, err)
+	require.Equal(t, "late first", messages[1].Content)
 	var count int
 	require.NoError(t, db.GetContext(ctx, &count, `SELECT COUNT(*) FROM task_sessions`))
 	require.Zero(t, count)
+}
+
+func TestErrandToolNotificationCarriesCapturedOrigin(t *testing.T) {
+	mgr, bus := createTestManagerWithTracking()
+	event := agentctl.AgentEvent{Type: streams.EventTypeToolUpdate, DeliverySubmissionID: "prompt:origin", PromptGeneration: 3, TurnID: "turn-origin"}
+	execution := &AgentExecution{ID: "execution", Owner: ExecutionOwner{Kind: ExecutionOwnerErrand, ErrandID: "child", TaskID: "task", Generation: 2}}
+	mgr.eventPublisher.PublishAgentStreamEvent(execution, event)
+	records := bus.getStreamEvents()
+	require.Len(t, records, 1)
+	raw, err := json.Marshal(records[0])
+	require.NoError(t, err)
+	var envelope map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	require.Equal(t, "task", envelope["task_id"])
+	require.Equal(t, "prompt:origin", envelope["delivery_submission_id"])
+	require.EqualValues(t, 3, envelope["prompt_generation"])
+	require.Equal(t, "turn-origin", envelope["turn_id"])
+	mgr2, bus2 := createTestManagerWithTracking()
+	ordinary := &AgentExecution{ID: "ordinary", SessionID: "session"}
+	mgr2.eventPublisher.PublishAgentStreamEvent(ordinary, event)
+	records = bus2.getStreamEvents()
+	require.Len(t, records, 1)
+	raw, err = json.Marshal(records[0])
+	require.NoError(t, err)
+	envelope = map[string]interface{}{}
+	require.NoError(t, json.Unmarshal(raw, &envelope))
+	require.NotContains(t, envelope, "delivery_submission_id")
+	require.NotContains(t, envelope, "prompt_generation")
+	require.NotContains(t, envelope, "turn_id")
+}
+
+func TestErrandToolCallbackDoesNotMutateSuccessorAfterOriginCheck(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{ID: "execution", Owner: ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", ErrandID: "child", Generation: 1}, promptGeneration: 1, promptTurnID: "turn"}
+	execution.setDeliverySubmissionID("first")
+	old := agentctl.AgentEvent{Type: streams.EventTypeToolCall, ToolCallID: "old", ToolTitle: "old", DeliverySubmissionID: "first", PromptGeneration: 1, TurnID: "turn"}
+	require.True(t, errandToolOriginCurrent(execution, &models.ErrandToolOrigin{SubmissionID: "first", PromptGeneration: 1, TurnID: "turn"}))
+	execution.promptLifecycleMu.Lock()
+	execution.promptGeneration = 2
+	execution.setDeliverySubmissionID("second")
+	execution.setActiveTool(activeTopLevelTool{ToolCallID: "successor"})
+	execution.promptLifecycleMu.Unlock()
+	execution.messageMu.Lock()
+	execution.messageBuffer.WriteString("successor buffer")
+	execution.messageMu.Unlock()
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, old, false, "", false)
+	require.Equal(t, "successor", execution.activeToolSnapshot().ToolCallID)
+	execution.messageMu.Lock()
+	buffer := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
+	require.Equal(t, "successor buffer", buffer)
+	current := old
+	current.ToolCallID = "current"
+	current.DeliverySubmissionID = "second"
+	current.PromptGeneration = 2
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, current, false, "", false)
+	require.Equal(t, "current", execution.activeToolSnapshot().ToolCallID)
+	old.Type = streams.EventTypeToolUpdate
+	old.ToolCallID = "current"
+	old.ToolStatus = "completed"
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, old, false, "", false)
+	require.Equal(t, "current", execution.activeToolSnapshot().ToolCallID)
+	current.Type = streams.EventTypeToolUpdate
+	current.ToolStatus = "completed"
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, current, false, "", false)
+	require.Nil(t, execution.activeToolSnapshot())
 }

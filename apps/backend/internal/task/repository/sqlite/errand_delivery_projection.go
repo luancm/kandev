@@ -33,6 +33,7 @@ type errandPromptProof struct {
 	TurnID            string `json:"turn_id"`
 	SubmissionID      string `json:"submission_id"`
 	PayloadHash       string `json:"payload_hash"`
+	DispatchAttemptID string `json:"dispatch_attempt_id"`
 }
 
 func (r *Repository) errandDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, errandID string, event *models.AgentDeliveryEvent) (string, error) {
@@ -40,6 +41,10 @@ func (r *Repository) errandDeliveryEventAdmissionTx(ctx context.Context, tx *sql
 		return "", repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	if event.SubmissionID == "" {
+		if event.EventType == streams.EventTypeToolUpdate {
+			source, err := r.resolveErrandAdmittedToolSourceTx(ctx, tx, errandID, event)
+			return source.TurnID, err
+		}
 		return "", r.validateErrandControlEventTx(ctx, tx, errandID, event)
 	}
 	var raw, taskID string
@@ -69,6 +74,9 @@ func (r *Repository) errandDeliveryEventAdmissionTx(ctx context.Context, tx *sql
 	}
 	if !valid {
 		return "", repoerrors.ErrAgentDeliveryIdentityMismatch
+	}
+	if err = validateErrandNativeIdentityTx(ctx, tx, proof, agent.SessionID); err != nil {
+		return "", err
 	}
 	return proof.TurnID, nil
 }
@@ -156,12 +164,15 @@ func validateErrandSubmittedEvent(errandID, taskID string, event *models.AgentDe
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	switch agent.Type {
-	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError:
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError, streams.EventTypeToolCall, streams.EventTypeToolUpdate:
 	default:
 		return fmt.Errorf("unsupported errand delivery event type %q", agent.Type)
 	}
 	if agent.ShellOutput != nil {
 		return fmt.Errorf("unsupported errand shell output")
+	}
+	if (agent.Type == streams.EventTypeToolCall || agent.Type == streams.EventTypeToolUpdate) && (agent.ToolCallID == "" || (agent.NormalizedPayload != nil && agent.NormalizedPayload.ShellExec() != nil)) {
+		return fmt.Errorf("unsupported errand tool event")
 	}
 
 	if !errandProofMatches(errandID, taskID, event, agent, proof) {

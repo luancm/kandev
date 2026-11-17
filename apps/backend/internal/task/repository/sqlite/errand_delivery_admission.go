@@ -63,20 +63,7 @@ func (r *Repository) validateErrandPromptAdmissionTx(ctx context.Context, tx *sq
 }
 
 func (r *Repository) persistErrandPromptAdmissionTx(ctx context.Context, tx *sqlx.Tx, a *models.ErrandDeliveryAdmission, key string) (bool, error) {
-	proof := struct {
-		ErrandID          string `json:"errand_id"`
-		Generation        uint64 `json:"generation"`
-		ExecutionID       string `json:"execution_id"`
-		IncarnationID     string `json:"incarnation_id"`
-		HarnessGeneration int64  `json:"harness_generation"`
-		StreamID          string `json:"stream_id"`
-		NativeSessionID   string `json:"native_session_id"`
-		PromptGeneration  uint64 `json:"prompt_generation"`
-		TurnID            string `json:"turn_id"`
-		SubmissionID      string `json:"submission_id"`
-		PayloadHash       string `json:"payload_hash"`
-		DispatchAttemptID string `json:"dispatch_attempt_id"`
-	}{a.ErrandID, a.Generation, a.ExecutionID, a.IncarnationID, a.HarnessGeneration, a.StreamID, a.NativeSessionID, a.PromptGeneration, a.TurnID, a.Submission.ID, a.Submission.PayloadHash, a.Submission.DispatchAttemptID}
+	proof := errandPromptProof{ErrandID: a.ErrandID, Generation: a.Generation, ExecutionID: a.ExecutionID, IncarnationID: a.IncarnationID, HarnessGeneration: a.HarnessGeneration, StreamID: a.StreamID, NativeSessionID: a.NativeSessionID, PromptGeneration: a.PromptGeneration, TurnID: a.TurnID, SubmissionID: a.Submission.ID, PayloadHash: a.Submission.PayloadHash, DispatchAttemptID: a.Submission.DispatchAttemptID}
 	raw, err := json.Marshal(proof)
 	if err != nil {
 		return false, err

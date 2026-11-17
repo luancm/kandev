@@ -305,6 +305,18 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		}
 		return nil
 	}
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && prepared.durableEvent != nil && (prepared.event.Type == streams.EventTypeToolCall || prepared.event.Type == streams.EventTypeToolUpdate) {
+		if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, prepared.durableEvent, delivery, prepared.deliveryEffect); err != nil {
+			return err
+		}
+		if !prepared.skipAcknowledgement {
+			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
+		}
+		if !prepared.skipCallback && errandToolOriginCurrent(execution, prepared.errandToolOrigin) {
+			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
+		}
+		return nil
+	}
 	event, canonicalProjected, notify, err := sm.projectCanonicalAgentEvent(
 		ctx, execution, prepared.event, prepared.durableEvent, delivery, client,
 		!prepared.skipAcknowledgement,

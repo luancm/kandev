@@ -30,3 +30,10 @@ type ErrandHarnessBinding struct {
 	StreamID          string
 	NativeSessionID   string
 }
+
+// ErrandToolOrigin identifies the admitted prompt that created a tool call.
+type ErrandToolOrigin struct {
+	SubmissionID     string
+	PromptGeneration uint64
+	TurnID           string
+}

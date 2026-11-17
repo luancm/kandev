@@ -16,6 +16,7 @@ import (
 )
 
 type preparedAgentEvent struct {
+	errandToolOrigin    *models.ErrandToolOrigin
 	event               agentctl.AgentEvent
 	durableEvent        *models.AgentDeliveryEvent
 	deliveryEffect      *models.AgentDeliveryEffect
@@ -90,9 +91,21 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// remain byte-identical from admission through projection.
 	receivedEvent := event
 	durableEvent := durableAgentEvent(execution, event)
-	event, errand, err := prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
-	if err != nil {
-		return preparedAgentEvent{}, err
+	var origin *models.ErrandToolOrigin
+	var errand bool
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeToolCall) {
+		origin, err = resolveErrandToolOrigin(ctx, delivery, durableEvent)
+		if err != nil {
+			return preparedAgentEvent{}, err
+		}
+		event.TurnID = origin.TurnID
+		event.DeliverySubmissionID = origin.SubmissionID
+		event.PromptGeneration = origin.PromptGeneration
+	} else {
+		event, errand, err = prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
+		if err != nil {
+			return preparedAgentEvent{}, err
+		}
 	}
 	if errand && receivedEvent.DeliverySubmissionID == "" && receivedEvent.TurnID == "" {
 		// Errand native activity owns a source-derived turn. Keep the
@@ -109,7 +122,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check for %q: %w", event.Type, err)
 	}
-	if event.DeliverySubmissionID != "" && !staleSubmission && !errand {
+	if event.DeliverySubmissionID != "" && !staleSubmission && !errand && execution.Owner.Kind != ExecutionOwnerErrand {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -124,12 +137,13 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		skipCallback = true
 	}
 	return preparedAgentEvent{
-		event:           event,
-		durableEvent:    durableEvent,
-		deliveryEffect:  effect,
-		receiptDeferred: deferred,
-		skipCallback:    skipCallback,
-		staleTerminal:   staleTerminal,
+		errandToolOrigin: origin,
+		event:            event,
+		durableEvent:     durableEvent,
+		deliveryEffect:   effect,
+		receiptDeferred:  deferred,
+		skipCallback:     skipCallback,
+		staleTerminal:    staleTerminal,
 	}, nil
 }
 

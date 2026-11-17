@@ -395,6 +395,9 @@ type AgentStreamEventPayload struct {
 	WorkspaceID                     string                `json:"workspace_id,omitempty"`
 	ErrandID                        string                `json:"errand_id,omitempty"`
 	ErrandGeneration                uint64                `json:"errand_generation,omitempty"`
+	DeliverySubmissionID            string                `json:"delivery_submission_id,omitempty"`
+	PromptGeneration                uint64                `json:"prompt_generation,omitempty"`
+	TurnID                          string                `json:"turn_id,omitempty"`
 	RunID                           string                `json:"run_id,omitempty"`
 	RunSessionID                    string                `json:"run_session_id,omitempty"`
 	RunAttempt                      int                   `json:"run_attempt,omitempty"`
