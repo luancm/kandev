@@ -38,6 +38,16 @@ admission, generation, transcript projection, and recovery adapters wherever the
 existing task path requires task-session persistence. A taskless process launch
 alone does not establish durable conversation recovery.
 
+Keep Errand execution generations, harness identities, and prompt generations
+distinct. Persist the execution and transport binding before replay or prompt
+dispatch, including launches without a prompt. A native conversation ID may be
+unknown at startup; accept its first value once and reject conflicting values.
+An exact earlier retry must preserve that value without requiring a refresh.
+Retained bindings authorize their own delivery evidence, not a successor's
+state. Binding, admission, and receipt retirement share an identity fence so
+cleanup cannot delete evidence after an Errand acquires it. Existing delivery
+protocol generation fields retain their established meaning.
+
 Reuse conversation rendering through explicit data and action interfaces.
 Ordinary task chat keeps its session adapter; Errand chat receives Errand-owned
 data. Remove replaced ordinary-session exceptions after the new path is wired.

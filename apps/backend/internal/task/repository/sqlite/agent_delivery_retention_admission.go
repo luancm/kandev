@@ -66,3 +66,14 @@ func (r *Repository) ensureAgentDeliverySessionNotRetired(
 	}
 	return nil
 }
+
+func (r *Repository) ensureAgentDeliveryNoRetirementJob(ctx context.Context, exec taskSessionQueryRowExecutor, sessionID string) error {
+	var retiring bool
+	if err := exec.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM agent_delivery_cleanup_jobs WHERE session_id=?)`), sessionID).Scan(&retiring); err != nil {
+		return err
+	}
+	if retiring {
+		return repoerrors.ErrAgentDeliveryIdentityRetiring
+	}
+	return nil
+}

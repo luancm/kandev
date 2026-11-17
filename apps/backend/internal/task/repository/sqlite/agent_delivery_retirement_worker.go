@@ -269,7 +269,7 @@ func (r *Repository) suspendAgentDeliveryRetirementJobTx(
 
 func (r *Repository) agentDeliverySessionExistsTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {
 	var exists bool
-	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ?)`), sessionID).Scan(&exists)
+	err := tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT (EXISTS (SELECT 1 FROM task_sessions WHERE id = sessions.session_id) OR `+errandDeliveryOwnerExistsSQL+`) FROM (SELECT ? AS session_id) sessions`), sessionID).Scan(&exists)
 	return exists, err
 }
 
