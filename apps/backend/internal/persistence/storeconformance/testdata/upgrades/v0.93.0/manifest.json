@@ -457,6 +457,8 @@
       "agent_delivery_inbox",
       "agent_delivery_retention_state",
       "agent_delivery_submissions",
+      "errand_messages",
+      "errand_turns",
       "harness_native_session_rebinds",
       "harness_session_generations",
       "session_continuation_snapshots",

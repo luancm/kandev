@@ -36,6 +36,10 @@ become the default delegation mechanism.
 
 ## Decision
 
+The task-session identity and role prescriptions below are superseded by
+[Errand-owned conversations](2026-11-17-errand-owned-conversations.md).
+The product, workspace, authority, and delegation decisions remain applicable.
+
 ### The errand concept
 
 An errand is a task session with the immutable role `errand` and one parent
