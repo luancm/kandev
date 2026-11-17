@@ -18,6 +18,8 @@ type AgentEventPayload struct {
 	AttemptID                 string                           `json:"attempt_id,omitempty"`
 	OwnerKind                 ExecutionOwnerKind               `json:"owner_kind,omitempty"`
 	WorkspaceID               string                           `json:"workspace_id,omitempty"`
+	ErrandID                  string                           `json:"errand_id,omitempty"`
+	ErrandGeneration          uint64                           `json:"errand_generation,omitempty"`
 	RunID                     string                           `json:"run_id,omitempty"`
 	RunSessionID              string                           `json:"run_session_id,omitempty"`
 	RunAttempt                int                              `json:"run_attempt,omitempty"`
@@ -114,6 +116,8 @@ type AgentctlEventPayload struct {
 	OriginalRuntime           processidentity.Identity `json:"original_runtime,omitempty"`
 	OwnerKind                 ExecutionOwnerKind       `json:"owner_kind,omitempty"`
 	WorkspaceID               string                   `json:"workspace_id,omitempty"`
+	ErrandID                  string                   `json:"errand_id,omitempty"`
+	ErrandGeneration          uint64                   `json:"errand_generation,omitempty"`
 	RunID                     string                   `json:"run_id,omitempty"`
 	RunSessionID              string                   `json:"run_session_id,omitempty"`
 	RunAttempt                int                      `json:"run_attempt,omitempty"`
@@ -389,6 +393,8 @@ type AgentStreamEventPayload struct {
 	SessionSettingsSourceGeneration uint64                `json:"session_settings_source_generation,omitempty"`
 	OwnerKind                       ExecutionOwnerKind    `json:"owner_kind,omitempty"`
 	WorkspaceID                     string                `json:"workspace_id,omitempty"`
+	ErrandID                        string                `json:"errand_id,omitempty"`
+	ErrandGeneration                uint64                `json:"errand_generation,omitempty"`
 	RunID                           string                `json:"run_id,omitempty"`
 	RunSessionID                    string                `json:"run_session_id,omitempty"`
 	RunAttempt                      int                   `json:"run_attempt,omitempty"`
@@ -583,6 +589,8 @@ type PermissionRequestEventPayload struct {
 	AgentExecutionID string             `json:"agent_execution_id"`
 	OwnerKind        ExecutionOwnerKind `json:"owner_kind,omitempty"`
 	WorkspaceID      string             `json:"workspace_id,omitempty"`
+	ErrandID         string             `json:"errand_id,omitempty"`
+	ErrandGeneration uint64             `json:"errand_generation,omitempty"`
 	RunID            string             `json:"run_id,omitempty"`
 	RunSessionID     string             `json:"run_session_id,omitempty"`
 	RunAttempt       int                `json:"run_attempt,omitempty"`

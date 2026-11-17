@@ -136,12 +136,14 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		}
 		running.Metadata[MetadataKeyOfficeAgentProfileID] = officeProfileID
 	}
-	if execution.Owner.Kind == ExecutionOwnerRun {
+	if execution.Owner.Kind == ExecutionOwnerRun || execution.Owner.Kind == ExecutionOwnerErrand {
 		if running.Metadata == nil {
 			running.Metadata = make(map[string]interface{})
 		}
 		running.Metadata[runExecutionOwnerMetadataKey] = execution.Owner
-		running.Resumable = false
+		if execution.Owner.Kind == ExecutionOwnerRun {
+			running.Resumable = false
+		}
 		running.WorktreePath = execution.WorkspacePath
 	}
 	if prior != nil {

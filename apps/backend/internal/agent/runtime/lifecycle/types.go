@@ -558,8 +558,9 @@ func (e *AgentExecution) OwnerSnapshot() ExecutionOwner {
 type ExecutionOwnerKind string
 
 const (
-	ExecutionOwnerTask ExecutionOwnerKind = "task"
-	ExecutionOwnerRun  ExecutionOwnerKind = "run"
+	ExecutionOwnerTask   ExecutionOwnerKind = "task"
+	ExecutionOwnerRun    ExecutionOwnerKind = "run"
+	ExecutionOwnerErrand ExecutionOwnerKind = "errand"
 )
 
 // ExecutionOwner is immutable identity carried through launch and lifecycle
@@ -569,6 +570,8 @@ type ExecutionOwner struct {
 	WorkspaceID    string
 	TaskID         string
 	SessionID      string
+	ErrandID       string
+	Generation     uint64
 	RunID          string
 	RunSessionID   string
 	Attempt        int

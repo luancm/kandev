@@ -59,7 +59,7 @@ type facade struct {
 // multi-repo specs, attachments) reach the runtime in Phase 1 without
 // canonicalising them onto LaunchSpec yet.
 func (f *facade) Launch(ctx context.Context, spec LaunchSpec) (ExecutionRef, error) {
-	if spec.Owner.Kind == ExecutionOwnerRun {
+	if spec.Owner.Kind == ExecutionOwnerRun || spec.Owner.Kind == ExecutionOwnerErrand {
 		if spec.OwnerAdmission == nil {
 			return ExecutionRef{}, fmt.Errorf("execution owner %q has no admission provider", spec.Owner.Kind)
 		}
@@ -103,7 +103,7 @@ func (f *facade) StartExecution(ctx context.Context, executionID string) error {
 	if !ok || execution == nil {
 		return ErrNotFound
 	}
-	if execution.Owner.Kind == ExecutionOwnerRun && execution.OwnerAdmission != nil {
+	if (execution.Owner.Kind == ExecutionOwnerRun || execution.Owner.Kind == ExecutionOwnerErrand) && execution.OwnerAdmission != nil {
 		if err := execution.OwnerAdmission.AdmitExecution(ctx, execution.Owner); err != nil {
 			return err
 		}

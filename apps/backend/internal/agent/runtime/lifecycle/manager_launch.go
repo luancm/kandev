@@ -1663,6 +1663,9 @@ func (m *Manager) runEnvironmentPreparerWithProgress(
 	// can still get distinct preparation logic.
 	execType := models.ExecutorType(req.ExecutorType)
 	preparer := m.preparerRegistry.Get(execType)
+	if req.Owner.Kind == ExecutionOwnerErrand && execType == models.ExecutorTypeWorktree {
+		preparer = m.preparerRegistry.Get(models.ExecutorTypeLocal)
+	}
 	if preparer == nil && execType == "" {
 		// Fall back to LocalPreparer only for a genuinely empty ExecutorType
 		// — legacy task rows (e.g. PR-watcher-created tasks without an
@@ -1946,6 +1949,12 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	}
 	if err := m.validateManagedToolPolicyAdmission(ctx, req); err != nil {
 		return nil, err
+	}
+	if req.Owner.Kind == ExecutionOwnerErrand && (req.WorkspaceID != req.Owner.WorkspaceID || req.TaskID != "" || req.SessionID != "" || req.WorkspacePath == "" || req.UseWorktree || req.AllowBranchReplacement) {
+		return nil, errors.New("errand execution requires an attached workspace")
+	}
+	if req.Owner.Kind == ExecutionOwnerErrand {
+		req.WorkspaceReuseRequired = true
 	}
 	if err := m.admitExecutionOwner(ctx, req); err != nil {
 		return nil, err
@@ -2456,8 +2465,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 }
 
 func (m *Manager) admitExecutionOwner(ctx context.Context, req *LaunchRequest) error {
-	if req == nil || req.Owner.Kind != ExecutionOwnerRun {
+	if req == nil || (req.Owner.Kind != ExecutionOwnerRun && req.Owner.Kind != ExecutionOwnerErrand) {
 		return nil
+	}
+	if req.Owner.Kind == ExecutionOwnerErrand {
+		owner := req.Owner
+		if owner.ErrandID == "" || owner.Generation == 0 || owner.WorkspaceID == "" || owner.TaskID == "" || owner.SessionID != "" || owner.RunID != "" || owner.RunSessionID != "" || owner.Attempt != 0 || req.SessionID != "" {
+			return errors.New("invalid errand execution owner")
+		}
 	}
 	admission := req.OwnerAdmission
 	if admission == nil {
@@ -2472,6 +2487,9 @@ func (m *Manager) admitExecutionOwner(ctx context.Context, req *LaunchRequest) e
 func executionOwnerKind(execution *AgentExecution) ExecutionOwnerKind {
 	if execution == nil {
 		return ""
+	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return execution.Owner.Kind
 	}
 	if execution.RunID != "" || execution.RunSessionID != "" {
 		return ExecutionOwnerRun
@@ -2675,7 +2693,10 @@ func (m *Manager) registerAndPublishExecution(
 	if execution != nil {
 		ownerReq := &LaunchRequest{
 			OwnerAdmission: execution.OwnerAdmission,
-			Owner: ExecutionOwner{
+			Owner:          execution.Owner,
+		}
+		if ownerReq.Owner.Kind == ExecutionOwnerTask || ownerReq.Owner.Kind == "" {
+			ownerReq.Owner = ExecutionOwner{
 				Kind:           executionOwnerKind(execution),
 				WorkspaceID:    execution.WorkspaceID,
 				TaskID:         execution.TaskID,
@@ -2684,9 +2705,9 @@ func (m *Manager) registerAndPublishExecution(
 				RunSessionID:   execution.RunSessionID,
 				Attempt:        execution.RunAttempt,
 				AgentProfileID: execution.OfficeAgentProfileID,
-			},
+			}
 		}
-		if ownerReq.Owner.Kind == ExecutionOwnerRun {
+		if ownerReq.Owner.Kind == ExecutionOwnerRun || ownerReq.Owner.Kind == ExecutionOwnerErrand {
 			if err := m.admitExecutionOwner(ctx, ownerReq); err != nil {
 				m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "owner admission failed")
 				return err

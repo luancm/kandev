@@ -198,6 +198,8 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		AttemptID:              execution.currentStartupAttemptID(),
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
+		ErrandID:               execution.Owner.ErrandID,
+		ErrandGeneration:       execution.Owner.Generation,
 		RunID:                  execution.RunID,
 		CausingRunID:           execution.CausingRunID,
 		TerminalCausingRunID:   execution.TerminalCausingRunID,
@@ -319,6 +321,8 @@ func (p *EventPublisher) agentctlEventPayload(
 	payload := AgentctlEventPayload{
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
+		ErrandID:               execution.Owner.ErrandID,
+		ErrandGeneration:       execution.Owner.Generation,
 		RunID:                  execution.RunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
@@ -434,6 +438,8 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		SessionSettingsSourceGeneration: event.SessionSettingsSourceGeneration,
 		OwnerKind:                       executionOwnerKind(execution),
 		WorkspaceID:                     execution.WorkspaceID,
+		ErrandID:                        execution.Owner.ErrandID,
+		ErrandGeneration:                execution.Owner.Generation,
 		RunID:                           execution.RunID,
 		RunSessionID:                    execution.RunSessionID,
 		RunAttempt:                      execution.RunAttempt,
@@ -448,7 +454,7 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
 	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
-		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID,
+		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID, execution.Owner.ErrandID,
 	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
@@ -536,7 +542,7 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", *payload)
 	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
-		payload.OwnerKind, payload.SessionID, payload.RunSessionID,
+		payload.OwnerKind, payload.SessionID, payload.RunSessionID, payload.ErrandID,
 	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
@@ -547,7 +553,10 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 	}
 }
 
-func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string) string {
+func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string, errandIDs ...string) string {
+	if ownerKind == ExecutionOwnerErrand && len(errandIDs) > 0 {
+		return models.ErrandExecutionIdentity(errandIDs[0])
+	}
 	if ownerKind == ExecutionOwnerRun && runSessionID != "" {
 		return runSessionID
 	}
@@ -783,6 +792,8 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		AgentExecutionID: execution.ID,
 		OwnerKind:        executionOwnerKind(execution),
 		WorkspaceID:      execution.WorkspaceID,
+		ErrandID:         execution.Owner.ErrandID,
+		ErrandGeneration: execution.Owner.Generation,
 		RunID:            execution.RunID,
 		RunSessionID:     execution.RunSessionID,
 		RunAttempt:       execution.RunAttempt,
@@ -796,7 +807,7 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
 	subject := events.BuildPermissionRequestSubject(agentStreamSubjectID(
-		payload.OwnerKind, execution.SessionID, execution.RunSessionID,
+		payload.OwnerKind, execution.SessionID, execution.RunSessionID, execution.Owner.ErrandID,
 	))
 
 	const maxAttempts = 3

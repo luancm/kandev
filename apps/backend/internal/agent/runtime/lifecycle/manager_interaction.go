@@ -1569,7 +1569,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// live consumer. A passthrough TUI also needs its stopped execution ID to
 	// resume the same conversation after a graceful backend restart.
 	stopWatch.advance(stopWaitPersistence)
-	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
+	if (execution.Owner.Kind == ExecutionOwnerRun || execution.Owner.Kind == ExecutionOwnerErrand) || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 			return err
 		}
@@ -1579,7 +1579,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 
 	stopWatch.advance(stopWaitRemove)
 	m.RemoveExecution(executionID)
-	if execution.Owner.Kind != ExecutionOwnerRun && !preservePassthroughConversation {
+	if execution.Owner.Kind != ExecutionOwnerRun && execution.Owner.Kind != ExecutionOwnerErrand && !preservePassthroughConversation {
 		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
 	}
 	if pendingRecovery != nil {

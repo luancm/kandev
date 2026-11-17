@@ -94,8 +94,9 @@ type SessionExecutionControl interface {
 }
 
 const (
-	ExecutionOwnerTask = lifecycle.ExecutionOwnerTask
-	ExecutionOwnerRun  = lifecycle.ExecutionOwnerRun
+	ExecutionOwnerTask   = lifecycle.ExecutionOwnerTask
+	ExecutionOwnerRun    = lifecycle.ExecutionOwnerRun
+	ExecutionOwnerErrand = lifecycle.ExecutionOwnerErrand
 )
 
 // Runtime is the public surface for launching, resuming, stopping, and
@@ -286,3 +287,6 @@ type TurnChangeCaptureHandlerBinder interface {
 func InstallTurnChangeCaptureHandler(binder TurnChangeCaptureHandlerBinder, handler TurnChangeCaptureHandler) {
 	binder.SetTurnChangeCaptureHandler(handler)
 }
+
+// ErrErrandRecoveryRequiresReconnect indicates that inventory alone cannot prove a remote execution stopped.
+var ErrErrandRecoveryRequiresReconnect = lifecycle.ErrErrandRecoveryRequiresReconnect
