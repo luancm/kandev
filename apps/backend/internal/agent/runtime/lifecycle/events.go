@@ -810,6 +810,12 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
 		AutoApprovalSource:     event.AutoApprovalSource,
 	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		payload.TaskID = execution.Owner.TaskID
+		payload.DeliverySubmissionID = event.DeliverySubmissionID
+		payload.PromptGeneration = event.PromptGeneration
+		payload.TurnID = event.TurnID
+	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
 	subject := events.BuildPermissionRequestSubject(agentStreamSubjectID(

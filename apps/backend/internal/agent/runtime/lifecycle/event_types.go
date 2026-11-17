@@ -582,11 +582,14 @@ type PermissionOption struct {
 
 // PermissionRequestEventPayload is the payload when an agent requests permission.
 type PermissionRequestEventPayload struct {
-	Type      string `json:"type"` // Always "permission_request"
-	Timestamp string `json:"timestamp"`
-	AgentID   string `json:"agent_id"`
-	TaskID    string `json:"task_id"`
-	SessionID string `json:"session_id"`
+	Type                 string `json:"type"` // Always "permission_request"
+	Timestamp            string `json:"timestamp"`
+	AgentID              string `json:"agent_id"`
+	TaskID               string `json:"task_id"`
+	SessionID            string `json:"session_id"`
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+	PromptGeneration     uint64 `json:"prompt_generation,omitempty"`
+	TurnID               string `json:"turn_id,omitempty"`
 	// Owner identity routes and admits a run-owned request, which has no
 	// task session.
 	AgentExecutionID string             `json:"agent_execution_id"`

@@ -1,10 +1,24 @@
 package models
 
+import "time"
+
 type ErrandExecutionDescriptor struct {
-	ErrandID    string
-	TaskID      string
-	Generation  uint64
-	ExecutionID string
+	ErrandID           string
+	TaskID             string
+	Generation         uint64
+	ExecutionID        string
+	ActiveSubmissionID string
+	ActiveTurnID       string
+	PromptGeneration   uint64
+}
+
+type ErrandPermissionFinalization struct {
+	RequestID   string
+	PendingID   string
+	ClaimID     string
+	Result      PermissionResolutionResult
+	Status      PermissionStatus
+	FinalizedAt time.Time
 }
 
 type ErrandDeliveryAdmission struct {

@@ -74,14 +74,15 @@ func (r *Repository) BindErrandExecution(ctx context.Context, errandID string, g
 
 func (r *Repository) GetErrandExecutionDescriptor(ctx context.Context, errandID string) (*models.ErrandExecutionDescriptor, error) {
 	var result models.ErrandExecutionDescriptor
-	var generation int64
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT g.errand_id,e.task_id,g.generation,g.execution_id FROM errand_execution_generations g JOIN task_session_errands e ON e.id=g.errand_id WHERE g.errand_id=? ORDER BY g.generation DESC LIMIT 1`), errandID).Scan(&result.ErrandID, &result.TaskID, &generation, &result.ExecutionID)
+	var generation, promptGeneration int64
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT g.errand_id,e.task_id,g.generation,g.execution_id,g.active_submission_id,g.active_turn_id,g.prompt_generation FROM errand_execution_generations g JOIN task_session_errands e ON e.id=g.errand_id WHERE g.errand_id=? ORDER BY g.generation DESC LIMIT 1`), errandID).Scan(&result.ErrandID, &result.TaskID, &generation, &result.ExecutionID, &result.ActiveSubmissionID, &result.ActiveTurnID, &promptGeneration)
 	if err != nil {
 		return nil, err
 	}
-	if generation <= 0 {
+	if generation <= 0 || promptGeneration < 0 {
 		return nil, sql.ErrNoRows
 	}
 	result.Generation = uint64(generation)
+	result.PromptGeneration = uint64(promptGeneration)
 	return &result, nil
 }

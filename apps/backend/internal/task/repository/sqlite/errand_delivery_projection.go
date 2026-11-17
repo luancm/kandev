@@ -164,7 +164,7 @@ func validateErrandSubmittedEvent(errandID, taskID string, event *models.AgentDe
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	switch agent.Type {
-	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError, streams.EventTypeToolCall, streams.EventTypeToolUpdate, streams.EventTypeShellOutputUpdate:
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError, streams.EventTypeToolCall, streams.EventTypeToolUpdate, streams.EventTypeShellOutputUpdate, streams.EventTypePermissionRequest:
 	default:
 		return fmt.Errorf("unsupported errand delivery event type %q", agent.Type)
 	}

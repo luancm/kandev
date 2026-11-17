@@ -93,7 +93,16 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	durableEvent := durableAgentEvent(execution, event)
 	var origin *models.ErrandToolOrigin
 	var errand bool
-	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeShellOutputUpdate) {
+	switch {
+	case execution.Owner.Kind == ExecutionOwnerErrand && event.Type == streams.EventTypePermissionRequest:
+		permissionOrigin, originErr := resolveErrandPermissionOrigin(ctx, delivery, durableEvent)
+		if originErr != nil {
+			return preparedAgentEvent{}, originErr
+		}
+		event.TurnID = permissionOrigin.TurnID
+		event.DeliverySubmissionID = permissionOrigin.SubmissionID
+		event.PromptGeneration = permissionOrigin.PromptGeneration
+	case execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeShellOutputUpdate):
 		origin, err = resolveErrandToolOrigin(ctx, delivery, durableEvent)
 		if err != nil {
 			return preparedAgentEvent{}, err
@@ -101,7 +110,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		event.TurnID = origin.TurnID
 		event.DeliverySubmissionID = origin.SubmissionID
 		event.PromptGeneration = origin.PromptGeneration
-	} else {
+	default:
 		event, errand, err = prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
 		if err != nil {
 			return preparedAgentEvent{}, err

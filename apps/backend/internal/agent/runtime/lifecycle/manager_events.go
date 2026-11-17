@@ -894,7 +894,8 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		execution.promptLifecycleMu.Lock()
 		promptLifecycleLocked = true
 		if execution.promptGeneration != event.PromptGeneration ||
-			execution.promptCompletionGeneration == event.PromptGeneration {
+			execution.promptCompletionGeneration == event.PromptGeneration ||
+			(execution.Owner.Kind == ExecutionOwnerErrand && event.Type == streams.EventTypePermissionRequest && execution.deliverySubmissionIDSnapshot() != event.DeliverySubmissionID) {
 			unlockPromptLifecycle()
 			return
 		}
@@ -1533,6 +1534,15 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 		return
 	}
 	if m.handleMCPAttachmentEvent(execution, &event, attemptID) {
+		return
+	}
+	if execution.Owner.Kind == ExecutionOwnerErrand && event.Type == streams.EventTypePermissionRequest {
+		if execution.errandPermissionCurrent(event) {
+			m.recordActivity(execution, event)
+			if execution.errandPermissionCurrent(event) {
+				_ = m.eventPublisher.PublishPermissionRequest(execution, event)
+			}
+		}
 		return
 	}
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {

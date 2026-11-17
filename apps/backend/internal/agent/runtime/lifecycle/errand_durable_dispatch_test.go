@@ -366,6 +366,41 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	output, ok := models.ExtractShellExecOutput(detail.Metadata)
 	require.True(t, ok)
 	require.Equal(t, "hello from shell", output.Stdout)
+	callbacks = 0
+	mgr.streamManager.callbacks.OnAgentEventWithGeneration = func(_ *AgentExecution, event agentctl.AgentEvent, _ uint64) {
+		callbacks++
+		notification = event
+		stored, _, readErr := repo.ListErrandMessages(ctx, "child-vertical", "", 20)
+		require.NoError(t, readErr)
+		found := false
+		for _, message := range stored {
+			if message.Type == models.MessageTypePermissionRequest && message.Metadata["request_id"] == event.RequestID {
+				found = true
+			}
+		}
+		require.True(t, found, "permission must be committed before callback")
+	}
+	permission := next
+	permission.Type = streams.EventTypePermissionRequest
+	permission.DeliverySequence = 13
+	permission.PromptGeneration, permission.TurnID = 0, ""
+	permission.ToolCallID, permission.NormalizedPayload = "", nil
+	permission.RequestID, permission.PendingID = "current-request", "current-pending"
+	permission.PermissionHumanInput = true
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, permission, 0))
+	require.Equal(t, 1, callbacks)
+	require.Equal(t, second.ID, notification.DeliverySubmissionID)
+	require.EqualValues(t, 2, notification.PromptGeneration)
+	require.Equal(t, "turn-vertical", notification.TurnID)
+	historicalPermission := permission
+	historicalPermission.DeliverySequence = 14
+	historicalPermission.DeliverySubmissionID = "prompt:first-vertical"
+	historicalPermission.RequestID, historicalPermission.PendingID = "old-request", "old-pending"
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, historicalPermission, 0))
+	require.Equal(t, 1, callbacks, "historical permission must not notify successor")
+	pending, err := repo.LatestErrandPendingPermissions(ctx, []string{"child-vertical"})
+	require.NoError(t, err)
+	require.Equal(t, "current-request", pending["child-vertical"].Metadata["request_id"])
 	var count int
 	require.NoError(t, db.GetContext(ctx, &count, `SELECT COUNT(*) FROM task_sessions`))
 	require.Zero(t, count)
