@@ -12,9 +12,28 @@ type ErrandExecutionDescriptor struct {
 	PromptGeneration   uint64
 }
 
+// ErrandPermissionOwner identifies one Errand execution generation.
+type ErrandPermissionOwner struct {
+	ErrandID    string
+	TaskID      string
+	Generation  uint64
+	ExecutionID string
+}
+
+// ErrandPermissionSource is the immutable admitted origin of one request.
+type ErrandPermissionSource struct {
+	Owner             ErrandPermissionOwner
+	IncarnationID     string
+	HarnessGeneration int64
+	StreamID          string
+	SubmissionID      string
+	TurnID            string
+	PromptGeneration  uint64
+	RequestID         string
+	PendingID         string
+}
+
 type ErrandPermissionFinalization struct {
-	RequestID   string
-	PendingID   string
 	ClaimID     string
 	Result      PermissionResolutionResult
 	Status      PermissionStatus

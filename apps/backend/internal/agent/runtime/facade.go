@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/models"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -223,6 +224,36 @@ func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID st
 type runPermissionBackend interface {
 	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
 	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
+}
+
+type errandPermissionBackend interface {
+	SnapshotErrandPermissions(context.Context, lifecycle.ErrandPermissionTarget) (*lifecycle.ErrandPermissionSnapshot, error)
+	ResolveErrandPermission(context.Context, *lifecycle.ErrandPermissionSnapshot, models.ErrandPermissionSource, string) (*streams.PermissionResolveResponse, error)
+	CancelErrandPermission(context.Context, *lifecycle.ErrandPermissionSnapshot, models.ErrandPermissionSource) (*streams.PermissionCancelResponse, error)
+}
+
+func (f *facade) SnapshotErrandPermissions(ctx context.Context, target ErrandPermissionTarget) (*ErrandPermissionSnapshot, error) {
+	backend, ok := f.backend.(errandPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.SnapshotErrandPermissions(ctx, target)
+}
+
+func (f *facade) ResolveErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource, optionID string) (*streams.PermissionResolveResponse, error) {
+	backend, ok := f.backend.(errandPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.ResolveErrandPermission(ctx, snapshot, source, optionID)
+}
+
+func (f *facade) CancelErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource) (*streams.PermissionCancelResponse, error) {
+	backend, ok := f.backend.(errandPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.CancelErrandPermission(ctx, snapshot, source)
 }
 
 func (f *facade) runPermissionBackend(executionID string) (runPermissionBackend, error) {

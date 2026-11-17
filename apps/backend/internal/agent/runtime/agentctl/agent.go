@@ -1199,7 +1199,11 @@ func (c *Client) RespondToPermission(ctx context.Context, pendingID, optionID st
 
 // ListPendingPermissions returns safe snapshots from the live agent process.
 func (c *Client) ListPendingPermissions(ctx context.Context) ([]PendingAgentPermission, error) {
-	resp, err := c.sendStreamRequest(ctx, "agent.permissions.list", nil)
+	return listPendingPermissions(ctx, c.sendStreamRequest)
+}
+
+func listPendingPermissions(ctx context.Context, send permissionRequestSender) ([]PendingAgentPermission, error) {
+	resp, err := send(ctx, "agent.permissions.list", nil)
 	if err != nil {
 		return nil, fmt.Errorf("permission list request failed: %w", err)
 	}
@@ -1216,12 +1220,16 @@ func (c *Client) ListPendingPermissions(ctx context.Context) ([]PendingAgentPerm
 // ResolvePermission selects one exact provider-offered option on one exact
 // request generation.
 func (c *Client) ResolvePermission(ctx context.Context, requestID, pendingID, optionID string) (*PermissionResolveResponse, error) {
+	return resolvePermission(ctx, c.sendStreamRequest, requestID, pendingID, optionID)
+}
+
+func resolvePermission(ctx context.Context, send permissionRequestSender, requestID, pendingID, optionID string) (*PermissionResolveResponse, error) {
 	payload := streams.PermissionResolveRequest{
 		RequestID: requestID,
 		PendingID: pendingID,
 		OptionID:  optionID,
 	}
-	resp, err := c.sendStreamRequest(ctx, "agent.permissions.resolve", payload)
+	resp, err := send(ctx, "agent.permissions.resolve", payload)
 	if err != nil {
 		return nil, fmt.Errorf("permission resolution request failed: %w", err)
 	}
@@ -1238,8 +1246,12 @@ func (c *Client) ResolvePermission(ctx context.Context, requestID, pendingID, op
 // CancelPermission dismisses one exact live request generation for internal UI
 // compatibility. External MCP callers are not given this operation.
 func (c *Client) CancelPermission(ctx context.Context, requestID, pendingID string) (*PermissionCancelResponse, error) {
+	return cancelPermission(ctx, c.sendStreamRequest, requestID, pendingID)
+}
+
+func cancelPermission(ctx context.Context, send permissionRequestSender, requestID, pendingID string) (*PermissionCancelResponse, error) {
 	payload := streams.PermissionCancelRequest{RequestID: requestID, PendingID: pendingID}
-	resp, err := c.sendStreamRequest(ctx, "agent.permissions.cancel", payload)
+	resp, err := send(ctx, "agent.permissions.cancel", payload)
 	if err != nil {
 		return nil, fmt.Errorf("permission cancellation request failed: %w", err)
 	}

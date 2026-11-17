@@ -48,7 +48,10 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RLock()
 	conn := c.agentStreamConn
 	c.mu.RUnlock()
+	return c.sendStreamRequestOnConnection(ctx, conn, action, payload, false)
+}
 
+func (c *Client) sendStreamRequestOnConnection(ctx context.Context, conn *websocket.Conn, action string, payload interface{}, requireCurrent bool) (*ws.Message, error) {
 	if conn == nil {
 		return nil, &RequestNotSentError{Err: ErrAgentStreamNotConnected}
 	}
@@ -91,6 +94,21 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	}
 
 	c.streamWriteMu.Lock()
+	if requireCurrent {
+		c.mu.RLock()
+		if c.agentStreamConn != conn {
+			c.mu.RUnlock()
+			c.streamWriteMu.Unlock()
+			tracing.TraceWSResponse(span, "", ErrAgentStreamNotConnected)
+			return nil, &RequestNotSentError{Err: ErrAgentStreamNotConnected}
+		}
+		if err := ctx.Err(); err != nil {
+			c.mu.RUnlock()
+			c.streamWriteMu.Unlock()
+			tracing.TraceWSResponse(span, "", err)
+			return nil, &RequestNotSentError{Err: err}
+		}
+	}
 	// Honor a caller deadline for the write itself, not just the response wait:
 	// a stalled conn.WriteMessage (full send buffer to a half-open peer) would
 	// otherwise block uninterruptibly and, for a steer, pin the lifecycle lock the
@@ -101,6 +119,9 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	}
 	writeErr := conn.WriteMessage(websocket.TextMessage, data)
 	_ = conn.SetWriteDeadline(time.Time{}) // clear so later writers are unbounded
+	if requireCurrent {
+		c.mu.RUnlock()
+	}
 	c.streamWriteMu.Unlock()
 	if writeErr != nil {
 		tracing.TraceWSResponse(span, "", writeErr)

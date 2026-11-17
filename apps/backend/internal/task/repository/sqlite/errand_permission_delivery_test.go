@@ -81,12 +81,17 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	require.Equal(t, "submission", descriptor.ActiveSubmissionID)
 	require.Equal(t, "turn", descriptor.ActiveTurnID)
 	require.EqualValues(t, 1, descriptor.PromptGeneration)
+	owner := models.ErrandPermissionOwner{ErrandID: descriptor.ErrandID, TaskID: descriptor.TaskID, Generation: descriptor.Generation, ExecutionID: descriptor.ExecutionID}
+	source, err := repo.LookupErrandPermissionSource(ctx, owner, "request", "provider-pending")
+	require.NoError(t, err)
+	_, err = repo.LookupErrandPermissionSource(ctx, owner, "request", "wrong-pending")
+	require.Error(t, err)
 	pending, err := repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
 	require.NoError(t, err)
 	require.Equal(t, "request", pending["permission-errand"].Metadata["request_id"])
 	resolver, ok := any(repo).(interface {
-		ClaimErrandPermissionResolution(context.Context, models.ErrandExecutionDescriptor, models.PermissionResolutionAudit, bool) (*models.PermissionResolutionClaimResult, error)
-		FinalizeErrandPermissionResolution(context.Context, models.ErrandExecutionDescriptor, models.ErrandPermissionFinalization) (*models.PermissionResolutionFinalizeResult, error)
+		ClaimErrandPermissionResolution(context.Context, models.ErrandPermissionSource, models.PermissionResolutionAudit, bool) (*models.PermissionResolutionClaimResult, error)
+		FinalizeErrandPermissionResolution(context.Context, models.ErrandPermissionSource, models.ErrandPermissionFinalization) (*models.PermissionResolutionFinalizeResult, error)
 	})
 	require.True(t, ok, "Errand permission resolution must be available")
 	audit := models.PermissionResolutionAudit{ClaimID: "claim-1", RequestID: "request", PendingID: "provider-pending", OptionID: "allow", SelectedAt: errandScenarioBase}
@@ -104,7 +109,7 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 		for _, candidate := range []models.PermissionResolutionAudit{audit, competing} {
 			go func(candidate models.PermissionResolutionAudit) {
 				<-start
-				result, claimErr := resolver.ClaimErrandPermissionResolution(ctx, *descriptor, candidate, false)
+				result, claimErr := resolver.ClaimErrandPermissionResolution(ctx, *source, candidate, false)
 				results <- claimResult{candidate, result, claimErr}
 			}(candidate)
 		}
@@ -121,48 +126,85 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 		require.Equal(t, 1, seen[models.PermissionClaimed])
 		require.Equal(t, 1, seen[models.PermissionClaimInProgress])
 	} else {
-		claimed, claimErr := resolver.ClaimErrandPermissionResolution(ctx, *descriptor, audit, false)
+		claimed, claimErr := resolver.ClaimErrandPermissionResolution(ctx, *source, audit, false)
 		require.NoError(t, claimErr)
 		require.Equal(t, models.PermissionClaimed, claimed.Outcome)
-		claimed, claimErr = resolver.ClaimErrandPermissionResolution(ctx, *descriptor, competing, false)
+		claimed, claimErr = resolver.ClaimErrandPermissionResolution(ctx, *source, competing, false)
 		require.NoError(t, claimErr)
 		require.Equal(t, models.PermissionClaimInProgress, claimed.Outcome)
 	}
+	agent.RequestID, agent.PendingID = "historical-request", "historical-pending"
+	historicalPayload, err := json.Marshal(agent)
+	require.NoError(t, err)
+	historical := *event
+	historical.Sequence, historical.Payload = 2, historicalPayload
+	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &historical, 2)
+	require.NoError(t, err)
+	_, err = repo.ProjectAgentDeliveryEvent(ctx, &historical, nil)
+	require.NoError(t, err)
+	historicalSource, err := repo.LookupErrandPermissionSource(ctx, owner, "historical-request", "historical-pending")
+	require.NoError(t, err)
 	terminalAgent := streams.AgentEvent{Type: streams.EventTypeComplete, TurnID: "turn", PromptGeneration: 1}
 	terminalPayload, err := json.Marshal(terminalAgent)
 	require.NoError(t, err)
 	terminal := *event
-	terminal.Sequence, terminal.EventType, terminal.Terminal, terminal.Payload = 2, terminalAgent.Type, true, terminalPayload
-	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &terminal, 2)
+	terminal.Sequence, terminal.EventType, terminal.Terminal, terminal.Payload = 3, terminalAgent.Type, true, terminalPayload
+	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &terminal, 3)
 	require.NoError(t, err)
 	_, err = repo.ProjectAgentDeliveryEvent(ctx, &terminal, nil)
 	require.NoError(t, err)
-	settled, err := repo.SettleAgentDeliveryTerminal(ctx, "permission-stream", 2, models.DeliverySubmissionCompleted, time.Time{})
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, "permission-stream", 3, models.DeliverySubmissionCompleted, time.Time{})
 	require.NoError(t, err)
 	require.True(t, settled)
 	nextPrompt := &models.AgentDeliverySubmission{ID: "submission-next", Payload: []byte("next prompt"), PayloadHash: journal.SubmissionHash([]byte("next prompt"))}
 	_, err = repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{ErrandID: "permission-errand", Generation: 1, ExecutionID: "execution", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "permission-stream", PromptGeneration: 2, TurnID: "turn", Submission: nextPrompt})
 	require.NoError(t, err)
 	agent.PromptGeneration = 2
+	agent.RequestID, agent.PendingID = "second-request", "second-pending"
 	nextPayload, err := json.Marshal(agent)
 	require.NoError(t, err)
 	nextEvent := *event
-	nextEvent.Sequence, nextEvent.SubmissionID, nextEvent.Payload = 3, nextPrompt.ID, nextPayload
-	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &nextEvent, 3)
+	nextEvent.Sequence, nextEvent.SubmissionID, nextEvent.Payload = 4, nextPrompt.ID, nextPayload
+	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &nextEvent, 4)
 	require.NoError(t, err)
 	_, err = repo.ProjectAgentDeliveryEvent(ctx, &nextEvent, nil)
 	require.NoError(t, err)
 	pending, err = repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
 	require.NoError(t, err)
 	require.Equal(t, "submission-next", pending["permission-errand"].AuthorID)
-	_, err = resolver.ClaimErrandPermissionResolution(ctx, *descriptor, competing, false)
-	require.Error(t, err, "old prompt cannot claim after a same-execution successor")
+	oldClaim, err := resolver.ClaimErrandPermissionResolution(ctx, *source, competing, false)
+	require.NoError(t, err)
+	require.Equal(t, models.PermissionClaimInProgress, oldClaim.Outcome)
+	retained, err := repo.LookupErrandPermissionSource(ctx, owner, "request", "provider-pending")
+	require.NoError(t, err)
+	require.Equal(t, *source, *retained)
+	historicalAudit := models.PermissionResolutionAudit{ClaimID: "historical-claim", RequestID: "historical-request", PendingID: "historical-pending"}
+	historicalClaim, err := resolver.ClaimErrandPermissionResolution(ctx, *historicalSource, historicalAudit, false)
+	require.NoError(t, err)
+	require.Equal(t, models.PermissionClaimed, historicalClaim.Outcome)
+	require.Equal(t, "submission", historicalClaim.Message.AuthorID)
+	currentPending, err := repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
+	require.NoError(t, err)
+	require.Equal(t, "submission-next", currentPending["permission-errand"].AuthorID)
+	agent.RequestID, agent.PendingID = "request", "provider-pending"
+	ambiguousPayload, err := json.Marshal(agent)
+	require.NoError(t, err)
+	ambiguous := nextEvent
+	ambiguous.Sequence, ambiguous.Payload = 5, ambiguousPayload
+	_, err = repo.ReceiveAgentDeliveryEvent(ctx, &ambiguous, 5)
+	require.NoError(t, err)
+	_, err = repo.ProjectAgentDeliveryEvent(ctx, &ambiguous, nil)
+	require.NoError(t, err)
+	_, err = repo.LookupErrandPermissionSource(ctx, owner, "request", "provider-pending")
+	require.Error(t, err, "ambiguous source must not be selected by current prompt")
+	_, err = resolver.ClaimErrandPermissionResolution(ctx, *source, competing, false)
+	require.Error(t, err)
 	_, err = repo.ReserveErrandExecutionGeneration(ctx, "permission-errand", 1)
 	require.NoError(t, err)
 	pending, err = repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
 	require.NoError(t, err)
 	require.Empty(t, pending)
-	_, err = resolver.ClaimErrandPermissionResolution(ctx, *descriptor, competing, false)
+	_, err = resolver.ClaimErrandPermissionResolution(ctx, *source, competing, false)
 	require.Error(t, err)
 	bound, err = repo.BindErrandExecution(ctx, "permission-errand", 2, "execution-2")
 	require.NoError(t, err)
@@ -173,6 +215,7 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	_, err = repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{ErrandID: "permission-errand", Generation: 2, ExecutionID: "execution-2", IncarnationID: "incarnation-2", HarnessGeneration: 1, StreamID: "permission-stream-2", PromptGeneration: 1, TurnID: "turn-2", Submission: sub2})
 	require.NoError(t, err)
 	agent.TurnID, agent.PromptGeneration = "turn-2", 1
+	agent.RequestID, agent.PendingID = "request", "provider-pending"
 	payload, err = json.Marshal(agent)
 	require.NoError(t, err)
 	successor := &models.AgentDeliveryEvent{SessionID: "errand:permission-errand", TaskID: task, ExecutionID: "execution-2", IncarnationID: "incarnation-2", HarnessGeneration: 1, OwnerGeneration: 1, ExpectedStreamID: "permission-stream-2", StreamID: "permission-stream-2", Sequence: 1, SubmissionID: "submission-2", EventType: agent.Type, Payload: payload}
@@ -213,18 +256,24 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	pending, err = repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
 	require.NoError(t, err)
 	require.Equal(t, "human-request", pending["permission-errand"].Metadata["request_id"])
-	currentOwner, err := repo.GetErrandExecutionDescriptor(ctx, "permission-errand")
+	currentDescriptor, err := repo.GetErrandExecutionDescriptor(ctx, "permission-errand")
 	require.NoError(t, err)
+	currentOwner := models.ErrandPermissionOwner{ErrandID: currentDescriptor.ErrandID, TaskID: currentDescriptor.TaskID, Generation: currentDescriptor.Generation, ExecutionID: currentDescriptor.ExecutionID}
+	lookup := func(request, pending string) models.ErrandPermissionSource {
+		found, lookupErr := repo.LookupErrandPermissionSource(ctx, currentOwner, request, pending)
+		require.NoError(t, lookupErr)
+		return *found
+	}
 	autoAudit := models.PermissionResolutionAudit{ClaimID: "auto-claim", RequestID: "human-request", PendingID: "human-pending"}
-	autoClaim, err := resolver.ClaimErrandPermissionResolution(ctx, *currentOwner, autoAudit, true)
+	autoClaim, err := resolver.ClaimErrandPermissionResolution(ctx, lookup(autoAudit.RequestID, autoAudit.PendingID), autoAudit, true)
 	require.NoError(t, err)
 	require.NotEqual(t, models.PermissionClaimed, autoClaim.Outcome)
 	olderAudit := models.PermissionResolutionAudit{ClaimID: "older-current-claim", RequestID: "request", PendingID: "provider-pending"}
-	olderClaim, err := resolver.ClaimErrandPermissionResolution(ctx, *currentOwner, olderAudit, false)
+	olderClaim, err := resolver.ClaimErrandPermissionResolution(ctx, lookup(olderAudit.RequestID, olderAudit.PendingID), olderAudit, false)
 	require.NoError(t, err)
 	require.Equal(t, models.PermissionClaimed, olderClaim.Outcome)
 	finalizedAt := errandScenarioBase.Add(time.Second)
-	finalized, err := resolver.FinalizeErrandPermissionResolution(ctx, *descriptor, models.ErrandPermissionFinalization{RequestID: audit.RequestID, PendingID: audit.PendingID, ClaimID: audit.ClaimID, Result: models.PermissionResolutionAccepted, Status: models.PermissionStatusApproved, FinalizedAt: finalizedAt})
+	finalized, err := resolver.FinalizeErrandPermissionResolution(ctx, *source, models.ErrandPermissionFinalization{ClaimID: audit.ClaimID, Result: models.PermissionResolutionAccepted, Status: models.PermissionStatusApproved, FinalizedAt: finalizedAt})
 	require.NoError(t, err)
 	require.Equal(t, models.PermissionFinalized, finalized.Outcome)
 	pending, err = repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
@@ -234,7 +283,7 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	malformed.Metadata["permission_resolution"] = map[string]interface{}{"result": "indeterminate"}
 	require.NoError(t, repo.UpdateErrandMessage(ctx, "permission-errand", malformed))
 	humanAudit := models.PermissionResolutionAudit{ClaimID: "human-claim", RequestID: "human-request", PendingID: "human-pending"}
-	_, err = resolver.ClaimErrandPermissionResolution(ctx, *currentOwner, humanAudit, false)
+	_, err = resolver.ClaimErrandPermissionResolution(ctx, lookup(humanAudit.RequestID, humanAudit.PendingID), humanAudit, false)
 	require.Error(t, err, "an existing malformed resolution must not be reopened")
 	agent.RequestID, agent.PendingID = "approved-request", "approved-pending"
 	agent.PermissionHumanInput, agent.AutoApprovalPending = false, false
@@ -260,10 +309,10 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	_, err = repo.ProjectAgentDeliveryEvent(ctx, successor, nil)
 	require.NoError(t, err)
 	uncertainAudit := models.PermissionResolutionAudit{ClaimID: "uncertain-claim", RequestID: "uncertain-request", PendingID: "uncertain-pending", ActorKind: models.PermissionActorBrowser, OptionID: "allow"}
-	uncertainClaim, err := resolver.ClaimErrandPermissionResolution(ctx, *currentOwner, uncertainAudit, false)
+	uncertainClaim, err := resolver.ClaimErrandPermissionResolution(ctx, lookup(uncertainAudit.RequestID, uncertainAudit.PendingID), uncertainAudit, false)
 	require.NoError(t, err)
 	require.Equal(t, models.PermissionClaimed, uncertainClaim.Outcome)
-	uncertain, err := resolver.FinalizeErrandPermissionResolution(ctx, *currentOwner, models.ErrandPermissionFinalization{ClaimID: uncertainAudit.ClaimID, RequestID: uncertainAudit.RequestID, PendingID: uncertainAudit.PendingID, Result: models.PermissionResolutionIndeterminate, FinalizedAt: finalizedAt})
+	uncertain, err := resolver.FinalizeErrandPermissionResolution(ctx, lookup(uncertainAudit.RequestID, uncertainAudit.PendingID), models.ErrandPermissionFinalization{ClaimID: uncertainAudit.ClaimID, Result: models.PermissionResolutionIndeterminate, FinalizedAt: finalizedAt})
 	require.NoError(t, err)
 	require.Equal(t, models.PermissionFinalized, uncertain.Outcome)
 	storedAudit, ok := permissionAuditFromMetadata(uncertain.Message.Metadata)
@@ -271,7 +320,7 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	require.Equal(t, models.PermissionResolutionIndeterminate, storedAudit.Result)
 	require.Equal(t, models.PermissionActorBrowser, storedAudit.ActorKind)
 	require.Equal(t, "allow", storedAudit.OptionID)
-	retry, err := resolver.ClaimErrandPermissionResolution(ctx, *currentOwner, uncertainAudit, false)
+	retry, err := resolver.ClaimErrandPermissionResolution(ctx, lookup(uncertainAudit.RequestID, uncertainAudit.PendingID), uncertainAudit, false)
 	require.NoError(t, err)
 	require.Equal(t, models.PermissionClaimAlreadyFinal, retry.Outcome)
 	agent.RequestID, agent.PendingID = "cancel-request", "cancel-pending"
@@ -294,6 +343,8 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	pending, err = repo.LatestErrandPendingPermissions(ctx, ids)
 	require.NoError(t, err)
 	require.Equal(t, "cancel-request", pending["permission-errand"].Metadata["request_id"])
+	cancelSource := lookup("cancel-request", "cancel-pending")
+	olderSource := lookup(olderAudit.RequestID, olderAudit.PendingID)
 	cancelled, err := repo.GetErrand(ctx, "permission-errand")
 	require.NoError(t, err)
 	cancelled.Lifecycle, cancelled.CancelSource = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser
@@ -304,9 +355,11 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	pending, err = repo.LatestErrandPendingPermissions(ctx, []string{"permission-errand"})
 	require.NoError(t, err)
 	require.Empty(t, pending)
-	_, err = resolver.ClaimErrandPermissionResolution(ctx, *currentOwner, models.PermissionResolutionAudit{ClaimID: "cancel-claim", RequestID: "cancel-request", PendingID: "cancel-pending"}, false)
+	_, err = repo.LookupErrandPermissionSource(ctx, currentOwner, "cancel-request", "cancel-pending")
 	require.Error(t, err)
-	finished, err := resolver.FinalizeErrandPermissionResolution(ctx, *currentOwner, models.ErrandPermissionFinalization{ClaimID: olderAudit.ClaimID, RequestID: olderAudit.RequestID, PendingID: olderAudit.PendingID, Result: models.PermissionResolutionAccepted, Status: models.PermissionStatusApproved, FinalizedAt: finalizedAt})
+	_, err = resolver.ClaimErrandPermissionResolution(ctx, cancelSource, models.PermissionResolutionAudit{ClaimID: "cancel-claim", RequestID: "cancel-request", PendingID: "cancel-pending"}, false)
+	require.Error(t, err)
+	finished, err := resolver.FinalizeErrandPermissionResolution(ctx, olderSource, models.ErrandPermissionFinalization{ClaimID: olderAudit.ClaimID, Result: models.PermissionResolutionAccepted, Status: models.PermissionStatusApproved, FinalizedAt: finalizedAt})
 	require.NoError(t, err)
 	require.Equal(t, models.PermissionFinalized, finished.Outcome)
 }

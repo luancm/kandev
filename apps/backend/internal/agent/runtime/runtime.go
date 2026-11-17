@@ -17,6 +17,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/task/models"
 	"time"
 
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -30,6 +31,8 @@ import (
 type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
 type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
+type ErrandPermissionTarget = lifecycle.ErrandPermissionTarget
+type ErrandPermissionSnapshot = lifecycle.ErrandPermissionSnapshot
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
@@ -156,6 +159,11 @@ type Runtime interface {
 	// CancelRunPermission cancels a pending permission request of a run-owned
 	// execution.
 	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
+
+	// Errand permission snapshots are in-process live-client capabilities.
+	SnapshotErrandPermissions(ctx context.Context, target ErrandPermissionTarget) (*ErrandPermissionSnapshot, error)
+	ResolveErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource, optionID string) (*streams.PermissionResolveResponse, error)
+	CancelErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource) (*streams.PermissionCancelResponse, error)
 }
 
 // LaunchSpec carries everything the runtime needs to start an agent.
