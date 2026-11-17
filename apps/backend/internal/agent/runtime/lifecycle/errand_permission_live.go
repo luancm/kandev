@@ -166,7 +166,7 @@ func validErrandPermissionTarget(target ErrandPermissionTarget) bool {
 }
 
 func (e *AgentExecution) matchesErrandPermissionTarget(target ErrandPermissionTarget) bool {
-	if e == nil || e.ID != target.ExecutionID || e.Owner != target.Owner || e.TaskID != target.Owner.TaskID || e.WorkspaceID != target.Owner.WorkspaceID || e.SessionID != "" || e.DeliveryMode != DurableDeliveryV1 || e.DeliveryIncarnationID != target.IncarnationID || e.DeliveryHarnessGeneration != target.HarnessGeneration || e.DeliveryStreamID != target.StreamID {
+	if e == nil || e.ID != target.ExecutionID || e.Owner != target.Owner || e.TaskID != "" || e.WorkspaceID != target.Owner.WorkspaceID || e.SessionID != "" || e.DeliveryMode != DurableDeliveryV1 || e.DeliveryIncarnationID != target.IncarnationID || e.DeliveryHarnessGeneration != target.HarnessGeneration || e.DeliveryStreamID != target.StreamID {
 		return false
 	}
 	return true

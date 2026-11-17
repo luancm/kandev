@@ -116,7 +116,7 @@ func (r *SpritesExecutor) inspectSavedSprite(
 	if err != nil || instanceInfo == nil || instanceInfo.Port < 1 || instanceInfo.Port > 65535 {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
-	if instanceInfo.SessionID != record.SessionID || instanceInfo.TaskID != record.TaskID {
+	if instanceInfo.SessionID != record.SessionID || instanceInfo.TaskID != record.TaskID || !matchesRecordedErrandMCPOwner(record, instanceInfo.ErrandMCPOwner) {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
 	return sprite, instanceInfo, ""

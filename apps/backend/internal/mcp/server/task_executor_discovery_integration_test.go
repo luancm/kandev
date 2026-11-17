@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"path/filepath"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func (b taskExecutorDiscoveryScopedBackend) RequestPayload(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	scoped, err = b.resolver.ScopePrincipal(scoped, b.taskID, b.session)
+	scoped, err = b.resolver.ScopePrincipal(scoped, streams.MCPExecutionContext{TaskID: b.taskID, SessionID: b.session})
 	if err != nil {
 		return err
 	}

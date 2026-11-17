@@ -67,6 +67,7 @@ type ContainerConfig struct {
 	PromptSuggestions              bool
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
+	ErrandMCPOwner                 *agentctltypes.ErrandMCPOwner
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
 	AllowUserNamespaces            bool   // If true, the container is launched with a relaxed seccomp profile and apparmor=unconfined.
@@ -153,6 +154,7 @@ func buildContainerCreateInstanceRequest(
 		CopilotNativeSessionEvents: config.CopilotNativeSessionEvents,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
+		ErrandMCPOwner:             config.ErrandMCPOwner,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,

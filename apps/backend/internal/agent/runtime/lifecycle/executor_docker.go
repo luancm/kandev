@@ -596,6 +596,9 @@ func (r *DockerExecutor) findExistingInstance(
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, requestedInstanceID)
 	if err == nil && instance != nil && instance.Port > 0 {
+		if !matchErrandMCPOwner(req.ErrandMCPOwner, instance.ErrandMCPOwner) {
+			return 0, false, "", fmt.Errorf("%w: retained agentctl errand owner mismatch", errReconnectOwnerBlocked)
+		}
 		if hasManagedGitHubBrokerEnv(req.Env) {
 			instanceHost, instancePort, resolveErr := r.resolveEndpoint(
 				ctx, dockerClient, containerID, instance.Port, containerIP)
@@ -708,6 +711,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		McpServers:                 req.McpServers,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
+		ErrandMCPOwner:             req.ErrandMCPOwner,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		SessionID:                  req.SessionID,
 		TaskID:                     req.TaskID,

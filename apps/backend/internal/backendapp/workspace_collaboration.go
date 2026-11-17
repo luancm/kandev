@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -80,16 +81,46 @@ func (b *workspaceCollaborationBoundary) caller(ctx context.Context) (*models.Ta
 	if err != nil {
 		return nil, fmt.Errorf("%w: caller task", taskservice.ErrWorkspaceCollaborationUnavailable)
 	}
-	session, err := b.store.GetTaskSession(ctx, principal.CallerSessionID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: caller session", taskservice.ErrWorkspaceCollaborationUnavailable)
-	}
-	if task == nil || session == nil || session.TaskID != task.ID || task.WorkspaceID != principal.WorkspaceID {
+	if task == nil || task.ID != principal.CallerTaskID || task.WorkspaceID != principal.WorkspaceID {
 		return nil, taskservice.ErrWorkspaceCollaborationUnavailable
+	}
+	if principal.Surface == mcpprofile.SurfaceErrand {
+		if err := b.validateErrandCaller(ctx, principal); err != nil {
+			return nil, err
+		}
+	} else {
+		session, err := b.store.GetTaskSession(ctx, principal.CallerSessionID)
+		if err != nil || session == nil || session.TaskID != task.ID || session.ID != principal.CallerSessionID {
+			return nil, taskservice.ErrWorkspaceCollaborationUnavailable
+		}
 	}
 	workspace, err := b.store.GetWorkspace(ctx, task.WorkspaceID)
 	if err != nil || workspace == nil {
 		return nil, fmt.Errorf("%w: caller workspace", taskservice.ErrWorkspaceCollaborationUnavailable)
 	}
 	return task, nil
+}
+
+func (b *workspaceCollaborationBoundary) validateErrandCaller(ctx context.Context, principal mcpscope.Principal) error {
+	execution, ok := streams.MCPExecutionContextFromContext(ctx)
+	if !ok || execution.ErrandID != principal.ErrandID || execution.TaskID != principal.CallerTaskID || execution.WorkspaceID != principal.WorkspaceID {
+		return taskservice.ErrWorkspaceCollaborationUnavailable
+	}
+	lookup, ok := b.store.(interface {
+		GetErrand(context.Context, string) (*models.Errand, error)
+		ErrandHarnessBindingStale(context.Context, string, *models.ErrandHarnessBinding) (bool, error)
+	})
+	if !ok {
+		return taskservice.ErrWorkspaceCollaborationUnavailable
+	}
+	row, err := lookup.GetErrand(ctx, execution.ErrandID)
+	if err != nil || row == nil || row.ID != execution.ErrandID || row.TaskID != execution.TaskID {
+		return taskservice.ErrWorkspaceCollaborationUnavailable
+	}
+	binding := &models.ErrandHarnessBinding{ErrandID: execution.ErrandID, Generation: execution.ErrandGeneration, ExecutionID: execution.ExecutionID, IncarnationID: execution.ParentIncarnationID, HarnessGeneration: execution.HarnessGeneration, StreamID: execution.StreamID}
+	stale, err := lookup.ErrandHarnessBindingStale(ctx, execution.TaskID, binding)
+	if err != nil || stale {
+		return taskservice.ErrWorkspaceCollaborationUnavailable
+	}
+	return nil
 }

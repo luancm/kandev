@@ -69,6 +69,8 @@ type Instance struct {
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string
 
+	ErrandMCPOwner *agentctltypes.ErrandMCPOwner
+
 	// manager is the process manager handling the agent subprocess (unexported)
 	manager processManager
 
@@ -214,8 +216,9 @@ type CreateRequest struct {
 	McpMode string `json:"mcp_mode,omitempty"`
 
 	// McpProviders limits task-mode review automation tools to attached providers.
-	McpProviders []string            `json:"mcp_providers,omitempty"`
-	McpProfile   *mcpprofile.Context `json:"mcp_profile,omitempty"`
+	McpProviders   []string                      `json:"mcp_providers,omitempty"`
+	McpProfile     *mcpprofile.Context           `json:"mcp_profile,omitempty"`
+	ErrandMCPOwner *agentctltypes.ErrandMCPOwner `json:"errand_mcp_owner,omitempty"`
 
 	// NamespacesMCPToolsByServer enables the per-instance MCP name adapter for
 	// clients that append the injected server name to every tool.
@@ -310,6 +313,8 @@ type InstanceInfo struct {
 	// TaskID is the task ID this instance was created for, if any.
 	TaskID string `json:"task_id,omitempty"`
 
+	ErrandMCPOwner *agentctltypes.ErrandMCPOwner `json:"errand_mcp_owner,omitempty"`
+
 	WorkspaceExcludedRoots []string `json:"workspace_excluded_roots,omitempty"`
 
 	// WorkspaceSourceRoots is the live, current source-root allowlist this
@@ -347,6 +352,11 @@ func (i *Instance) Info() *InstanceInfo {
 		}
 	}
 
+	var owner *agentctltypes.ErrandMCPOwner
+	if i.ErrandMCPOwner != nil {
+		copyOwner := *i.ErrandMCPOwner
+		owner = &copyOwner
+	}
 	var sourceRoots []string
 	var providerSessionID string
 	var copilotNativeSessionEvents bool
@@ -368,6 +378,7 @@ func (i *Instance) Info() *InstanceInfo {
 		CreatedAt:                  i.CreatedAt,
 		SessionID:                  i.SessionID,
 		TaskID:                     i.TaskID,
+		ErrandMCPOwner:             owner,
 		WorkspaceSourceRoots:       sourceRoots,
 		ProviderSessionID:          providerSessionID,
 		CopilotNativeSessionEvents: copilotNativeSessionEvents,

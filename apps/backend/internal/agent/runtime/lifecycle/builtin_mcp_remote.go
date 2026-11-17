@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
 func requireBuiltinRemoteHelper(ctx context.Context, req *ExecutorCreateRequest, fetch func(context.Context) ([]byte, error)) error {
-	if req.McpProfile == nil || req.McpProfile.BuiltinPackages == nil {
+	if req.ErrandMCPOwner == nil && (req.McpProfile == nil || req.McpProfile.BuiltinPackages == nil) {
 		return nil
 	}
 	data, err := fetch(ctx)
@@ -22,6 +24,9 @@ func requireBuiltinRemoteHelper(ctx context.Context, req *ExecutorCreateRequest,
 	var identity agentctl.IdentityInfo
 	if err := json.Unmarshal(data, &identity); err != nil {
 		return fmt.Errorf("read built-in MCP helper identity: %w", err)
+	}
+	if req.ErrandMCPOwner != nil && !slices.Contains(identity.Capabilities, agentctltypes.ErrandMCPOwnerCapability) {
+		return fmt.Errorf("agentctl does not support %s; update the execution runtime before retrying", agentctltypes.ErrandMCPOwnerCapability)
 	}
 	return agentctl.ValidateBuiltinHelper(req.McpProfile, req.TaskID, &identity)
 }

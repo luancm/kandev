@@ -774,6 +774,7 @@ type ExecutorCreateRequest struct {
 	PromptSuggestions     bool     // Ask a native-suggestion agent to emit next-prompt suggestions
 	McpProviders          []string // Normalized provider capabilities attached to the task
 	McpProfile            *mcpprofile.Context
+	ErrandMCPOwner        *agentctltypes.ErrandMCPOwner
 	AuthToken             string // Previously handshaken agentctl token for reconnects
 	BootstrapNonce        string // Stored nonce for re-handshake after container restart
 	AgentctlStartupConfig commonconfig.AgentctlStartupConfig

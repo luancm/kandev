@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"path/filepath"
 	"testing"
 	"testing/synctest"
@@ -39,7 +40,7 @@ func (selfPlacementWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Contex
 }
 
 func (b selfPlacementScopedBackend) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
-	scoped, err := b.resolver.ScopePrincipal(ctx, b.taskID, b.sessionID)
+	scoped, err := b.resolver.ScopePrincipal(ctx, streams.MCPExecutionContext{TaskID: b.taskID, SessionID: b.sessionID})
 	if err != nil {
 		return err
 	}

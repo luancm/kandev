@@ -70,6 +70,9 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetes
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 			return nil, false, err
 		}
+		if !matchErrandMCPOwner(request.ErrandMCPOwner, info.ErrandMCPOwner) {
+			return nil, false, errors.New("retained agentctl errand owner mismatch")
+		}
 		if info.WorkspacePath != request.WorkspacePath {
 			return nil, false, fmt.Errorf("kubernetes instance workspace mismatch")
 		}
@@ -78,8 +81,8 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetes
 	if !errors.Is(err, agentctl.ErrInstanceNotFound) {
 		return nil, false, err
 	}
-	response, createErr := createOrReconcileKubernetesAgentctlInstance(ctx, control, request)
-	return response, true, createErr
+	response, created, createErr := createOrReconcileKubernetesAgentctlInstanceWithOwnership(ctx, control, request)
+	return response, created, createErr
 }
 
 func (r *KubernetesExecutor) sharedKubernetesControlToken(ctx context.Context, req *ExecutorCreateRequest) (string, error) {

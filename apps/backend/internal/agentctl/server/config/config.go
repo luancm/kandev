@@ -400,7 +400,8 @@ type InstanceConfig struct {
 	McpProviders []string
 
 	// McpProfile is the backend-owned typed MCP tool profile.
-	McpProfile *mcpprofile.Context
+	McpProfile     *mcpprofile.Context
+	ErrandMCPOwner *agentctltypes.ErrandMCPOwner
 
 	// ProjectMCPDelivery is execution-bound evidence that the host materialized
 	// the bound built-in packages into a project configuration file. It is
@@ -755,6 +756,9 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) (*Ins
 	}
 
 	applyOverrides(cfg, overrides)
+	if cfg.ErrandMCPOwner != nil && (cfg.ErrandMCPOwner.TaskID == "" || cfg.ErrandMCPOwner.ErrandID == "" || cfg.ErrandMCPOwner.Generation == 0) {
+		return nil, fmt.Errorf("invalid errand MCP owner")
+	}
 	if cfg.McpProfile != nil && cfg.McpProfile.BuiltinPackages != nil && port <= 0 {
 		return nil, fmt.Errorf("built-in MCP packages require an instance port")
 	}
@@ -840,6 +844,15 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if overrides.McpProfile != nil {
 		profileContext := mcpprofile.Normalize(*overrides.McpProfile)
+		cfg.McpProfile = &profileContext
+	}
+	if overrides.ErrandMCPOwner != nil {
+		owner := *overrides.ErrandMCPOwner
+		cfg.ErrandMCPOwner = &owner
+		cfg.McpMode = "errand"
+	}
+	if cfg.McpMode == "errand" {
+		profileContext := mcpprofile.New(mcpprofile.SurfaceErrand, nil, nil)
 		cfg.McpProfile = &profileContext
 	}
 	if overrides.NamespacesMCPToolsByServer {
@@ -933,6 +946,7 @@ type InstanceOverrides struct {
 	McpMode                      string
 	McpProviders                 []string
 	McpProfile                   *mcpprofile.Context
+	ErrandMCPOwner               *agentctltypes.ErrandMCPOwner
 	NamespacesMCPToolsByServer   bool
 	RequiresProcessKill          bool
 	StripEnv                     []string

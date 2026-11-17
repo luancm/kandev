@@ -252,3 +252,50 @@ func TestSetMCPIdentityScoperReachesStreamManager(t *testing.T) {
 		t.Error("SetMCPIdentityScoper did not reach the stream manager")
 	}
 }
+
+func TestMCPHandlerForErrandUsesOwnerWithoutFakeSession(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	sm.setMCPPrincipalScoper(func(ctx context.Context, _ streams.MCPExecutionContext) (context.Context, error) { return ctx, nil })
+	execution := &AgentExecution{ID: "exec", Owner: ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", WorkspaceID: "workspace", ErrandID: "errand", Generation: 2}, DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 3, DeliveryStreamID: "stream"}
+	_, err := sm.mcpHandlerFor(execution).Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{"task_id": "forged", "session_id": "forged"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok || got.TaskID != "task" || got.SessionID != "" {
+		t.Fatalf("trusted execution = %+v, present = %v", got, ok)
+	}
+}
+
+func TestMCPHandlerForErrandRequiresPrincipalScoper(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	execution := &AgentExecution{ID: "exec", Owner: ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", WorkspaceID: "workspace", ErrandID: "errand", Generation: 2}, DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 3, DeliveryStreamID: "stream"}
+	response, err := sm.mcpHandlerFor(execution).Dispatch(context.Background(), mcpRequest(t, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != ws.MessageTypeError || inner.calls != 0 {
+		t.Fatalf("response = %v, calls = %d", response.Type, inner.calls)
+	}
+}
+
+func TestErrandMCPHandlerRejectsRetiredExecutionWithoutBuiltinBinding(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	current := true
+	sm.isExecutionCurrent = func(*AgentExecution) bool { return current }
+	sm.setMCPPrincipalScoper(func(ctx context.Context, _ streams.MCPExecutionContext) (context.Context, error) { return ctx, nil })
+	execution := &AgentExecution{ID: "execution", Owner: ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", WorkspaceID: "workspace", ErrandID: "child", Generation: 1}, DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream"}
+	handler := sm.mcpHandlerFor(execution)
+	response, err := handler.Dispatch(context.Background(), mcpRequest(t, nil))
+	if err != nil || response.Type != ws.MessageTypeResponse {
+		t.Fatalf("current dispatch = %v, %v", response, err)
+	}
+	current = false
+	response, err = handler.Dispatch(context.Background(), mcpRequest(t, nil))
+	if err != nil || response.Type != ws.MessageTypeError || inner.calls != 1 {
+		t.Fatalf("retired dispatch = %v, %v, calls %d", response, err, inner.calls)
+	}
+}

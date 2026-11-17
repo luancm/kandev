@@ -69,7 +69,7 @@ func TestErrandPermissionLiveSnapshotFencesOwnerAndClient(t *testing.T) {
 	mgr := newTestManager(t)
 	mgr.streamManager.setAgentDeliveryRepository(repo)
 	owner := ExecutionOwner{Kind: ExecutionOwnerErrand, WorkspaceID: "workspace", TaskID: "task-live", ErrandID: "child-live", Generation: 1}
-	execution := &AgentExecution{ID: "execution-live", Owner: owner, TaskID: owner.TaskID, WorkspaceID: owner.WorkspaceID, DeliveryMode: DurableDeliveryV1, DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream", promptGeneration: 1, promptTurnID: "turn", agentctl: client}
+	execution := &AgentExecution{ID: "execution-live", Owner: owner, WorkspaceID: owner.WorkspaceID, DeliveryMode: DurableDeliveryV1, DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream", promptGeneration: 1, promptTurnID: "turn", agentctl: client}
 	execution.setDeliverySubmissionID("submission")
 	require.NoError(t, mgr.executionStore.Add(execution))
 	target := ErrandPermissionTarget{Owner: owner, ExecutionID: "execution-live", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream"}

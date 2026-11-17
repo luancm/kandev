@@ -299,6 +299,7 @@ func buildStandaloneCreateInstanceRequest(
 		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
+		ErrandMCPOwner:             req.ErrandMCPOwner,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,

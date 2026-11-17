@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -39,7 +40,7 @@ func (m *Manager) restoreBuiltinOwner(ctx context.Context, execution *AgentExecu
 	if scope == nil {
 		return errors.New("built-in MCP principal scope is unavailable")
 	}
-	scoped, err := scope(ctx, execution.TaskID, execution.SessionID)
+	scoped, err := scope(ctx, streams.MCPExecutionContext{TaskID: execution.TaskID, SessionID: execution.SessionID})
 	if err != nil {
 		return err
 	}

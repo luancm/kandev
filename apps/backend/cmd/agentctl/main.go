@@ -235,11 +235,12 @@ func run(cfg *config.Config, log *logger.Logger) {
 		var mcpSrv *mcpserver.Server
 		mcpNamePresentationOption := mcpserver.WithMCPToolNamespacingByServer(instCfg.NamespacesMCPToolsByServer)
 		mcpSSEBaseURLOption := mcpserver.WithSSEBaseURL(config.MCPServerURL(instCfg.MCPHost, instCfg.Port, ""))
+		mcpTaskID, mcpSessionID := instCfg.MCPIdentity()
 		if instCfg.McpProfile != nil {
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, mcpSessionID, mcpTaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
 		} else {
 			legacyProfile := mcpprofile.Legacy(instCfg.McpMode, instCfg.DisableAskQuestion, instCfg.McpProviders)
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, mcpSessionID, mcpTaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
 		}
 		mcpSrv.SetAttachmentReporter(procMgr.PublishMCPAttachment)
 		instLog.Info("MCP server enabled (channel-based)",

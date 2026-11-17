@@ -292,7 +292,7 @@ func (r *SSHExecutor) readSSHRecoveryInstanceInfo(
 		return nil, 0, fmt.Errorf("read exact agentctl instance: %w", err)
 	}
 	if info == nil || info.ID != identity.nativeID || info.SessionID != record.SessionID ||
-		info.TaskID != record.TaskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir {
+		info.TaskID != record.TaskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir || !matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) {
 		return nil, 0, errors.New("live agentctl metadata does not match the persisted SSH instance")
 	}
 	return info, controlPort, nil

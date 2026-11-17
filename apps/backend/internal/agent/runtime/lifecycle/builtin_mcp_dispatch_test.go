@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"testing"
 
 	p "github.com/kandev/kandev/internal/mcp/profile"
@@ -112,7 +113,8 @@ func TestBuiltinDispatchRejectsChangedPrincipal(t *testing.T) {
 			sm := newMCPStreamManager(t, inner, nil)
 			sm.builtinActionResolver = builtinTestActions
 			sm.mcpPrincipalScoper = builtinTestPrincipal
-			sm.mcpPrincipalScoper = func(ctx context.Context, taskID, sessionID string) (context.Context, error) {
+			sm.mcpPrincipalScoper = func(ctx context.Context, execution streams.MCPExecutionContext) (context.Context, error) {
+				taskID, sessionID := execution.TaskID, execution.SessionID
 				principal := mcpscope.Principal{WorkspaceID: "workspace", CallerTaskID: taskID, CallerSessionID: sessionID, Surface: p.SurfaceKanbanTask}
 				if changed == "workspace" {
 					principal.WorkspaceID = "other"
@@ -129,7 +131,8 @@ func TestBuiltinDispatchRejectsChangedPrincipal(t *testing.T) {
 	}
 }
 
-func builtinTestPrincipal(ctx context.Context, taskID, sessionID string) (context.Context, error) {
+func builtinTestPrincipal(ctx context.Context, execution streams.MCPExecutionContext) (context.Context, error) {
+	taskID, sessionID := execution.TaskID, execution.SessionID
 	return mcpscope.WithPrincipal(ctx, mcpscope.Principal{WorkspaceID: "workspace", CallerTaskID: taskID, CallerSessionID: sessionID, Surface: p.SurfaceKanbanTask}), nil
 }
 

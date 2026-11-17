@@ -14,6 +14,10 @@ type MCPExecutionContext struct {
 	ParentIncarnationID       string
 	HarnessGeneration         int64
 	BuiltinAuthority          BuiltinMCPAuthority
+	ErrandID                  string
+	ErrandGeneration          uint64
+	WorkspaceID               string
+	StreamID                  string
 	ExecutionID               string
 	TaskID                    string
 	SessionID                 string
@@ -48,5 +52,9 @@ func WithMCPExecutionContext(ctx context.Context, execution MCPExecutionContext)
 // MCPExecutionContextFromContext returns trusted execution identity.
 func MCPExecutionContextFromContext(ctx context.Context) (MCPExecutionContext, bool) {
 	execution, ok := ctx.Value(mcpExecutionContextKey{}).(MCPExecutionContext)
+	errand := execution.ErrandID != "" || execution.ErrandGeneration != 0 || execution.WorkspaceID != "" || execution.StreamID != ""
+	if errand {
+		return execution, ok && execution.TaskID != "" && execution.SessionID == "" && execution.ErrandID != "" && execution.ErrandGeneration > 0 && execution.WorkspaceID != "" && execution.StreamID != "" && execution.ExecutionID != "" && execution.ParentIncarnationID != "" && execution.HarnessGeneration > 0
+	}
 	return execution, ok && execution.TaskID != "" && execution.SessionID != ""
 }

@@ -321,7 +321,7 @@ func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
 	}
 	if info == nil || info.ID != record.AgentExecutionID || info.TaskID != record.TaskID ||
 		info.SessionID != record.SessionID || info.Port < 1 || uint32(info.Port) != state.inventory.InstancePort ||
-		strings.TrimSpace(info.WorkspacePath) == "" {
+		strings.TrimSpace(info.WorkspacePath) == "" || !matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) {
 		return nil, errors.New("authenticated plugin agentctl instance metadata does not match persisted owner")
 	}
 	return info, nil

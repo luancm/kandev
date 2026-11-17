@@ -93,6 +93,8 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	}
 	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" {
 		mcpBackendClient.SetSessionID(cfg.SessionID)
+	}
+	if mcpBackendClient != nil && !cfg.DisableAskQuestion && cfg.SessionID != "" && cfg.ErrandMCPOwner == nil {
 		procMgr.SetUserInputRequestHandler(newCodexUserInputRequestHandler(cfg, mcpBackendClient, s.logger))
 	}
 

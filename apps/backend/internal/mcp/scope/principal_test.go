@@ -2,6 +2,7 @@ package scope
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -39,7 +40,7 @@ func TestScopePrincipalDerivesAutomationIdentityFromExecution(t *testing.T) {
 		session:   &models.TaskSession{ID: "session-1", TaskID: "automation-task"},
 	}}
 
-	ctx, err := resolver.ScopePrincipal(context.Background(), "automation-task", "session-1")
+	ctx, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "automation-task", SessionID: "session-1"})
 	require.NoError(t, err)
 
 	principal, ok := PrincipalFromContext(ctx)
@@ -61,7 +62,7 @@ func TestScopePrincipalRejectsSessionFromAnotherTask(t *testing.T) {
 		session:   &models.TaskSession{ID: "session-1", TaskID: "other-task"},
 	}}
 
-	_, err := resolver.ScopePrincipal(context.Background(), "automation-task", "session-1")
+	_, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "automation-task", SessionID: "session-1"})
 	require.Error(t, err)
 }
 
@@ -94,7 +95,7 @@ func TestScopePrincipalDerivesCoordinatorIdentityFromExecution(t *testing.T) {
 		coordinators: fakeCoordinatorLookup{coordinatorID: "coordinator-1", ok: true},
 	}
 
-	ctx, err := resolver.ScopePrincipal(context.Background(), "conversation-task", "session-1")
+	ctx, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "conversation-task", SessionID: "session-1"})
 	require.NoError(t, err)
 
 	principal, ok := PrincipalFromContext(ctx)
@@ -111,7 +112,7 @@ func TestScopePrincipalDerivesCoordinatorIdentityFromExecution(t *testing.T) {
 func TestScopePrincipalRefusesCoordinatorTaskWithNoLookupWired(t *testing.T) {
 	resolver := &Resolver{tasks: coordinatorConversationLookup()}
 
-	_, err := resolver.ScopePrincipal(context.Background(), "conversation-task", "session-1")
+	_, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "conversation-task", SessionID: "session-1"})
 	require.Error(t, err)
 }
 
@@ -121,7 +122,7 @@ func TestScopePrincipalRefusesOrphanedCoordinatorConversationTask(t *testing.T) 
 		coordinators: fakeCoordinatorLookup{ok: false},
 	}
 
-	_, err := resolver.ScopePrincipal(context.Background(), "conversation-task", "session-1")
+	_, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "conversation-task", SessionID: "session-1"})
 	require.Error(t, err)
 }
 
@@ -131,6 +132,6 @@ func TestScopePrincipalRefusesOnCoordinatorLookupError(t *testing.T) {
 		coordinators: fakeCoordinatorLookup{err: context.DeadlineExceeded},
 	}
 
-	_, err := resolver.ScopePrincipal(context.Background(), "conversation-task", "session-1")
+	_, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "conversation-task", SessionID: "session-1"})
 	require.Error(t, err)
 }

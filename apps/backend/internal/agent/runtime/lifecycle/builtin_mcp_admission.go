@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	p "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 )
@@ -64,7 +65,7 @@ func (m *Manager) validateBuiltinOwner(ctx context.Context, taskID, sessionID, w
 	if scope == nil {
 		return errors.New("built-in MCP principal scope is unavailable")
 	}
-	scoped, err := scope(ctx, taskID, sessionID)
+	scoped, err := scope(ctx, streams.MCPExecutionContext{TaskID: taskID, SessionID: sessionID})
 	if err != nil {
 		return fmt.Errorf("resolve built-in MCP principal: %w", err)
 	}

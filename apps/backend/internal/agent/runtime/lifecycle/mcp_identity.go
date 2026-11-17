@@ -28,7 +28,7 @@ type MCPIdentityScoper func(ctx context.Context, taskID string) (context.Context
 // It runs after the owner identity scoper and is independent of auth mode:
 // automation self/workspace boundaries are required even on single-user
 // installations.
-type MCPPrincipalScoper func(ctx context.Context, taskID, sessionID string) (context.Context, error)
+type MCPPrincipalScoper func(ctx context.Context, execution streams.MCPExecutionContext) (context.Context, error)
 
 // taskScopedMCPHandler scopes every MCP request on one agent stream to the
 // owner of that stream's task.
@@ -38,6 +38,8 @@ type MCPPrincipalScoper func(ctx context.Context, taskID, sessionID string) (con
 // payload session_id would let it name another user's session and inherit
 // their identity — turning the scoping fix into a privilege escalation.
 type taskScopedMCPHandler struct {
+	errandOwner               ExecutionOwner
+	streamID                  string
 	parentIncarnationID       string
 	harnessGeneration         int64
 	builtinAuthority          streams.BuiltinMCPAuthority
@@ -55,6 +57,8 @@ type taskScopedMCPHandler struct {
 }
 
 type currentMCPHandler struct {
+	errandOwner               ExecutionOwner
+	streamID                  string
 	parentIncarnationID       string
 	harnessGeneration         int64
 	execution                 *AgentExecution
@@ -69,7 +73,11 @@ type currentMCPHandler struct {
 }
 
 func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	if h.execution != nil {
+	if h.execution != nil && h.errandOwner.Kind == ExecutionOwnerErrand {
+		if h.errandOwner.RunID != "" || h.errandOwner.RunSessionID != "" || h.errandOwner.Attempt != 0 || h.execution.ID != h.executionID || h.execution.Owner != h.errandOwner || (h.streamManager.isExecutionCurrent != nil && !h.streamManager.isExecutionCurrent(h.execution)) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "tool is not available in this execution", nil)
+		}
+	} else if h.execution != nil {
 		if _, bound := h.execution.metadataValue(mcpprofile.BuiltinBindingMetadataKey); bound &&
 			(h.taskID == "" || h.sessionID == "" || h.execution.ID != h.executionID || h.execution.TaskID != h.taskID || h.execution.SessionID != h.sessionID ||
 				(h.streamManager.isExecutionCurrent != nil && !h.streamManager.isExecutionCurrent(h.execution))) {
@@ -80,10 +88,12 @@ func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.
 	if inner == nil {
 		return nil, errMCPHandlerUnavailable
 	}
-	if h.taskID == "" {
+	if h.taskID == "" && h.errandOwner.Kind != ExecutionOwnerErrand {
 		return inner.Dispatch(ctx, msg)
 	}
 	return (&taskScopedMCPHandler{
+		errandOwner:               h.errandOwner,
+		streamID:                  h.streamID,
 		parentIncarnationID:       h.parentIncarnationID,
 		harnessGeneration:         h.harnessGeneration,
 		inner:                     inner,
@@ -108,7 +118,7 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 	if mcporigin.MessageCarriesTrustedInternalCall(msg) {
 		ctx = mcporigin.WithTrustedInternalCall(ctx)
 	}
-	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
+	execution := streams.MCPExecutionContext{
 		ParentIncarnationID:       h.parentIncarnationID,
 		HarnessGeneration:         h.harnessGeneration,
 		ExecutionID:               h.executionID,
@@ -120,14 +130,26 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 
 		CoordinatorToolPolicy:         h.coordinatorToolPolicy,
 		CoordinatorToolPolicyRequired: h.coordinatorPolicyRequired,
-	})
+	}
+	if h.errandOwner.Kind == ExecutionOwnerErrand {
+		execution.TaskID = h.errandOwner.TaskID
+		execution.SessionID = h.errandOwner.SessionID
+		execution.WorkspaceID = h.errandOwner.WorkspaceID
+		execution.ErrandID = h.errandOwner.ErrandID
+		execution.ErrandGeneration = h.errandOwner.Generation
+		execution.StreamID = h.streamID
+		if _, ok := streams.MCPExecutionContextFromContext(streams.WithMCPExecutionContext(ctx, execution)); !ok {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "tool is not available in this execution", nil)
+		}
+	}
+	ctx = streams.WithMCPExecutionContext(ctx, execution)
 	if invocation, ok := mcporigin.AwaitInvocationFromMessage(msg); ok {
 		ctx = mcporigin.WithAwaitInvocation(ctx, invocation)
 	}
 	scoped := ctx
 	if h.scope != nil {
 		var err error
-		scoped, err = h.scope(ctx, h.taskID)
+		scoped, err = h.scope(ctx, execution.TaskID)
 		if err != nil {
 			h.logger.Error("denying in-session MCP request: cannot resolve the task owner",
 				zap.String("task_id", h.taskID),
@@ -138,9 +160,12 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 		}
 	}
 	if h.principal == nil {
+		if h.errandOwner.Kind == ExecutionOwnerErrand {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, "tool is not available in this execution", nil)
+		}
 		return h.dispatchBuiltinScoped(scoped, msg)
 	}
-	principalScoped, err := h.principal(scoped, h.taskID, h.sessionID)
+	principalScoped, err := h.principal(scoped, execution)
 	if err != nil {
 		h.logger.Error("denying in-session MCP request: cannot resolve the caller principal",
 			zap.String("task_id", h.taskID),
@@ -180,6 +205,8 @@ func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHa
 		}
 	}
 	return &currentMCPHandler{
+		errandOwner:               execution.Owner,
+		streamID:                  execution.DeliveryStreamID,
 		parentIncarnationID:       execution.DeliveryIncarnationID,
 		harnessGeneration:         int64(execution.DeliveryHarnessGeneration),
 		execution:                 execution,

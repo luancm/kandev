@@ -2,6 +2,7 @@ package scope
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -31,7 +32,7 @@ func TestScopePrincipalConfigurationRequiresStoredSessionPurpose(t *testing.T) {
 				},
 				coordinators: fakeCoordinatorLookup{coordinatorID: "coordinator", ok: true},
 			}
-			ctx, err := resolver.ScopePrincipal(context.Background(), "task", "session")
+			ctx, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "task", SessionID: "session"})
 			require.NoError(t, err)
 			principal, ok := PrincipalFromContext(ctx)
 			require.True(t, ok)
@@ -46,6 +47,6 @@ func TestScopePrincipalConfigurationCannotOverrideInvalidManagedPolicy(t *testin
 		workspace: &models.Workspace{ID: "workspace"},
 		session:   &models.TaskSession{ID: "session", TaskID: "task", Metadata: map[string]interface{}{"config_mode": true}},
 	}}
-	_, err := resolver.ScopePrincipal(context.Background(), "task", "session")
+	_, err := resolver.ScopePrincipal(context.Background(), streams.MCPExecutionContext{TaskID: "task", SessionID: "session"})
 	require.Error(t, err)
 }

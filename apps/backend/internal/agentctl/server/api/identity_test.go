@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -97,6 +98,9 @@ func TestGetIdentityRoundTripsThroughTheRealClient(t *testing.T) {
 	}
 	if identity.ServerIdentity != cfg.ServerIdentity {
 		t.Errorf("ServerIdentity = %q, want %q", identity.ServerIdentity, cfg.ServerIdentity)
+	}
+	if !slices.Contains(identity.Capabilities, agentctltypes.ErrandMCPOwnerCapability) {
+		t.Fatal("errand MCP owner capability missing")
 	}
 	if identity.BuiltinMCPCatalogVersion != 1 || !slices.Contains(identity.Capabilities, mcpprofile.BuiltinPackagesCapability) {
 		t.Fatal("identity must advertise the built-in package capability and catalog version")

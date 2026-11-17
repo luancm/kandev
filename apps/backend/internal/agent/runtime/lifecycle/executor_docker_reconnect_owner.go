@@ -115,6 +115,9 @@ func (r *DockerExecutor) classifyReconnectOwners(
 		if !relevant {
 			continue
 		}
+		if !matchErrandMCPOwner(req.ErrandMCPOwner, info.ErrandMCPOwner) {
+			return nil, fmt.Errorf("agent instance %q has mismatched errand owner", info.ID)
+		}
 		if len(candidates) >= maxReconnectOwnerCandidates {
 			return nil, fmt.Errorf("more than %d agent instances claim session %q", maxReconnectOwnerCandidates, req.SessionID)
 		}

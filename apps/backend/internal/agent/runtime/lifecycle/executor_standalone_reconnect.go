@@ -141,6 +141,9 @@ func standaloneOwnerRelevant(req *ExecutorCreateRequest, info *agentctl.Instance
 }
 
 func verifyStandaloneOwnerIdentity(req *ExecutorCreateRequest, info *agentctl.InstanceInfo) error {
+	if !matchErrandMCPOwner(req.ErrandMCPOwner, info.ErrandMCPOwner) {
+		return errors.New("retained agentctl errand owner mismatch")
+	}
 	if info.Port <= 0 {
 		return fmt.Errorf("agent instance %q has no reachable port", info.ID)
 	}

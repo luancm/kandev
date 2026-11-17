@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -96,7 +97,7 @@ func dispatchTrustedMCP(
 	ctx := context.Background()
 	if ts.mcpCallerTaskID != "" && ts.mcpCallerSessionID != "" {
 		resolver := mcpscope.NewResolver(ts.TaskRepo, nil, func() bool { return false }, ts.Logger)
-		ctx, err = resolver.ScopePrincipal(ctx, ts.mcpCallerTaskID, ts.mcpCallerSessionID)
+		ctx, err = resolver.ScopePrincipal(ctx, streams.MCPExecutionContext{TaskID: ts.mcpCallerTaskID, SessionID: ts.mcpCallerSessionID})
 		if err != nil {
 			return nil, err
 		}

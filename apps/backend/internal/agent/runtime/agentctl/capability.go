@@ -44,3 +44,15 @@ func (c *Client) RequireCapability(ctx context.Context, capability string) error
 		capability,
 	)
 }
+
+// RequireCapability rejects helpers that would silently ignore an instance field.
+func (c *ControlClient) RequireCapability(ctx context.Context, capability string) error {
+	identity, err := c.GetIdentity(ctx)
+	if err != nil {
+		return fmt.Errorf("read agentctl identity: %w", err)
+	}
+	if identity != nil && slices.Contains(identity.Capabilities, capability) {
+		return nil
+	}
+	return fmt.Errorf("agentctl does not support %s; update the execution runtime before retrying", capability)
+}

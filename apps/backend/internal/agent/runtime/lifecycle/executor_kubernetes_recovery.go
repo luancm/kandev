@@ -365,7 +365,8 @@ func validKubernetesRecoveredInstance(
 ) bool {
 	return info != nil && info.ID == recorded.agentctlInstanceID &&
 		info.SessionID == record.SessionID && info.TaskID == record.TaskID &&
-		info.WorkspacePath == kubernetesWorkspacePath && info.Port == recorded.remotePort
+		info.WorkspacePath == kubernetesWorkspacePath && info.Port == recorded.remotePort &&
+		matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner)
 }
 
 func buildRecoveredKubernetesInstance(

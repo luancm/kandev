@@ -139,6 +139,7 @@ func buildDockerContainerConfig(req *ExecutorCreateRequest, executorType string)
 		McpServers:                     req.McpServers,
 		McpProviders:                   req.McpProviders,
 		McpProfile:                     req.McpProfile,
+		ErrandMCPOwner:                 req.ErrandMCPOwner,
 		PromptSuggestions:              req.PromptSuggestions,
 		CopilotNativeSessionEvents:     req.CopilotNativeSessionEvents,
 		PrepareScript:                  prepareScript,

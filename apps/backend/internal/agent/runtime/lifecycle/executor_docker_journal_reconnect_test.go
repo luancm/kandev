@@ -352,3 +352,25 @@ func TestJournalFailureCannotSelectLegacyReconnect(t *testing.T) {
 	defer control.mu.Unlock()
 	require.NotContains(t, control.held, "exec-new")
 }
+
+func TestDockerReconnectErrandRejectsForeignSameSessionWithoutMutation(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(fmt.Sprint("foreign=", foreign), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "delivery.bbolt")
+			control := newJournalReconnectControl(func(string) string { return path })
+			control.addInstance("exec-old", "", "errand:child", 41001, false)
+			if foreign {
+				control.instances["exec-old"].ErrandMCPOwner = errandMCPOwner(ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", WorkspaceID: "ws", ErrandID: "child", Generation: 2})
+			}
+			server := newReconnectStatusServer(t, control)
+			exec, req, docker := reconnectRequest(t, server, "exec-new", "exec-old", "errand:child")
+			req.TaskID = ""
+			req.ErrandMCPOwner = errandMCPOwner(ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", WorkspaceID: "ws", ErrandID: "child", Generation: 1})
+			_, _, _, err := exec.findExistingInstance(context.Background(), docker, control, req, "container", "172.17.0.2", "exec-new", "token")
+			require.Error(t, err)
+			require.False(t, control.hasMethod("DELETE"))
+			require.False(t, control.hasMethod("CREATE"))
+			require.Contains(t, control.instances, "exec-old")
+		})
+	}
+}

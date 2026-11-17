@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -19,6 +20,7 @@ type Principal struct {
 	CallerSessionID string
 	Surface         mcpprofile.Surface
 	CoordinatorID   string
+	ErrandID        string
 }
 
 func (p Principal) IsAutomation() bool {
@@ -42,14 +44,21 @@ func WithPrincipal(ctx context.Context, principal Principal) context.Context {
 // PrincipalFromContext returns the server-derived caller principal.
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	principal, ok := ctx.Value(principalContextKey{}).(Principal)
-	return principal, ok && principal.CallerTaskID != "" && principal.CallerSessionID != ""
+	if principal.Surface == mcpprofile.SurfaceErrand {
+		return principal, ok && principal.CallerTaskID != "" && principal.CallerSessionID == "" && principal.ErrandID != "" && principal.WorkspaceID != "" && principal.AutomationID == "" && principal.CoordinatorID == ""
+	}
+	return principal, ok && principal.CallerTaskID != "" && principal.CallerSessionID != "" && principal.ErrandID == ""
 }
 
 // ScopePrincipal derives the MCP principal from the execution's own task and
 // session. It intentionally does not read any identity or surface fields from
 // an agent payload. Non-automation tasks still receive their normal surface so
 // downstream code has one consistent trusted caller shape.
-func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string) (context.Context, error) {
+func (r *Resolver) ScopePrincipal(ctx context.Context, execution streams.MCPExecutionContext) (context.Context, error) {
+	taskID, sessionID := execution.TaskID, execution.SessionID
+	if hasErrandIdentity(execution) {
+		return r.scopeErrandPrincipal(ctx, execution)
+	}
 	if r == nil || taskID == "" || sessionID == "" || r.tasks == nil {
 		return nil, fmt.Errorf("resolve MCP principal: task and session are required")
 	}
@@ -88,6 +97,10 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		Surface:         surface,
 		CoordinatorID:   coordinatorID,
 	}), nil
+}
+
+func hasErrandIdentity(execution streams.MCPExecutionContext) bool {
+	return execution.ErrandID != "" || execution.ErrandGeneration != 0 || execution.WorkspaceID != "" || execution.StreamID != ""
 }
 
 func (r *Resolver) resolvePrincipalTask(ctx context.Context, taskID string) (*models.Task, error) {
@@ -180,4 +193,65 @@ func (r *Resolver) principalSurface(ctx context.Context, task *models.Task) (aut
 		return "", "", mcpprofile.SurfaceAutomation, fmt.Errorf("automation ID is missing")
 	}
 	return automationID, "", mcpprofile.SurfaceAutomation, nil
+}
+
+func (r *Resolver) scopeErrandPrincipal(ctx context.Context, execution streams.MCPExecutionContext) (context.Context, error) {
+	if r == nil || r.tasks == nil {
+		return nil, fmt.Errorf("resolve MCP errand: lookup unavailable")
+	}
+	if _, ok := streams.MCPExecutionContextFromContext(streams.WithMCPExecutionContext(ctx, execution)); !ok {
+		return nil, fmt.Errorf("resolve MCP errand: incomplete identity")
+	}
+	lookup, ok := r.tasks.(interface {
+		GetErrand(context.Context, string) (*models.Errand, error)
+		ErrandHarnessBindingStale(context.Context, string, *models.ErrandHarnessBinding) (bool, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("resolve MCP errand: lookup unavailable")
+	}
+	task, err := r.resolvePrincipalTask(ctx, execution.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err := r.resolvePrincipalWorkspace(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+	if workspace != execution.WorkspaceID {
+		return nil, fmt.Errorf("resolve MCP errand: workspace mismatch")
+	}
+	row, err := lookup.GetErrand(ctx, execution.ErrandID)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil || row.ID != execution.ErrandID || row.TaskID != execution.TaskID {
+		return nil, fmt.Errorf("resolve MCP errand: task mismatch")
+	}
+	binding := &models.ErrandHarnessBinding{ErrandID: execution.ErrandID, Generation: execution.ErrandGeneration, ExecutionID: execution.ExecutionID, IncarnationID: execution.ParentIncarnationID, HarnessGeneration: execution.HarnessGeneration, StreamID: execution.StreamID}
+	stale, err := lookup.ErrandHarnessBindingStale(ctx, execution.TaskID, binding)
+	if err != nil {
+		return nil, err
+	}
+	if stale {
+		return nil, fmt.Errorf("resolve MCP errand: stale binding")
+	}
+	ctx, err = r.errandActorContext(ctx, execution.TaskID, row.ParentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	return WithPrincipal(ctx, Principal{WorkspaceID: workspace, CallerTaskID: execution.TaskID, ErrandID: execution.ErrandID, Surface: mcpprofile.SurfaceErrand}), nil
+}
+
+func (r *Resolver) errandActorContext(ctx context.Context, taskID, parentSessionID string) (context.Context, error) {
+	if parentSessionID == "" {
+		return ctx, nil
+	}
+	session, err := r.principalSession(ctx, taskID, parentSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, fmt.Errorf("resolve MCP errand: parent lookup unavailable")
+	}
+	return models.WithExecutorActor(ctx, session.ExecutorActorUserID), nil
 }

@@ -465,37 +465,45 @@ type kubernetesAgentctlInstanceControl interface {
 	GetInstance(context.Context, string) (*agentctl.InstanceInfo, error)
 }
 
-func createOrReconcileKubernetesAgentctlInstance(
+func createOrReconcileKubernetesAgentctlInstance(ctx context.Context, control kubernetesAgentctlInstanceControl, request *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error) {
+	response, _, err := createOrReconcileKubernetesAgentctlInstanceWithOwnership(ctx, control, request)
+	return response, err
+}
+
+func createOrReconcileKubernetesAgentctlInstanceWithOwnership(
 	ctx context.Context,
 	control kubernetesAgentctlInstanceControl,
 	request *agentctl.CreateInstanceRequest,
-) (*agentctl.CreateInstanceResponse, error) {
+) (*agentctl.CreateInstanceResponse, bool, error) {
 	response, createErr := control.CreateInstance(ctx, request)
 	if createErr == nil {
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return response, nil
+		return response, true, nil
 	}
 	if !kubeexecutor.IsAmbiguousCreateError(createErr) {
-		return nil, createErr
+		return nil, false, createErr
 	}
 	reconcileCtx, cancel := kubernetesAmbiguousCreateContext(ctx)
 	defer cancel()
 	info, reconcileErr := control.GetInstance(reconcileCtx, request.ID)
 	if reconcileErr != nil {
-		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
+		return nil, false, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
 	}
 	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
 	if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
-		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
+		return nil, false, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
+	}
+	if !matchErrandMCPOwner(request.ErrandMCPOwner, info.ErrandMCPOwner) {
+		return nil, false, errors.New("retained agentctl errand owner mismatch")
 	}
 	if info.WorkspacePath != request.WorkspacePath {
-		return nil, errors.Join(createErr, errors.New(
+		return nil, false, errors.Join(createErr, errors.New(
 			"reconcile ambiguous agentctl create: existing instance workspace does not match request",
 		))
 	}
-	return response, nil
+	return response, false, nil
 }
 
 func validateKubernetesAgentctlInstanceResponse(

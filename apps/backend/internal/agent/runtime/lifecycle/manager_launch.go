@@ -1543,6 +1543,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		PromptSuggestions:                m.promptSuggestionsForLaunch(ctx, reqWithWorktree.McpMode),
 		McpProviders:                     reqWithWorktree.McpProviders,
 		McpProfile:                       reqWithWorktree.McpProfile,
+		ErrandMCPOwner:                   errandMCPOwner(reqWithWorktree.Owner),
 		AuthToken:                        launchAuthToken,
 		BootstrapNonce:                   m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		AgentctlStartupConfig:            agentctlStartupConfigForExecutor(m.agentctlStartupConfig, reqWithWorktree.ExecutorType),
@@ -1934,6 +1935,13 @@ func (m *Manager) publishExecutionPrepareCompleted(execution *AgentExecution, re
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
 	if req == nil {
 		return nil, errors.New("launch request is required")
+	}
+	if req.Owner.Kind == ExecutionOwnerErrand {
+		copyReq := *req
+		profile := mcpprofile.New(mcpprofile.SurfaceErrand, nil, nil)
+		copyReq.McpProfile = &profile
+		copyReq.McpMode = mcpmode.Errand
+		req = &copyReq
 	}
 	if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
 		if err := m.validateBuiltinOwner(ctx, req.TaskID, req.SessionID, req.WorkspaceID, req.McpProfile); err != nil {

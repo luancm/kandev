@@ -12,6 +12,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -203,12 +204,25 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	mgr.executorRegistry = NewExecutorRegistry(mgr.logger)
 	mgr.executorRegistry.Register(backend)
 	req := &LaunchRequest{WorkspaceID: "ws", AgentProfileID: "profile-1", ExecutorType: "local_pc", WorkspacePath: t.TempDir(), Owner: ExecutionOwner{Kind: ExecutionOwnerErrand, WorkspaceID: "ws", TaskID: "task-vertical", ErrandID: "child-vertical", Generation: 1}, OwnerAdmission: allowRunOwner{}, DeliveryStreamID: "stream-vertical", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, TurnID: "turn-vertical", InitialDeliverySubmissionID: "first-vertical", TaskDescription: "hello"}
+	inherited := mcpprofile.New(mcpprofile.SurfaceConfiguration, nil, nil)
+	req.McpProfile = &inherited
+	req.McpMode = "config"
 	execution, err := mgr.Launch(ctx, req)
 	require.NoError(t, err)
+	require.Equal(t, mcpprofile.SurfaceConfiguration, inherited.Surface)
+	require.Equal(t, "config", req.McpMode)
+	require.Equal(t, mcpprofile.SurfaceErrand, backend.lastRequest.McpProfile.Surface)
+	require.Equal(t, "errand", backend.lastRequest.McpMode)
+	require.Equal(t, errandMCPOwner(req.Owner), backend.lastRequest.ErrandMCPOwner)
+	require.Empty(t, execution.TaskID)
+	require.Empty(t, execution.SessionID)
+	require.Equal(t, req.Owner, execution.Owner)
 	bound, err := repo.BindErrandExecution(ctx, "child-vertical", 1, execution.ID)
 	require.NoError(t, err)
 	require.True(t, bound)
 	require.NoError(t, mgr.StartAgentProcess(ctx, execution.ID))
+	require.Equal(t, DurableDeliveryV1, execution.DeliveryMode)
+	require.True(t, execution.matchesErrandPermissionTarget(ErrandPermissionTarget{Owner: req.Owner, ExecutionID: execution.ID, IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream-vertical"}))
 	select {
 	case err = <-dispatch:
 		require.NoError(t, err)

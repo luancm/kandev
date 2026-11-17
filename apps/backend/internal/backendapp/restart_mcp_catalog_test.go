@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"net/http/httptest"
 	"net/url"
 	"sort"
@@ -445,7 +446,8 @@ func newResumeCatalogLifecycle(t *testing.T, workspaceID string, log *logger.Log
 		lifecycle.ExecutorFallbackDeny, t.TempDir(), log,
 	)
 	t.Cleanup(func() { _ = mgr.Stop() })
-	mgr.SetMCPPrincipalScoper(func(ctx context.Context, taskID, sessionID string) (context.Context, error) {
+	mgr.SetMCPPrincipalScoper(func(ctx context.Context, execution streams.MCPExecutionContext) (context.Context, error) {
+		taskID, sessionID := execution.TaskID, execution.SessionID
 		return mcpscope.WithPrincipal(ctx, mcpscope.Principal{
 			WorkspaceID: workspaceID, CallerTaskID: taskID, CallerSessionID: sessionID,
 			Surface: p.SurfaceKanbanTask,

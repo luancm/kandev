@@ -28,6 +28,7 @@ var SurvivalCapabilities = []string{
 	// retained-process adoption.
 	acpcompat.CopilotNativeCompactionCapability,
 	agentctltypes.ProjectMCPDeliveryCapability,
+	agentctltypes.ErrandMCPOwnerCapability,
 	agentctltypes.ManagedRuntimePrivatePreparationCapability,
 	agentctltypes.ManagedRuntimeRepairReuseCapability,
 }
