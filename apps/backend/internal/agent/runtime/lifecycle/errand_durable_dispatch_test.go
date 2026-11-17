@@ -306,6 +306,66 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	messages, _, err = repo.ListErrandMessages(ctx, "child-vertical", "", 10)
 	require.NoError(t, err)
 	require.Equal(t, "late first", messages[1].Content)
+	historicalShell := tool
+	historicalShell.DeliverySequence = 9
+	historicalShell.ToolCallID = "shell-old"
+	historicalShell.ProtocolMessageID = "shell-old-source"
+	historicalShell.ToolTitle = "Earlier command"
+	historicalShell.NormalizedPayload = streams.NewShellExec("echo old", "/tmp", "", 0, false)
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, historicalShell, 0))
+	oldPatch, err := streams.EncodeShellOutputPatch(nil, streams.ShellExecOutput{Stdout: "old shell output"}, "old-shell-epoch", true)
+	require.NoError(t, err)
+	historicalShell.Type = streams.EventTypeShellOutputUpdate
+	historicalShell.DeliverySequence = 10
+	historicalShell.DeliverySubmissionID = ""
+	historicalShell.PromptGeneration = 0
+	historicalShell.TurnID = ""
+	historicalShell.ShellOutput = oldPatch
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, historicalShell, 0))
+	require.Equal(t, 2, callbacks, "historical shell output must not update successor activity")
+	shell := next
+	shell.DeliverySequence = 11
+	shell.ToolCallID = "shell-next"
+	shell.ProtocolMessageID = "shell-source"
+	shell.ToolTitle = "Run command"
+	shell.NormalizedPayload = streams.NewShellExec("echo hello", "/tmp", "", 0, false)
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, shell, 0))
+	patch, err := streams.EncodeShellOutputPatch(nil, streams.ShellExecOutput{Stdout: "hello from shell"}, "shell-epoch", true)
+	require.NoError(t, err)
+	shell.Type = streams.EventTypeShellOutputUpdate
+	shell.DeliverySequence = 12
+	shell.DeliverySubmissionID = ""
+	shell.PromptGeneration = 0
+	shell.TurnID = ""
+	shell.ShellOutput = patch
+	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, shell, 0))
+	require.Equal(t, 4, callbacks)
+	require.Equal(t, second.ID, notification.DeliverySubmissionID)
+	require.EqualValues(t, 2, notification.PromptGeneration)
+	messages, _, err = repo.ListErrandMessages(ctx, "child-vertical", "", 10)
+	require.NoError(t, err)
+	var shellMessage *models.Message
+	var oldShellMessage *models.Message
+	for _, message := range messages {
+		if message.Type == models.MessageTypeToolExecute && message.Metadata["tool_call_id"] == "shell-next" {
+			shellMessage = message
+		}
+		if message.Type == models.MessageTypeToolExecute && message.Metadata["tool_call_id"] == "shell-old" {
+			oldShellMessage = message
+		}
+	}
+	require.NotNil(t, shellMessage)
+	require.NotNil(t, oldShellMessage)
+	oldDetail, err := repo.GetErrandMessageDetail(ctx, "child-vertical", oldShellMessage.ID)
+	require.NoError(t, err)
+	oldOutput, ok := models.ExtractShellExecOutput(oldDetail.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "old shell output", oldOutput.Stdout)
+	detail, err := repo.GetErrandMessageDetail(ctx, "child-vertical", shellMessage.ID)
+	require.NoError(t, err)
+	output, ok := models.ExtractShellExecOutput(detail.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "hello from shell", output.Stdout)
 	var count int
 	require.NoError(t, db.GetContext(ctx, &count, `SELECT COUNT(*) FROM task_sessions`))
 	require.Zero(t, count)
@@ -372,6 +432,20 @@ func TestErrandToolCallbackDoesNotMutateSuccessorAfterOriginCheck(t *testing.T) 
 	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, old, false, "", false)
 	require.Equal(t, "current", execution.activeToolSnapshot().ToolCallID)
 	current.Type = streams.EventTypeToolUpdate
+	current.ToolStatus = "completed"
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, current, false, "", false)
+	require.Nil(t, execution.activeToolSnapshot())
+	current.Type = streams.EventTypeToolCall
+	current.ToolCallID = "shell"
+	current.ToolStatus = "pending"
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, current, false, "", false)
+	require.Equal(t, "shell", execution.activeToolSnapshot().ToolCallID)
+	old.Type = streams.EventTypeShellOutputUpdate
+	old.ToolCallID = "shell"
+	old.ToolStatus = "completed"
+	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, old, false, "", false)
+	require.Equal(t, "shell", execution.activeToolSnapshot().ToolCallID)
+	current.Type = streams.EventTypeShellOutputUpdate
 	current.ToolStatus = "completed"
 	mgr.handleAgentEventAtContextResetBoundaryInternal(execution, current, false, "", false)
 	require.Nil(t, execution.activeToolSnapshot())

@@ -41,7 +41,7 @@ func (r *Repository) errandDeliveryEventAdmissionTx(ctx context.Context, tx *sql
 		return "", repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	if event.SubmissionID == "" {
-		if event.EventType == streams.EventTypeToolUpdate {
+		if event.EventType == streams.EventTypeToolUpdate || event.EventType == streams.EventTypeShellOutputUpdate {
 			source, err := r.resolveErrandAdmittedToolSourceTx(ctx, tx, errandID, event)
 			return source.TurnID, err
 		}
@@ -164,15 +164,18 @@ func validateErrandSubmittedEvent(errandID, taskID string, event *models.AgentDe
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	switch agent.Type {
-	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError, streams.EventTypeToolCall, streams.EventTypeToolUpdate:
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError, streams.EventTypeToolCall, streams.EventTypeToolUpdate, streams.EventTypeShellOutputUpdate:
 	default:
 		return fmt.Errorf("unsupported errand delivery event type %q", agent.Type)
 	}
-	if agent.ShellOutput != nil {
+	if agent.ShellOutput != nil && agent.Type != streams.EventTypeShellOutputUpdate {
 		return fmt.Errorf("unsupported errand shell output")
 	}
-	if (agent.Type == streams.EventTypeToolCall || agent.Type == streams.EventTypeToolUpdate) && (agent.ToolCallID == "" || (agent.NormalizedPayload != nil && agent.NormalizedPayload.ShellExec() != nil)) {
+	if (agent.Type == streams.EventTypeToolCall || agent.Type == streams.EventTypeToolUpdate) && agent.ToolCallID == "" {
 		return fmt.Errorf("unsupported errand tool event")
+	}
+	if agent.NormalizedPayload != nil && agent.NormalizedPayload.ShellExec() != nil && agent.Type != streams.EventTypeShellOutputUpdate && (agent.Type != streams.EventTypeToolCall || agent.NormalizedPayload.ShellExec().Output != nil) {
+		return fmt.Errorf("unsupported errand shell output")
 	}
 
 	if !errandProofMatches(errandID, taskID, event, agent, proof) {

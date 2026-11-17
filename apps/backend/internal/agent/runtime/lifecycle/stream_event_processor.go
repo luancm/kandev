@@ -305,7 +305,7 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		}
 		return nil
 	}
-	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && prepared.durableEvent != nil && (prepared.event.Type == streams.EventTypeToolCall || prepared.event.Type == streams.EventTypeToolUpdate) {
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && prepared.durableEvent != nil && (prepared.event.Type == streams.EventTypeToolCall || prepared.event.Type == streams.EventTypeToolUpdate || prepared.event.Type == streams.EventTypeShellOutputUpdate) {
 		if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, prepared.durableEvent, delivery, prepared.deliveryEffect); err != nil {
 			return err
 		}

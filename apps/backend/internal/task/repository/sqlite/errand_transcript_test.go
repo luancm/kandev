@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,9 @@ func TestErrandTranscriptSchemaWithoutSession(t *testing.T) {
 			t.Fatalf("%s exists = %v, err = %v; Errand transcript must not require task_sessions", table, exists, err)
 		}
 	}
+	var indexCount int
+	require.NoError(t, repo.db.Get(&indexCount, `SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_errand_messages_payload_digest'`))
+	require.Equal(t, 1, indexCount)
 }
 
 type errandTranscriptStore interface {
@@ -29,6 +33,7 @@ type errandTranscriptStore interface {
 	ListErrandTurns(context.Context, string) ([]*models.Turn, error)
 	CreateErrandMessage(context.Context, string, *models.Message) error
 	GetErrandMessage(context.Context, string, string) (*models.Message, error)
+	GetErrandMessageDetail(context.Context, string, string) (*models.Message, error)
 	UpdateErrandMessage(context.Context, string, *models.Message) error
 	ListErrandMessages(context.Context, string, string, int) ([]*models.Message, bool, error)
 }
@@ -166,9 +171,19 @@ func assertErrandLargeToolPayload(t *testing.T, store errandTranscriptStore, tas
 	output := strings.Repeat("\x00full stdout\n", 1000)
 	message := &models.Message{ID: "large-tool", TaskID: taskID, TurnID: turnID, AuthorType: models.MessageAuthorAgent, AuthorID: "execution", Type: models.MessageTypeToolCall, Content: "command", RequestsInput: true, Metadata: shellOutputMetadata(output, "stderr"), CreatedAt: errandScenarioBase.Add(time.Second), UpdatedAt: errandScenarioBase.Add(time.Second)}
 	require.NoError(t, store.CreateErrandMessage(ctx, "errand-transcript", message))
-	got, err := store.GetErrandMessage(ctx, "errand-transcript", message.ID)
+	listed, _, err := store.ListErrandMessages(ctx, "errand-transcript", "", 10)
 	require.NoError(t, err)
-	require.Equal(t, message, got)
+	encoded, err := json.Marshal(listed)
+	require.NoError(t, err)
+	require.Less(t, len(encoded), len(output))
+	require.NotContains(t, string(encoded), output)
+	got, err := store.GetErrandMessageDetail(ctx, "errand-transcript", message.ID)
+	require.NoError(t, err)
+	snapshot, ok := models.ExtractShellExecOutput(got.Metadata)
+	require.True(t, ok)
+	require.Equal(t, output, snapshot.Stdout)
+	got, err = store.GetErrandMessage(ctx, "errand-transcript", message.ID)
+	require.NoError(t, err)
 	got.Content = "updated command"
 	require.NoError(t, store.UpdateErrandMessage(ctx, "errand-transcript", got))
 	updated, err := store.GetErrandMessage(ctx, "errand-transcript", message.ID)

@@ -125,7 +125,7 @@ func validateErrandNativeIdentityTx(ctx context.Context, tx *sqlx.Tx, proof erra
 }
 
 func (r *Repository) ResolveErrandToolOrigin(ctx context.Context, event *models.AgentDeliveryEvent) (*models.ErrandToolOrigin, error) {
-	if event == nil || (event.EventType != streams.EventTypeToolUpdate && event.EventType != streams.EventTypeToolCall) {
+	if event == nil || (event.EventType != streams.EventTypeToolUpdate && event.EventType != streams.EventTypeToolCall && event.EventType != streams.EventTypeShellOutputUpdate) {
 		return nil, repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	errandID, ok := errandDeliveryIdentity(event.SessionID)

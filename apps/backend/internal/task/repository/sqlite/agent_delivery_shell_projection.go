@@ -23,7 +23,7 @@ func (r *Repository) persistCanonicalShellOutputTx(ctx context.Context, tx *sqlx
 	if models.ToolPayloadRemoved(metadata) {
 		return nil
 	}
-	head, err := loadShellOutputHead(ctx, tx, messageID)
+	head, err := loadShellOutputHead(ctx, tx, taskShellOutputQueries, messageID)
 	if err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func (r *Repository) persistCanonicalShellOutputTx(ctx context.Context, tx *sqlx
 	if head == nil && agent.ShellOutput.BaseRevision != 0 {
 		return streams.ErrShellOutputBaseline
 	}
-	base, err := shellOutputStateTx(ctx, tx, messageID, head)
+	base, err := shellOutputStateTx(ctx, tx, taskShellOutputQueries, messageID, head)
 	if err != nil {
 		return err
 	}
@@ -60,33 +60,41 @@ func reconcileCanonicalShellIdentityTx(ctx context.Context, tx *sqlx.Tx, message
 }
 
 func (r *Repository) persistCanonicalShellChunksTx(ctx context.Context, tx *sqlx.Tx, messageID string, metadata map[string]any, event *models.AgentDeliveryEvent, agent streams.AgentEvent, head *shellOutputHead, base *streams.ShellOutputState, identity string) error {
-	next, err := streams.ApplyShellOutputPatch(base, agent.ShellOutput)
+	output, err := persistShellChunksTx(ctx, tx, taskShellOutputQueries, messageID, event, agent, head, base, identity)
 	if err != nil {
 		return err
+	}
+	return r.updateShellOutputSummaryTx(ctx, tx, messageID, metadata, agent, output)
+}
+
+func persistShellChunksTx(ctx context.Context, tx *sqlx.Tx, queries shellOutputQueries, messageID string, event *models.AgentDeliveryEvent, agent streams.AgentEvent, head *shellOutputHead, base *streams.ShellOutputState, identity string) (streams.ShellExecOutput, error) {
+	next, err := streams.ApplyShellOutputPatch(base, agent.ShellOutput)
+	if err != nil {
+		return streams.ShellExecOutput{}, err
 	}
 	if head == nil {
 		head = &shellOutputHead{Identity: identity}
-		if err := saveShellOutputHead(ctx, tx, messageID, head); err != nil {
-			return err
+		if err := saveShellOutputHead(ctx, tx, queries, messageID, head); err != nil {
+			return streams.ShellExecOutput{}, err
 		}
 	}
-	head.StdoutStart, head.StdoutEnd, err = applyShellOutputChunksTx(ctx, tx, messageID, "stdout", head.StdoutStart, head.StdoutEnd, agent.ShellOutput.Stdout)
+	head.StdoutStart, head.StdoutEnd, err = applyShellOutputChunksTx(ctx, tx, queries, messageID, "stdout", head.StdoutStart, head.StdoutEnd, agent.ShellOutput.Stdout)
 	if err != nil {
-		return err
+		return streams.ShellExecOutput{}, err
 	}
-	head.StderrStart, head.StderrEnd, err = applyShellOutputChunksTx(ctx, tx, messageID, "stderr", head.StderrStart, head.StderrEnd, agent.ShellOutput.Stderr)
+	head.StderrStart, head.StderrEnd, err = applyShellOutputChunksTx(ctx, tx, queries, messageID, "stderr", head.StderrStart, head.StderrEnd, agent.ShellOutput.Stderr)
 	if err != nil {
-		return err
+		return streams.ShellExecOutput{}, err
 	}
 	head.Header, err = shellOutputHeader(agent.ShellOutput, next.Output)
 	if err != nil {
-		return err
+		return streams.ShellExecOutput{}, err
 	}
 	head.Sequence = event.Sequence
-	if err := saveShellOutputHead(ctx, tx, messageID, head); err != nil {
-		return err
+	if err := saveShellOutputHead(ctx, tx, queries, messageID, head); err != nil {
+		return streams.ShellExecOutput{}, err
 	}
-	return r.updateShellOutputSummaryTx(ctx, tx, messageID, metadata, agent, next.Output)
+	return next.Output, nil
 }
 
 func loadShellOutputMessageTx(ctx context.Context, tx *sqlx.Tx, sessionID string, agent streams.AgentEvent) (string, map[string]any, error) {
@@ -138,6 +146,19 @@ func loadShellOutputMessageTx(ctx context.Context, tx *sqlx.Tx, sessionID string
 }
 
 func (r *Repository) updateShellOutputSummaryTx(ctx context.Context, tx *sqlx.Tx, messageID string, metadata map[string]any, agent streams.AgentEvent, output streams.ShellExecOutput) error {
+	projected, err := projectShellOutputSummary(metadata, agent, output)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(projected)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET metadata=?,payload_digest='',payload_size=0,content=CASE WHEN ?='' THEN content ELSE ? END,updated_at=? WHERE id=?`), string(encoded), agent.ToolTitle, agent.ToolTitle, r.nowUTC(), messageID)
+	return err
+}
+
+func projectShellOutputSummary(metadata map[string]any, agent streams.AgentEvent, output streams.ShellExecOutput) (map[string]any, error) {
 	if agent.NormalizedPayload != nil {
 		metadata["normalized"] = agent.NormalizedPayload
 	}
@@ -145,15 +166,15 @@ func (r *Repository) updateShellOutputSummaryTx(ctx context.Context, tx *sqlx.Tx
 	if !ok {
 		encoded, err := json.Marshal(metadata)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := json.Unmarshal(encoded, &metadata); err != nil {
-			return err
+			return nil, err
 		}
 		full, ok = models.RehydrateShellOutput(metadata, models.ShellExecOutputSnapshot{Stdout: output.Stdout, Stderr: output.Stderr, ExitCode: output.ExitCode, Truncated: output.Truncated})
 	}
 	if !ok {
-		return streams.ErrShellOutputBaseline
+		return nil, streams.ErrShellOutputBaseline
 	}
 	projected := models.ProjectMessageMetadata(full)
 	projected[shellOutputStorageKey] = 1
@@ -163,12 +184,7 @@ func (r *Repository) updateShellOutputSummaryTx(ctx context.Context, tx *sqlx.Tx
 	if agent.ToolTitle != "" {
 		projected["title"] = agent.ToolTitle
 	}
-	encoded, err := json.Marshal(projected)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET metadata=?,payload_digest='',payload_size=0,content=CASE WHEN ?='' THEN content ELSE ? END,updated_at=? WHERE id=?`), string(encoded), agent.ToolTitle, agent.ToolTitle, r.nowUTC(), messageID)
-	return err
+	return projected, nil
 }
 
 func (r *Repository) rehydrateShellOutputChunks(ctx context.Context, message *models.Message) error {
@@ -188,14 +204,14 @@ func (r *Repository) rehydrateShellOutputChunks(ctx context.Context, message *mo
 	if models.ToolPayloadRemoved(metadata) {
 		return fmt.Errorf("tool_payload_removed")
 	}
-	head, err := loadShellOutputHead(ctx, tx, message.ID)
+	head, err := loadShellOutputHead(ctx, tx, taskShellOutputQueries, message.ID)
 	if err != nil {
 		return err
 	}
 	if head == nil {
 		return streams.ErrShellOutputBaseline
 	}
-	state, err := shellOutputStateTx(ctx, tx, message.ID, head)
+	state, err := shellOutputStateTx(ctx, tx, taskShellOutputQueries, message.ID, head)
 	if err != nil {
 		return err
 	}

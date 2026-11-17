@@ -452,7 +452,7 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		Data:                            eventData,
 	}
 
-	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate) {
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeShellOutputUpdate) {
 		payload.TaskID = execution.Owner.TaskID
 		payload.DeliverySubmissionID = event.DeliverySubmissionID
 		payload.PromptGeneration = event.PromptGeneration

@@ -1545,7 +1545,7 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 		zap.String("operation_id", event.OperationID),
 		zap.Int("text_length", len(event.Text)))
 
-	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate) {
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeShellOutputUpdate) {
 		if execution.applyErrandToolActivity(event) {
 			m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
 		}

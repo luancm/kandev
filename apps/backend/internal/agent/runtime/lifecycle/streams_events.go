@@ -93,7 +93,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	durableEvent := durableAgentEvent(execution, event)
 	var origin *models.ErrandToolOrigin
 	var errand bool
-	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeToolCall) {
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeShellOutputUpdate) {
 		origin, err = resolveErrandToolOrigin(ctx, delivery, durableEvent)
 		if err != nil {
 			return preparedAgentEvent{}, err

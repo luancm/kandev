@@ -1,5 +1,11 @@
 package sqlite
 
+import (
+	"fmt"
+
+	"github.com/kandev/kandev/internal/db/dialect"
+)
+
 func (r *Repository) initErrandTranscriptSchema() error {
 	statements := []struct{ name, sql string }{
 		{"errand_execution_generations.table", `CREATE TABLE IF NOT EXISTS errand_execution_generations (
@@ -19,11 +25,20 @@ func (r *Repository) initErrandTranscriptSchema() error {
 		{"errand_turns.order", `CREATE INDEX IF NOT EXISTS idx_errand_turns_order ON errand_turns(errand_id,created_at,id)`},
 		{"errand_messages.table", `CREATE TABLE IF NOT EXISTS errand_messages (
  id TEXT PRIMARY KEY, errand_id TEXT NOT NULL, turn_id TEXT NOT NULL, payload TEXT NOT NULL,
+ payload_digest TEXT NOT NULL DEFAULT '', payload_size BIGINT NOT NULL DEFAULT 0,
  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
  FOREIGN KEY(errand_id) REFERENCES task_session_errands(id) ON DELETE CASCADE,
  FOREIGN KEY(errand_id,turn_id) REFERENCES errand_turns(errand_id,id) ON DELETE CASCADE)`},
 		{"errand_messages.order", `CREATE INDEX IF NOT EXISTS idx_errand_messages_order ON errand_messages(errand_id,created_at,id)`},
 		{"errand_messages.turn", `CREATE INDEX IF NOT EXISTS idx_errand_messages_turn ON errand_messages(errand_id,turn_id,created_at,id)`},
+		{"errand_messages.payload_digest", `CREATE INDEX IF NOT EXISTS idx_errand_messages_payload_digest ON errand_messages(payload_digest)`},
+		{"errand_message_shell_output.table", `CREATE TABLE IF NOT EXISTS errand_message_shell_output (
+ message_id TEXT PRIMARY KEY REFERENCES errand_messages(id) ON DELETE CASCADE,
+ identity TEXT NOT NULL, header TEXT NOT NULL, stdout_start BIGINT NOT NULL, stdout_end BIGINT NOT NULL,
+ stderr_start BIGINT NOT NULL, stderr_end BIGINT NOT NULL, last_sequence BIGINT NOT NULL)`},
+		{"errand_message_shell_output_chunks.table", fmt.Sprintf(`CREATE TABLE IF NOT EXISTS errand_message_shell_output_chunks (
+ message_id TEXT NOT NULL REFERENCES errand_message_shell_output(message_id) ON DELETE CASCADE,
+ field TEXT NOT NULL, ordinal BIGINT NOT NULL, content %s NOT NULL, PRIMARY KEY(message_id,field,ordinal))`, dialect.BlobType(r.db.DriverName()))},
 	}
 	for _, stmt := range statements {
 		if err := r.migrate.Apply(stmt.name, stmt.sql); err != nil {

@@ -42,8 +42,10 @@ func (e *AgentExecution) applyErrandToolActivity(event agentctl.AgentEvent) bool
 	switch event.Type {
 	case streams.EventTypeToolCall:
 		e.setActiveTool(activeTopLevelTool{ToolCallID: event.ToolCallID, Name: event.ToolName, Title: event.ToolTitle, Status: event.ToolStatus})
-	case streams.EventTypeToolUpdate:
-		if isTerminalToolUpdate(event) {
+	case streams.EventTypeToolUpdate, streams.EventTypeShellOutputUpdate:
+		status := event
+		status.Type = streams.EventTypeToolUpdate
+		if isTerminalToolUpdate(status) {
 			e.clearActiveTool(event.ToolCallID)
 		}
 	}
