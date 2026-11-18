@@ -120,12 +120,17 @@ type PermissionRequestData struct {
 	AgentID       string `json:"agent_id"`
 	// OwnerKind is "run" for a run-owned Office execution, which Office
 	// answers; the task permission path ignores it.
-	OwnerKind  string                   `json:"owner_kind,omitempty"`
-	RequestID  string                   `json:"request_id"`
-	PendingID  string                   `json:"pending_id"`
-	ToolCallID string                   `json:"tool_call_id"`
-	Title      string                   `json:"title"`
-	Options    []map[string]interface{} `json:"options"`
+	OwnerKind            string                   `json:"owner_kind,omitempty"`
+	ErrandID             string                   `json:"errand_id,omitempty"`
+	ErrandGeneration     uint64                   `json:"errand_generation,omitempty"`
+	DeliverySubmissionID string                   `json:"delivery_submission_id,omitempty"`
+	PromptGeneration     uint64                   `json:"prompt_generation,omitempty"`
+	TurnID               string                   `json:"turn_id,omitempty"`
+	RequestID            string                   `json:"request_id"`
+	PendingID            string                   `json:"pending_id"`
+	ToolCallID           string                   `json:"tool_call_id"`
+	Title                string                   `json:"title"`
+	Options              []map[string]interface{} `json:"options"`
 	// HumanInput marks a provider-native question only a person can answer.
 	// Automatic consumers must leave it pending.
 	HumanInput    bool                   `json:"human_input,omitempty"`

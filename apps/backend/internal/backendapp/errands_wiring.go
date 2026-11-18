@@ -116,6 +116,7 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) *errand
 	p.orchestratorSvc.SetErrandsEnabled(func() bool { return p.features.Errands })
 	p.orchestratorSvc.SetParentAwaitEnder(service)
 	p.taskSvc.SetTaskErrandCanceller(p.orchestratorSvc)
+	adapter.WireOwnedPermissionEvents(service.PublishPermissionStatus)
 	service.StartWorkers(p.ctx)
 	p.addCleanup(func() error {
 		service.StopWorkers()

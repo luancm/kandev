@@ -3,11 +3,13 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +45,7 @@ func exerciseOwnedErrandPermission(t *testing.T, humanInput bool) {
 	f := newErrandLaunchFixture(t)
 	launch := f.request()
 	seedOwnedLaunchReceipt(t, f, launch, models.DeliverySubmissionAccepted, "execution", false)
-	request := seedErrandPermissionRequest(t, f, launch, humanInput)
+	request := seedErrandPermissionRequest(t, f, launch, humanInput, false)
 	pending, err := f.repo.LatestErrandPendingPermissions(t.Context(), []string{launch.ErrandID})
 	require.NoError(t, err)
 	require.NotNil(t, pending[launch.ErrandID])
@@ -100,7 +102,76 @@ func exerciseOwnedErrandPermission(t *testing.T, humanInput bool) {
 	require.Equal(t, 1, resolutions)
 }
 
-func seedErrandPermissionRequest(t *testing.T, f *errandLaunchFixture, launch errands.LaunchRequest, humanInput bool) errands.PermissionResponseRequest {
+func TestErrandAutomaticPermissionUsesExactOwnedSource(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	launch := f.request()
+	seedOwnedLaunchReceipt(t, f, launch, models.DeliverySubmissionAccepted, "execution", false)
+	request := seedErrandPermissionRequest(t, f, launch, false, true)
+	choice := streams.PermissionChoice{OptionID: request.OptionID, Kind: streams.PermissionOptionKindAllowOnce}
+	deliveries := 0
+	adapter := NewErrandAdapter(f.svc)
+	adapter.SetOwnedLaunchRuntime(errandPermissionRuntimeFixture{
+		snapshot: func(_ context.Context, _ runtimeapi.ErrandPermissionTarget) (*runtimeapi.ErrandPermissionSnapshot, error) {
+			return &runtimeapi.ErrandPermissionSnapshot{Permissions: []streams.PendingAgentPermission{{
+				RequestID: request.RequestID, PendingID: request.PendingID, Options: []streams.PermissionChoice{choice},
+			}}}, nil
+		},
+		resolve: func(_ context.Context, _ *runtimeapi.ErrandPermissionSnapshot, source models.ErrandPermissionSource, optionID string) (*streams.PermissionResolveResponse, error) {
+			deliveries++
+			return &streams.PermissionResolveResponse{RequestID: source.RequestID, PendingID: source.PendingID, OptionID: optionID, OptionKind: choice.Kind, Status: "resolved"}, nil
+		},
+	}, nil)
+	adapter.WireOwnedPermissionEvents(nil)
+	event := watcher.PermissionRequestData{
+		OwnerKind: string(runtimeapi.ExecutionOwnerErrand), TaskID: launch.TaskID, ErrandID: launch.ErrandID,
+		AgentID: "execution", ErrandGeneration: 1, DeliverySubmissionID: launch.SubmissionID,
+		PromptGeneration: 1, TurnID: launch.TurnID, RequestID: request.RequestID, PendingID: request.PendingID,
+		AutoApprovedOptionID: choice.OptionID, AutoApprovedOptionKind: string(choice.Kind),
+		AutoApprovalSource: streams.PermissionDecisionSourceAutoApprove, AutoApprovalPending: true,
+	}
+	wrong := event
+	wrong.DeliverySubmissionID = "foreign-submission"
+	f.svc.handlePermissionRequest(t.Context(), wrong)
+	require.Zero(t, deliveries)
+	f.svc.handlePermissionRequest(t.Context(), event)
+	f.svc.handlePermissionRequest(t.Context(), event)
+	require.Equal(t, 1, deliveries)
+	messages, _, err := f.repo.ListErrandMessages(t.Context(), launch.ErrandID, "", 10)
+	require.NoError(t, err)
+	index := slices.IndexFunc(messages, func(message *models.Message) bool { return message.Type == models.MessageTypePermissionRequest })
+	require.NotEqual(t, -1, index)
+	permission := messages[index]
+	require.Equal(t, string(models.PermissionStatusApproved), permission.Metadata["status"])
+	require.Equal(t, string(models.PermissionPresentationAutomatic), permission.Metadata[models.PermissionPresentationMetadataKey])
+	audit, ok := permission.Metadata["permission_resolution"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, string(models.PermissionSourceAutoApprove), audit["source"])
+}
+
+func TestErrandInteractivePermissionRefreshesOnlyOwnedAttention(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	launch := f.request()
+	adapter := NewErrandAdapter(f.svc)
+	var observed [][2]string
+	adapter.WireOwnedPermissionEvents(func(_ context.Context, taskID, errandID string) {
+		observed = append(observed, [2]string{taskID, errandID})
+	})
+	event := watcher.PermissionRequestData{
+		OwnerKind: string(runtimeapi.ExecutionOwnerErrand), TaskID: launch.TaskID, ErrandID: launch.ErrandID,
+		RequestID: "request", PendingID: "pending",
+	}
+	question := event
+	question.HumanInput = true
+	f.svc.handlePermissionRequest(t.Context(), question)
+	foreignSession := event
+	foreignSession.TaskSessionID = launch.ParentSessionID
+	f.svc.handlePermissionRequest(t.Context(), foreignSession)
+	require.Empty(t, observed)
+	f.svc.handlePermissionRequest(t.Context(), event)
+	require.Equal(t, [][2]string{{launch.TaskID, launch.ErrandID}}, observed)
+}
+
+func seedErrandPermissionRequest(t *testing.T, f *errandLaunchFixture, launch errands.LaunchRequest, humanInput, automatic bool) errands.PermissionResponseRequest {
 	t.Helper()
 	request := errands.PermissionResponseRequest{
 		TaskID: launch.TaskID, ErrandID: launch.ErrandID, RequestID: "request", PendingID: "pending", OptionID: "allow",
@@ -110,6 +181,12 @@ func seedErrandPermissionRequest(t *testing.T, f *errandLaunchFixture, launch er
 		PermissionTitle: "Allow action", PermissionHumanInput: humanInput,
 		PermissionOptions: []streams.PermissionOption{{OptionID: request.OptionID, Name: "Allow", Kind: streams.PermissionOptionKindAllowOnce}},
 		TurnID:            launch.TurnID, PromptGeneration: 1,
+	}
+	if automatic {
+		agent.AutoApprovalPending = true
+		agent.AutoApprovedOptionID = request.OptionID
+		agent.AutoApprovedOptionKind = string(streams.PermissionOptionKindAllowOnce)
+		agent.AutoApprovalSource = streams.PermissionDecisionSourceAutoApprove
 	}
 	payload, err := json.Marshal(agent)
 	require.NoError(t, err)

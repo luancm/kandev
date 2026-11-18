@@ -4,6 +4,7 @@ import type { Message } from "../../lib/types/http";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
+import { createAutomaticPermissionProfile } from "./automatic-permission-presentation";
 import { watchWs } from "./causal-waits";
 import {
   expectNoHorizontalOverflow,
@@ -72,7 +73,7 @@ export async function exerciseOwnedErrandView({
       taskId,
       parentId,
       errandId,
-      phone,
+      { phone },
     );
     try {
       await expect(
@@ -145,6 +146,53 @@ export async function exerciseOwnedErrandView({
   }
 }
 
+export async function exerciseOwnedErrandAutomaticPermission({
+  page,
+  api,
+  seed,
+  backend,
+  phone,
+}: {
+  page: Page;
+  api: ApiClient;
+  seed: SeedData;
+  backend: BackendContext;
+  phone: boolean;
+}) {
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    const profile = await createAutomaticPermissionProfile(api, seed.agentProfileId);
+    const { taskId, parentId, errands } = await startErrands(api, seed, backend, {
+      prompts: ["/e2e:permission-flow"],
+      errandAgentProfileId: profile.id,
+    });
+    const errandId = errands[0].errand_id;
+    await waitDelivered(api, taskId, [errandId]);
+    expect(await readOwnedPermission(api, taskId, errandId)).toMatchObject({
+      session_id: "",
+      metadata: {
+        status: "approved",
+        permission_presentation: "automatic",
+        permission_resolution: { option_id: "allow", source: "auto_approve", result: "accepted" },
+      },
+    });
+    const { conversation, parent } = await openOwnedErrandConversation(
+      page,
+      taskId,
+      parentId,
+      errandId,
+      { phone, finished: true },
+    );
+    await expect(
+      conversation.getByText("Permission was granted and command executed."),
+    ).toBeVisible();
+    await expect(conversation.getByTestId("permission-action-row")).toHaveCount(0);
+    await returnToErrandParent(conversation, parent, phone);
+  } finally {
+    await restore();
+  }
+}
+
 async function returnToErrandParent(conversation: Locator, parent: Locator, phone: boolean) {
   const back = conversation.getByTestId("errand-back-to-parent");
   if (phone) await expectTouchTarget(back);
@@ -158,13 +206,17 @@ async function openOwnedErrandConversation(
   taskId: string,
   parentId: string,
   errandId: string,
-  phone: boolean,
+  { phone, finished = false }: { phone: boolean; finished?: boolean },
 ) {
   await page.goto(`/t/${taskId}`);
   const parent = parentChat(page, parentId);
   const chip = parent.getByTestId("errands-chip");
   await (phone ? chip.tap() : chip.click());
   const choices = page.getByTestId(phone ? "errands-drawer-content" : "errands-popover");
+  if (finished) {
+    const history = choices.getByTestId(`errands-history-toggle-${parentId}`);
+    await (phone ? history.tap() : history.click());
+  }
   const open = choices.getByTestId(
     phone ? `errands-panel-row-${errandId}` : `errand-open-${errandId}`,
   );

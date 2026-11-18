@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"go.uber.org/zap"
@@ -25,6 +26,7 @@ type ownedErrandPermissionStore interface {
 	LookupErrandPermissionSource(context.Context, models.ErrandPermissionOwner, string, string) (*models.ErrandPermissionSource, error)
 	ClaimErrandPermissionResolution(context.Context, models.ErrandPermissionSource, models.PermissionResolutionAudit, bool) (*models.PermissionResolutionClaimResult, error)
 	FinalizeErrandPermissionResolution(context.Context, models.ErrandPermissionSource, models.ErrandPermissionFinalization) (*models.PermissionResolutionFinalizeResult, error)
+	UpdateErrandAutomaticPermissionPresentation(context.Context, models.ErrandPermissionSource, string, string, models.PermissionPresentation) (bool, error)
 }
 
 // RespondToErrandPermission accepts one provider-offered action after claiming
@@ -36,6 +38,10 @@ func (a *ErrandAdapter) RespondToErrandPermission(ctx context.Context, request e
 	if err := a.svc.authorizeTask(ctx, request.TaskID); err != nil {
 		return models.ErrErrandNotFound
 	}
+	return a.resolveOwnedPermission(ctx, request, nil)
+}
+
+func (a *ErrandAdapter) resolveOwnedPermission(ctx context.Context, request errands.PermissionResponseRequest, event *watcher.PermissionRequestData) error {
 	store, ok := a.svc.repo.(ownedErrandPermissionStore)
 	if !ok || a.runtime == nil {
 		return ErrPermissionAuditFailed
@@ -44,23 +50,49 @@ func (a *ErrandAdapter) RespondToErrandPermission(ctx context.Context, request e
 	if err != nil {
 		return err
 	}
-	snapshot, err := a.runtime.SnapshotErrandPermissions(ctx, target)
-	if runtimeapi.IsNotFound(err) || runtimeapi.IsTerminalPermissionError(err) {
+	if event != nil && !ownedPermissionOriginMatches(event, source) {
 		return ErrPermissionStale
 	}
+	snapshot, choice, err := a.selectOwnedPermission(ctx, target, request, event)
 	if err != nil {
+		if event != nil {
+			a.showUnclaimedAutomaticPermission(ctx, store, source, event, err)
+		}
 		return err
 	}
-	choice, err := chooseErrandPermission(snapshot, request)
-	if err != nil {
-		return err
+	resolutionSource := models.PermissionSourceWeb
+	if event != nil {
+		resolutionSource = models.PermissionSourceAutoApprove
 	}
-	claimID, err := claimErrandPermission(ctx, store, source, choice)
+	claimID, err := claimErrandPermission(ctx, store, source, choice, resolutionSource)
 	if err != nil {
 		return err
 	}
 	status, deliveryErr := a.deliverErrandPermission(ctx, snapshot, source, choice, request.Cancelled)
 	return a.finalizeErrandPermission(ctx, store, source, claimID, status, deliveryErr)
+}
+
+func (a *ErrandAdapter) selectOwnedPermission(ctx context.Context, target runtimeapi.ErrandPermissionTarget, request errands.PermissionResponseRequest, event *watcher.PermissionRequestData) (*runtimeapi.ErrandPermissionSnapshot, *streams.PermissionChoice, error) {
+	snapshot, err := a.runtime.SnapshotErrandPermissions(ctx, target)
+	if runtimeapi.IsNotFound(err) || runtimeapi.IsTerminalPermissionError(err) {
+		return nil, nil, ErrPermissionStale
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	choice, err := chooseErrandPermission(snapshot, request)
+	if err != nil {
+		return nil, nil, err
+	}
+	if event != nil && !automaticErrandChoiceMatches(event, choice) {
+		return nil, nil, ErrPermissionOptionNotOffered
+	}
+	return snapshot, choice, nil
+}
+
+func automaticErrandChoiceMatches(event *watcher.PermissionRequestData, choice *streams.PermissionChoice) bool {
+	return string(choice.Kind) == event.AutoApprovedOptionKind &&
+		(choice.Kind == streams.PermissionOptionKindAllowOnce || choice.Kind == streams.PermissionOptionKindAllowAlways)
 }
 
 func (a *ErrandAdapter) readErrandPermissionTarget(ctx context.Context, store ownedErrandPermissionStore, request errands.PermissionResponseRequest) (runtimeapi.ErrandPermissionTarget, models.ErrandPermissionSource, error) {
@@ -133,14 +165,18 @@ func chooseErrandPermission(snapshot *runtimeapi.ErrandPermissionSnapshot, reque
 	return offeredPermissionOption(permission, request.OptionID)
 }
 
-func claimErrandPermission(ctx context.Context, store ownedErrandPermissionStore, source models.ErrandPermissionSource, choice *streams.PermissionChoice) (string, error) {
+func claimErrandPermission(ctx context.Context, store ownedErrandPermissionStore, source models.ErrandPermissionSource, choice *streams.PermissionChoice, resolutionSource models.PermissionResolutionSource) (string, error) {
 	userID, actor := permissionAuditActor(ctx)
+	automatic := resolutionSource == models.PermissionSourceAutoApprove
+	if automatic {
+		userID, actor = "", models.PermissionActorAutomation
+	}
 	audit := models.PermissionResolutionAudit{
-		ClaimID: uuid.NewString(), ActorUserID: userID, ActorKind: actor, Source: models.PermissionSourceWeb,
+		ClaimID: uuid.NewString(), ActorUserID: userID, ActorKind: actor, Source: resolutionSource,
 		RequestID: source.RequestID, PendingID: source.PendingID, OptionID: choice.OptionID,
 		OptionKind: string(choice.Kind), SelectedAt: time.Now().UTC(),
 	}
-	claim, err := store.ClaimErrandPermissionResolution(ctx, source, audit, false)
+	claim, err := store.ClaimErrandPermissionResolution(ctx, source, audit, automatic)
 	if errors.Is(err, repoerrors.ErrAgentDeliveryIdentityMismatch) {
 		return "", ErrPermissionStale
 	}
@@ -207,12 +243,19 @@ func (a *ErrandAdapter) finalizeErrandPermission(ctx context.Context, store owne
 	if err != nil || finalized == nil || finalized.Outcome != models.PermissionFinalized {
 		return ErrPermissionFinalizationFailed
 	}
+	a.publishErrandPermissionChange(finalCtx, source.Owner)
+	return outcomeErr
+}
+
+func (a *ErrandAdapter) publishErrandPermissionChange(ctx context.Context, owner models.ErrandPermissionOwner) {
+	if a.permissionStatusChanged != nil {
+		a.permissionStatusChanged(ctx, owner.TaskID, owner.ErrandID)
+	}
 	if a.svc.eventBus != nil {
-		payload := map[string]any{"task_id": source.Owner.TaskID, "errand_id": source.Owner.ErrandID}
+		payload := map[string]any{"task_id": owner.TaskID, "errand_id": owner.ErrandID}
 		event := bus.NewEvent(events.ErrandTranscriptChanged, "orchestrator", payload)
-		if err := a.svc.eventBus.Publish(finalCtx, events.ErrandTranscriptChanged, event); err != nil {
+		if err := a.svc.eventBus.Publish(ctx, events.ErrandTranscriptChanged, event); err != nil {
 			a.svc.logger.Debug("publish errand permission change", zap.Error(err))
 		}
 	}
-	return outcomeErr
 }

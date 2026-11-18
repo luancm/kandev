@@ -10,16 +10,17 @@ import (
 	"math"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func (r *Repository) ClaimErrandPermissionResolution(ctx context.Context, source models.ErrandPermissionSource, audit models.PermissionResolutionAudit, automaticOnly bool) (*models.PermissionResolutionClaimResult, error) {
-	if audit.RequestID != source.RequestID || audit.PendingID != source.PendingID {
+	if audit.ClaimID == "" || audit.RequestID != source.RequestID || audit.PendingID != source.PendingID {
 		return nil, repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
-	tx, message, err := r.beginErrandPermissionResolution(ctx, source, audit.ClaimID, true)
+	tx, message, err := r.beginErrandPermissionResolution(ctx, source, true)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimNotFound}, nil
 	}
@@ -34,6 +35,9 @@ func (r *Repository) ClaimErrandPermissionResolution(ctx context.Context, source
 	if !eligible {
 		return &models.PermissionResolutionClaimResult{Outcome: outcome, Message: message}, nil
 	}
+	if automaticOnly && !matchesErrandAutomaticPermissionProposal(message, audit) {
+		return nil, repoerrors.ErrAgentDeliveryIdentityMismatch
+	}
 	audit.Result = models.PermissionResolutionDispatching
 	message.Metadata["permission_resolution"] = audit
 	if err = r.writeErrandPermissionTx(ctx, tx, source.Owner.ErrandID, message); err != nil {
@@ -43,6 +47,14 @@ func (r *Repository) ClaimErrandPermissionResolution(ctx context.Context, source
 		return nil, err
 	}
 	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimed, Message: message}, nil
+}
+
+func matchesErrandAutomaticPermissionProposal(message *models.Message, audit models.PermissionResolutionAudit) bool {
+	metadata := message.Metadata
+	return audit.Source == models.PermissionSourceAutoApprove && audit.OptionID != "" &&
+		(audit.OptionKind == string(streams.PermissionOptionKindAllowOnce) || audit.OptionKind == string(streams.PermissionOptionKindAllowAlways)) &&
+		metadata["auto_approval_pending"] == true && metadata["auto_approved_option_id"] == audit.OptionID &&
+		metadata["auto_approved_option_kind"] == audit.OptionKind && metadata["auto_approval_source"] == streams.PermissionDecisionSourceAutoApprove
 }
 
 func errandPermissionClaimEligibility(message *models.Message, automaticOnly bool) (models.PermissionResolutionClaimOutcome, bool, error) {
@@ -66,7 +78,10 @@ func (r *Repository) FinalizeErrandPermissionResolution(ctx context.Context, sou
 	if final.FinalizedAt.IsZero() || final.Result == "" || final.Result == models.PermissionResolutionDispatching {
 		return nil, fmt.Errorf("invalid permission resolution result")
 	}
-	tx, message, err := r.beginErrandPermissionResolution(ctx, source, final.ClaimID, false)
+	if final.ClaimID == "" {
+		return nil, repoerrors.ErrAgentDeliveryIdentityMismatch
+	}
+	tx, message, err := r.beginErrandPermissionResolution(ctx, source, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeNotFound}, nil
 	}
@@ -85,6 +100,9 @@ func (r *Repository) FinalizeErrandPermissionResolution(ctx context.Context, sou
 	existing.Result, existing.FinalizedAt = final.Result, &finalizedAt
 	message.Metadata["permission_resolution"] = existing
 	message.Metadata["status"] = string(final.Status)
+	if existing.Source == models.PermissionSourceAutoApprove && final.Status == models.PermissionStatusExpired {
+		message.Metadata[models.PermissionPresentationMetadataKey] = string(models.PermissionPresentationUnavailable)
+	}
 	if err = r.writeErrandPermissionTx(ctx, tx, source.Owner.ErrandID, message); err != nil {
 		return nil, err
 	}
@@ -94,9 +112,9 @@ func (r *Repository) FinalizeErrandPermissionResolution(ctx context.Context, sou
 	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalized, Message: message}, nil
 }
 
-func (r *Repository) beginErrandPermissionResolution(ctx context.Context, source models.ErrandPermissionSource, claimID string, current bool) (*sqlx.Tx, *models.Message, error) {
+func (r *Repository) beginErrandPermissionResolution(ctx context.Context, source models.ErrandPermissionSource, current bool) (*sqlx.Tx, *models.Message, error) {
 	owner := source.Owner
-	if !validErrandPermissionSource(source) || claimID == "" {
+	if !validErrandPermissionSource(source) {
 		return nil, nil, repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)

@@ -866,7 +866,7 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		zap.String("pending_id", data.PendingID),
 		zap.String("title", data.Title))
 
-	if data.OwnerKind == string(lifecycle.ExecutionOwnerRun) {
+	if s.handleNonSessionPermissionRequest(ctx, data) {
 		return
 	}
 	if data.TaskSessionID == "" {

@@ -1,5 +1,8 @@
 import { test } from "../../fixtures/test-base";
-import { exerciseOwnedErrandView } from "../../helpers/owned-errand";
+import {
+  exerciseOwnedErrandAutomaticPermission,
+  exerciseOwnedErrandView,
+} from "../../helpers/owned-errand";
 
 test("phone opens an owned Errand from the drawer and returns to its parent", async ({
   testPage: page,
@@ -29,4 +32,14 @@ test("phone approves a live Errand tool action", async ({
 }) => {
   test.setTimeout(120_000);
   await exerciseOwnedErrandView({ page, api, seed, backend, phone: true, permission: true });
+});
+
+test("phone retains a tool action approved by the Errand's saved policy", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandAutomaticPermission({ page, api, seed, backend, phone: true });
 });

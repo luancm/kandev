@@ -301,7 +301,7 @@ reply hint.
 
 Independent Errands return questions and blockers in their result to the parent. The host-owned agentctl instance identity refuses Codex native user-input callbacks and classified provider-native human-input permission requests before they create clarification or permission waiters. Ordinary task-session questions retain their existing path. The independent Errand helper capability requires this policy as well as MCP owner projection. Unsupported helpers fail admission. See [the independent ownership decision](../../../decisions/2026-11-17-errand-owned-conversations.md).
 
-The Errand transcript renders genuine action requests with the shared permission controls. `errand.permission.respond` requires task control and the exact Errand, request and pending IDs. The backend resolves the current owned execution and retained harness binding, checks the live options and claims the original durable message before sending a provider response. It finalizes that claim against the same retained source and publishes a task-scoped transcript change.
+The transcript uses shared action controls. `errand.permission.respond` requires task control and exact Errand, request and pending IDs. Manual and saved automatic approvals check the offered choice and retained execution, harness and prompt submission before claiming the durable request. Finalize that claim against its original source. An unclaimed automatic proposal can become interactive if the request is still pending and its choice is unavailable. Publish transcript and parent attention updates.
 
 `kandev-context.md` uses `{delegation_policy_section}` and
 `{errand_tools_section}`, populated through `KandevContextOptions` fields

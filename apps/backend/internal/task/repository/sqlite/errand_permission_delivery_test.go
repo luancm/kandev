@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -229,6 +230,8 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 	agent.RequestID, agent.PendingID = "automatic-request", "automatic-pending"
 	agent.PermissionHumanInput = false
 	agent.AutoApprovedOptionID, agent.AutoApprovalPending = "allow", true
+	agent.AutoApprovedOptionKind = string(streams.PermissionOptionKindAllowOnce)
+	agent.AutoApprovalSource = streams.PermissionDecisionSourceAutoApprove
 	successor.Sequence = 2
 	successor.Payload, err = json.Marshal(agent)
 	require.NoError(t, err)
@@ -264,6 +267,23 @@ func exerciseErrandPermissionDelivery(t *testing.T, repo *Repository, concurrent
 		require.NoError(t, lookupErr)
 		return *found
 	}
+	wrongAutomatic := models.PermissionResolutionAudit{
+		ClaimID: "wrong-auto-claim", RequestID: "automatic-request", PendingID: "automatic-pending",
+		OptionID: "foreign-option", OptionKind: string(streams.PermissionOptionKindAllowOnce), Source: models.PermissionSourceAutoApprove,
+	}
+	automaticSource := lookup(wrongAutomatic.RequestID, wrongAutomatic.PendingID)
+	_, err = resolver.ClaimErrandPermissionResolution(ctx, automaticSource, wrongAutomatic, true)
+	require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryIdentityMismatch)
+	changed, err := repo.UpdateErrandAutomaticPermissionPresentation(ctx, automaticSource, wrongAutomatic.OptionID, wrongAutomatic.OptionKind, models.PermissionPresentationInteractive)
+	require.NoError(t, err)
+	require.False(t, changed)
+	changed, err = repo.UpdateErrandAutomaticPermissionPresentation(ctx, automaticSource, "allow", wrongAutomatic.OptionKind, models.PermissionPresentationInteractive)
+	require.NoError(t, err)
+	require.True(t, changed)
+	interactive, err := repo.GetErrandMessage(ctx, "permission-errand", automaticID)
+	require.NoError(t, err)
+	require.True(t, interactive.RequestsInput)
+	require.Equal(t, string(models.PermissionPresentationInteractive), interactive.Metadata[models.PermissionPresentationMetadataKey])
 	autoAudit := models.PermissionResolutionAudit{ClaimID: "auto-claim", RequestID: "human-request", PendingID: "human-pending"}
 	autoClaim, err := resolver.ClaimErrandPermissionResolution(ctx, lookup(autoAudit.RequestID, autoAudit.PendingID), autoAudit, true)
 	require.NoError(t, err)

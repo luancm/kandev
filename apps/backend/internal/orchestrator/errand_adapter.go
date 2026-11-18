@@ -13,9 +13,10 @@ import (
 // ErrandAdapter satisfies the errands service's launcher, teardown, and
 // MCP selection seams on top of the orchestrator.
 type ErrandAdapter struct {
-	svc       *Service
-	runtime   runtimeapi.Runtime
-	workspace func(context.Context, string, string) (*runtimeapi.WorkspaceInfo, error)
+	svc                     *Service
+	runtime                 runtimeapi.Runtime
+	workspace               func(context.Context, string, string) (*runtimeapi.WorkspaceInfo, error)
+	permissionStatusChanged func(context.Context, string, string)
 }
 
 var (

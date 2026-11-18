@@ -882,7 +882,8 @@ type Service struct {
 
 	// unattendedPermissionHandler denies a permission request of a coordinator's
 	// unattended turn; nil = requests wait for a person. Set once at wiring.
-	unattendedPermissionHandler UnattendedPermissionHandler
+	unattendedPermissionHandler  UnattendedPermissionHandler
+	ownedErrandPermissionHandler func(context.Context, watcher.PermissionRequestData)
 
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
