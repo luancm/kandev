@@ -53,38 +53,38 @@ func (r *Repository) ReserveErrandParentAdmission(ctx context.Context, admission
 		if err != nil {
 			return err
 		}
-		state, err := readErrandAdmission(ctx, tx, admission)
-		if err != nil {
-			return err
-		}
-		if state != "" {
-			reservation.State = models.ErrandAdmissionState(state)
-			return nil
-		}
-		if admission.SenderSessionID != row.ParentSessionID {
-			return nil
-		}
-		if row.Lifecycle == models.ErrandLifecycleCancelled {
-			return models.ErrErrandVersionConflict
-		}
-		pending, err := unresolvedErrandAdmission(ctx, tx, row.ID)
-		if err != nil {
-			return err
-		}
-		if pending {
-			return models.ErrErrandVersionConflict
-		}
-		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_parent_admission
-			(task_id, parent_session_id, errand_id, sender_session_id, turn_id, submission_id, state, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`), admission.TaskID, admission.ParentSessionID, admission.ErrandID,
-			admission.SenderSessionID, admission.TurnID, admission.SubmissionID, r.nowUTC(), r.nowUTC())
-		reservation = models.ErrandAdmissionReservation{Created: true, State: models.ErrandAdmissionReserved}
+		reservation, err = r.reserveErrandParentAdmissionTx(ctx, tx, row, admission)
 		return err
 	})
 	if err != nil {
 		return models.ErrandAdmissionReservation{}, err
 	}
 	return reservation, nil
+}
+
+func (r *Repository) reserveErrandParentAdmissionTx(ctx context.Context, tx *sqlx.Tx, row *models.Errand, admission models.ErrandParentAdmission) (models.ErrandAdmissionReservation, error) {
+	state, err := readErrandAdmission(ctx, tx, admission)
+	if err != nil || state != "" {
+		return models.ErrandAdmissionReservation{State: models.ErrandAdmissionState(state)}, err
+	}
+	if admission.SenderSessionID != row.ParentSessionID {
+		return models.ErrandAdmissionReservation{}, nil
+	}
+	if row.Lifecycle == models.ErrandLifecycleCancelled {
+		return models.ErrandAdmissionReservation{}, models.ErrErrandVersionConflict
+	}
+	pending, err := unresolvedErrandAdmission(ctx, tx, row.ID)
+	if err != nil {
+		return models.ErrandAdmissionReservation{}, err
+	}
+	if pending {
+		return models.ErrandAdmissionReservation{}, models.ErrErrandVersionConflict
+	}
+	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_parent_admission
+		(task_id, parent_session_id, errand_id, sender_session_id, turn_id, submission_id, state, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`), admission.TaskID, admission.ParentSessionID, admission.ErrandID,
+		admission.SenderSessionID, admission.TurnID, admission.SubmissionID, r.nowUTC(), r.nowUTC())
+	return models.ErrandAdmissionReservation{Created: true, State: models.ErrandAdmissionReserved}, err
 }
 
 // DecideErrandParentAdmission consumes only positive acceptance or definite
@@ -152,7 +152,12 @@ func admissionErrand(ctx context.Context, tx *sqlx.Tx, a models.ErrandParentAdmi
 	return row, nil
 }
 
-func readErrandAdmission(ctx context.Context, tx *sqlx.Tx, a models.ErrandParentAdmission) (string, error) {
+type errandAdmissionReader interface {
+	Rebind(string) string
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func readErrandAdmission(ctx context.Context, tx errandAdmissionReader, a models.ErrandParentAdmission) (string, error) {
 	var task, parent, sender, turn, state string
 	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT task_id, parent_session_id, sender_session_id, turn_id, state
 		FROM errand_parent_admission WHERE errand_id = ? AND submission_id = ?`), a.ErrandID, a.SubmissionID).Scan(&task, &parent, &sender, &turn, &state)
@@ -166,6 +171,11 @@ func readErrandAdmission(ctx context.Context, tx *sqlx.Tx, a models.ErrandParent
 		return "", models.ErrErrandVersionConflict
 	}
 	return state, nil
+}
+
+func (r *Repository) ReadOwnedErrandParentAdmission(ctx context.Context, admission models.ErrandParentAdmission) (models.ErrandAdmissionState, error) {
+	state, err := readErrandAdmission(ctx, r.ro, admission)
+	return models.ErrandAdmissionState(state), err
 }
 
 func unresolvedErrandAdmission(ctx context.Context, tx *sqlx.Tx, errandID string) (bool, error) {

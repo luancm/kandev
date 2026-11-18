@@ -116,7 +116,11 @@ func validateOwnedCompletionTarget(ctx context.Context, tx *sqlx.Tx, current, ne
 		intent.State != models.ErrandTeardownIntentPending || intent.Target != target || next.LatestSettledTurnID != target.TurnID {
 		return models.ErrInvalidErrand
 	}
-	if !validOwnedCompletionResult(current, next, target, outcome) {
+	parentInitiated, err := validateOwnedResultOrigin(ctx, tx, current, target)
+	if err != nil {
+		return err
+	}
+	if !validOwnedCompletionResult(current, next, target, outcome, parentInitiated) {
 		return models.ErrInvalidErrand
 	}
 	if current.TeardownIntent != nil {
@@ -125,8 +129,22 @@ func validateOwnedCompletionTarget(ctx context.Context, tx *sqlx.Tx, current, ne
 	return nil
 }
 
-func validOwnedCompletionResult(current, next *models.Errand, target models.ErrandTeardownTarget, outcome models.DeliverySubmissionState) bool {
-	if target.TurnID == current.FirstTurnID {
+func validateOwnedResultOrigin(ctx context.Context, tx *sqlx.Tx, row *models.Errand, target models.ErrandTeardownTarget) (bool, error) {
+	if target.TurnID == row.FirstTurnID {
+		return true, nil
+	}
+	state, err := readErrandAdmission(ctx, tx, target.ParentAdmission(row.ParentSessionID))
+	if err != nil || state == "" {
+		return false, err
+	}
+	if state != string(models.ErrandAdmissionAccepted) {
+		return false, models.ErrErrandVersionConflict
+	}
+	return true, nil
+}
+
+func validOwnedCompletionResult(current, next *models.Errand, target models.ErrandTeardownTarget, outcome models.DeliverySubmissionState, parentInitiated bool) bool {
+	if parentInitiated {
 		return next.ResultTurnID == target.TurnID && !next.AwaitingResult && next.ResultState == models.ErrandResultPending &&
 			(outcome == models.DeliverySubmissionCompleted) == (next.LastOutcome == models.ErrandOutcomeDone)
 	}

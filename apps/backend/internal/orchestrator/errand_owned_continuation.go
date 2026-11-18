@@ -17,9 +17,10 @@ type ownedErrandContinuationStore interface {
 	ownedErrandLaunchStore
 	PrepareErrandContinuation(context.Context, models.ErrandContinuation) (*models.PreparedErrandContinuation, error)
 	DiscardUnallocatedErrandContinuation(context.Context, models.ErrandContinuation, uint64) error
+	DecideErrandParentAdmission(context.Context, models.ErrandParentAdmission, models.ErrandAdmissionState) error
 }
 
-// ContinueErrand starts the next explicit user instruction in the retained
+// ContinueErrand starts the next explicit instruction in the retained
 // provider conversation after the preceding runtime has confirmed close.
 func (a *ErrandAdapter) ContinueErrand(ctx context.Context, request errands.ContinuationRequest) (string, error) {
 	if !request.Valid() {
@@ -41,9 +42,16 @@ func (a *ErrandAdapter) ContinueErrand(ctx context.Context, request errands.Cont
 	if err != nil || row == nil || row.TaskID != request.TaskID {
 		return "", models.ErrErrandNotFound
 	}
+	origin := launchOriginManual
+	if parent := errands.ParentPromptOriginFromContext(ctx).SenderSessionID; parent != "" {
+		if parent != row.ParentSessionID {
+			return "", models.ErrErrandNotFound
+		}
+		origin = launchOriginAutomatic
+	}
 	decision := a.svc.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: request.TaskID, sessionID: models.ErrandExecutionIdentity(request.ErrandID),
-		origin: launchOriginManual, seam: "errand_continue",
+		origin: origin, seam: "errand_continue",
 	})
 	if !decision.admitted {
 		return "", errands.ErrCeilingRefused
@@ -56,12 +64,20 @@ func (a *ErrandAdapter) ContinueErrand(ctx context.Context, request errands.Cont
 
 func (a *ErrandAdapter) continueOwnedErrand(ctx context.Context, store ownedErrandContinuationStore, row *models.Errand, request errands.ContinuationRequest) (string, error) {
 	author, _ := authn.IdentityFromContext(ctx)
+	parent := errands.ParentPromptOriginFromContext(ctx).SenderSessionID
+	authorID := author.UserID
+	if parent != "" {
+		authorID = parent
+	}
 	identity := []byte(row.ID + "\x00" + request.ClientMessageID)
+	if parent != "" {
+		identity = append(identity, ("\x00" + parent)...)
+	}
 	turnID := uuid.NewSHA1(uuid.NameSpaceOID, identity).String()
 	submissionID := "prompt:errand:" + uuid.NewSHA1(uuid.NameSpaceURL, identity).String()
 	instruction := models.ErrandContinuation{
 		TaskID: row.TaskID, ErrandID: row.ID, TurnID: turnID, SubmissionID: submissionID,
-		Content: request.Content, AuthorID: author.UserID,
+		Content: request.Content, AuthorID: authorID, ParentSessionID: parent,
 	}
 	prepared, err := store.PrepareErrandContinuation(ctx, instruction)
 	if errors.Is(err, models.ErrInvalidErrand) {
@@ -71,7 +87,7 @@ func (a *ErrandAdapter) continueOwnedErrand(ctx context.Context, store ownedErra
 		return "", fmt.Errorf("prepare errand continuation: %w", err)
 	}
 	if prepared.Accepted {
-		return turnID, nil
+		return turnID, confirmOwnedParentInstruction(ctx, store, instruction)
 	}
 	if prepared.ExecutionID != "" {
 		return "", db.ErrErrandSettlementPending
@@ -90,10 +106,22 @@ func (a *ErrandAdapter) continueOwnedErrand(ctx context.Context, store ownedErra
 		}
 		return "", fmt.Errorf("launch errand continuation: %w", err)
 	}
+	if err := confirmOwnedParentInstruction(ctx, store, instruction); err != nil {
+		return "", err
+	}
 	if a.ownedStatusChanged != nil {
 		a.ownedStatusChanged(ctx, row.TaskID, row.ID)
 	}
 	return turnID, nil
+}
+
+func confirmOwnedParentInstruction(ctx context.Context, store ownedErrandContinuationStore, instruction models.ErrandContinuation) error {
+	if instruction.ParentSessionID == "" {
+		return nil
+	}
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return store.DecideErrandParentAdmission(commitCtx, instruction.ParentAdmission(), models.ErrandAdmissionAccepted)
 }
 
 func (a *ErrandAdapter) launchOwnedErrandContinuation(ctx context.Context, store ownedErrandContinuationStore, req errands.LaunchRequest, prepared *models.PreparedErrandContinuation) error {

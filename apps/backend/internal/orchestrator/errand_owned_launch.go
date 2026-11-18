@@ -244,11 +244,10 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 		}
 		return nil
 	}
-	prompt, _ := applyErrandOriginContext(req.Objective, "", &ErrandLaunch{ParentSessionID: req.ParentSessionID, Title: req.Title})
 	ref, err := a.runtime.Launch(ctx, runtimeapi.LaunchSpec{
 		Owner: owner, OwnerAdmission: admission, AgentProfileID: req.AgentProfileID,
 		ExecutorID: launch.ExecutorType, Workspace: runtimeapi.WorkspaceRef{Path: launch.WorkspacePath},
-		Prompt: prompt, PriorACPSession: launch.RequiredNativeConversationID, McpMode: mcpmode.Errand,
+		Prompt: ownedErrandRuntimePrompt(ctx, req, launch), PriorACPSession: launch.RequiredNativeConversationID, McpMode: mcpmode.Errand,
 		Metadata: map[string]any{"launch_request": launch},
 	})
 	if err != nil {
@@ -268,6 +267,14 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 		return fmt.Errorf("start errand execution: %w", err)
 	}
 	return nil
+}
+
+func ownedErrandRuntimePrompt(ctx context.Context, req errands.LaunchRequest, launch *runtimeapi.LaunchRequest) string {
+	if launch.ErrandPredecessor != nil && errands.ParentPromptOriginFromContext(ctx).SenderSessionID != "" {
+		return req.Objective
+	}
+	prompt, _ := applyErrandOriginContext(req.Objective, "", &ErrandLaunch{ParentSessionID: req.ParentSessionID, Title: req.Title})
+	return prompt
 }
 
 func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, attachment *ownedErrandWorkspaceAttachment) *runtimeapi.LaunchRequest {

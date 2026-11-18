@@ -29,6 +29,66 @@ func TestPostgresOwnedErrandContinuationCountsReservedWorkAgainstCapacity(t *tes
 	exerciseOwnedErrandContinuationCapacity(t, newPostgresErrandRepo(t))
 }
 
+func TestOwnedErrandParentContinuationReservesBeforeSupersedingResult(t *testing.T) {
+	exerciseOwnedErrandParentContinuation(t, newRepoForSessionTests(t))
+}
+
+func TestPostgresOwnedErrandParentContinuationReservesBeforeSupersedingResult(t *testing.T) {
+	exerciseOwnedErrandParentContinuation(t, newPostgresErrandRepo(t))
+}
+
+func exerciseOwnedErrandParentContinuation(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	row := seedOwnedErrandCompletion(t, repo)
+	_, err := repo.TransitionErrandTeardownIntent(ctx, row.ID, row.TeardownIntent.ID, row.Version, models.ErrandTeardownIntentCompleted)
+	require.NoError(t, err)
+	request := models.ErrandContinuation{
+		TaskID: row.TaskID, ErrandID: row.ID, TurnID: "parent-follow-up", SubmissionID: "prompt:errand:parent-follow-up",
+		Content: "New parent instruction", AuthorID: row.ParentSessionID, ParentSessionID: row.ParentSessionID,
+	}
+	foreign := request
+	foreign.ParentSessionID = "other-parent"
+	foreign.AuthorID = foreign.ParentSessionID
+	_, err = repo.PrepareErrandContinuation(ctx, foreign)
+	require.ErrorIs(t, err, models.ErrInvalidErrand)
+	_, err = repo.GetErrandTurn(ctx, row.ID, request.TurnID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+
+	prepared, err := repo.PrepareErrandContinuation(ctx, request)
+	require.NoError(t, err)
+	state, err := repo.ReadOwnedErrandParentAdmission(ctx, request.ParentAdmission())
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandAdmissionReserved, state)
+	reserved, err := repo.GetErrand(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandResultPending, reserved.ResultState)
+	require.False(t, reserved.AwaitingResult)
+	require.NoError(t, repo.DiscardUnallocatedErrandContinuation(ctx, request, prepared.Generation))
+	state, err = repo.ReadOwnedErrandParentAdmission(ctx, request.ParentAdmission())
+	require.NoError(t, err)
+	require.Empty(t, state)
+
+	prepared, err = repo.PrepareErrandContinuation(ctx, request)
+	require.NoError(t, err)
+	evidence, owned, err := repo.ReadOwnedErrandContinuationAcceptance(ctx, request.ParentAdmission())
+	require.NoError(t, err)
+	require.True(t, owned)
+	require.Equal(t, models.ErrandAdmissionUnknown, evidence)
+	bindAcceptedErrandContinuation(t, repo, request, prepared)
+	evidence, owned, err = repo.ReadOwnedErrandContinuationAcceptance(ctx, request.ParentAdmission())
+	require.NoError(t, err)
+	require.True(t, owned)
+	require.Equal(t, models.ErrandAdmissionAccepted, evidence)
+	require.NoError(t, repo.DecideErrandParentAdmission(ctx, request.ParentAdmission(), models.ErrandAdmissionAccepted))
+	accepted, err := repo.GetErrand(ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandResultSuperseded, accepted.ResultState)
+	require.True(t, accepted.AwaitingResult)
+	require.Equal(t, row.ResultRevision, accepted.ResultRevision)
+	require.EqualValues(t, 1, accepted.ParentAdmissionGeneration)
+}
+
 func exerciseOwnedErrandContinuationCapacity(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := t.Context()

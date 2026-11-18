@@ -33,6 +33,23 @@ func ParentPromptOriginFromContext(ctx context.Context) ParentPromptOrigin {
 	return origin
 }
 
+// ContinueFromParent starts an explicit instruction with verified parent provenance.
+func (s *Service) ContinueFromParent(ctx context.Context, request ContinuationRequest) (string, error) {
+	if !s.featureEnabled() {
+		return "", newError(ReasonFeatureDisabled, "errands are disabled", nil)
+	}
+	if ParentPromptOriginFromContext(ctx).SenderSessionID == "" {
+		return "", newError(ReasonSenderNotParent, "only the errand's parent session can message this errand", nil)
+	}
+	launcher, ok := s.launcher.(interface {
+		ContinueErrand(context.Context, ContinuationRequest) (string, error)
+	})
+	if !ok {
+		return "", errors.New("errand continuation is unavailable")
+	}
+	return launcher.ContinueErrand(ctx, request)
+}
+
 // ParentAdmissionEvidenceReader resolves only the exact retained identity.
 type ParentAdmissionEvidenceReader interface {
 	ReadErrandParentAdmissionEvidence(context.Context, models.ErrandParentAdmission) (models.ErrandAdmissionState, error)

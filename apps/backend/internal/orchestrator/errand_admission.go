@@ -148,6 +148,13 @@ func (s *Service) recordErrandAdmissionEvidence(ctx context.Context, a models.Er
 // ReadErrandParentAdmissionEvidence never interprets local dispatch preparation,
 // an abandoned turn, or missing data as a provider acceptance/refusal.
 func (s *Service) ReadErrandParentAdmissionEvidence(ctx context.Context, a models.ErrandParentAdmission) (models.ErrandAdmissionState, error) {
+	if store, ok := s.repo.(interface {
+		ReadOwnedErrandContinuationAcceptance(context.Context, models.ErrandParentAdmission) (models.ErrandAdmissionState, bool, error)
+	}); ok {
+		if state, owned, err := store.ReadOwnedErrandContinuationAcceptance(ctx, a); owned || err != nil {
+			return state, err
+		}
+	}
 	state, err := s.errandParentTurnEvidence(ctx, a)
 	if err != nil || state != models.ErrandAdmissionUnknown {
 		return state, err

@@ -13,6 +13,7 @@ import (
 type ownedErrandResultStore interface {
 	ListOwnedErrandsAwaitingSettlement(context.Context) ([]*models.Errand, error)
 	ReadOwnedErrandLatestTerminal(context.Context, string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error)
+	ReadOwnedErrandParentAdmission(context.Context, models.ErrandParentAdmission) (models.ErrandAdmissionState, error)
 }
 
 func (s *Service) reconcileOwnedErrandResults(ctx context.Context) error {
@@ -53,7 +54,10 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 		settlement.Outcome = models.ErrandOutcomeFailed
 		settlement.Interrupted = outcome == models.DeliverySubmissionCancelled
 	}
-	parentInitiated := target.TurnID == row.FirstTurnID
+	parentInitiated, err := s.reconcileOwnedErrandResultOrigin(ctx, store, row, target)
+	if err != nil {
+		return err
+	}
 	text, truncated, kind := resultOf(settlement, view, parentInitiated)
 	now := s.clock.Now()
 	unlock := s.parentLocks.lock(row.ParentSessionID)
@@ -81,4 +85,16 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 		s.publish(ctx, next)
 	}
 	return nil
+}
+
+func (s *Service) reconcileOwnedErrandResultOrigin(ctx context.Context, store ownedErrandResultStore, row *models.Errand, target models.ErrandTeardownTarget) (bool, error) {
+	if target.TurnID == row.FirstTurnID {
+		return true, nil
+	}
+	admission := target.ParentAdmission(row.ParentSessionID)
+	state, err := store.ReadOwnedErrandParentAdmission(ctx, admission)
+	if err != nil || state == "" {
+		return false, err
+	}
+	return true, s.store.DecideErrandParentAdmission(ctx, admission, models.ErrandAdmissionAccepted)
 }

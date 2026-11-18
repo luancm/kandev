@@ -38,6 +38,13 @@ type ErrandTeardownTarget struct {
 	PromptGeneration     uint64 `json:"prompt_generation,omitempty"`
 }
 
+func (t ErrandTeardownTarget) ParentAdmission(parentSessionID string) ErrandParentAdmission {
+	return ErrandParentAdmission{
+		TaskID: t.TaskID, ErrandID: t.ErrandID, TurnID: t.TurnID, SubmissionID: t.SubmissionID,
+		ParentSessionID: parentSessionID, SenderSessionID: parentSessionID,
+	}
+}
+
 type ErrandTeardownIntent struct {
 	Version     int                       `json:"version"`
 	ID          string                    `json:"id"`

@@ -51,12 +51,32 @@ func (r *Repository) PrepareErrandContinuation(ctx context.Context, request mode
 	if err = r.insertErrandContinuation(ctx, tx, request, prior); err != nil {
 		return nil, err
 	}
+	if err = r.reserveOwnedErrandParentInstruction(ctx, tx, row, request); err != nil {
+		return nil, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &models.PreparedErrandContinuation{
 		Generation: prior.Generation, NativeID: prior.NativeID, Predecessor: row.TeardownIntent.Target,
 	}, nil
+}
+
+func (r *Repository) reserveOwnedErrandParentInstruction(ctx context.Context, tx *sqlx.Tx, row *models.Errand, request models.ErrandContinuation) error {
+	if request.ParentSessionID == "" {
+		return nil
+	}
+	if request.ParentSessionID != row.ParentSessionID || request.AuthorID != row.ParentSessionID {
+		return models.ErrInvalidErrand
+	}
+	reservation, err := r.reserveErrandParentAdmissionTx(ctx, tx, row, request.ParentAdmission())
+	if err != nil {
+		return err
+	}
+	if !reservation.Created {
+		return db.ErrErrandSettlementPending
+	}
+	return nil
 }
 
 func readErrandContinuationRow(ctx context.Context, tx *sqlx.Tx, request models.ErrandContinuation) (*models.Errand, error) {
@@ -98,7 +118,28 @@ func (r *Repository) DiscardUnallocatedErrandContinuation(ctx context.Context, r
 	if err := deleteUnboundErrandContinuation(ctx, tx, request, generation); err != nil {
 		return err
 	}
+	if err := r.releaseUnallocatedParentInstruction(ctx, tx, request); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func (r *Repository) releaseUnallocatedParentInstruction(ctx context.Context, tx *sqlx.Tx, request models.ErrandContinuation) error {
+	if request.ParentSessionID == "" {
+		return nil
+	}
+	state, err := readErrandAdmission(ctx, tx, request.ParentAdmission())
+	if err != nil {
+		return err
+	}
+	if state != string(models.ErrandAdmissionReserved) {
+		return models.ErrErrandVersionConflict
+	}
+	if _, err = tx.ExecContext(ctx, tx.Rebind(`DELETE FROM errand_parent_admission WHERE errand_id=? AND submission_id=? AND state=?`),
+		request.ErrandID, request.SubmissionID, models.ErrandAdmissionReserved); err != nil {
+		return err
+	}
+	return retryErrandDeferredReleases(ctx, tx, request.TaskID, request.ParentSessionID, request.ErrandID, r.nowUTC())
 }
 
 func deleteUnboundErrandContinuation(ctx context.Context, tx *sqlx.Tx, request models.ErrandContinuation, generation uint64) error {
@@ -109,8 +150,11 @@ func deleteUnboundErrandContinuation(ctx context.Context, tx *sqlx.Tx, request m
 		return err
 	}
 	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
+	if err != nil {
 		return err
+	}
+	if rows != 1 {
+		return models.ErrExecutionRotated
 	}
 	_, err = tx.ExecContext(ctx, tx.Rebind(`DELETE FROM errand_turns WHERE errand_id=? AND id=?`), request.ErrandID, request.TurnID)
 	return err
@@ -134,7 +178,7 @@ func readPreparedErrandContinuation(ctx context.Context, tx *sqlx.Tx, row *model
 	if err != nil {
 		return nil, err
 	}
-	if message.TurnID != request.TurnID || message.AuthorType != models.MessageAuthorUser || message.AuthorID != request.AuthorID || message.Content != request.Content {
+	if !matchesErrandContinuationMessage(message, request) {
 		return nil, models.ErrInvalidErrand
 	}
 	prepared := &models.PreparedErrandContinuation{Generation: receipt.Generation, NativeID: receipt.NativeID}
@@ -156,6 +200,12 @@ func readPreparedErrandContinuation(ctx context.Context, tx *sqlx.Tx, row *model
 	return prepared, err
 }
 
+func matchesErrandContinuationMessage(message *models.Message, request models.ErrandContinuation) bool {
+	parent, _ := message.Metadata["sender_session_id"].(string)
+	return message.TurnID == request.TurnID && message.AuthorType == models.MessageAuthorUser &&
+		message.AuthorID == request.AuthorID && message.Content == request.Content && parent == request.ParentSessionID
+}
+
 func decodeErrandContinuationRecord(turn *models.Turn, submissionID string) (errandContinuationRecord, error) {
 	var receipt errandContinuationRecord
 	encoded, ok := turn.Metadata[errandContinuationMetadata].(string)
@@ -165,9 +215,9 @@ func decodeErrandContinuationRecord(turn *models.Turn, submissionID string) (err
 	return receipt, nil
 }
 
-func hasAcceptedErrandContinuation(ctx context.Context, tx *sqlx.Tx, request models.ErrandContinuation, executionID string) (bool, error) {
+func hasAcceptedErrandContinuation(ctx context.Context, reader errandAdmissionReader, request models.ErrandContinuation, executionID string) (bool, error) {
 	var accepted bool
-	err := tx.GetContext(ctx, &accepted, tx.Rebind(`SELECT EXISTS (
+	err := reader.QueryRowContext(ctx, reader.Rebind(`SELECT EXISTS (
 		SELECT 1 FROM agent_delivery_submissions s JOIN agent_delivery_effects a
 		 ON a.effect_key=? AND a.effect_type=? AND a.session_id=s.session_id AND a.incarnation_id=s.incarnation_id
 		 AND a.harness_generation=s.harness_generation AND a.submission_id=s.id AND a.turn_id=?
@@ -179,8 +229,47 @@ func hasAcceptedErrandContinuation(ctx context.Context, tx *sqlx.Tx, request mod
 		  AND terminal.submission_id=s.id AND terminal.turn_id=a.turn_id AND terminal.outcome=s.state))))`),
 		errandPromptAdmissionEffect+":"+request.SubmissionID, errandPromptAdmissionEffect, request.TurnID,
 		request.SubmissionID, models.ErrandExecutionIdentity(request.ErrandID), executionID,
-		models.DeliveryTerminalEffectType, models.DeliveryEffectBlockResolved)
+		models.DeliveryTerminalEffectType, models.DeliveryEffectBlockResolved).Scan(&accepted)
 	return accepted, err
+}
+
+// ReadOwnedErrandContinuationAcceptance recovers only a durable dispatch
+// decision for the exact parent continuation.
+func (r *Repository) ReadOwnedErrandContinuationAcceptance(ctx context.Context, admission models.ErrandParentAdmission) (models.ErrandAdmissionState, bool, error) {
+	unknown := models.ErrandAdmissionUnknown
+	turn, err := r.GetErrandTurn(ctx, admission.ErrandID, admission.TurnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return unknown, false, nil
+	}
+	if err != nil {
+		return unknown, false, err
+	}
+	if turn.TaskID != admission.TaskID || admission.SenderSessionID != admission.ParentSessionID {
+		return unknown, true, models.ErrInvalidErrand
+	}
+	if state, err := readErrandAdmission(ctx, r.ro, admission); err != nil || state == "" {
+		return unknown, true, err
+	}
+	receipt, err := decodeErrandContinuationRecord(turn, admission.SubmissionID)
+	if err != nil {
+		return unknown, true, err
+	}
+	var executionID string
+	err = r.ro.GetContext(ctx, &executionID, r.ro.Rebind(`SELECT execution_id FROM errand_execution_generations
+		WHERE errand_id=? AND generation=?`), admission.ErrandID, int64(receipt.Generation))
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && executionID == "") {
+		return unknown, true, nil
+	}
+	if err != nil {
+		return unknown, true, err
+	}
+	accepted, err := hasAcceptedErrandContinuation(ctx, r.ro, models.ErrandContinuation{
+		ErrandID: admission.ErrandID, TurnID: admission.TurnID, SubmissionID: admission.SubmissionID,
+	}, executionID)
+	if err == nil && accepted {
+		return models.ErrandAdmissionAccepted, true, nil
+	}
+	return unknown, true, err
 }
 
 func readErrandContinuationPredecessor(ctx context.Context, tx *sqlx.Tx, row *models.Errand) (*errandContinuationRecord, error) {
@@ -235,5 +324,8 @@ func (r *Repository) insertErrandContinuation(ctx context.Context, tx *sqlx.Tx, 
 	message := &models.Message{ID: request.TurnID, TaskID: request.TaskID, TurnID: request.TurnID,
 		AuthorID: request.AuthorID, AuthorType: models.MessageAuthorUser, Type: models.MessageTypeMessage,
 		Content: request.Content, CreatedAt: now, UpdatedAt: now}
+	if request.ParentSessionID != "" {
+		message.Metadata = map[string]any{"sender_session_id": request.ParentSessionID}
+	}
 	return insertErrandMessageTx(ctx, tx, request.ErrandID, message)
 }

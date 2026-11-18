@@ -2971,15 +2971,7 @@ func (h *Handlers) publishStepCompletionEvent(
 // sender tasks reject with an MCP error. Same-task messages are allowed only
 // when session_id names a distinct sibling session.
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID            string `json:"task_id"`
-		SessionID         string `json:"session_id"`
-		Prompt            string `json:"prompt"`
-		SenderTaskID      string `json:"sender_task_id"`
-		SenderSessionID   string `json:"sender_session_id"`
-		DeliveryMode      string `json:"delivery_mode"`
-		ReplyToQuestionID string `json:"reply_to_question_id"`
-	}
+	var req messageTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -3065,6 +3057,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 	session, pinnedTarget, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
 	if errResp != nil {
+		if response, err := h.tryOwnedErrandMessage(ctx, msg, req, senderTask, errResp); response != nil || err != nil {
+			return response, err
+		}
 		return errResp, nil
 	}
 

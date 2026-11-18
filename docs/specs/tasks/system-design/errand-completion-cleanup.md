@@ -55,6 +55,8 @@ User follow-up and parent `message_task_kandev` use existing authorization, queu
 
 For an Errand-owned conversation, the task-prompt-authorized `errand.continue` action uses a client message ID to reserve one user turn and successor generation together. Admission requires completed teardown of the exact previous execution and its retained native binding. The launch checks the recorded predecessor against the selected runtime and attached task workspace before it loads that same native conversation. An exact retry returns the original turn when prompt acceptance or terminal projection is durable. A user-origin settlement leaves the original parent result and its delivery receipt intact.
 
+The authenticated ordinary parent addresses an owned Errand through the existing explicit `session_id` argument of `message_task_kandev`. The successor reservation saves the parent, turn and submission in the existing admission ledger. Durable prompt acceptance or the exact projected terminal receipt authorizes the parent result transition. Recovery can recognize those saved receipts and finish the admission without dispatching a second prompt.
+
 ## Presentation and validation
 
 Use existing session status rendering and completed-session continuation controls. No new session-state enum, management surface or phone layout is required. The parent still displays the established errand outcome and completed history; the opened child displays a completed session after confirmed cleanup. Opening it does not launch an agent or dispatch work. Explicit continuation returns that child to normal running/attention states, then closes again after settlement. Desktop panel/Open/Back and phone drawer/full-screen child/Back retain their current composition.
