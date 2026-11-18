@@ -125,6 +125,15 @@ func exerciseErrandLateBindingAfterCancellation(t *testing.T, repo *Repository) 
 	require.NoError(t, err)
 	row.Lifecycle = models.ErrandLifecycleCancelled
 	row.CancelSource = models.ErrandCancelSource("user")
+	row.TeardownIntent = &models.ErrandTeardownIntent{
+		Version: models.ErrandTeardownIntentVersion, ID: "late-binding-stop",
+		State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCancellation,
+		RequestedAt: errandScenarioBase,
+		Target:      models.ErrandTeardownTarget{TaskID: task, ErrandID: row.ID, NoTurn: true},
+	}
+	require.ErrorIs(t, repo.UpdateErrand(ctx, row), models.ErrErrandVersionConflict,
+		"a reservation made after target capture invalidates a no-runtime witness")
+	row.TeardownIntent.Target.OwnerGeneration = 1
 	require.NoError(t, repo.UpdateErrand(ctx, row))
 	bound, err := repo.BindErrandExecution(ctx, row.ID, 1, "late-execution")
 	require.NoError(t, err)

@@ -378,8 +378,7 @@ func errandBrowserColumns(driver string) string {
 	createdAtKey := errandBrowserCreatedAtKey(driver, "e.created_at")
 	return `e.id, e.task_id, e.parent_session_id, e.title, e.agent_profile_id,
 		` + errandBrowserStatusExpression(driver) + `,
-		CASE WHEN s.state IN ('STARTING', 'RUNNING') AND ` + errandBrowserPermissionPredicate(driver) + ` THEN 'permission'
-			WHEN ` + recoveryAttentionPredicate(driver) + ` THEN 'recovery_unresolved' ELSE '' END,
+		` + errandBrowserAttentionExpression(driver) + `,
 		e.result_state, ` + errandAwaitProjectionFor("e") + `, e.result_truncated,
 		` + createdAtKey + ` AS created_at, e.updated_at, e.settled_at, e.version,
 	` + liveErrandPredicate(driver) + `,
@@ -396,6 +395,10 @@ func errandBrowserStatusExpression(driver string) string {
 	return `CASE
 		WHEN e.lifecycle = 'cancelled' THEN 'cancelled'
 		WHEN e.lifecycle = 'queued' THEN 'queued'
+		WHEN ` + ownedErrandExists + ` THEN CASE
+			WHEN ` + ownedErrandWorking + ` AND ` + ownedErrandPermission(driver) + ` THEN 'needs_attention'
+			WHEN ` + ownedErrandWorking + ` THEN 'running'
+			ELSE e.last_outcome END
 		WHEN s.id IS NULL OR s.state = 'FAILED' THEN 'failed'
 		WHEN s.state IN ('STARTING', 'RUNNING') AND ` + permission + ` THEN 'needs_attention'
 		WHEN s.state IN ('STARTING', 'RUNNING') THEN 'running'
@@ -403,6 +406,24 @@ func errandBrowserStatusExpression(driver string) string {
 		WHEN e.last_outcome = 'done' THEN 'done'
 		WHEN e.last_outcome = 'failed' THEN 'failed'
 		ELSE 'running' END`
+}
+
+func errandBrowserAttentionExpression(driver string) string {
+	return `CASE
+		WHEN ` + ownedErrandWorking + ` AND ` + ownedErrandPermission(driver) + ` THEN 'permission'
+		WHEN s.state IN ('STARTING', 'RUNNING') AND ` + errandBrowserPermissionPredicate(driver) + ` THEN 'permission'
+		WHEN ` + recoveryAttentionPredicate(driver) + ` THEN 'recovery_unresolved' ELSE '' END`
+}
+
+func ownedErrandPermission(driver string) string {
+	field := func(path ...string) string { return dialect.JSONExtractPath(driver, "m.payload", path...) }
+	return `EXISTS (SELECT 1 FROM errand_execution_generations g
+		JOIN errand_messages m ON m.errand_id=g.errand_id AND m.turn_id=g.active_turn_id
+		WHERE g.errand_id=e.id AND g.active_submission_id<>'' AND g.generation=(
+			SELECT MAX(latest.generation) FROM errand_execution_generations latest WHERE latest.errand_id=e.id)
+		AND ` + field("author_id") + `=g.active_submission_id AND ` + field("type") + `='permission_request'
+		AND COALESCE(` + field("metadata", "status") + `,'') IN ('','pending')
+		AND COALESCE(` + field("metadata", models.PermissionPresentationMetadataKey) + `,'') NOT IN ('automatic','unavailable'))`
 }
 
 func errandBrowserPermissionPredicate(driver string) string {

@@ -140,6 +140,15 @@ func (s *Service) Project(ctx context.Context, errand *models.Errand) (models.Er
 }
 
 func (s *Service) ProjectSnapshot(ctx context.Context, errand *models.Errand) (Snapshot, error) {
+	if reader, ok := s.store.(errandStatusReader); ok {
+		statuses, err := reader.ReadErrandStatuses(ctx, errand.TaskID, errand.ID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if observation, found := statuses[errand.ID]; found {
+			return observeErrand(errand, observation), nil
+		}
+	}
 	var session *models.TaskSession
 	if errand.Lifecycle == models.ErrandLifecycleLaunched {
 		loaded, err := s.store.GetTaskSession(ctx, errand.ID)

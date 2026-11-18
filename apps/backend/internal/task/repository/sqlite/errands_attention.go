@@ -56,9 +56,16 @@ func (r *Repository) ErrandRecoveryAttention(ctx context.Context, id string) (bo
 }
 
 func liveErrandPredicate(driver string) string {
-	return `(e.lifecycle = 'queued' OR (e.lifecycle = 'launched' AND s.id IS NOT NULL
- AND s.state <> 'FAILED' AND (s.state IN ('STARTING', 'RUNNING') OR e.last_outcome = '' OR ` + recoveryAttentionPredicate(driver) + `)))`
+	return `(e.lifecycle = 'queued' OR (e.lifecycle = 'launched' AND (
+ (` + ownedErrandExists + ` AND ` + ownedErrandWorking + `)
+ OR (s.id IS NOT NULL AND s.state <> 'FAILED'
+ AND (s.state IN ('STARTING', 'RUNNING') OR e.last_outcome = '' OR ` + recoveryAttentionPredicate(driver) + `)))))`
 }
+
+const ownedErrandExists = `EXISTS (SELECT 1 FROM errand_execution_generations owner WHERE owner.errand_id=e.id)`
+const ownedErrandWorking = `(e.last_outcome='' OR EXISTS (SELECT 1 FROM errand_execution_generations owner
+ WHERE owner.errand_id=e.id AND owner.active_submission_id<>'' AND owner.generation=(
+ SELECT MAX(current.generation) FROM errand_execution_generations current WHERE current.errand_id=e.id)))`
 
 // Match the projected terminal evidence consumed by resolveErrandTerminalEvidence.
 // Conflicting outcomes cannot turn unresolved recovery into ordinary reconciliation.

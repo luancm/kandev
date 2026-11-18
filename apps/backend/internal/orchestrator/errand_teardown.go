@@ -65,6 +65,9 @@ func (a *ErrandAdapter) CancelErrandWithTarget(ctx context.Context, row *models.
 	if row == nil || row.ID == "" || commit == nil {
 		return models.ErrInvalidErrand
 	}
+	if a.runtime != nil {
+		return a.cancelOwnedErrand(ctx, row, commit)
+	}
 	if handled, err := a.cancelPendingCompletion(ctx, row, commit); handled {
 		return err
 	}
@@ -128,6 +131,9 @@ func (o *errandTeardownOwner) captureLegacyTarget(ctx context.Context, row *mode
 // RetryErrandTeardown uses only the persisted target. Startup callers must first
 // finish authenticated runtime recovery so typed absence is authoritative.
 func (a *ErrandAdapter) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
+	if intent.Target.ErrandID != "" && a.runtime != nil {
+		return a.retryOwnedErrandTeardown(ctx, intent)
+	}
 	if intent.Target.SessionID == "" || intent.ID == "" {
 		return "", models.ErrInvalidErrand
 	}

@@ -30,6 +30,9 @@ func (s *Service) Reconcile(ctx context.Context) (err error) {
 	// Queue recovery shares the normal FIFO and launch guard. Adoption happens
 	// before result recovery, so an admitted reservation is never replayed.
 	s.drainQueued(ctx, owners)
+	if err := s.reconcileOwnedErrandResults(ctx); err != nil {
+		return err
+	}
 	rows, err := s.store.ListErrands(ctx)
 	if err != nil {
 		return fmt.Errorf("list errands for reconciliation: %w", err)

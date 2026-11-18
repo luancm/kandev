@@ -128,6 +128,9 @@ func exerciseErrandDeliveryProjection(t *testing.T, repo *Repository, inject boo
 	stored, err := repo.GetAgentDeliverySubmission(ctx, "submission")
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionCompleted, stored.State)
+	turn, err := repo.GetErrandTurn(ctx, "projection", "turn")
+	require.NoError(t, err)
+	require.NotNil(t, turn.CompletedAt, "a historical terminal receipt still closes its owned turn")
 	var active string
 	require.NoError(t, repo.db.GetContext(ctx, &active, repo.db.Rebind(`SELECT active_submission_id FROM errand_execution_generations WHERE errand_id=? AND generation=?`), "projection", 1))
 	require.Empty(t, active)

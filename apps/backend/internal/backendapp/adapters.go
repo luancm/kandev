@@ -288,6 +288,10 @@ type lifecycleAdapter struct {
 	logger   *logger.Logger
 }
 
+func (a *lifecycleAdapter) StopErrandOwnerForRecovery(ctx context.Context, owner lifecycle.ExecutionOwner, executionID string) error {
+	return a.mgr.StopErrandOwnerForRecovery(ctx, owner, executionID)
+}
+
 // orchestrator.Service.currentACPSessionID selects the generation-safety seam
 // for resetAgentContext by asserting the agent manager to this unexported
 // interface; that assertion fails silently at runtime if this method is

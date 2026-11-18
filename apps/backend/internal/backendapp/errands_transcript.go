@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -27,12 +28,27 @@ type errandTranscript struct {
 	repo errandTranscriptRepo
 }
 
+type ownedErrandTranscriptRepo interface {
+	GetErrandTurn(context.Context, string, string) (*models.Turn, error)
+	ListErrandTurns(context.Context, string) ([]*models.Turn, error)
+	GetErrandLastAssistantMessage(context.Context, string, string) (*models.Message, error)
+}
+
 var (
 	_ errands.TurnReader  = errandTranscript{}
 	_ errands.DeliveryLog = errandTranscript{}
 )
 
 func (t errandTranscript) ReadTurn(ctx context.Context, sessionID, turnID string) (errands.TurnView, error) {
+	if repo, ok := t.repo.(ownedErrandTranscriptRepo); ok {
+		turn, err := repo.GetErrandTurn(ctx, sessionID, turnID)
+		if !errors.Is(err, sql.ErrNoRows) {
+			if err != nil {
+				return errands.TurnView{}, err
+			}
+			return readOwnedErrandTurnView(ctx, repo, sessionID, turn)
+		}
+	}
 	turns, err := t.repo.ListTurnsBySession(ctx, sessionID)
 	if err != nil {
 		return errands.TurnView{}, err
@@ -46,6 +62,17 @@ func (t errandTranscript) ReadTurn(ctx context.Context, sessionID, turnID string
 }
 
 func (t errandTranscript) LatestTurn(ctx context.Context, sessionID string) (string, errands.TurnView, error) {
+	if repo, ok := t.repo.(ownedErrandTranscriptRepo); ok {
+		turns, err := repo.ListErrandTurns(ctx, sessionID)
+		if err != nil {
+			return "", errands.TurnView{}, err
+		}
+		if len(turns) != 0 {
+			latest := turns[len(turns)-1]
+			view, err := readOwnedErrandTurnView(ctx, repo, sessionID, latest)
+			return latest.ID, view, err
+		}
+	}
 	turns, err := t.repo.ListTurnsBySession(ctx, sessionID)
 	if err != nil || len(turns) == 0 {
 		return "", errands.TurnView{}, err
@@ -53,6 +80,19 @@ func (t errandTranscript) LatestTurn(ctx context.Context, sessionID string) (str
 	latest := turns[len(turns)-1]
 	view, err := t.view(ctx, latest)
 	return latest.ID, view, err
+}
+
+func readOwnedErrandTurnView(ctx context.Context, repo ownedErrandTranscriptRepo, errandID string, turn *models.Turn) (errands.TurnView, error) {
+	view := errands.TurnView{Completed: turn.CompletedAt != nil}
+	message, err := repo.GetErrandLastAssistantMessage(ctx, errandID, turn.ID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return errands.TurnView{}, err
+	}
+	if message != nil {
+		view.LastAgentText = message.Content
+	}
+	view.EarliestUserSender, _ = turn.Metadata["sender_session_id"].(string)
+	return view, nil
 }
 
 func (t errandTranscript) HasDeliveryToken(ctx context.Context, parentSessionID, token string) (bool, error) {

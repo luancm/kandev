@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -22,11 +23,19 @@ import (
 // independent is what lets TestAdmittedSessionIDsMatchSQLFilter catch an edit to
 // one that was not made to the other.
 func (r *Repository) ListAdmittedSessionIDs(ctx context.Context) ([]string, error) {
+	driver := r.ro.DriverName()
+	done := dialect.JSONExtract(driver, "NULLIF(e.teardown_intent,'')", "state")
+	target := dialect.JSONExtractPath(driver, "NULLIF(e.teardown_intent,'')", "target", "owner_generation")
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT s.id
+		SELECT s.id AS id
 		FROM task_sessions s
 		WHERE s.state IN (?, ?)
-		ORDER BY s.id ASC
+		UNION ALL
+		SELECT 'errand:' || g.errand_id AS id
+		FROM errand_execution_generations g JOIN task_session_errands e ON e.id=g.errand_id
+		WHERE g.generation=(SELECT MAX(current.generation) FROM errand_execution_generations current WHERE current.errand_id=e.id)
+		  AND NOT (COALESCE(`+done+`,'')='completed' AND COALESCE(CAST(`+target+` AS TEXT),'')=CAST(g.generation AS TEXT))
+		ORDER BY id ASC
 	`), string(models.TaskSessionStateStarting), string(models.TaskSessionStateRunning))
 	if err != nil {
 		return nil, err

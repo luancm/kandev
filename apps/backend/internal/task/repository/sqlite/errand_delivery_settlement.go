@@ -47,9 +47,7 @@ func (r *Repository) settleErrandDeliveryTerminal(ctx context.Context, tx *sqlx.
 	if err = settleErrandSubmissionOutcomeTx(ctx, tx, r.db, state, outcome, at); err != nil {
 		return false, err
 	}
-
-	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_execution_generations SET active_submission_id='',active_turn_id='' WHERE errand_id=? AND generation=? AND execution_id=? AND active_submission_id=? AND active_turn_id=? AND prompt_generation=?`), errandID, int64(proof.Generation), proof.ExecutionID, proof.SubmissionID, proof.TurnID, int64(proof.PromptGeneration))
-	if err != nil {
+	if err = closeErrandTerminalTurnTx(ctx, tx, proof, at); err != nil {
 		return false, err
 	}
 	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE agent_delivery_effects SET state=? WHERE effect_key=? AND state=?`), models.DeliveryEffectBlockResolved, state.effect.EffectKey, models.DeliveryEffectPending)
@@ -60,6 +58,16 @@ func (r *Repository) settleErrandDeliveryTerminal(ctx context.Context, tx *sqlx.
 		return false, err
 	}
 	return true, nil
+}
+
+func closeErrandTerminalTurnTx(ctx context.Context, tx *sqlx.Tx, proof errandPromptProof, at time.Time) error {
+	turnTime := errandTranscriptTime(at)
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_turns SET completed_at=?,updated_at=? WHERE errand_id=? AND id=? AND completed_at IS NULL`),
+		turnTime, turnTime, proof.ErrandID, proof.TurnID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_execution_generations SET active_submission_id='',active_turn_id='' WHERE errand_id=? AND generation=? AND execution_id=? AND active_submission_id=? AND active_turn_id=? AND prompt_generation=?`), proof.ErrandID, int64(proof.Generation), proof.ExecutionID, proof.SubmissionID, proof.TurnID, int64(proof.PromptGeneration))
+	return err
 }
 
 func (r *Repository) releaseUnsentErrandClaimTx(ctx context.Context, tx *sqlx.Tx, errandID string, expected *models.AgentDeliverySubmission) error {

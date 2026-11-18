@@ -8,6 +8,14 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+type errandStatusReader interface {
+	ReadErrandStatuses(context.Context, string, string) (map[string]models.ErrandBrowserObservation, error)
+}
+
+func observeErrand(row *models.Errand, observation models.ErrandBrowserObservation) Snapshot {
+	return Snapshot{Errand: row, Status: observation.Status, AttentionReason: observation.AttentionReason}
+}
+
 // List returns a task's errands in creation order with their projected status.
 func (s *Service) List(ctx context.Context, taskID string) ([]Snapshot, error) {
 	if taskID == "" {
@@ -33,6 +41,9 @@ func (s *Service) list(ctx context.Context, taskID string) ([]Snapshot, error) {
 	errands, err := s.store.ListErrandsByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list errands: %w", err)
+	}
+	if reader, ok := s.store.(errandStatusReader); ok {
+		return s.listObserved(ctx, reader, taskID, errands)
 	}
 	sessions := make(map[string]*models.TaskSession, len(errands))
 	var working []string
@@ -67,6 +78,20 @@ func (s *Service) list(ctx context.Context, taskID string) ([]Snapshot, error) {
 			return nil, err
 		}
 		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
+func (s *Service) listObserved(ctx context.Context, reader errandStatusReader, taskID string, rows []*models.Errand) ([]Snapshot, error) {
+	statuses, err := reader.ReadErrandStatuses(ctx, taskID, "")
+	if err != nil {
+		return nil, err
+	}
+	snapshots := make([]Snapshot, 0, len(rows))
+	for _, row := range rows {
+		if observation, ok := statuses[row.ID]; ok {
+			snapshots = append(snapshots, observeErrand(row, observation))
+		}
 	}
 	return snapshots, nil
 }

@@ -34,6 +34,7 @@ type OwnerAdmission = lifecycle.OwnerAdmission
 type ErrandPermissionTarget = lifecycle.ErrandPermissionTarget
 type ErrandPermissionSnapshot = lifecycle.ErrandPermissionSnapshot
 type LaunchRequest = lifecycle.LaunchRequest
+type WorkspaceInfo = lifecycle.WorkspaceInfo
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 

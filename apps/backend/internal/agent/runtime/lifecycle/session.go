@@ -709,9 +709,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
 	// Send the task prompt if provided, or mark the execution as ready.
-	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
-
-	return nil
+	return sm.dispatchFirstPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
 }
 
 func strictAuggieTaskStartModelPolicy(
@@ -1382,6 +1380,17 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 		})
 	}
 	return result
+}
+
+// Errand launch waits for dispatch confirmation before recording admission.
+func (sm *SessionManager) dispatchFirstPrompt(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, markReady func(executionID string) error) error {
+	if execution.Owner.Kind == ExecutionOwnerErrand && (taskDescription != "" || len(attachments) > 0) {
+		_, err := sm.sendPrompt(ctx, execution, taskDescription, false, convertAttachments(attachments), true,
+			sendPromptCallbacks{deliverySubmissionID: initialPromptDeliverySubmissionID(execution)}, false)
+		return err
+	}
+	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
+	return nil
 }
 
 // dispatchInitialPrompt sends the initial task prompt or marks the execution as ready.

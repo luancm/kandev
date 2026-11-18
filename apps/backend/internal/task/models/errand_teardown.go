@@ -25,7 +25,9 @@ const (
 
 type ErrandTeardownTarget struct {
 	TaskID               string `json:"task_id"`
-	SessionID            string `json:"session_id"`
+	ErrandID             string `json:"errand_id,omitempty"`
+	OwnerGeneration      uint64 `json:"owner_generation,omitempty"`
+	SessionID            string `json:"session_id,omitempty"`
 	SessionIncarnation   string `json:"session_incarnation,omitempty"`
 	ExecutionID          string `json:"execution_id,omitempty"`
 	TurnID               string `json:"turn_id,omitempty"`
@@ -75,8 +77,11 @@ func (i *ErrandTeardownIntent) ValidateFor(errand *Errand) error {
 }
 
 func (target ErrandTeardownTarget) validateFor(errand *Errand) error {
+	if target.ErrandID != "" {
+		return target.validateOwnedTarget(errand)
+	}
 	if strings.TrimSpace(target.TaskID) == "" || target.TaskID != errand.TaskID ||
-		strings.TrimSpace(target.SessionID) == "" || target.SessionID != errand.ID {
+		strings.TrimSpace(target.SessionID) == "" || target.SessionID != errand.ID || target.OwnerGeneration != 0 {
 		return invalidErrandTeardownTarget("does not match errand task and session")
 	}
 	if target.hasBlankIdentity() {
@@ -86,6 +91,29 @@ func (target ErrandTeardownTarget) validateFor(errand *Errand) error {
 		return target.validateReservedLaunch(errand)
 	}
 	return target.validateSessionTarget()
+}
+
+func (target ErrandTeardownTarget) validateOwnedTarget(errand *Errand) error {
+	if target.ErrandID != errand.ID || target.TaskID != errand.TaskID || target.hasLegacyIdentity() || target.hasBlankIdentity() {
+		return invalidErrandTeardownTarget("does not match the errand owner")
+	}
+	if target.OwnerGeneration == 0 && target.ExecutionID != "" {
+		return invalidErrandTeardownTarget("execution requires a generation")
+	}
+	if target.NoTurn {
+		if target.TurnID != "" || target.SubmissionID != "" {
+			return invalidErrandTeardownTarget("no-turn witness carries a submission")
+		}
+		return nil
+	}
+	if target.TurnID == "" || target.SubmissionID == "" || target.ExecutionID == "" || target.PromptGeneration == 0 {
+		return invalidErrandTeardownTarget("active owned turn requires exact dispatch identity")
+	}
+	return nil
+}
+
+func (target ErrandTeardownTarget) hasLegacyIdentity() bool {
+	return target.SessionID != "" || target.SessionIncarnation != "" || target.hasReservedLaunchIdentity()
 }
 
 func (target ErrandTeardownTarget) hasReservedLaunchIdentity() bool {

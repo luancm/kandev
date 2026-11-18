@@ -260,6 +260,9 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	submission, err := repo.GetAgentDeliverySubmission(ctx, "prompt:first-vertical")
 	require.NoError(t, err)
 	require.Equal(t, models.DeliverySubmissionCompleted, submission.State)
+	turn, err := repo.GetErrandTurn(ctx, "child-vertical", "turn-vertical")
+	require.NoError(t, err)
+	require.NotNil(t, turn.CompletedAt, "durable terminal evidence must close the owned transcript turn")
 	secondPayload := []byte(`{"text":"second"}`)
 	second := &models.AgentDeliverySubmission{ID: "prompt:second-vertical", Payload: secondPayload, PayloadHash: journal.SubmissionHash(secondPayload), State: models.DeliverySubmissionDispatching, DispatchAttemptID: execution.ID}
 	admitted, err := repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{ErrandID: "child-vertical", Generation: 1, ExecutionID: execution.ID, IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream-vertical", NativeSessionID: execution.ACPSessionID, PromptGeneration: 2, TurnID: "turn-vertical", Submission: second})

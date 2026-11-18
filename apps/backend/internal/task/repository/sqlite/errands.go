@@ -173,7 +173,7 @@ func (r *Repository) UpdateErrand(ctx context.Context, errand *models.Errand) er
 		if err != nil {
 			return err
 		}
-		if err := validateErrandTeardownUpdate(current, errand); err != nil {
+		if err := validateErrandTeardownWrite(ctx, tx, current, errand); err != nil {
 			return err
 		}
 		revision := errandUpdateRevision(current, errand)
@@ -267,6 +267,18 @@ func (r *Repository) transitionErrandTeardownIntent(
 	return &row, nil
 }
 
+func validateErrandTeardownWrite(ctx context.Context, tx *sqlx.Tx, current, next *models.Errand) error {
+	before, after := current.TeardownIntent, next.TeardownIntent
+	if after != nil && after.Purpose == models.ErrandTeardownPurposeCompletion && after.Target.ErrandID != "" &&
+		(before == nil || before.ID != after.ID) {
+		return validateOwnedCompletionTarget(ctx, tx, current, next)
+	}
+	if err := validateErrandTeardownUpdate(current, next); err != nil {
+		return err
+	}
+	return validateOwnedCancellationTarget(ctx, tx, current, next)
+}
+
 func validateErrandTeardownUpdate(current, next *models.Errand) error {
 	before, after := current.TeardownIntent, next.TeardownIntent
 	if before == nil {
@@ -330,6 +342,9 @@ func validErrandTeardownTransition(intent *models.ErrandTeardownIntent, state mo
 			return true
 		}
 		if teardownPurpose(intent.Purpose) == models.ErrandTeardownPurposeCompletion {
+			if intent.Target.ErrandID != "" {
+				return state == models.ErrandTeardownIntentCompleted
+			}
 			return state == models.ErrandTeardownIntentClosed
 		}
 		return state == models.ErrandTeardownIntentCompleted

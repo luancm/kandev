@@ -5,13 +5,16 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 )
 
 // ErrandAdapter satisfies the errands service's launcher, teardown, and
 // MCP selection seams on top of the orchestrator.
 type ErrandAdapter struct {
-	svc *Service
+	svc       *Service
+	runtime   runtimeapi.Runtime
+	workspace func(context.Context, string, string) (*runtimeapi.WorkspaceInfo, error)
 }
 
 var (
@@ -25,8 +28,17 @@ func NewErrandAdapter(svc *Service) *ErrandAdapter {
 	return &ErrandAdapter{svc: svc}
 }
 
+// SetOwnedLaunchRuntime binds the runtime and parent workspace reader at setup.
+func (a *ErrandAdapter) SetOwnedLaunchRuntime(runtime runtimeapi.Runtime, workspace func(context.Context, string, string) (*runtimeapi.WorkspaceInfo, error)) {
+	a.runtime = runtime
+	a.workspace = workspace
+}
+
 // LaunchErrand shares guarded classification and admission with direct callers.
 func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) (errands.LaunchResult, error) {
+	if a.runtime != nil {
+		return a.launchOwnedErrand(ctx, request)
+	}
 	result, _, err := a.svc.launchErrand(ctx, request)
 	return result, err
 }
