@@ -111,6 +111,62 @@ func exerciseErrandNewWorkAdmission(t *testing.T, factory func(*testing.T) *Repo
 func TestErrandLateBindingAfterCancellation(t *testing.T) {
 	exerciseErrandLateBindingAfterCancellation(t, newRepoForSessionTests(t))
 }
+
+func TestErrandCancelRejectsStalePromptTarget(t *testing.T) {
+	exerciseErrandCancelRejectsStalePromptTarget(t, newRepoForSessionTests(t))
+}
+
+func TestPostgresErrandCancelRejectsStalePromptTarget(t *testing.T) {
+	exerciseErrandCancelRejectsStalePromptTarget(t, newPostgresErrandRepo(t))
+}
+
+func exerciseErrandCancelRejectsStalePromptTarget(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	task := newErrandTask(t, repo, "cancel-stale-prompt")
+	row := sampleErrand("cancel-stale-prompt", task, "parent", errandScenarioBase)
+	mustCreateErrand(t, repo, row)
+	generation, err := repo.ReserveErrandExecutionGeneration(ctx, row.ID, 0)
+	require.NoError(t, err)
+	bound, err := repo.BindErrandExecution(ctx, row.ID, generation.Generation, "execution")
+	require.NoError(t, err)
+	require.True(t, bound)
+	observed, err := repo.GetErrandExecutionDescriptor(ctx, row.ID)
+	require.NoError(t, err)
+	require.Empty(t, observed.ActiveTurnID)
+	row, err = repo.GetErrand(ctx, row.ID)
+	require.NoError(t, err)
+	row.Lifecycle, row.CancelSource = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser
+	row.TeardownIntent = &models.ErrandTeardownIntent{
+		Version: models.ErrandTeardownIntentVersion, ID: "cancel-exact", RequestedAt: errandScenarioBase,
+		State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCancellation,
+		Target: models.ErrandTeardownTarget{
+			TaskID: task, ErrandID: row.ID, OwnerGeneration: observed.Generation,
+			ExecutionID: observed.ExecutionID, NoTurn: true, PromptGeneration: observed.PromptGeneration,
+		},
+	}
+	binding := &models.ErrandHarnessBinding{
+		ErrandID: row.ID, Generation: 1, ExecutionID: "execution", IncarnationID: "incarnation",
+		HarnessGeneration: 1, StreamID: "stream",
+	}
+	require.NoError(t, repo.AppendErrandHarnessBinding(ctx, binding, 0))
+	require.NoError(t, repo.CreateErrandTurn(ctx, row.ID, &models.Turn{ID: row.FirstTurnID, TaskID: task}))
+	payload := []byte("the dispatch won")
+	admitted, err := repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{
+		ErrandID: row.ID, Generation: 1, ExecutionID: binding.ExecutionID,
+		IncarnationID: binding.IncarnationID, HarnessGeneration: 1, StreamID: binding.StreamID,
+		PromptGeneration: 1, TurnID: row.FirstTurnID,
+		Submission: &models.AgentDeliverySubmission{ID: row.SubmissionID, Payload: payload, PayloadHash: journal.SubmissionHash(payload)},
+	})
+	require.NoError(t, err)
+	require.True(t, admitted)
+	require.ErrorIs(t, repo.UpdateErrand(ctx, row), models.ErrErrandVersionConflict,
+		"cancellation must recapture the same generation's admitted prompt")
+	target := &row.TeardownIntent.Target
+	target.NoTurn = false
+	target.PromptGeneration, target.TurnID, target.SubmissionID = 1, row.FirstTurnID, row.SubmissionID
+	require.NoError(t, repo.UpdateErrand(ctx, row))
+}
 func TestPostgresErrandLateBindingAfterCancellation(t *testing.T) {
 	exerciseErrandLateBindingAfterCancellation(t, newPostgresErrandRepo(t))
 }
