@@ -1466,10 +1466,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	// sharing one task environment must have separate files. A session remains
 	// the stable owner across agentctl replacement; the environment fallback is
 	// only for callers that do not provide a session identity.
-	journalOwnerID := reqWithWorktree.SessionID
-	if journalOwnerID == "" {
-		journalOwnerID = reqWithWorktree.TaskEnvironmentID
-	}
+	journalOwnerID := launchJournalOwnerID(reqWithWorktree)
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -2698,29 +2695,9 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
-	if execution != nil {
-		ownerReq := &LaunchRequest{
-			OwnerAdmission: execution.OwnerAdmission,
-			Owner:          execution.Owner,
-		}
-		if ownerReq.Owner.Kind == ExecutionOwnerTask || ownerReq.Owner.Kind == "" {
-			ownerReq.Owner = ExecutionOwner{
-				Kind:           executionOwnerKind(execution),
-				WorkspaceID:    execution.WorkspaceID,
-				TaskID:         execution.TaskID,
-				SessionID:      execution.SessionID,
-				RunID:          execution.RunID,
-				RunSessionID:   execution.RunSessionID,
-				Attempt:        execution.RunAttempt,
-				AgentProfileID: execution.OfficeAgentProfileID,
-			}
-		}
-		if ownerReq.Owner.Kind == ExecutionOwnerRun || ownerReq.Owner.Kind == ExecutionOwnerErrand {
-			if err := m.admitExecutionOwner(ctx, ownerReq); err != nil {
-				m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "owner admission failed")
-				return err
-			}
-		}
+	if err := m.admitOwnerBeforeRegistration(ctx, execution); err != nil {
+		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "owner admission failed")
+		return err
 	}
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
@@ -2773,6 +2750,10 @@ func (m *Manager) registerAndPublishExecution(
 			m.rollbackRegisteredLaunch(rt, execInstance, execution, "runtime secret persistence failed")
 			return err
 		}
+	}
+	if err := m.admitRegisteredErrand(ctx, execution); err != nil {
+		m.rollbackRegisteredLaunch(rt, execInstance, execution, "errand owner admission failed")
+		return err
 	}
 
 	go m.pollOneRemoteStatus(context.Background(), execution)
