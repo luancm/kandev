@@ -393,32 +393,9 @@ describe("setupSessionTabSync explicit activation", () => {
   });
 });
 
-// @covers AC-TASKS-ERRANDS-010.2
-it("keeps an explicitly selected child across a restored layout pointing at another normal conversation", () => {
-  const harness = makeDefaultSessionTabSyncHarness({ restoredSessionId: OTHER_SESSION_ID });
-  const baseline = harness.appStore.getState();
-  const parent = { id: "parent", task_id: TASK_ID };
-  const child = {
-    id: ACTIVE_SESSION_ID,
-    task_id: TASK_ID,
-    role: "errand" as const,
-    parent_session_id: "parent",
-  };
-  harness.appStore.getState = () => ({
-    ...baseline,
-    taskSessions: { items: { ...baseline.taskSessions.items, [ACTIVE_SESSION_ID]: child, parent } },
-    taskSessionsByTask: {
-      itemsByTaskId: { [TASK_ID]: [child, parent, baseline.taskSessions.items[OTHER_SESSION_ID]] },
-    },
-    environmentIdBySessionId: { ...baseline.environmentIdBySessionId, parent: "env-A" },
-  });
-  startSessionTabSync(harness);
-  expect(harness.setActiveSessionAuto).not.toHaveBeenCalled();
-});
-
-it("preserves an explicit child URL before role hydration can identify it", () => {
+it("preserves an explicit Errand URL during layout restoration", () => {
   const previous = window.location.href;
-  window.history.replaceState({}, "", `/t/${TASK_ID}?sessionId=${ACTIVE_SESSION_ID}`);
+  window.history.replaceState({}, "", `/t/${TASK_ID}?sessionId=owned-errand`);
   try {
     const harness = makeDefaultSessionTabSyncHarness({ restoredSessionId: OTHER_SESSION_ID });
     startSessionTabSync(harness);

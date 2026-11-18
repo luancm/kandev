@@ -1,4 +1,3 @@
-import { isErrandConversation } from "@/lib/task-conversation-navigation";
 /**
  * Helpers for task selection in the sidebar. Extracted as pure functions so
  * the no-session fallback path can be unit-tested without standing up the
@@ -115,11 +114,10 @@ export function resolveLoadedSessionId(
   sessions: TaskSession[],
   preferredSessionId: string,
 ): string {
-  const normal = sessions.filter((session) => !isErrandConversation(session));
   return (
     sessions.find((s) => s.id === preferredSessionId)?.id ??
-    normal.find((s) => s.is_primary)?.id ??
-    normal[0]?.id ??
+    sessions.find((s) => s.is_primary)?.id ??
+    sessions[0]?.id ??
     preferredSessionId
   );
 }

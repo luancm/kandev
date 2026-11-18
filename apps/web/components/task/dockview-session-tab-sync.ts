@@ -1,8 +1,5 @@
 import { isTaskDetailPath } from "@/lib/links";
-import {
-  conversationTabSessionId,
-  replaceTaskConversationUrl,
-} from "@/lib/task-conversation-navigation";
+import { replaceTaskConversationUrl } from "@/lib/task-conversation-navigation";
 import type { DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -18,14 +15,10 @@ import { resolveSessionTabSyncTarget } from "./dockview-session-tabs";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
-function restoreActiveSessionPanel(api: DockviewReadyEvent["api"], state: AppState): void {
-  const taskId = state.tasks.activeTaskId;
-  const activeSessionId = conversationTabSessionId(
-    state.tasks.activeSessionId,
-    taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
-    taskId ? state.errands.byTaskId[taskId] : undefined,
-    state.tasks.activeSessionId ? state.taskSessions.items[state.tasks.activeSessionId] : undefined,
-  );
+function restoreActiveSessionPanel(
+  api: DockviewReadyEvent["api"],
+  activeSessionId: string | null,
+): void {
   if (!activeSessionId) return;
   if (hiddenSessionIdsFor(api).has(activeSessionId)) return;
   api.getPanel(`session:${activeSessionId}`)?.api.setActive();
@@ -96,15 +89,6 @@ function adoptRestoredSessionTabSelection(
   if (selectedSessionIds.length !== 1) return;
 
   const sessionId = selectedSessionIds[0];
-  const selectedHostId = conversationTabSessionId(
-    state.tasks.activeSessionId,
-    state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [],
-    state.errands.byTaskId[activeTaskId],
-    state.tasks.activeSessionId ? state.taskSessions.items[state.tasks.activeSessionId] : undefined,
-  );
-  // An explicit child route owns selection; a saved peer tab cannot replace it.
-  if (selectedHostId !== state.tasks.activeSessionId) return;
-  if (sessionId === selectedHostId) return;
   if (sessionId === state.tasks.activeSessionId) return;
   state.setActiveSessionAuto(activeTaskId, sessionId);
 }
@@ -154,7 +138,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
           activeTaskId: state.tasks.activeTaskId,
         });
       }
-      if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state);
+      if (shouldRestoreActiveSession) restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
     if (state.tasks.activeSessionId && hiddenSessionIdsFor(api).has(state.tasks.activeSessionId)) {
@@ -168,7 +152,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
           activeSessionId: state.tasks.activeSessionId,
         });
       }
-      restoreActiveSessionPanel(api, state);
+      restoreActiveSessionPanel(api, state.tasks.activeSessionId);
       return;
     }
     if (isDebug()) {

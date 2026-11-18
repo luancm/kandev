@@ -4,7 +4,6 @@ import {
   TaskSessionNavigationContext,
   useScopedTaskSessionNavigation,
 } from "./chat/errands/task-session-navigation-context";
-import { conversationTabSessionId, isErrandConversation } from "@/lib/task-conversation-navigation";
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -40,11 +39,11 @@ import { limitSessionName, useSessionRenameCommitter } from "./use-session-renam
 import {
   buildAgentLabelsById,
   isSessionActive,
+  pickActiveSessionId,
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
 import { useTranslation } from "react-i18next";
-import { usePreviewConversation } from "./use-preview-conversation";
 
 const LABEL_SEPARATOR = " \u2022 ";
 const PLAN_TAB_ID = "plan";
@@ -296,7 +295,8 @@ export function PreviewSessionTabs({
     [primarySessionId],
   );
 
-  const activeSession = usePreviewConversation(taskId, sessionId, sortedSessions);
+  const selectedId = pickActiveSessionId(sortedSessions, sessionId);
+  const activeSession = sortedSessions.find((session) => session.id === selectedId) ?? null;
   const activeSessionId = activeSession?.id ?? null;
   const taskStatusSummaryDetail = useAppStore(
     (state) =>
@@ -332,9 +332,7 @@ export function PreviewSessionTabs({
   const handleSessionRemoved = useCallback(
     (removedSessionId: string) => {
       if (removedSessionId !== activeSessionIdRef.current) return;
-      const remaining = sortedSessionsRef.current.filter(
-        (s) => s.id !== removedSessionId && !isErrandConversation(s),
-      );
+      const remaining = sortedSessionsRef.current.filter((s) => s.id !== removedSessionId);
       onSessionChange?.(remaining[0]?.id ?? null);
     },
     [onSessionChange],
@@ -348,7 +346,7 @@ export function PreviewSessionTabs({
   const { viewMode, planTab, hasPlan } = planTabState;
 
   const sessionTabs = useBuildPreviewTabs({
-    sortedSessions: sortedSessions.filter((session) => session.role !== "errand"),
+    sortedSessions,
     profilesById,
     agentLabelsById,
     taskId,
@@ -406,16 +404,7 @@ export function PreviewSessionTabs({
           <div className="border-b px-2 py-1">
             <SessionTabs
               tabs={tabs}
-              activeTab={
-                viewMode === "plan"
-                  ? PLAN_TAB_ID
-                  : (conversationTabSessionId(
-                      activeSessionId,
-                      sortedSessions,
-                      {},
-                      activeSession ?? undefined,
-                    ) ?? "")
-              }
+              activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
               onTabChange={planTabState.handleTabChange}
               listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
             />

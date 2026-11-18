@@ -1,10 +1,7 @@
 import { useCallback, useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
-import {
-  errandParentSessionId,
-  replaceTaskConversationUrl,
-} from "@/lib/task-conversation-navigation";
+import { replaceTaskConversationUrl } from "@/lib/task-conversation-navigation";
 import type { ErrandInspection } from "@/lib/types/errands";
 import { OwnedErrandConversation } from "./chat/errands/owned-errand-conversation";
 import {
@@ -61,8 +58,7 @@ export function TaskConversationPanel({
         return false;
       const errand = inspection.errand;
       const state = store.getState();
-      state.releaseErrandInspection(ownerId);
-      state.retainErrandDetail(ownerId, errand.errand_id);
+      state.retainErrandInspection(ownerId, inspection);
       replaceTaskConversationUrl(taskId, errand.errand_id);
       setSelection({ taskId, parentId: sessionId, errandId: errand.errand_id, readScope });
       return true;
@@ -83,21 +79,10 @@ export function TaskConversationPanel({
     if (linkedHere) setDismissedLink(linkedHere);
     if (taskId && sessionId) replaceTaskConversationUrl(taskId, sessionId);
   };
-  const parentSessionId = useAppStore((state) =>
-    taskId
-      ? errandParentSessionId(
-          sessionId,
-          state.taskSessionsByTask.itemsByTaskId[taskId] ?? [],
-          state.errands.byTaskId[taskId],
-          sessionId ? state.taskSessions.items[sessionId] : undefined,
-        )
-      : null,
-  );
   return (
     <OwnedErrandNavigationContext.Provider value={open}>
       <TaskConversationView
         sessionId={sessionId}
-        parentSessionId={parentSessionId}
         ownedConversation={
           taskId &&
           errandId && (
@@ -116,39 +101,28 @@ export function TaskConversationPanel({
   );
 }
 
-/** A temporary child covers its retained parent without changing the parent's viewport. */
+/** An Errand covers the retained parent without changing the parent's viewport. */
 export function TaskConversationView({
   sessionId,
-  parentSessionId,
   ownedConversation,
   children,
 }: {
   sessionId: string | null;
-  parentSessionId: string | null;
   ownedConversation?: ReactNode;
   children: ConversationRenderer;
 }) {
-  const temporary = parentSessionId !== null && parentSessionId !== sessionId;
-  const hostId = temporary ? parentSessionId : sessionId;
-  const covered = temporary || Boolean(ownedConversation);
+  const covered = Boolean(ownedConversation);
   return (
     <div className="relative flex h-full min-h-0 flex-1 flex-col">
       <div
-        key={hostId}
+        key={sessionId}
         className={`flex min-h-0 flex-1 flex-col${covered ? " invisible" : ""}`}
         inert={covered || undefined}
         aria-hidden={covered || undefined}
       >
-        {children(hostId, covered)}
+        {children(sessionId, covered)}
       </div>
-      {covered && (
-        <div
-          key={ownedConversation ? "owned" : sessionId}
-          className="absolute inset-0 flex min-h-0 flex-col"
-        >
-          {ownedConversation ?? children(sessionId, false)}
-        </div>
-      )}
+      {covered && <div className="absolute inset-0 flex min-h-0 flex-col">{ownedConversation}</div>}
     </div>
   );
 }

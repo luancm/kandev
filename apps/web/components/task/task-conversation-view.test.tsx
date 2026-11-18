@@ -30,15 +30,12 @@ function Conversation({ id, inactive }: { id: string | null; inactive: boolean }
   );
 }
 
-function View({
-  sessionId,
-  parentSessionId = null,
-}: {
-  sessionId: string;
-  parentSessionId?: string | null;
-}) {
+function View({ sessionId, errandId }: { sessionId: string; errandId?: string }) {
   return (
-    <TaskConversationView sessionId={sessionId} parentSessionId={parentSessionId}>
+    <TaskConversationView
+      sessionId={sessionId}
+      ownedConversation={errandId && <Conversation key={errandId} id={errandId} inactive={false} />}
+    >
       {(id, inactive) => <Conversation id={id} inactive={inactive} />}
     </TaskConversationView>
   );
@@ -78,7 +75,7 @@ describe("temporary conversation view retention", () => {
     const view = render(<View sessionId={PARENT_ID} />);
     const parent = screen.getByTestId(PARENT_ID);
     fireEvent.change(parent, { target: { value: "Unsent parent draft" } });
-    view.rerender(<View sessionId={CHILD_ID} parentSessionId={PARENT_ID} />);
+    view.rerender(<View sessionId={PARENT_ID} errandId={CHILD_ID} />);
     expect(screen.getByTestId(PARENT_ID)).toBe(parent);
     expect(parent.dataset.inactive).toBe("true");
     expect(parent.parentElement?.hasAttribute("inert")).toBe(true);
@@ -101,19 +98,13 @@ describe("temporary conversation view retention", () => {
     expect((screen.getByTestId("other-parent") as HTMLInputElement).value).toBe("");
   });
 
-  it("keeps a direct child with no retained parent as the only conversation", () => {
-    render(<View sessionId="orphan" />);
-    expect(screen.getAllByRole("textbox")).toHaveLength(1);
-    expect(screen.getByTestId("orphan").dataset.inactive).toBe("false");
-  });
-
-  it("retains the parent while replacing local state between different children", () => {
-    const view = render(<View sessionId={CHILD_ID} parentSessionId={PARENT_ID} />);
+  it("retains the parent while replacing local state between Errands", () => {
+    const view = render(<View sessionId={PARENT_ID} errandId={CHILD_ID} />);
     const parent = screen.getByTestId(PARENT_ID);
     fireEvent.change(screen.getByTestId(CHILD_ID), { target: { value: "Child draft" } });
-    view.rerender(<View sessionId="next-child" parentSessionId={PARENT_ID} />);
+    view.rerender(<View sessionId={PARENT_ID} errandId="next-errand" />);
     expect(screen.getByTestId(PARENT_ID)).toBe(parent);
     expect(screen.queryByTestId(CHILD_ID)).toBeNull();
-    expect((screen.getByTestId("next-child") as HTMLInputElement).value).toBe("");
+    expect((screen.getByTestId("next-errand") as HTMLInputElement).value).toBe("");
   });
 });

@@ -206,7 +206,7 @@ export function readErrandInspection(store: StoreApi<AppState>, taskId: string, 
   const generation = initial.connection.generation ?? 0;
   const epoch = initial.errands.resetEpochByTaskId[taskId] ?? 0;
   const scopeEpoch = initial.errands.scopeResetEpoch ?? 0;
-  let revision = initial.errands.browserRevisionByTaskId[taskId] ?? 0;
+  const revision = initial.errands.browserRevisionByTaskId[taskId] ?? 0;
   const isCurrent = () => {
     const state = store.getState();
     return (
@@ -240,28 +240,6 @@ export function readErrandInspection(store: StoreApi<AppState>, taskId: string, 
     promise,
     release: lease.release,
     isCurrent,
-    publishSession: (ownerId: string, inspection: ErrandInspection, publish: () => void) => {
-      if (!isCurrent()) return false;
-      const previousRevision = revision;
-      publish();
-      revision = previousRevision + 1;
-      if (!isCurrent()) return false;
-      const state = store.getState();
-      if (
-        state.errands.detailBySessionId[sessionId] !== inspection ||
-        !state.errands.detailOwnersBySessionId[sessionId]?.[ownerId] ||
-        state.errands.detailObservationRevisionBySessionId?.[sessionId] !== previousRevision
-      )
-        return false;
-      state.retainErrandInspection(ownerId, inspection);
-      const retained = store.getState().errands;
-      return (
-        isCurrent() &&
-        retained.detailBySessionId[sessionId] === inspection &&
-        Boolean(retained.detailOwnersBySessionId[sessionId]?.[ownerId]) &&
-        retained.detailObservationRevisionBySessionId?.[sessionId] === revision
-      );
-    },
     retain: (ownerId: string, inspection: ErrandInspection) => {
       if (!isCurrent() || !validInspection(inspection, taskId, sessionId)) return false;
       store.getState().retainErrandInspection(ownerId, inspection);

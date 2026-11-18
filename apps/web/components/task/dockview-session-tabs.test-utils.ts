@@ -86,36 +86,6 @@ export function makeSharedEnvironmentHandoffApi(): {
   };
 }
 
-export type ErrandTabSession = { id: string; role?: "errand"; parent_session_id?: string };
-
-/**
- * App-store stand-in for the automatic tab effect on one loaded task, with
- * the given session rows, errand rows, and errands flag.
- */
-export function makeErrandTabAppStore(args: {
-  taskId: string;
-  errandsEnabled: boolean;
-  sessions: ErrandTabSession[];
-  errandIds: string[];
-}) {
-  const setActiveSessionAuto = vi.fn();
-  const errandRows = Object.fromEntries(args.errandIds.map((id) => [id, { errand_id: id }]));
-  const state = {
-    tasks: { activeTaskId: args.taskId },
-    taskSessionsByTask: {
-      itemsByTaskId: { [args.taskId]: args.sessions },
-      loadedByTaskId: { [args.taskId]: true },
-    },
-    taskSessions: {
-      items: Object.fromEntries(args.sessions.map((session) => [session.id, session])),
-    },
-    features: { errands: args.errandsEnabled },
-    errands: { byTaskId: { [args.taskId]: errandRows } },
-    setActiveSessionAuto,
-  };
-  return { appStore: { getState: () => state }, setActiveSessionAuto };
-}
-
 type ReorderingMoveOptions = {
   index: number;
   skipSetActive: boolean;

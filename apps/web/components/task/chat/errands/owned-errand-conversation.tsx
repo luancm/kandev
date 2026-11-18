@@ -46,7 +46,7 @@ export function OwnedErrandConversation({
       data-errand-id={errandId}
       className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
     >
-      <ErrandHeader taskId={taskId} sessionId={errandId} onBack={onClose} />
+      <ErrandHeader taskId={taskId} errandId={errandId} onBack={onClose} />
       <ErrandStatusAnnouncer taskId={taskId} sessionId={errandId} active />
       <OwnedErrandPermissionContext.Provider value={permissionOwner}>
         <MessageList

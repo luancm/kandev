@@ -30,15 +30,11 @@ export function resolveTaskSessionId(
   task: Task,
   sessions: TaskSession[],
   requestedSessionId?: string,
-  selectedErrandInspection?: ErrandInspection,
 ): string | null {
   const ownedSessions = sessions.filter((session) => session.task_id === task.id);
   if (requestedSessionId) {
     if (ownedSessions.some((session) => session.id === requestedSessionId))
       return requestedSessionId;
-    if (inspectionMatchesRequestedChild(task.id, requestedSessionId, selectedErrandInspection)) {
-      return requestedSessionId;
-    }
     return null;
   }
   const primarySession = task.primary_session_id
@@ -51,28 +47,7 @@ export function matchingActiveSession(
   session: TaskSession | null,
   task: Task,
   sessionId: string,
-  expectedErrandParentSessionId?: string,
 ): TaskSession | null {
   if (!session || session.id !== sessionId || session.task_id !== task.id) return null;
-  if (
-    expectedErrandParentSessionId &&
-    (session.role !== "errand" || session.parent_session_id !== expectedErrandParentSessionId)
-  ) {
-    return null;
-  }
   return session;
-}
-
-function inspectionMatchesRequestedChild(
-  taskId: string,
-  requestedSessionId: string,
-  inspection?: ErrandInspection,
-): boolean {
-  return Boolean(
-    inspection?.scope.task_id === taskId &&
-    inspection.scope.child_session_id === requestedSessionId &&
-    inspection.errand.task_id === taskId &&
-    inspection.errand.errand_id === requestedSessionId &&
-    inspection.child_session_exists,
-  );
 }

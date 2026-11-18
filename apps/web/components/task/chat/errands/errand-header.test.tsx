@@ -106,7 +106,8 @@ function makeHeaderInspection(compact: ErrandBrowserRow | null): ErrandInspectio
   return {
     scope: { task_id: TASK_ID, child_session_id: ERRAND_ID },
     errand: compact,
-    child_session_exists: true,
+    child_session_exists: false,
+    owns_conversation: true,
     parent: { available: true, id: PARENT_ID, title: "Main", role: "primary" },
   };
 }
@@ -126,8 +127,7 @@ function makeHeaderCounts(compact: ErrandBrowserRow | null): ErrandBrowserCounts
 function setState({
   enabled = true,
   row = errand(),
-  role = "errand" as string | undefined,
-}: { enabled?: boolean; row?: Errand | null; role?: string } = {}) {
+}: { enabled?: boolean; row?: Errand | null } = {}) {
   const compact = row ? browserRow(row) : null;
   const inspection = makeHeaderInspection(compact);
   mocks.state = {
@@ -135,15 +135,13 @@ function setState({
     tasks: { activeTaskId: TASK_ID },
     taskSessions: {
       items: {
-        [ERRAND_ID]: {
-          id: ERRAND_ID,
+        [PARENT_ID]: {
+          id: PARENT_ID,
           task_id: TASK_ID,
-          role,
-          parent_session_id: PARENT_ID,
+          name: "Main",
           workspace_path: "/home/me/.kandev/tasks/auth",
           worktree_branch: "feat/auth",
         },
-        [PARENT_ID]: { id: PARENT_ID, task_id: TASK_ID, name: "Main" },
       },
     },
     errands: {
@@ -177,8 +175,8 @@ function setState({
   };
 }
 
-function renderHeader(sessionId = ERRAND_ID) {
-  return render(<ErrandHeader sessionId={sessionId} taskId={TASK_ID} />);
+function renderHeader(onBack?: () => void) {
+  return render(<ErrandHeader errandId={ERRAND_ID} taskId={TASK_ID} onBack={onBack} />);
 }
 
 afterEach(cleanup);
@@ -193,11 +191,6 @@ beforeEach(() => {
 });
 
 describe("ErrandHeader visibility", () => {
-  it("renders nothing for an ordinary session", () => {
-    renderHeader(PARENT_ID);
-    expect(screen.queryByTestId(HEADER)).toBeNull();
-  });
-
   it("retains parent navigation while the errands flag is off", () => {
     setState({ enabled: false });
     renderHeader();
@@ -226,7 +219,7 @@ describe("ErrandHeader desktop", () => {
     expect(workspace.getAttribute("title")).toBe("/home/me/.kandev/tasks/auth (feat/auth)");
   });
 
-  it("keeps a legacy needs-attention snapshot free of inferred recovery wording", () => {
+  it("uses a generic label for attention without a specific reason", () => {
     setState({ row: errand({ status: "needs_attention" }) });
     renderHeader();
 
@@ -303,11 +296,13 @@ describe("ErrandHeader desktop", () => {
     expect(screen.getByText("Audit /api/v1 handlers for missing authorize calls")).toBeTruthy();
   });
 
-  it("keeps the back link for an errand whose row has not loaded yet", () => {
+  it("closes the overlay when the Errand row has not loaded yet", () => {
     setState({ row: null });
-    renderHeader();
+    const onBack = vi.fn();
+    renderHeader(onBack);
 
-    expect(screen.getByRole("button", { name: BACK_NAME })).toBeTruthy();
+    fireEvent.click(screen.getByTestId("errand-back-to-parent"));
+    expect(onBack).toHaveBeenCalledOnce();
     expect(screen.queryByTestId(STOP)).toBeNull();
   });
 });

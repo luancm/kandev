@@ -678,24 +678,18 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
   });
 });
 
-// @covers AC-TASKS-ERRANDS-005.6
-it("filters fallback candidates without excluding explicit children or pending input owners", () => {
-  const child = {
-    id: "child",
-    role: "errand",
+it("offers the ordinary session with pending input before the preferred session", () => {
+  const reviewing = {
+    id: "reviewing",
     state: "WAITING_FOR_INPUT",
     pending_action: "permission",
-    is_primary: true,
   } as TaskSession;
-  const sessions = [child, { id: "normal" } as TaskSession];
-  expect(resolveTaskSessionId({ sessions, preferredSessionId: "" })).toBe("normal");
-  expect(resolveTaskSessionId({ sessions: [child], preferredSessionId: "" })).toBe("");
-  expect(resolveTaskSessionId({ sessions, preferredSessionId: "child" })).toBe("child");
+  const sessions = [reviewing, { id: "normal" } as TaskSession];
   expect(
     resolveTaskSessionId({
       sessions,
       preferredSessionId: "normal",
       taskPendingAction: "permission",
     }),
-  ).toBe("child");
+  ).toBe("reviewing");
 });

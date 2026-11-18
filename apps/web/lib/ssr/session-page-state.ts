@@ -323,12 +323,7 @@ export function buildTaskNavigationShellData(
   );
   const sessionId = ownedErrand
     ? ownedErrandParentSession(ownedErrand)
-    : (resolveTaskSessionId(
-        task,
-        sessions,
-        requestedSessionId,
-        identity.selectedErrandInspection,
-      ) ??
+    : (resolveTaskSessionId(task, sessions, requestedSessionId) ??
       (identity.sessionListUnavailable && !requestedSessionId
         ? (task.primary_session_id ?? null)
         : null));
@@ -370,12 +365,7 @@ export async function fetchTaskNavigationEnrichment(
   );
   const sessionId = ownedErrand
     ? ownedErrandParentSession(ownedErrand)
-    : resolveTaskSessionId(
-        task,
-        allSessionsResponse.sessions ?? [],
-        requestedSessionId,
-        identity.selectedErrandInspection,
-      );
+    : resolveTaskSessionId(task, allSessionsResponse.sessions ?? [], requestedSessionId);
   const loadAgentList = options.store
     ? () => getAgentListResourceScope(options.store!).ensure()
     : () => listAgents({ cache: "no-store" });
@@ -390,10 +380,7 @@ export async function fetchTaskNavigationEnrichment(
     );
     data = await fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
       activeSessionResponse,
-      sessionEnvironmentId: identity.selectedErrandInspection?.parent.task_environment_id,
-      expectedErrandParentSessionId: ownedErrand
-        ? undefined
-        : identity.selectedErrandInspection?.errand.parent_session_id,
+      sessionEnvironmentId: ownedErrand?.parent.task_environment_id,
       optionalHydration,
       loadAgentList,
       store: options.store,
@@ -527,7 +514,6 @@ async function fetchSessionDataFromTask(
   options: {
     activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>;
     sessionEnvironmentId?: string;
-    expectedErrandParentSessionId?: string;
     optionalHydration: ReturnType<typeof beginOptionalHydration>;
     loadAgentList?: () => Promise<AgentListResponse>;
     store?: StoreApi<AppState>;
@@ -579,12 +565,7 @@ async function fetchSessionDataFromTask(
   const terminals = optionalValue(terminalsResponse) ?? [];
   const messages = optionalValue(messagesResponse);
   const sessionCandidate = optionalValue(activeSessionResult)?.session ?? null;
-  const activeSession = matchingActiveSession(
-    sessionCandidate,
-    task,
-    sessionId,
-    options.expectedErrandParentSessionId,
-  );
+  const activeSession = matchingActiveSession(sessionCandidate, task, sessionId);
   const { turns, turnCoverage } = await resolveMessageTurnWindow(
     sessionId,
     messages,

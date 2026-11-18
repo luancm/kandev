@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import { requestedOwnedErrand } from "@/lib/ssr/task-session-route-identity";
 import {
   InvalidErrandInspectionError,
   readErrandInspection,
@@ -31,7 +32,8 @@ export async function assertRequestedSession(
   }
   const read = readErrandInspection(store, taskId, sessionId);
   try {
-    const inspection = await read.promise;
+    const inspection = requestedOwnedErrand(taskId, sessionId, await read.promise);
+    if (!inspection) throw new InvalidErrandInspectionError();
     return {
       inspection,
       retain: (ownerId: string) => read.retain(ownerId, inspection),

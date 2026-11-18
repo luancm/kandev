@@ -76,7 +76,6 @@ import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { JumpToLatestButton } from "./chat/jump-to-latest-button";
 import { ConversationUsageDisplay } from "./chat/conversation-usage-display";
-import { ErrandHeader } from "./chat/errands/errand-header";
 import { ErrandStatusAnnouncer } from "./chat/errands/errand-status-announcer";
 import { TaskConversationPanel } from "./task-conversation-view";
 import { useRetainedReaderPosition } from "./chat/use-retained-reader-position";
@@ -1634,7 +1633,6 @@ const TaskChatPanelContent = memo(function TaskChatPanelContent({
           <div ref={wipQueueStatusRef} className="shrink-0">
             {!hideWipQueueStatus && <WipQueueStatus taskId={summaryTaskId} />}
           </div>
-          <ErrandHeader sessionId={resolvedSessionId} taskId={taskId ?? summaryTaskId} />
           <ErrandStatusAnnouncer
             taskId={taskId ?? summaryTaskId}
             sessionId={resolvedSessionId}

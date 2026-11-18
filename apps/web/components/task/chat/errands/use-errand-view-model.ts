@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo } from "react";
+import { useEffect, useId, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -18,9 +18,8 @@ import type { AppState } from "@/lib/state/store";
 import { selectSessionTabTitle } from "../../session-tab-title";
 
 export type ErrandViewModel = {
-  sessionId: string;
+  errandId: string;
   taskId: string;
-  /** Bounded current row; absent until summary, history, or targeted inspect supplies it. */
   errand: ErrandBrowserRow | null;
   parentSessionId: string | null;
   parentTitle: string;
@@ -30,205 +29,102 @@ export type ErrandViewModel = {
   branch: string | null;
 };
 
-function useErrandInspectionOwner(args: {
-  enabled: boolean;
-  taskId: string | null;
-  sessionId: string | null | undefined;
-  isErrand: boolean;
-  ownerId: string;
-  store: ReturnType<typeof useAppStoreApi>;
-  connectionStatus: string;
-  connectionGeneration: number;
-  readScopeIdentity: string;
-  taskResetEpoch: number;
-  observationRevision: number;
-}) {
+function selectErrandParent(state: AppState, taskId: string, errandId: string, parentId?: string) {
+  const retained = selectErrandInspection(state, errandId);
+  const inspection = retained?.scope.task_id === taskId ? retained : undefined;
+  const candidate = parentId ? state.taskSessions.items[parentId] : undefined;
+  const parent = candidate?.task_id === taskId ? candidate : undefined;
+  return {
+    parentSessionId: parent?.id ?? null,
+    parentTitle: parent ? selectSessionTabTitle(state, parent.id) : inspection?.parent.title,
+    workspacePath: getSessionWorkspacePath(parent) ?? null,
+    branch: parent?.worktree_branch ?? null,
+  };
+}
+
+function selectErrandViewInputs(state: AppState, taskId: string, errandId: string) {
+  const enabled = state.features.errands;
+  const errand = selectErrandBrowserRowBySessionId(state, taskId, errandId);
+  return {
+    ...selectErrandParent(state, taskId, errandId, errand?.parent_session_id),
+    enabled,
+    errand: enabled ? (errand ?? null) : null,
+    title: errand?.title,
+    objective: enabled
+      ? (selectErrandBySessionId(state, taskId, errandId)?.objective ?? null)
+      : null,
+    connectionStatus: state.connection.status,
+    connectionGeneration: state.connection.generation ?? 0,
+    readScopeIdentity: stateReadScopeIdentity(state),
+    observationRevision: state.errands.browserRevisionByTaskId[taskId] ?? 0,
+    taskResetEpoch: state.errands.resetEpochByTaskId[taskId] ?? 0,
+  };
+}
+
+/** Header data for an Errand-owned conversation and its authorized parent. */
+export function useErrandViewModel(errandId: string, taskId: string): ErrandViewModel {
+  const { t } = useTranslation();
+  const store = useAppStoreApi();
+  const ownerId = `errand-view-${useId()}`;
+  const inputs = useAppStore(
+    useShallow((state) => selectErrandViewInputs(state, taskId, errandId)),
+  );
   const {
     enabled,
-    taskId,
-    sessionId,
-    isErrand,
-    ownerId,
-    store,
     connectionStatus,
     connectionGeneration,
     readScopeIdentity,
-    taskResetEpoch,
     observationRevision,
-  } = args;
+    taskResetEpoch,
+  } = inputs;
+
+  useLayoutEffect(() => {
+    const detailOwner = `${ownerId}:conversation`;
+    store.getState().retainErrandDetail(detailOwner, errandId);
+    return () => store.getState().releaseErrandInspection(detailOwner);
+  }, [errandId, ownerId, readScopeIdentity, store]);
+
   useEffect(() => {
-    if (!enabled || !taskId || !sessionId || !isErrand) return;
-    let released = false;
-    if (retainCurrentErrandInspection(store, taskId, sessionId, ownerId)) {
+    if (!enabled) return;
+    if (retainCurrentErrandInspection(store, taskId, errandId, ownerId)) {
       return () => store.getState().releaseErrandInspection(ownerId);
     }
     if (connectionStatus !== "connected") return;
-
-    const lease = readErrandInspection(store, taskId, sessionId);
-    void lease.promise
-      .then((result) => {
-        if (!released) lease.retain(ownerId, result);
+    const read = readErrandInspection(store, taskId, errandId);
+    let active = true;
+    void read.promise
+      .then((inspection) => {
+        if (active) read.retain(ownerId, inspection);
       })
       .catch(() => undefined)
-      .finally(lease.release);
+      .finally(read.release);
     return () => {
-      released = true;
-      lease.release();
+      active = false;
+      read.release();
       store.getState().releaseErrandInspection(ownerId);
     };
   }, [
-    observationRevision,
     connectionGeneration,
     connectionStatus,
     enabled,
-    isErrand,
+    errandId,
+    observationRevision,
     ownerId,
     readScopeIdentity,
-    sessionId,
     store,
     taskId,
     taskResetEpoch,
   ]);
-}
 
-type ErrandViewInputs = {
-  enabled: boolean;
-  session: AppState["taskSessions"]["items"][string] | null;
-  taskId: string | null;
-  errand: ErrandBrowserRow | undefined;
-  objective: string | null;
-  parentSessionId: string | null;
-  parentTitle: string | null;
-  isErrand: boolean;
-  connectionStatus: string;
-  connectionGeneration: number;
-  readScopeIdentity: string;
-  observationRevision: number;
-  taskResetEpoch: number;
-};
-
-const EMPTY_INPUTS: ErrandViewInputs = {
-  enabled: false,
-  session: null,
-  taskId: null,
-  errand: undefined,
-  objective: null,
-  parentSessionId: null,
-  parentTitle: null,
-  isErrand: false,
-  connectionStatus: "disconnected",
-  connectionGeneration: 0,
-  readScopeIdentity: "",
-  observationRevision: 0,
-  taskResetEpoch: 0,
-};
-
-function selectParentInputs(state: AppState, taskId: string | null, parentId: string | null) {
-  const parent = parentId ? state.taskSessions.items[parentId] : null;
-  const parentSessionId = parent?.task_id === taskId && parent.role !== "errand" ? parentId : null;
   return {
-    parentSessionId,
-    parentTitle: parentSessionId ? selectSessionTabTitle(state, parentSessionId) : null,
-  };
-}
-
-function selectRecognizedErrandInputs(
-  state: AppState,
-  sessionId: string,
-  inputs: Pick<ErrandViewInputs, "enabled" | "session" | "taskId" | "errand">,
-): ErrandViewInputs {
-  const { enabled, session, taskId, errand } = inputs;
-  const parentId = errand?.parent_session_id || session?.parent_session_id || null;
-  return {
-    ...inputs,
-    ...selectParentInputs(state, taskId, parentId),
-    objective:
-      enabled && taskId
-        ? (selectErrandBySessionId(state, taskId, sessionId)?.objective ?? null)
-        : null,
-    isErrand: true,
-    connectionStatus: state.connection.status,
-    connectionGeneration: state.connection.generation ?? 0,
-    readScopeIdentity: stateReadScopeIdentity(state),
-    observationRevision: taskId ? (state.errands.browserRevisionByTaskId[taskId] ?? 0) : 0,
-    taskResetEpoch: taskId ? (state.errands.resetEpochByTaskId[taskId] ?? 0) : 0,
-  };
-}
-
-function selectErrandViewInputs(
-  state: AppState,
-  sessionId: string | null | undefined,
-  taskIdHint: string | null | undefined,
-): ErrandViewInputs {
-  if (!sessionId) return EMPTY_INPUTS;
-  const enabled = state.features.errands;
-  const session = state.taskSessions.items[sessionId] ?? null;
-  const taskId = session?.task_id ?? taskIdHint ?? null;
-  const errand = enabled ? selectErrandBrowserRowBySessionId(state, taskId, sessionId) : undefined;
-  const inspection = selectErrandInspection(state, sessionId);
-  const isErrand = session?.role === "errand" || Boolean(errand) || Boolean(inspection);
-  if (!isErrand) return EMPTY_INPUTS;
-  return selectRecognizedErrandInputs(state, sessionId, { enabled, session, taskId, errand });
-}
-
-/** View model of the selected child conversation and its targeted inspection. */
-export function useErrandViewModel(
-  sessionId: string | null | undefined,
-  taskIdHint: string | null | undefined,
-): ErrandViewModel | null {
-  const { t } = useTranslation();
-  const store = useAppStoreApi();
-  const ownerId = `errand-view-${useId()}`;
-  const {
-    enabled,
-    session,
+    errandId,
     taskId,
-    errand,
-    objective,
-    parentSessionId,
-    parentTitle,
-    isErrand,
-    connectionStatus,
-    connectionGeneration,
-    readScopeIdentity,
-    observationRevision,
-    taskResetEpoch,
-  } = useAppStore(useShallow((state) => selectErrandViewInputs(state, sessionId, taskIdHint)));
-
-  useLayoutEffect(() => {
-    if (!sessionId || !isErrand) return;
-    const detailOwner = `${ownerId}:conversation`;
-    store.getState().retainErrandDetail(detailOwner, sessionId);
-    return () => store.getState().releaseErrandInspection(detailOwner);
-  }, [isErrand, ownerId, readScopeIdentity, sessionId, store]);
-
-  useErrandInspectionOwner({
-    enabled,
-    taskId,
-    sessionId,
-    isErrand,
-    ownerId,
-    store,
-    connectionStatus,
-    connectionGeneration,
-    readScopeIdentity,
-    taskResetEpoch,
-    observationRevision,
-  });
-
-  return useMemo(() => {
-    if (!sessionId || !taskId || !isErrand) return null;
-    const browserErrand = errand ?? null;
-    return {
-      sessionId,
-      taskId,
-      errand: browserErrand,
-      parentSessionId,
-      parentTitle: parentTitle || t("task:errandParentFallback"),
-      title: browserErrand?.title || session?.name || t("task:errandUntitled"),
-      objective,
-      workspacePath: getSessionWorkspacePath(session) ?? null,
-      branch: session?.worktree_branch || null,
-    };
-  }, [errand, isErrand, objective, parentSessionId, parentTitle, session, sessionId, t, taskId]);
+    errand: inputs.errand,
+    parentSessionId: inputs.parentSessionId,
+    parentTitle: inputs.parentTitle || t("task:errandParentFallback"),
+    title: inputs.title || t("task:errandUntitled"),
+    objective: inputs.objective,
+    workspacePath: inputs.workspacePath,
+    branch: inputs.branch,
+  };
 }

@@ -38,7 +38,7 @@ function ErrandHeaderDesktop({ model, onBack }: HeaderProps) {
             {model.title}
           </h2>
         </nav>
-        <ErrandHeaderActionButton errand={model.errand} sessionId={model.sessionId} />
+        <ErrandHeaderActionButton errand={model.errand} sessionId={model.errandId} />
       </div>
       <ErrandMetaRow model={model} showWorkspace />
       <ErrandRecoveryHeaderNotice errand={model.errand} />
@@ -63,7 +63,7 @@ function ErrandHeaderPhone({ model, onBack }: HeaderProps) {
         >
           {model.title}
         </h2>
-        <ErrandHeaderActionsMenu errand={model.errand} sessionId={model.sessionId} />
+        <ErrandHeaderActionsMenu errand={model.errand} sessionId={model.errandId} />
       </div>
       <div className="space-y-1 px-2">
         <ErrandMetaRow model={model} showWorkspace={false} />
@@ -74,22 +74,18 @@ function ErrandHeaderPhone({ model, onBack }: HeaderProps) {
   );
 }
 
-/**
- * Header above an errand's transcript. Renders nothing for ordinary sessions
- * or while the errands flag is off.
- */
+/** Header above an Errand's transcript. */
 export function ErrandHeader({
-  sessionId,
+  errandId,
   taskId,
   onBack,
 }: {
-  sessionId: string | null | undefined;
-  taskId: string | null | undefined;
+  errandId: string;
+  taskId: string;
   onBack?: () => void;
 }) {
-  const model = useErrandViewModel(sessionId, taskId);
+  const model = useErrandViewModel(errandId, taskId);
   const { isMobile } = useResponsiveBreakpoint();
-  if (!model) return null;
   return isMobile ? (
     <ErrandHeaderPhone model={model} onBack={onBack} />
   ) : (

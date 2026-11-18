@@ -8,6 +8,7 @@ import { taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import type { Task, TaskSession } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
+import { makeBrowserErrandRow } from "@/lib/state/slices/errands/errands.test-helpers";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 import type { StoreApi } from "zustand";
 
@@ -274,51 +275,55 @@ function renderTaskRoute(element: ReactElement, initialState?: Partial<AppState>
 }
 
 it.each(["scope", "deletion", "current"] as const)(
-  "handles child enrichment with %s ownership during the later fetch",
+  "handles owned Errand enrichment with %s ownership during the later fetch",
   async (invalidation) => {
-    const childId = "errand-child";
-    const identity = makeNavigationIdentity(TASK_ONE_ID, false);
+    const errandId = "errand";
+    const parent = makeTaskSession("parent-message", "parent");
+    const identity = {
+      ...makeNavigationIdentity(TASK_ONE_ID, false),
+      allSessionsResponse: { sessions: [parent], total: 1 },
+    };
+    const inspection = {
+      scope: { task_id: TASK_ONE_ID, child_session_id: errandId },
+      errand: makeBrowserErrandRow({
+        task_id: TASK_ONE_ID,
+        errand_id: errandId,
+        parent_session_id: parent.id,
+      }),
+      child_session_exists: false,
+      owns_conversation: true,
+      parent: { available: true, id: parent.id },
+    };
     mocks.readTaskNavigationIdentity.mockResolvedValueOnce(identity);
-    mocks.inspectErrand.mockResolvedValueOnce({
-      scope: { task_id: TASK_ONE_ID, child_session_id: childId },
-      errand: { task_id: TASK_ONE_ID, errand_id: childId, parent_session_id: "parent" },
-      child_session_exists: true,
-      parent: { available: false },
-    });
+    mocks.inspectErrand.mockResolvedValueOnce(inspection);
     const enrichment = deferred<FetchedSessionData>();
     mocks.fetchTaskNavigationEnrichment.mockReturnValueOnce(enrichment.promise);
-    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId={childId} />);
+    renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} sessionId={errandId} />);
     await waitFor(() => expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledOnce());
     const store = mocks.store!;
     act(() => {
       if (invalidation === "scope") store.getState().resetErrandReadScope();
-      else if (invalidation === "deletion")
-        store.getState().removeTaskSession(TASK_ONE_ID, childId);
+      if (invalidation === "deletion")
+        store.getState().removeErrandBrowserSession(TASK_ONE_ID, errandId);
     });
-    const selectedAfterInvalidation = store.getState().tasks.activeSessionId;
-    const child = {
-      ...makeTaskSession("stale-message", childId),
-      role: "errand",
-      parent_session_id: "parent",
-    } as TaskSession;
+    const parentReadBefore = store.getState().taskSessions.items[parent.id]?.last_read_message_id;
     await act(async () => {
       enrichment.resolve({
         ...makeFetchedData(),
-        sessionId: childId,
-        initialState: makeSessionHydrationState(child),
+        sessionId: parent.id,
+        ownedErrand: inspection,
+        initialState: makeSessionHydrationState(makeTaskSession("enriched-parent", parent.id)),
       });
       await enrichment.promise;
     });
-    if (invalidation === "current") {
-      expect(store.getState().taskSessions.items[childId]?.last_read_message_id).toBe(
-        "stale-message",
-      );
-      expect(store.getState().errands.detailBySessionId[childId]).toBeDefined();
-    } else {
-      expect(store.getState().taskSessions.items[childId]).toBeUndefined();
-      expect(store.getState().errands.detailBySessionId[childId]).toBeUndefined();
-      expect(store.getState().tasks.activeSessionId).toBe(selectedAfterInvalidation);
-    }
+    expect(store.getState().taskSessions.items[errandId]).toBeUndefined();
+    expect(store.getState().tasks.activeSessionId).toBe(parent.id);
+    expect(store.getState().taskSessions.items[parent.id]?.last_read_message_id).toBe(
+      invalidation === "current" ? "enriched-parent" : parentReadBefore,
+    );
+    expect(Boolean(store.getState().errands.detailBySessionId[errandId])).toBe(
+      invalidation === "current",
+    );
   },
 );
 
@@ -374,13 +379,14 @@ describe("TaskDetailRoute session selection", () => {
       .mockReturnValueOnce(newEnrichment.promise);
     const { rerender } = renderTaskRoute(<TaskDetailRoute taskId={TASK_ONE_ID} />);
 
-    await waitFor(() => expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy());
+    await waitFor(() => expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledTimes(1));
     rerender(<TaskDetailRoute taskId={TASK_TWO_ID} />);
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
         TASK_TWO_ID,
       );
     });
+    await waitFor(() => expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledTimes(2));
     rerender(<TaskDetailRoute taskId={TASK_ONE_ID} />);
     await waitFor(() => {
       expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute(TASK_DATA_ATTRIBUTE)).toBe(
@@ -388,6 +394,7 @@ describe("TaskDetailRoute session selection", () => {
       );
     });
 
+    await waitFor(() => expect(mocks.fetchTaskNavigationEnrichment).toHaveBeenCalledTimes(3));
     oldEnrichment.resolve({
       ...makeEnrichedData(makeNavigationIdentity()),
       initialState: makeSessionHydrationState(makeTaskSession("stale-message")),

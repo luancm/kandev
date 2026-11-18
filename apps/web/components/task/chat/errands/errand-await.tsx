@@ -112,7 +112,7 @@ function AwaitErrandRowItem({
         disabled={!taskId || status === "queued"}
         aria-label={t("chat:errandOpenAria", { title })}
         onClick={() => {
-          if (taskId) openSession({ taskId, sessionId: row.errandId, title });
+          if (taskId) openSession({ taskId, sessionId: row.errandId, title, isErrand: true });
         }}
         className={cn(
           "min-w-0 flex-1 cursor-pointer truncate rounded text-left text-foreground hover:underline disabled:cursor-default disabled:no-underline",
