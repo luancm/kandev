@@ -22,6 +22,81 @@ type ownedErrandLaunchFixtureRuntime struct {
 	start  func(context.Context, string) error
 }
 
+func TestErrandAdapterAttachesDockerTaskEnvironment(t *testing.T) {
+	t.Run("saved environment", func(t *testing.T) { exerciseOwnedDockerLaunch(t, false) })
+	t.Run("environment rotated before allocation", func(t *testing.T) { exerciseOwnedDockerLaunch(t, true) })
+}
+
+func exerciseOwnedDockerLaunch(t *testing.T, rotate bool) {
+	t.Helper()
+	ctx := t.Context()
+	f := newErrandLaunchFixture(t)
+	req := f.request()
+	env := &models.TaskEnvironment{
+		ID: "shared-docker-environment", TaskID: req.TaskID, OwnershipGeneration: 3,
+		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace", ContainerID: "environment-container",
+		ContainerControlAuthTokenSecretID: "environment-control-secret",
+		ContainerBootstrapNonceSecretID:   "environment-bootstrap-secret",
+	}
+	require.NoError(t, f.repo.CreateTaskEnvironment(ctx, env))
+	var launch *runtimeapi.LaunchRequest
+	var execution *runtimeapi.Execution
+	adapter := NewErrandAdapter(f.svc)
+	adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{
+		launch: func(ctx context.Context, spec runtimeapi.LaunchSpec) (runtimeapi.ExecutionRef, error) {
+			launch = spec.Metadata["launch_request"].(*runtimeapi.LaunchRequest)
+			if rotate {
+				rotated := *env
+				rotated.ContainerID = "rotated-container"
+				require.NoError(t, f.repo.UpdateTaskEnvironment(ctx, &rotated))
+			}
+			if err := spec.OwnerAdmission.AdmitExecution(ctx, spec.Owner); err != nil {
+				return runtimeapi.ExecutionRef{}, err
+			}
+			require.NoError(t, launch.OnExecutionAllocated(ctx, launch.CandidateExecutionID))
+			execution = &runtimeapi.Execution{ID: launch.CandidateExecutionID, Owner: spec.Owner}
+			return runtimeapi.ExecutionRef{ID: execution.ID}, nil
+		},
+		read:  func(context.Context, string) (*runtimeapi.Execution, error) { return execution, nil },
+		start: func(context.Context, string) error { return nil },
+	}, func(_ context.Context, taskID, parentID string) (*runtimeapi.WorkspaceInfo, error) {
+		return &runtimeapi.WorkspaceInfo{
+			TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1", ExecutorType: env.ExecutorType,
+			WorkspacePath: env.WorkspacePath, TaskEnvironmentID: env.ID, EnvironmentOwnerTaskID: env.TaskID,
+			OwnershipGeneration: env.OwnershipGeneration, AgentExecutionID: "parent-execution",
+			Metadata: map[string]any{
+				lifecycle.MetadataKeyContainerID:                "parent-instance-container",
+				lifecycle.MetadataKeyContainerControlAuthSecret: "parent-runtime-control-secret",
+				lifecycle.MetadataKeyBootstrapNonceSecret:       "parent-runtime-bootstrap-secret",
+				lifecycle.MetadataKeyAuthTokenSecret:            "parent-instance-secret",
+			},
+		}, nil
+	})
+	result, err := adapter.LaunchErrand(ctx, req)
+	if rotate {
+		require.Equal(t, errands.LaunchBlocked, result.Disposition)
+		require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsafe)
+		require.Nil(t, execution)
+		return
+	}
+	require.Equal(t, errands.LaunchAdmitted, result.Disposition, "launch: %v", err)
+	require.NoError(t, err)
+	require.NotNil(t, launch, "Docker must follow the owned launch path")
+	require.True(t, launch.WorkspaceReuseRequired)
+	require.Equal(t, env.ID, launch.TaskEnvironmentID)
+	require.Equal(t, env.ContainerID, launch.Metadata[lifecycle.MetadataKeyContainerID])
+	require.Equal(t, env.ContainerControlAuthTokenSecretID, launch.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret])
+	require.Equal(t, env.ContainerBootstrapNonceSecretID, launch.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
+	require.NotContains(t, launch.Metadata, lifecycle.MetadataKeyAuthTokenSecret)
+	require.Empty(t, launch.PreviousExecutionID)
+	require.Empty(t, launch.TaskID)
+	require.Empty(t, launch.SessionID)
+	sessions, err := f.repo.ListTaskSessions(ctx, req.TaskID)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+}
+
 func TestErrandAdapterRecoversOwnedLaunchReservation(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

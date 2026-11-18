@@ -4,11 +4,12 @@ import (
 	"slices"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ErrandWorkspaceLaunch projects the workspace attachment independently of
 // the parent's execution and conversation.
-func ErrandWorkspaceLaunch(info *WorkspaceInfo) *LaunchRequest {
+func ErrandWorkspaceLaunch(info *WorkspaceInfo, container *models.TaskEnvironment) *LaunchRequest {
 	request := &LaunchRequest{
 		WorkspaceID: info.WorkspaceID, WorkspacePath: info.WorkspacePath, WorkspaceLayout: info.WorkspaceLayout,
 		WorkspaceFolders: slices.Clone(info.WorkspaceFolders), DetachedWorkspaceRoots: slices.Clone(info.DetachedWorkspaceRoots),
@@ -18,6 +19,12 @@ func ErrandWorkspaceLaunch(info *WorkspaceInfo) *LaunchRequest {
 	}
 	if id, ok := info.Metadata["executor_id"].(string); ok {
 		request.Metadata["executor_id"] = id
+	}
+	if container != nil {
+		request.WorkspacePath = container.WorkspacePath
+		request.Metadata[lifecycle.MetadataKeyContainerID] = container.ContainerID
+		request.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret] = container.ContainerControlAuthTokenSecretID
+		request.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = container.ContainerBootstrapNonceSecretID
 	}
 	for _, repo := range info.WorkspaceRepositories {
 		request.Repositories = append(request.Repositories, lifecycle.RepoLaunchSpec{

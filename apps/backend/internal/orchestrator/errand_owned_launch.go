@@ -28,10 +28,11 @@ type ownedErrandLaunchStore interface {
 }
 
 type initialErrandAdmission struct {
-	service *Service
-	request errands.LaunchRequest
-	owner   runtimeapi.ExecutionOwner
-	store   ownedErrandLaunchStore
+	service   *Service
+	request   errands.LaunchRequest
+	owner     runtimeapi.ExecutionOwner
+	store     ownedErrandLaunchStore
+	container *models.TaskEnvironment
 }
 
 func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
@@ -48,7 +49,7 @@ func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtim
 	if current.TaskID != owner.TaskID || current.Generation != owner.Generation {
 		return models.ErrInvalidErrand
 	}
-	return nil
+	return a.verifyContainerWorkspace(ctx)
 }
 
 func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo) (errands.LaunchResult, error) {
@@ -81,6 +82,10 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 		}
 		defer a.svc.sessionCeiling.release(decision.reservationKey)
 	}
+	container, err := a.ownedErrandDockerWorkspace(ctx, info)
+	if err != nil {
+		return blocked, err
+	}
 	if err := prepareOwnedErrandFirstTurn(ctx, store, req); err != nil {
 		return blocked, err
 	}
@@ -88,7 +93,8 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 	if err != nil {
 		return blocked, fmt.Errorf("reserve errand generation: %w", err)
 	}
-	if err := a.startOwnedErrandExecution(ctx, store, req, info, descriptor.Generation); err != nil {
+	launch := ownedErrandLaunchRequest(req, info, container)
+	if err := a.startOwnedErrandExecution(ctx, store, req, launch, container, descriptor.Generation); err != nil {
 		return blocked, err
 	}
 	return errands.LaunchResult{
@@ -188,14 +194,13 @@ func prepareOwnedErrandFirstTurn(ctx context.Context, store ownedErrandLaunchSto
 
 func (a *ErrandAdapter) startOwnedErrandExecution(
 	ctx context.Context, store ownedErrandLaunchStore, req errands.LaunchRequest,
-	info *runtimeapi.WorkspaceInfo, generation uint64,
+	launch *runtimeapi.LaunchRequest, container *models.TaskEnvironment, generation uint64,
 ) error {
 	owner := runtimeapi.ExecutionOwner{
-		Kind: runtimeapi.ExecutionOwnerErrand, TaskID: req.TaskID, WorkspaceID: info.WorkspaceID,
+		Kind: runtimeapi.ExecutionOwnerErrand, TaskID: req.TaskID, WorkspaceID: launch.WorkspaceID,
 		ErrandID: req.ErrandID, Generation: generation, AgentProfileID: req.AgentProfileID,
 	}
-	admission := initialErrandAdmission{service: a.svc, request: req, owner: owner, store: store}
-	launch := ownedErrandLaunchRequest(req, info)
+	admission := initialErrandAdmission{service: a.svc, request: req, owner: owner, store: store, container: container}
 	launch.OnExecutionAllocated = func(ctx context.Context, executionID string) error {
 		if executionID != launch.CandidateExecutionID {
 			return models.ErrInvalidErrand
@@ -212,7 +217,7 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 	prompt, _ := applyErrandOriginContext(req.Objective, "", &ErrandLaunch{ParentSessionID: req.ParentSessionID, Title: req.Title})
 	ref, err := a.runtime.Launch(ctx, runtimeapi.LaunchSpec{
 		Owner: owner, OwnerAdmission: admission, AgentProfileID: req.AgentProfileID,
-		ExecutorID: info.ExecutorType, Workspace: runtimeapi.WorkspaceRef{Path: info.WorkspacePath},
+		ExecutorID: launch.ExecutorType, Workspace: runtimeapi.WorkspaceRef{Path: launch.WorkspacePath},
 		Prompt: prompt, McpMode: mcpmode.Errand,
 		Metadata: map[string]any{"launch_request": launch},
 	})
@@ -235,8 +240,8 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 	return nil
 }
 
-func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo) *runtimeapi.LaunchRequest {
-	launch := runtimeapi.ErrandWorkspaceLaunch(info)
+func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, container *models.TaskEnvironment) *runtimeapi.LaunchRequest {
+	launch := runtimeapi.ErrandWorkspaceLaunch(info, container)
 	launch.CandidateExecutionID = uuid.NewString()
 	launch.StartAgent, launch.SuppressBootStatusMessage = true, true
 	launch.TurnID, launch.InitialDeliverySubmissionID = req.TurnID, req.SubmissionID
