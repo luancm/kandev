@@ -1,4 +1,5 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
+import type { Message } from "@/lib/types/http";
 import {
   normalizeErrandAttention,
   normalizeErrandBrowserAttention,
@@ -13,6 +14,8 @@ import {
 
 // i18n-exempt: programmer precondition; UI callers render localized errors.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
+// i18n-exempt: invalid server response; UI callers render localized errors.
+const INVALID_ERRAND_MESSAGE_PAGE = "Invalid Errand message page";
 
 /** Cancelling stops errand sessions, which can outlast the default request timeout. */
 const ERRAND_MUTATION_TIMEOUT_MS = 15_000;
@@ -21,6 +24,42 @@ function requireClient() {
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   return client;
+}
+
+type ErrandMessagePage = {
+  task_id: string;
+  errand_id: string;
+  messages: Message[];
+  has_more: boolean;
+};
+
+/** Reads the newest messages or the page strictly before a known message. */
+export async function getErrandMessages(
+  taskId: string,
+  errandId: string,
+  options: { beforeMessageId?: string; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<ErrandMessagePage> {
+  const client = requireClient();
+  const payload = {
+    task_id: taskId,
+    errand_id: errandId,
+    before_message_id: options.beforeMessageId,
+    limit: options.limit,
+  };
+  const page = signal
+    ? await client.request<ErrandMessagePage>("errand.messages", payload, undefined, signal)
+    : await client.request<ErrandMessagePage>("errand.messages", payload);
+  if (
+    page?.task_id !== taskId ||
+    page.errand_id !== errandId ||
+    typeof page.has_more !== "boolean" ||
+    !Array.isArray(page.messages) ||
+    page.messages.some((message) => message?.task_id !== taskId || message.session_id !== "")
+  ) {
+    throw new Error(INVALID_ERRAND_MESSAGE_PAGE);
+  }
+  return page;
 }
 
 /** Every errand of a task, as the backend projects them. */

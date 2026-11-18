@@ -417,6 +417,7 @@ const (
 	ActionErrandBrowserSummary = "errand.browser_summary"
 	ActionErrandHistoryPage    = "errand.history_page"
 	ActionErrandInspect        = "errand.inspect"
+	ActionErrandMessages       = "errand.messages"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote

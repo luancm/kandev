@@ -55,6 +55,10 @@ func (f *fakeErrandService) Inspect(_ context.Context, taskID, childSessionID st
 	return f.browserInspection, f.browserErr
 }
 
+func (f *fakeErrandService) ReadErrandMessages(context.Context, string, string, string, int) ([]*models.Message, bool, error) {
+	return nil, false, f.browserErr
+}
+
 func (f *fakeErrandService) Lookup(_ context.Context, id string) (*models.Errand, error) {
 	if f.errand == nil || f.errand.ID != id {
 		return nil, errors.New("errand_not_found: " + id)
