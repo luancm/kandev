@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -44,7 +45,8 @@ func (s *Service) housekeepingStep(ctx context.Context, id startup.StepID, run f
 }
 
 func startupRuntimeNeedsReconciliation(row *models.ExecutorRunning, state models.TaskSessionState) bool {
-	return row != nil && (row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 || state == models.TaskSessionStateCreated || state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning)
+	return row != nil && !runtimeapi.IsErrandRuntimeInventory(row) &&
+		(row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 || state == models.TaskSessionStateCreated || state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning)
 }
 
 func (s *Service) startupRuntimeInventory(ctx context.Context) ([]*models.ExecutorRunning, error) {

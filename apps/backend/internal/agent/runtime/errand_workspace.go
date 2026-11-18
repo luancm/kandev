@@ -7,6 +7,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// IsErrandRuntimeInventory identifies the typed owner of a persisted Errand runtime.
+func IsErrandRuntimeInventory(record *models.ExecutorRunning) bool {
+	return lifecycle.IsErrandRuntimeInventory(record)
+}
+
 // SSHWorkspaceExecutorConfig copies the stable connection and profile options
 // from a saved executor, excluding instance routing and control metadata.
 func SSHWorkspaceExecutorConfig(config map[string]string) map[string]string {

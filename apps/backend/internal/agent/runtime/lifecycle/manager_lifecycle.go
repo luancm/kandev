@@ -261,6 +261,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
 			if ri != nil {
+				if ri.recoveredErrandOwner.Kind == ExecutionOwnerErrand {
+					if m.tryRestoreOwnedErrandExecution(recoveryCtx, ri) {
+						recordOutcomes[ri.SessionID] = recoveryOutcomeRetracked
+						progress.advance(ctx, ri.SessionID)
+					}
+					continue
+				}
 				if pending := m.pendingRemoteRecoveryForSession(ri.SessionID); pending != nil {
 					if !m.beginRemoteRecovery(pending) {
 						m.discardRemoteRecoveryInstance(ri)

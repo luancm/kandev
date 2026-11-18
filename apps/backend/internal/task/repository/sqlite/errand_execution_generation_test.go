@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"testing"
 	"time"
@@ -218,6 +219,13 @@ func exerciseErrandHarnessBinding(t *testing.T, repo *Repository) {
 	require.NoError(t, store.CompleteErrandHarnessNativeSession(ctx, first, "native"))
 	require.Error(t, store.CompleteErrandHarnessNativeSession(ctx, first, "different"))
 	first.NativeSessionID = "native"
+	staleBinding, err := repo.ErrandHarnessBindingStale(ctx, task, first)
+	require.NoError(t, err)
+	require.False(t, staleBinding)
+	wrongNative := *first
+	wrongNative.NativeSessionID = "foreign-native"
+	_, err = repo.ErrandHarnessBindingStale(ctx, task, &wrongNative)
+	require.ErrorIs(t, err, sql.ErrNoRows)
 	duplicate := *first
 	duplicate.StreamID = "other"
 	require.Error(t, store.AppendErrandHarnessBinding(ctx, &duplicate, 1))
@@ -226,6 +234,9 @@ func exerciseErrandHarnessBinding(t *testing.T, repo *Repository) {
 	second.StreamID = "new-stream"
 	require.NoError(t, store.AppendErrandHarnessBinding(ctx, &second, 1))
 	require.EqualValues(t, 2, second.Sequence)
+	staleBinding, err = repo.ErrandHarnessBindingStale(ctx, task, first)
+	require.NoError(t, err)
+	require.True(t, staleBinding)
 	_, err = repo.ReserveErrandExecutionGeneration(ctx, "binding", 1)
 	require.NoError(t, err)
 	stale := second

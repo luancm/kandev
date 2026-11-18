@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/models"
@@ -873,6 +874,15 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 	recovered := make([]*ExecutorInstance, 0, len(winners))
 	for sessionID, inst := range winners {
 		record := recordBySession[sessionID]
+		var errandOwner ExecutionOwner
+		if inst.ErrandMCPOwner != nil {
+			var err error
+			errandOwner, err = recordedErrandExecutionOwner(record)
+			if err != nil || !matchErrandMCPOwner(errandMCPOwner(errandOwner), inst.ErrandMCPOwner) ||
+				!r.peerHasCapability(agentctltypes.ErrandMCPOwnerCapability) {
+				continue
+			}
+		}
 
 		var client *agentctl.Client
 		if lease != nil {
@@ -926,6 +936,7 @@ func (r *StandaloneExecutor) buildRecoveredInstancesWithLease(
 			DeliveryStatus:             deliveryStatus,
 			DeliveryLegacyEvidence:     legacyEvidence,
 			DeliveryRecoveryError:      deliveryErr,
+			recoveredErrandOwner:       errandOwner,
 		})
 	}
 	return recovered

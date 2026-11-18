@@ -833,6 +833,7 @@ type ExecutorInstance struct {
 	// Agentctl client for communicating with this instance
 	Client                    *agentctl.Client
 	remotePassthroughSnapshot *agentctltypes.PassthroughSnapshot
+	recoveredErrandOwner      ExecutionOwner
 
 	// DiscardRecovery closes only host-side resources allocated for this
 	// recovery attempt. It must never stop the remote process or resource. The

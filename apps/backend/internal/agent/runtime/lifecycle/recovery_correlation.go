@@ -1,6 +1,8 @@
 package lifecycle
 
 import (
+	"slices"
+
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
@@ -61,19 +63,41 @@ func CorrelateRecoveryInstances(
 
 	result := &RecoveryCorrelationResult{Winners: make(map[string]*agentctl.InstanceInfo)}
 	for sessionID, group := range instancesBySession {
-		record, hasRecord := recordBySession[sessionID]
-		if !hasRecord {
-			result.ToStop = append(result.ToStop, group...)
-			continue
-		}
-		if len(group) == 1 {
-			result.Winners[sessionID] = group[0]
-			continue
-		}
-		result.resolveDuplicates(sessionID, record, group)
+		result.resolveSession(sessionID, recordBySession[sessionID], group)
 	}
 
 	return result
+}
+
+func (r *RecoveryCorrelationResult) resolveSession(sessionID string, record *models.ExecutorRunning, group []*agentctl.InstanceInfo) {
+	if record != nil {
+		owner, err := recordedErrandMCPOwner(record)
+		if err != nil {
+			return
+		}
+		if owner != nil {
+			// Errand adoption and teardown require independent runtime evidence.
+			matches := slices.DeleteFunc(group, func(inst *agentctl.InstanceInfo) bool {
+				return inst.ID != record.AgentExecutionID || inst.TaskID != "" ||
+					!matchErrandMCPOwner(owner, inst.ErrandMCPOwner)
+			})
+			if len(matches) == 1 {
+				r.Winners[sessionID] = matches[0]
+			}
+			return
+		}
+	}
+	group = slices.DeleteFunc(group, func(inst *agentctl.InstanceInfo) bool {
+		return inst.ErrandMCPOwner != nil
+	})
+	switch {
+	case record == nil:
+		r.ToStop = append(r.ToStop, group...)
+	case len(group) == 1:
+		r.Winners[sessionID] = group[0]
+	default:
+		r.resolveDuplicates(sessionID, record, group)
+	}
 }
 
 // resolveDuplicates applies the AC-EXECUTORS-SURVIVAL-002.10 tiebreak for a

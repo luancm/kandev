@@ -149,9 +149,13 @@ func (r *Repository) ErrandHarnessBindingStale(ctx context.Context, taskID strin
 		return false, fmt.Errorf("invalid errand harness identity")
 	}
 	var sequence, currentOwner, currentBinding int64
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT b.binding_sequence,(SELECT MAX(g.generation) FROM errand_execution_generations g WHERE g.errand_id=b.errand_id),(SELECT MAX(n.binding_sequence) FROM errand_harness_bindings n WHERE n.errand_id=b.errand_id AND n.owner_generation=b.owner_generation) FROM errand_harness_bindings b JOIN task_session_errands e ON e.id=b.errand_id WHERE b.errand_id=? AND e.task_id=? AND b.owner_generation=? AND b.execution_id=? AND b.incarnation_id=? AND b.harness_generation=? AND b.stream_id=?`), binding.ErrandID, taskID, int64(binding.Generation), binding.ExecutionID, binding.IncarnationID, binding.HarnessGeneration, binding.StreamID).Scan(&sequence, &currentOwner, &currentBinding)
+	var nativeSessionID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT b.binding_sequence,(SELECT MAX(g.generation) FROM errand_execution_generations g WHERE g.errand_id=b.errand_id),(SELECT MAX(n.binding_sequence) FROM errand_harness_bindings n WHERE n.errand_id=b.errand_id AND n.owner_generation=b.owner_generation),b.native_session_id FROM errand_harness_bindings b JOIN task_session_errands e ON e.id=b.errand_id WHERE b.errand_id=? AND e.task_id=? AND b.owner_generation=? AND b.execution_id=? AND b.incarnation_id=? AND b.harness_generation=? AND b.stream_id=?`), binding.ErrandID, taskID, int64(binding.Generation), binding.ExecutionID, binding.IncarnationID, binding.HarnessGeneration, binding.StreamID).Scan(&sequence, &currentOwner, &currentBinding, &nativeSessionID)
 	if err != nil {
 		return false, err
+	}
+	if binding.NativeSessionID != "" && binding.NativeSessionID != nativeSessionID {
+		return false, sql.ErrNoRows
 	}
 	return currentOwner != int64(binding.Generation) || currentBinding != sequence, nil
 }
