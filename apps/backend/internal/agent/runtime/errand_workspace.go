@@ -7,6 +7,17 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// SSHWorkspaceExecutorConfig copies the stable connection and profile options
+// from a saved executor, excluding instance routing and control metadata.
+func SSHWorkspaceExecutorConfig(config map[string]string) map[string]string {
+	filtered := lifecycle.FilterSSHWorkspaceFallbackConfig(config)
+	result := make(map[string]string, len(filtered))
+	for key := range filtered {
+		result[key] = config[key]
+	}
+	return result
+}
+
 // ErrandWorkspaceLaunch projects the workspace attachment independently of
 // the parent's execution and conversation.
 func ErrandWorkspaceLaunch(info *WorkspaceInfo, container *models.TaskEnvironment) *LaunchRequest {
@@ -17,14 +28,17 @@ func ErrandWorkspaceLaunch(info *WorkspaceInfo, container *models.TaskEnvironmen
 		ExecutorType: info.ExecutorType, ManagedRuntimeOwnerUserID: info.OwnerUserID,
 		Metadata: map[string]any{lifecycle.MetadataKeyExecutorProfileID: info.ExecutorProfileID},
 	}
-	if id, ok := info.Metadata["executor_id"].(string); ok {
-		request.Metadata["executor_id"] = id
-	}
+	executorID, _ := info.Metadata["executor_id"].(string)
 	if container != nil {
 		request.WorkspacePath = container.WorkspacePath
+		executorID = container.ExecutorID
+		request.Metadata[lifecycle.MetadataKeyExecutorProfileID] = container.ExecutorProfileID
 		request.Metadata[lifecycle.MetadataKeyContainerID] = container.ContainerID
 		request.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret] = container.ContainerControlAuthTokenSecretID
 		request.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = container.ContainerBootstrapNonceSecretID
+	}
+	if executorID != "" {
+		request.Metadata["executor_id"] = executorID
 	}
 	for _, repo := range info.WorkspaceRepositories {
 		request.Repositories = append(request.Repositories, lifecycle.RepoLaunchSpec{

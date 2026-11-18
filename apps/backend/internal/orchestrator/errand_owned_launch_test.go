@@ -23,18 +23,41 @@ type ownedErrandLaunchFixtureRuntime struct {
 }
 
 func TestErrandAdapterAttachesDockerTaskEnvironment(t *testing.T) {
-	t.Run("saved environment", func(t *testing.T) { exerciseOwnedDockerLaunch(t, false) })
-	t.Run("environment rotated before allocation", func(t *testing.T) { exerciseOwnedDockerLaunch(t, true) })
+	for _, tc := range []ownedDockerLaunchCase{
+		{name: "local saved environment", provider: models.ExecutorTypeLocalDocker},
+		{name: "local environment rotated", provider: models.ExecutorTypeLocalDocker, rotateContainer: true},
+		{name: "remote saved environment and target", provider: models.ExecutorTypeRemoteDocker},
+		{name: "remote target rotated", provider: models.ExecutorTypeRemoteDocker, rotateTarget: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) { exerciseOwnedDockerLaunch(t, tc) })
+	}
 }
 
-func exerciseOwnedDockerLaunch(t *testing.T, rotate bool) {
+type ownedDockerLaunchCase struct {
+	name            string
+	provider        models.ExecutorType
+	rotateContainer bool
+	rotateTarget    bool
+}
+
+func exerciseOwnedDockerLaunch(t *testing.T, tc ownedDockerLaunchCase) {
 	t.Helper()
 	ctx := t.Context()
 	f := newErrandLaunchFixture(t)
 	req := f.request()
+	executor := &models.Executor{
+		ID: "saved-docker-executor", Name: "Saved executor", Type: tc.provider, Status: models.ExecutorStatusActive,
+		Config: map[string]string{
+			lifecycle.MetadataKeySSHHost:            "workspace.example",
+			lifecycle.MetadataKeySSHUser:            "workspace-user",
+			lifecycle.MetadataKeySSHHostFingerprint: "SHA256:saved-host",
+			lifecycle.MetadataKeySSHRemoteTaskDir:   "/unrelated-task",
+		},
+	}
+	require.NoError(t, f.repo.CreateExecutor(ctx, executor))
 	env := &models.TaskEnvironment{
 		ID: "shared-docker-environment", TaskID: req.TaskID, OwnershipGeneration: 3,
-		ExecutorType: string(models.ExecutorTypeLocalDocker), Status: models.TaskEnvironmentStatusReady,
+		ExecutorType: string(tc.provider), ExecutorID: executor.ID, Status: models.TaskEnvironmentStatusReady,
 		WorkspacePath: "/workspace", ContainerID: "environment-container",
 		ContainerControlAuthTokenSecretID: "environment-control-secret",
 		ContainerBootstrapNonceSecretID:   "environment-bootstrap-secret",
@@ -46,10 +69,14 @@ func exerciseOwnedDockerLaunch(t *testing.T, rotate bool) {
 	adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{
 		launch: func(ctx context.Context, spec runtimeapi.LaunchSpec) (runtimeapi.ExecutionRef, error) {
 			launch = spec.Metadata["launch_request"].(*runtimeapi.LaunchRequest)
-			if rotate {
+			if tc.rotateContainer {
 				rotated := *env
 				rotated.ContainerID = "rotated-container"
 				require.NoError(t, f.repo.UpdateTaskEnvironment(ctx, &rotated))
+			}
+			if tc.rotateTarget {
+				executor.Config[lifecycle.MetadataKeySSHHost] = "different.example"
+				require.NoError(t, f.repo.UpdateExecutor(ctx, executor))
 			}
 			if err := spec.OwnerAdmission.AdmitExecution(ctx, spec.Owner); err != nil {
 				return runtimeapi.ExecutionRef{}, err
@@ -70,11 +97,14 @@ func exerciseOwnedDockerLaunch(t *testing.T, rotate bool) {
 				lifecycle.MetadataKeyContainerControlAuthSecret: "parent-runtime-control-secret",
 				lifecycle.MetadataKeyBootstrapNonceSecret:       "parent-runtime-bootstrap-secret",
 				lifecycle.MetadataKeyAuthTokenSecret:            "parent-instance-secret",
+				lifecycle.MetadataKeySSHHost:                    "parent-runtime.example",
+				"executor_id":                                   "parent-runtime-executor",
 			},
 		}, nil
 	})
 	result, err := adapter.LaunchErrand(ctx, req)
-	if rotate {
+	require.NotNil(t, launch, "Docker must follow the owned launch path")
+	if tc.rotateContainer || tc.rotateTarget {
 		require.Equal(t, errands.LaunchBlocked, result.Disposition)
 		require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsafe)
 		require.Nil(t, execution)
@@ -82,12 +112,18 @@ func exerciseOwnedDockerLaunch(t *testing.T, rotate bool) {
 	}
 	require.Equal(t, errands.LaunchAdmitted, result.Disposition, "launch: %v", err)
 	require.NoError(t, err)
-	require.NotNil(t, launch, "Docker must follow the owned launch path")
 	require.True(t, launch.WorkspaceReuseRequired)
 	require.Equal(t, env.ID, launch.TaskEnvironmentID)
 	require.Equal(t, env.ContainerID, launch.Metadata[lifecycle.MetadataKeyContainerID])
 	require.Equal(t, env.ContainerControlAuthTokenSecretID, launch.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret])
 	require.Equal(t, env.ContainerBootstrapNonceSecretID, launch.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
+	require.Equal(t, executor.ID, launch.Metadata["executor_id"])
+	if tc.provider == models.ExecutorTypeRemoteDocker {
+		require.Equal(t, executor.Config[lifecycle.MetadataKeySSHHost], launch.ExecutorConfig[lifecycle.MetadataKeySSHHost])
+		require.Equal(t, executor.Config[lifecycle.MetadataKeySSHUser], launch.ExecutorConfig[lifecycle.MetadataKeySSHUser])
+		require.Equal(t, executor.Config[lifecycle.MetadataKeySSHHostFingerprint], launch.ExecutorConfig[lifecycle.MetadataKeySSHHostFingerprint])
+		require.NotContains(t, launch.ExecutorConfig, lifecycle.MetadataKeySSHRemoteTaskDir)
+	}
 	require.NotContains(t, launch.Metadata, lifecycle.MetadataKeyAuthTokenSecret)
 	require.Empty(t, launch.PreviousExecutionID)
 	require.Empty(t, launch.TaskID)

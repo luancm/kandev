@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/google/uuid"
 
@@ -32,7 +33,7 @@ type initialErrandAdmission struct {
 	request   errands.LaunchRequest
 	owner     runtimeapi.ExecutionOwner
 	store     ownedErrandLaunchStore
-	container *models.TaskEnvironment
+	container *ownedErrandDockerAttachment
 }
 
 func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
@@ -194,7 +195,7 @@ func prepareOwnedErrandFirstTurn(ctx context.Context, store ownedErrandLaunchSto
 
 func (a *ErrandAdapter) startOwnedErrandExecution(
 	ctx context.Context, store ownedErrandLaunchStore, req errands.LaunchRequest,
-	launch *runtimeapi.LaunchRequest, container *models.TaskEnvironment, generation uint64,
+	launch *runtimeapi.LaunchRequest, container *ownedErrandDockerAttachment, generation uint64,
 ) error {
 	owner := runtimeapi.ExecutionOwner{
 		Kind: runtimeapi.ExecutionOwnerErrand, TaskID: req.TaskID, WorkspaceID: launch.WorkspaceID,
@@ -240,8 +241,14 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 	return nil
 }
 
-func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, container *models.TaskEnvironment) *runtimeapi.LaunchRequest {
-	launch := runtimeapi.ErrandWorkspaceLaunch(info, container)
+func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, container *ownedErrandDockerAttachment) *runtimeapi.LaunchRequest {
+	var environment *models.TaskEnvironment
+	var executorConfig map[string]string
+	if container != nil {
+		environment, executorConfig = container.environment, maps.Clone(container.executorConfig)
+	}
+	launch := runtimeapi.ErrandWorkspaceLaunch(info, environment)
+	launch.ExecutorConfig = executorConfig
 	launch.CandidateExecutionID = uuid.NewString()
 	launch.StartAgent, launch.SuppressBootStatusMessage = true, true
 	launch.TurnID, launch.InitialDeliverySubmissionID = req.TurnID, req.SubmissionID
