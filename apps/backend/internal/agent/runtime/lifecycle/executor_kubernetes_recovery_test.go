@@ -125,7 +125,7 @@ func TestKubernetesRecoveryRestoresPersistedExecutorIdentity(t *testing.T) {
 			fixture.row.Metadata = persistedMetadata
 			fixture.row.ExecutorID = tc.rowID(executorID)
 
-			req, ok := kubernetesRecoveryRequest(fixture.row)
+			req, _, ok := kubernetesRecoveryRequest(fixture.row)
 			require.True(t, ok)
 			require.Equal(t, fixture.row.ExecutorID, getMetadataString(req.Metadata, models.MetaKeyExecutorID))
 			require.Equal(t, originalMetadata, persistedMetadata, "request construction must not mutate persisted metadata")

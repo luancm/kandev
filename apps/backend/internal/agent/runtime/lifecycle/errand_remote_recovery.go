@@ -10,7 +10,8 @@ import (
 )
 
 func supportsOwnedRemoteRecovery(row *models.ExecutorRunning) bool {
-	return row != nil && row.Runtime == agentruntime.RuntimeRemoteDocker && IsErrandRuntimeInventory(row)
+	return row != nil && (row.Runtime == agentruntime.RuntimeRemoteDocker || row.Runtime == agentruntime.RuntimeKubernetes) &&
+		IsErrandRuntimeInventory(row)
 }
 
 func (m *Manager) retryOwnedRemoteRecovery(ctx context.Context, pending *remoteRecoveryRetry) {

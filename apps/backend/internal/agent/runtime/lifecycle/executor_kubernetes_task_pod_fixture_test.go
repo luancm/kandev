@@ -22,13 +22,14 @@ import (
 )
 
 type taskPodControl struct {
-	mu           sync.Mutex
-	active       map[string]agentctl.CreateInstanceRequest
-	created      []agentctl.CreateInstanceRequest
-	handshakes   int
-	token        string
-	failID       string
-	beforeDelete func()
+	mu            sync.Mutex
+	active        map[string]agentctl.CreateInstanceRequest
+	created       []agentctl.CreateInstanceRequest
+	handshakes    int
+	token         string
+	failID        string
+	beforeDelete  func()
+	recoveryProbe bool
 }
 
 func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +58,14 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Authorization") != "Bearer "+c.token {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return
+	}
+	if c.recoveryProbe && r.Method == http.MethodGet && r.URL.Path == "/api/v1/status" {
+		if _, active := c.active[r.Header.Get("X-Instance-ID")]; !active {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": "running"})
 		return
 	}
 	if r.URL.Path == "/api/v1/instances" {
@@ -91,7 +100,12 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath, ErrandMCPOwner: request.ErrandMCPOwner})
+	info := agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath, ErrandMCPOwner: request.ErrandMCPOwner}
+	if c.recoveryProbe {
+		info.SessionID, info.TaskID = request.SessionID, request.TaskID
+		info.ProviderSessionID = "retained-native-conversation"
+	}
+	_ = json.NewEncoder(w).Encode(info)
 }
 
 func (c *taskPodControl) stopErrandInstance(w http.ResponseWriter, r *http.Request, id string) {

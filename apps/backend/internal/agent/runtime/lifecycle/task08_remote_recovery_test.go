@@ -601,18 +601,27 @@ func TestRunOwnedRemoteInventoryStaysOnRunOwnerRecoveryPath(t *testing.T) {
 }
 
 func TestDeferredStartupRetriesRemoteDockerErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeRemoteDocker)
+}
+
+func TestDeferredStartupRetriesKubernetesErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeKubernetes)
+}
+
+func exerciseDeferredOwnedRemoteRetry(t *testing.T, runtime agentruntime.Runtime) {
+	t.Helper()
 	owner := ExecutionOwner{
 		Kind: ExecutionOwnerErrand, WorkspaceID: "workspace", TaskID: "task", ErrandID: "errand", Generation: 2,
 	}
 	row := &models.ExecutorRunning{
 		SessionID: models.ErrandExecutionIdentity(owner.ErrandID), AgentExecutionID: "errand-execution",
-		Runtime: agentruntime.RuntimeRemoteDocker, Status: models.ExecutorRunningStatusRunning,
+		Runtime: runtime, Status: models.ExecutorRunningStatusRunning,
 		Metadata: map[string]interface{}{runExecutionOwnerMetadataKey: owner},
 	}
 	writer := &task08ExecutorInventoryWriter{invariantWriter: invariantWriter{prior: row}, rows: []*models.ExecutorRunning{row}}
 	backend := &task08DetailedRecoveryBackend{
-		MockExecutor:   &MockExecutor{name: executor.NameRemoteDocker},
-		recoveryResult: task08UnknownOutcomes(agentruntime.RuntimeRemoteDocker),
+		MockExecutor:   &MockExecutor{name: runtime},
+		recoveryResult: task08UnknownOutcomes(runtime),
 	}
 	mgr, _ := task08ManagerWithBackend(t, backend)
 	mgr.SetExecutorRunningWriter(writer)

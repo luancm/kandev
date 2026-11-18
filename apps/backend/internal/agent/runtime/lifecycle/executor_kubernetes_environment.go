@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 )
 
 const metadataKubernetesTaskOwned = kubeexecutor.MetadataKeyTaskOwned
+const metadataKubernetesErrandWorkspaceGeneration = "kubernetes_errand_workspace_generation"
 
 // KubernetesEnvironmentStore separates physical inventory from session execution rows.
 type KubernetesEnvironmentStore interface {
@@ -83,6 +85,9 @@ func (r *KubernetesExecutor) createTaskInstance(ctx context.Context, original *E
 		}
 	}()
 	instance.Metadata[metadataKubernetesTaskOwned] = true
+	if original.ErrandMCPOwner != nil {
+		instance.Metadata[metadataKubernetesErrandWorkspaceGeneration] = strconv.FormatInt(record.OwnershipGeneration, 10)
+	}
 	instance.Metadata[MetadataKeyCleanupScript] = getMetadataString(req.Metadata, MetadataKeyCleanupScript)
 	record.Metadata = cloneKubernetesMetadata(instance.Metadata)
 	if err := r.persistKubernetesEnvironmentSecrets(ctx, record, instance); err != nil {

@@ -91,6 +91,63 @@ func TestKubernetesErrandAttachesToInheritedPodAndStopsOnlyItsInstance(t *testin
 	require.Empty(t, f.resources.deletedPVCs)
 }
 
+func TestKubernetesErrandRecoveryReattachesInTheSavedSharedPod(t *testing.T) {
+	f := newTaskPodFixture(t)
+	parent := f.launch(t, 1)
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "descendant-task", WorkspaceID: "workspace",
+		ErrandID: "owned-errand", Generation: 1, AgentProfileID: "agent",
+	}
+	req := taskPodRequest(2)
+	req.SessionID = models.ErrandExecutionIdentity(owner.ErrandID)
+	req.ErrandMCPOwner = errandMCPOwner(owner)
+	req.EnvironmentOwnershipGeneration = 1
+	child, err := f.runtime.CreateInstance(t.Context(), req)
+	require.NoError(t, err)
+	f.restartBackend(t)
+	f.control.mu.Lock()
+	f.control.recoveryProbe = true
+	f.control.mu.Unlock()
+
+	row := &models.ExecutorRunning{
+		AgentExecutionID: child.InstanceID, SessionID: req.SessionID, Runtime: child.RuntimeName,
+		ExecutionProfileID: owner.AgentProfileID, ExecutorID: "executor-1",
+		WorktreePath: child.WorkspacePath, TransientAuthToken: child.AuthToken,
+		Metadata: FilterPersistentMetadata(child.Metadata),
+	}
+	row.Metadata[runExecutionOwnerMetadataKey] = owner
+	staleWorkspace := *row
+	staleWorkspace.Metadata = cloneKubernetesMetadata(row.Metadata)
+	staleWorkspace.Metadata[metadataKubernetesErrandWorkspaceGeneration] = "2"
+	foreign := *row
+	foreign.Metadata = cloneKubernetesMetadata(row.Metadata)
+	newer := owner
+	newer.Generation++
+	foreign.Metadata[runExecutionOwnerMetadataKey] = newer
+	for _, stale := range []*models.ExecutorRunning{&foreign, &staleWorkspace} {
+		instances, outcomes, err := f.runtime.RecoverInstancesDetailed(t.Context(), []*models.ExecutorRunning{stale})
+		require.NoError(t, err)
+		require.Empty(t, instances)
+		require.Equal(t, RecoveryOutcomeUnknown, outcomes[row.SessionID])
+	}
+
+	instances, outcomes, err := f.runtime.RecoverInstancesDetailed(t.Context(), []*models.ExecutorRunning{row})
+	require.NoError(t, err)
+	require.Empty(t, outcomes)
+	require.Len(t, instances, 1)
+	require.Empty(t, instances[0].TaskID)
+	require.Equal(t, row.SessionID, instances[0].SessionID)
+	require.Equal(t, owner, instances[0].recoveredErrandOwner)
+	require.Equal(t, "retained-native-conversation", instances[0].ProviderSessionID)
+	_, active, _ := f.control.snapshot()
+	require.Contains(t, active, getMetadataString(parent.Metadata, MetadataKeyKubernetesAgentctlInstanceID))
+	require.Contains(t, active, getMetadataString(child.Metadata, MetadataKeyKubernetesAgentctlInstanceID))
+	require.Len(t, f.resources.createdPods, 1)
+	require.Len(t, f.resources.createdPVCs, 1)
+	require.Empty(t, f.resources.deletedPods)
+	require.Empty(t, f.resources.deletedPVCs)
+}
+
 func TestKubernetesErrandRollbackRequiresExactStop(t *testing.T) {
 	for _, stage := range []string{"forward", "secret persistence"} {
 		t.Run(stage, func(t *testing.T) {
