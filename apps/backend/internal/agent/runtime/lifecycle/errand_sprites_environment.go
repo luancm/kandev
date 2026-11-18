@@ -20,15 +20,9 @@ func (m *Manager) prepareOwnedSpriteEnvironment(ctx context.Context, req *Launch
 	}
 	profileID := getMetadataString(req.Metadata, MetadataKeyExecutorProfileID)
 	executorID := getMetadataString(req.Metadata, "executor_id")
-	if m.executorProfileReader == nil || profileID == "" || executorID == "" {
-		return fmt.Errorf("%w: sprite errand has no saved executor profile", models.ErrWorkspaceReuseUnsafe)
-	}
-	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
+	profile, err := readOwnedSpriteProfile(ctx, m.executorProfileReader, profileID, executorID)
 	if err != nil {
-		return fmt.Errorf("read sprite errand executor profile: %w", err)
-	}
-	if profile == nil || profile.ID != profileID || profile.ExecutorID != executorID {
-		return fmt.Errorf("%w: sprite errand executor profile identity changed", models.ErrWorkspaceReuseUnsafe)
+		return err
 	}
 	definitions := executorProfileDefinitions(profile)
 	if !hasEnvironmentDefinition(definitions, spritesAPITokenEnvKey) {
@@ -45,4 +39,18 @@ func (m *Manager) prepareOwnedSpriteEnvironment(ctx context.Context, req *Launch
 		}
 	}
 	return nil
+}
+
+func readOwnedSpriteProfile(ctx context.Context, reader ExecutorProfileReader, profileID, executorID string) (*models.ExecutorProfile, error) {
+	if reader == nil || profileID == "" || executorID == "" {
+		return nil, fmt.Errorf("%w: sprite errand has no saved executor profile", models.ErrWorkspaceReuseUnsafe)
+	}
+	profile, err := reader.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("read sprite errand executor profile: %w", err)
+	}
+	if profile == nil || profile.ID != profileID || profile.ExecutorID != executorID {
+		return nil, fmt.Errorf("%w: sprite errand executor profile identity changed", models.ErrWorkspaceReuseUnsafe)
+	}
+	return profile, nil
 }

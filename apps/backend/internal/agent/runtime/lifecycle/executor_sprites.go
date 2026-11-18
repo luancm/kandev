@@ -113,6 +113,7 @@ type SpritesProxySession struct {
 // SpritesExecutor implements ExecutorBackend for Sprites.dev remote sandboxes.
 type SpritesExecutor struct {
 	secretStore           secrets.SecretStore
+	executorProfileReader ExecutorProfileReader
 	agentList             RemoteAuthAgentLister
 	agentctlResolver      *AgentctlResolver
 	logger                *logger.Logger

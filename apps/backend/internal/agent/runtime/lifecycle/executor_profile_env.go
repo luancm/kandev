@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -28,6 +29,12 @@ type ExecutorProfileReader interface {
 // back to inheriting only the backend process environment.
 func (m *Manager) SetExecutorProfileReader(reader ExecutorProfileReader) {
 	m.executorProfileReader = reader
+	if m.executorRegistry != nil {
+		backend, _ := m.executorRegistry.GetBackend(executor.NameSprites)
+		if sprites, ok := backend.(*SpritesExecutor); ok {
+			sprites.executorProfileReader = reader
+		}
+	}
 }
 
 // SetPluginExecutorProfileLoader wires the host-owned profile and transient

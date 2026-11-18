@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 	sprites "github.com/superfly/sprites-go"
@@ -21,6 +23,20 @@ func TestSpritesErrandTeardownUsesRecordedSpriteAndOwner(t *testing.T) {
 	var controlStatus atomic.Int32
 	controlStatus.Store(http.StatusNoContent)
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			switch r.URL.Path {
+			case "/identity":
+				_ = json.NewEncoder(w).Encode(agentctl.IdentityInfo{Capabilities: []string{agentctltypes.ErrandMCPOwnerCapability}})
+			case "/api/v1/instances/execution":
+				_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
+					ID: "execution", Port: 41001, Status: "running", WorkspacePath: spritesWorkspacePath,
+					SessionID: "errand:child", ErrandMCPOwner: &owner, ProviderSessionID: "saved-native",
+				})
+			default:
+				http.NotFound(w, r)
+			}
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/instances/execution/stop-errand" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -90,6 +106,64 @@ func TestSpritesErrandTeardownUsesRecordedSpriteAndOwner(t *testing.T) {
 		require.NotContains(t, exec.tokens, row.AgentExecutionID)
 		require.Same(t, sibling, exec.proxies["sibling-execution"])
 		require.Contains(t, exec.tokens, "sibling-execution")
+	})
+
+	t.Run("cold recovery and exact stop use the saved literal profile", func(t *testing.T) {
+		manager, _ := task08ManagerWithBackend(t, exec)
+		manager.SetExecutorProfileReader(&fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+			"sprite-profile": {
+				ID: "sprite-profile", ExecutorID: "sprite-executor",
+				EnvVars: []models.ProfileEnvVar{{Key: spritesAPITokenEnvKey, Value: "sprite-token"}},
+			},
+		}})
+		owned := ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: owner.TaskID, ErrandID: owner.ErrandID,
+			Generation: owner.Generation, WorkspaceID: "workspace", AgentProfileID: "agent-profile"}
+		saved := &models.ExecutorRunning{
+			AgentExecutionID: row.AgentExecutionID, SessionID: row.SessionID, Runtime: agentruntime.RuntimeSprites,
+			ExecutorID: "sprite-executor", ExecutionProfileID: owned.AgentProfileID, WorktreePath: spritesWorkspacePath,
+			Metadata: map[string]interface{}{
+				MetadataKeySpriteName: "shared", MetadataKeySpriteCreatedAt: "2026-02-03T01:00:00Z",
+				MetadataKeyExecutorProfileID: "sprite-profile", runExecutionOwnerMetadataKey: owned,
+			},
+		}
+		stale := *saved
+		stale.Metadata = cloneSpriteRecoveryMetadata(saved.Metadata)
+		stale.Metadata[MetadataKeySpriteCreatedAt] = "2026-02-03T00:00:00Z"
+		instances, outcomes, err := exec.RecoverInstancesDetailed(t.Context(), []*models.ExecutorRunning{&stale})
+		require.NoError(t, err)
+		require.Empty(t, instances)
+		require.Equal(t, RecoveryOutcomeUnknown, outcomes[saved.SessionID])
+		instances, outcomes, err = exec.RecoverInstancesDetailed(t.Context(), []*models.ExecutorRunning{saved})
+		require.NoError(t, err)
+		require.Empty(t, outcomes)
+		require.Len(t, instances, 1)
+		require.Equal(t, owned, instances[0].recoveredErrandOwner)
+		require.Empty(t, instances[0].TaskID)
+		require.Equal(t, "saved-native", instances[0].ProviderSessionID)
+		instances[0].DiscardRecovery()
+		instances[0].Client.Close()
+		exec.mu.Lock()
+		delete(exec.tokens, saved.AgentExecutionID)
+		exec.mu.Unlock()
+		foreignProfile := *saved
+		foreignProfile.ExecutorID = "foreign-executor"
+		require.ErrorIs(t, exact.stopErrandInstance(t.Context(), &foreignProfile, owner), models.ErrWorkspaceReuseUnsafe)
+		require.Empty(t, calls)
+		require.NoError(t, exact.stopErrandInstance(t.Context(), saved, owner))
+		require.NotEmpty(t, calls)
+		require.Equal(t, owner, <-calls)
+
+		manager.SetExecutorProfileReader(&fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{
+			"sprite-profile": {
+				ID: "sprite-profile", ExecutorID: "sprite-executor",
+				EnvVars: []models.ProfileEnvVar{
+					{Key: spritesAPITokenEnvKey, Value: "sprite-token"},
+					{Key: spritesAPITokenEnvKey, Value: "different-token"},
+				},
+			},
+		}})
+		require.Error(t, exact.stopErrandInstance(t.Context(), saved, owner))
+		require.Empty(t, calls)
 	})
 
 	controlStatus.Store(http.StatusNotFound)

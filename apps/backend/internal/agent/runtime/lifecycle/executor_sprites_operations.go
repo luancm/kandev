@@ -20,6 +20,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
@@ -578,6 +579,15 @@ func (r *SpritesExecutor) getExistingInstanceInfo(
 	sprite *sprites.Sprite,
 	instanceID string,
 ) (*agentctl.InstanceInfo, error) {
+	return r.lookupSpriteInstanceInfo(ctx, sprite, instanceID, nil)
+}
+
+func (r *SpritesExecutor) lookupSpriteInstanceInfo(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instanceID string,
+	owner *agentctltypes.ErrandMCPOwner,
+) (*agentctl.InstanceInfo, error) {
 	if instanceID == "" {
 		return nil, fmt.Errorf("no instance ID")
 	}
@@ -592,6 +602,9 @@ func (r *SpritesExecutor) getExistingInstanceInfo(
 	defer func() { _ = proxy.Close() }()
 	if proxy.LocalAddr() == nil {
 		return nil, fmt.Errorf("sprite agentctl proxy for instance %s has no local address", instanceID)
+	}
+	if err := r.requireSpriteErrandPolicy(stepCtx, proxy.LocalAddr(), owner); err != nil {
+		return nil, err
 	}
 
 	requestURL := fmt.Sprintf("http://%s/api/v1/instances/%s", proxy.LocalAddr(), url.PathEscape(instanceID))

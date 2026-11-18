@@ -612,6 +612,10 @@ func TestDeferredStartupRetriesSSHErrandWithoutTaskSession(t *testing.T) {
 	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeSSH)
 }
 
+func TestDeferredStartupRetriesSpritesErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeSprites)
+}
+
 func exerciseDeferredOwnedRemoteRetry(t *testing.T, runtime agentruntime.Runtime) {
 	t.Helper()
 	owner := ExecutionOwner{
