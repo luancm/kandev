@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
@@ -67,6 +68,56 @@ func (sm *SessionManager) persistErrandDeliveryBeforeDispatch(ctx context.Contex
 		return nil, fmt.Errorf("errand prompt was already admitted")
 	}
 	return submission, nil
+}
+
+// Agentctl acknowledged the exact dispatch. Keep the receipt even if the
+// initiating request ended or a terminal frame settled first.
+func (sm *SessionManager) recordErrandPromptAccepted(ctx context.Context, execution *AgentExecution, submission *models.AgentDeliverySubmission) error {
+	if sm.streamManager == nil || submission == nil {
+		return fmt.Errorf("%w: errand dispatch receipt store is unavailable", ErrUncertainPromptDelivery)
+	}
+	store, ok := sm.streamManager.deliveryRepository().(interface {
+		TransitionAgentDeliverySubmission(context.Context, string, models.DeliverySubmissionState, models.DeliverySubmissionState, string, time.Time) (bool, error)
+		GetAgentDeliverySubmissionMetadata(context.Context, string) (*models.AgentDeliverySubmission, error)
+		HasSettledErrandDeliverySubmission(context.Context, *models.AgentDeliverySubmission, string, string) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("%w: errand dispatch receipt store is unavailable", ErrUncertainPromptDelivery)
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	changed, err := store.TransitionAgentDeliverySubmission(ctx, submission.ID, models.DeliverySubmissionDispatching, models.DeliverySubmissionAccepted, "", time.Now().UTC())
+	if err != nil {
+		return errors.Join(ErrUncertainPromptDelivery, err)
+	}
+	if changed {
+		return nil
+	}
+	current, err := store.GetAgentDeliverySubmissionMetadata(ctx, submission.ID)
+	if err != nil {
+		return errors.Join(ErrUncertainPromptDelivery, err)
+	}
+	if !matchesAcknowledgedErrandSubmission(current, submission) {
+		return fmt.Errorf("%w: errand dispatch receipt changed", ErrUncertainPromptDelivery)
+	}
+	if current.State == models.DeliverySubmissionAccepted {
+		return nil
+	}
+	settled, err := store.HasSettledErrandDeliverySubmission(ctx, current, execution.DeliveryStreamID, execution.promptTurnIDSnapshot())
+	if err != nil {
+		return errors.Join(ErrUncertainPromptDelivery, err)
+	}
+	if settled {
+		return nil
+	}
+	return fmt.Errorf("%w: errand dispatch has no committed acceptance or terminal receipt", ErrUncertainPromptDelivery)
+}
+
+func matchesAcknowledgedErrandSubmission(current, expected *models.AgentDeliverySubmission) bool {
+	return current != nil && current.ID == expected.ID && current.SessionID == expected.SessionID &&
+		current.IncarnationID == expected.IncarnationID && current.HarnessGeneration == expected.HarnessGeneration &&
+		current.OwnerGeneration == expected.OwnerGeneration && current.DispatchAttemptID == expected.DispatchAttemptID &&
+		current.PayloadHash == expected.PayloadHash
 }
 
 func errandDeliveryEventIsStale(ctx context.Context, execution *AgentExecution, event *models.AgentDeliveryEvent, repository AgentDeliveryRepository) (bool, error) {

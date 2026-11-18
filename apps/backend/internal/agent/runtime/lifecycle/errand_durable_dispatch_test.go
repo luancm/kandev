@@ -33,6 +33,15 @@ func TestErrandInitialPromptPersistsOwnerBeforeDispatch(t *testing.T) {
 	require.NoError(t, repo.CreateErrandTurn(ctx, "child", &models.Turn{ID: "turn", TaskID: "task"}))
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"success": true, "submission_id": "prompt:first",
+			})
+			return response
+		}
+		return mock.defaultHandler(msg)
+	}
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
 	require.NoError(t, client.StreamUpdates(ctx, nil, nil, nil))
@@ -79,6 +88,30 @@ func TestErrandInitialPromptPersistsOwnerBeforeDispatch(t *testing.T) {
 	var count int
 	require.NoError(t, db.Get(&count, `SELECT COUNT(*) FROM task_sessions`))
 	require.Zero(t, count)
+}
+
+func TestErrandPromptRejectsForeignAcknowledgement(t *testing.T) {
+	ctx := t.Context()
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"success": true, "submission_id": "prompt:sibling",
+			})
+			return response
+		}
+		return mock.defaultHandler(msg)
+	}
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	require.NoError(t, client.StreamUpdates(ctx, nil, nil, nil))
+	waitForWSConnected(t, mock)
+	sm := NewSessionManager(newSessionTestLogger(), nil)
+	execution := &AgentExecution{Owner: ExecutionOwner{Kind: ExecutionOwnerErrand}, agentctl: client}
+	err := sm.callAgentctlPrompt(ctx, execution, "hello", nil, 1, false, "first")
+	require.ErrorIs(t, err, ErrUncertainPromptDelivery)
+	require.Empty(t, execution.deliverySubmissionIDSnapshot())
 }
 
 func TestErrandDeliveryAcknowledgementRequiresExactTransportOwner(t *testing.T) {
@@ -233,6 +266,10 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 				e = fmt.Errorf("wrong admitted submission")
 			}
 			dispatch <- e
+			response, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+				"success": true, "submission_id": "prompt:first-vertical",
+			})
+			return response
 		}
 		return mock.defaultHandler(msg)
 	}
@@ -270,6 +307,10 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("prompt not dispatched")
 	}
+	accepted, err := repo.GetAgentDeliverySubmissionMetadata(ctx, "prompt:first-vertical")
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionAccepted, accepted.State)
+	require.Equal(t, execution.ID, accepted.DispatchAttemptID)
 	message := agentctl.AgentEvent{Type: streams.EventTypeMessageChunk, Text: "answer", SessionID: execution.ACPSessionID, DeliveryStreamID: "stream-vertical", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliverySequence: 1, DeliverySubmissionID: "prompt:first-vertical", PromptGeneration: 1, TurnID: "turn-vertical"}
 	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, message, 0))
 	tool := message
@@ -292,6 +333,7 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	terminal.Text = ""
 	terminal.DeliverySequence = 4
 	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, terminal, 0))
+	require.NoError(t, mgr.sessionManager.recordErrandPromptAccepted(ctx, execution, accepted))
 	messages, _, err := repo.ListErrandMessages(ctx, "child-vertical", "", 10)
 	require.NoError(t, err)
 	require.Len(t, messages, 2)

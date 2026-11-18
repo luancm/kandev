@@ -26,6 +26,27 @@ func (r *Repository) ReadOwnedErrandFirstTerminal(ctx context.Context, errandID 
 	return readOwnedErrandFirstTerminal(ctx, r.ro, errandID)
 }
 
+// HasSettledErrandDeliverySubmission checks the projected terminal effect
+// independently of parent delivery and runtime cleanup.
+func (r *Repository) HasSettledErrandDeliverySubmission(ctx context.Context, submission *models.AgentDeliverySubmission, streamID, turnID string) (bool, error) {
+	if submission == nil || !validDeliveryTerminalOutcome(submission.State) || streamID == "" || turnID == "" {
+		return false, nil
+	}
+	errandID, owned := errandDeliveryIdentity(submission.SessionID)
+	if !owned || errandID == "" {
+		return false, nil
+	}
+	var settled bool
+	err := r.ro.GetContext(ctx, &settled, r.ro.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM agent_delivery_effects
+		WHERE effect_type=? AND session_id=? AND incarnation_id=? AND harness_generation=?
+		  AND submission_id=? AND stream_id=? AND turn_id=? AND outcome=? AND sequence>0
+		  AND state IN (?,?)
+	)`), models.DeliveryTerminalEffectType, submission.SessionID, submission.IncarnationID, submission.HarnessGeneration,
+		submission.ID, streamID, turnID, submission.State, models.DeliveryEffectBlockResolved, models.DeliveryEffectCompleted)
+	return settled, err
+}
+
 type errandTerminalReader interface {
 	Rebind(string) string
 	QueryRowxContext(context.Context, string, ...interface{}) *sqlx.Row

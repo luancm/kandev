@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type ownedErrandLaunchStore interface {
@@ -22,6 +23,8 @@ type ownedErrandLaunchStore interface {
 	CreateErrandTurn(context.Context, string, *models.Turn) error
 	GetErrandMessage(context.Context, string, string) (*models.Message, error)
 	CreateErrandMessage(context.Context, string, *models.Message) error
+	GetAgentDeliverySubmissionMetadata(context.Context, string) (*models.AgentDeliverySubmission, error)
+	ReadOwnedErrandFirstTerminal(context.Context, string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error)
 }
 
 type initialErrandAdmission struct {
@@ -62,11 +65,11 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 	if !ok {
 		return blocked, errors.New("errand launch dependencies are unavailable")
 	}
-	if _, err := store.GetErrandExecutionDescriptor(ctx, req.ErrandID); !errors.Is(err, sql.ErrNoRows) {
+	if current, err := store.GetErrandExecutionDescriptor(ctx, req.ErrandID); !errors.Is(err, sql.ErrNoRows) {
 		if err != nil {
 			return blocked, fmt.Errorf("read errand launch evidence: %w", err)
 		}
-		return blocked, errors.New("errand launch already has an execution reservation")
+		return recoverOwnedErrandLaunch(ctx, store, req, current)
 	}
 	if a.svc.sessionCeiling != nil {
 		decision := a.svc.sessionCeiling.admit(ctx, admissionRequest{
@@ -92,6 +95,48 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 		Disposition: errands.LaunchAdmitted, SessionID: req.ErrandID,
 		TurnID: req.TurnID, SubmissionID: req.SubmissionID,
 	}, nil
+}
+
+func recoverOwnedErrandLaunch(ctx context.Context, store ownedErrandLaunchStore, req errands.LaunchRequest, current *models.ErrandExecutionDescriptor) (errands.LaunchResult, error) {
+	blocked := errands.LaunchResult{Disposition: errands.LaunchBlocked}
+	if current == nil || current.ErrandID != req.ErrandID || current.TaskID != req.TaskID ||
+		current.Generation == 0 || current.ExecutionID == "" {
+		return blocked, models.ErrInvalidErrand
+	}
+	result := errands.LaunchResult{SessionID: req.ErrandID, TurnID: req.TurnID, SubmissionID: req.SubmissionID}
+	if current.ActiveSubmissionID == req.SubmissionID && current.ActiveTurnID == req.TurnID && current.PromptGeneration != 0 {
+		stored, err := store.GetAgentDeliverySubmissionMetadata(ctx, req.SubmissionID)
+		if err != nil && !errors.Is(err, repoerrors.ErrAgentDeliverySubmissionNotFound) {
+			return blocked, fmt.Errorf("read initial errand submission: %w", err)
+		}
+		if acceptedOwnedErrandLaunch(stored, current, req) {
+			result.Disposition = errands.LaunchAdmitted
+			return result, nil
+		}
+	}
+	target, _, err := store.ReadOwnedErrandFirstTerminal(ctx, req.ErrandID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return blocked, errors.New("errand launch acceptance remains unresolved")
+	}
+	if err != nil {
+		return blocked, fmt.Errorf("read initial errand terminal receipt: %w", err)
+	}
+	if !matchesOwnedLaunchTerminal(target, current, req) {
+		return blocked, models.ErrInvalidErrand
+	}
+	result.Disposition = errands.LaunchSettled
+	return result, nil
+}
+
+func matchesOwnedLaunchTerminal(target models.ErrandTeardownTarget, current *models.ErrandExecutionDescriptor, req errands.LaunchRequest) bool {
+	return target.TaskID == req.TaskID && target.ErrandID == req.ErrandID && target.ExecutionID == current.ExecutionID &&
+		target.OwnerGeneration == current.Generation && target.TurnID == req.TurnID && target.SubmissionID == req.SubmissionID
+}
+
+func acceptedOwnedErrandLaunch(stored *models.AgentDeliverySubmission, current *models.ErrandExecutionDescriptor, req errands.LaunchRequest) bool {
+	return stored != nil && stored.ID == req.SubmissionID && stored.State == models.DeliverySubmissionAccepted &&
+		stored.SessionID == models.ErrandExecutionIdentity(req.ErrandID) && stored.DispatchAttemptID == current.ExecutionID &&
+		stored.IncarnationID != "" && stored.HarnessGeneration > 0 && stored.OwnerGeneration == stored.HarnessGeneration
 }
 
 func (a *ErrandAdapter) ownedErrandWorkspace(ctx context.Context, req errands.LaunchRequest) (*runtimeapi.WorkspaceInfo, error) {

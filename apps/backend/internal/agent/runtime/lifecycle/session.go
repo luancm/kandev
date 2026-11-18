@@ -2144,6 +2144,7 @@ func (sm *SessionManager) sendPrompt(
 		dispatchOnly,
 		callbacks.onDispatched,
 		promptGeneration,
+		initialDelivery,
 	)
 	if err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
@@ -2406,9 +2407,15 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	dispatchOnly bool,
 	onDispatched func(),
 	promptGeneration uint64,
+	submission *models.AgentDeliverySubmission,
 ) (*PromptResult, error) {
 	if dispatchOnly {
 		sm.markDispatchedPromptPending(execution, promptGeneration)
+	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		if err := sm.recordErrandPromptAccepted(ctx, execution, submission); err != nil {
+			return nil, err
+		}
 	}
 	if onDispatched != nil {
 		onDispatched()
@@ -2454,6 +2461,9 @@ func (sm *SessionManager) callAgentctlPrompt(
 	if err == nil {
 		acknowledgedID := client.LastDeliverySubmissionID()
 		activeID := deliverySubmissionIdentityForPrompt(submissionID, acknowledgedID)
+		if execution.Owner.Kind == ExecutionOwnerErrand && acknowledgedID != activeID {
+			return fmt.Errorf("%w: errand prompt acknowledgment identity mismatch", ErrUncertainPromptDelivery)
+		}
 		execution.setDeliverySubmissionID(activeID)
 	}
 	return err

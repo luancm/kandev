@@ -188,7 +188,7 @@ func TestDispatchCompletion_AcknowledgementOwnership(t *testing.T) {
 				if callbackUnlocked {
 					execution.promptLifecycleMu.Unlock()
 				}
-			}, generation,
+			}, generation, nil,
 		)
 		require.NoError(t, err)
 		require.True(t, callbackCalled, "dispatch callback must still be delivered")
@@ -209,7 +209,7 @@ func TestDispatchCompletion_AcknowledgementOwnership(t *testing.T) {
 		require.Greater(t, successor, predecessor)
 
 		_, err = manager.sessionManager.finishAcceptedPrompt(
-			context.Background(), execution, true, nil, predecessor,
+			context.Background(), execution, true, nil, predecessor, nil,
 		)
 		require.NoError(t, err)
 		require.False(t, execution.dispatchedPromptPending.Load(),
@@ -228,7 +228,7 @@ func TestDispatchCompletion_AcknowledgementOwnership(t *testing.T) {
 		replacement := createTestExecution(oldExecution.ID, oldExecution.TaskID, oldExecution.SessionID)
 		require.NoError(t, manager.executionStore.Add(replacement))
 		_, err = manager.sessionManager.finishAcceptedPrompt(
-			context.Background(), oldExecution, true, nil, generation,
+			context.Background(), oldExecution, true, nil, generation, nil,
 		)
 		require.NoError(t, err)
 		require.False(t, oldExecution.dispatchedPromptPending.Load(),
@@ -242,7 +242,7 @@ func TestDispatchCompletion_AcknowledgementOwnership(t *testing.T) {
 		execution.promptGeneration = 3
 		execution.dispatchedPromptGeneration = 3
 		manager := NewSessionManager(newTestLogger(), make(chan struct{}))
-		_, err := manager.finishAcceptedPrompt(context.Background(), execution, true, nil, 3)
+		_, err := manager.finishAcceptedPrompt(context.Background(), execution, true, nil, 3, nil)
 		require.NoError(t, err)
 		require.True(t, execution.dispatchedPromptPending.Load(),
 			"the no-store path must retain a live dispatched prompt barrier")
