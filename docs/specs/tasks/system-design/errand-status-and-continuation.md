@@ -25,6 +25,8 @@ Extend the common input to `errands.ProjectStatus` with a typed recovery-attenti
 
 Preserve cancellation, capacity-queued and failed/missing-session precedence. Active work with a pending permission maps to `needs_attention`/`permission`; other active work remains `running`. Identified idle unresolved recovery maps to `needs_attention`/`recovery_unresolved` before an older result can mask subsequent unresolved delegation. With no relevant later unresolved work, retain the previous settled outcome. Historical receipt-only uncertainty cannot overwrite a newer authoritative result.
 
+After reconnect, the exact active Errand stream can reoffer an unclaimed automatic proposal from the durably projected permission request. The normal resolver checks the current execution, binding, live request and offered option before claiming delivery. An existing claim and a request returned to manual review stay out of automatic recovery.
+
 Add optional closed-set `attention_reason` to backend snapshots/DTOs, list/event/await projections and browser types. Emit it only with attention status. Include the reason in parent context and session listings; absence remains compatible with older permission-only presentations. Do not conflate it with `delivery_state=uncertain`, which concerns parent receipt observation.
 
 `IsLive`, `IsOutstanding`, `liveErrandPredicate` and batched summaries must remain consistent with projection. Unresolved recovery retains capacity and ownership, including idle unresolved follow-ups after a prior outcome. Share the evidence predicate where possible; test SQL and service counts against the same fixtures rather than approximating with `last_outcome=''` or `awaiting_result` alone.

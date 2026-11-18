@@ -520,6 +520,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
+	} else {
+		sm.reofferRetainedErrandPermissions(ctx, execution, delivery)
 	}
 }
 
