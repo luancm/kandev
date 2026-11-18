@@ -202,7 +202,7 @@ func validateRecoveredReplayStream(
 	streamID string,
 	target uint64,
 ) error {
-	if stream.StreamID != streamID || stream.SessionID != execution.SessionID ||
+	if stream.StreamID != streamID || stream.SessionID != deliveryTransportSessionID(execution) ||
 		stream.IncarnationID != execution.DeliveryIncarnationID ||
 		stream.HarnessGeneration != execution.DeliveryHarnessGeneration ||
 		stream.HighWater < target {
@@ -630,13 +630,17 @@ func durableAgentEventWithoutPromptTurn(execution *AgentExecution, event agentct
 	return durableAgentEventWithPromptTurn(execution, event, false)
 }
 
+func deliveryTransportSessionID(execution *AgentExecution) string {
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return models.ErrandExecutionIdentity(execution.Owner.ErrandID)
+	}
+	return execution.SessionID
+}
+
 func durableAgentEventWithPromptTurn(execution *AgentExecution, event agentctl.AgentEvent, includePromptTurn bool) *models.AgentDeliveryEvent {
 	sessionID := ""
 	if execution != nil {
-		sessionID = execution.SessionID
-		if execution.Owner.Kind == ExecutionOwnerErrand {
-			sessionID = models.ErrandExecutionIdentity(execution.Owner.ErrandID)
-		}
+		sessionID = deliveryTransportSessionID(execution)
 	}
 	if sessionID == "" {
 		sessionID = event.SessionID

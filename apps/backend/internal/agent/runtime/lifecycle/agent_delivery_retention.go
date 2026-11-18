@@ -65,7 +65,7 @@ func validateAuthenticatedDeliveryDescriptor(execution *AgentExecution, status *
 		expectedStreamID = execution.SessionID
 	}
 	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) ||
-		status.SessionID != execution.SessionID || status.IncarnationID != execution.DeliveryIncarnationID ||
+		status.SessionID != deliveryTransportSessionID(execution) || status.IncarnationID != execution.DeliveryIncarnationID ||
 		status.HarnessGeneration != execution.DeliveryHarnessGeneration || status.StreamID != expectedStreamID {
 		return fmt.Errorf("authenticated delivery descriptor mismatch: %w", ErrDurableAdoptionIdentityMismatch)
 	}

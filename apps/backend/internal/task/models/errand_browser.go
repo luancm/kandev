@@ -98,5 +98,6 @@ type ErrandBrowserParentIdentity struct {
 type ErrandBrowserInspection struct {
 	Errand             *ErrandBrowserObservation
 	ChildSessionExists bool
+	OwnsConversation   bool
 	Parent             ErrandBrowserParentIdentity
 }

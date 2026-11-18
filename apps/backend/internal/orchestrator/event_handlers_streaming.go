@@ -59,6 +59,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	if payload == nil || payload.Data == nil {
 		return
 	}
+	if payload.OwnerKind == lifecycle.ExecutionOwnerErrand {
+		if payload.Data.Type == agentEventComplete {
+			s.signalCeilingSweep()
+		}
+		return
+	}
 	var streamGuard *lockedCancelInFlightGuard
 	if payload.SessionID != "" {
 		// Serialize stream side effects with cancellation/interrupt decisions.

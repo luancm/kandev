@@ -151,7 +151,7 @@ func (sm *StreamManager) projectReceivedDeliveryPrefix(ctx context.Context, exec
 func (sm *StreamManager) projectReceivedDeliveryPage(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, cursor *models.AgentDeliveryCursor, events []*models.AgentDeliveryEvent) error {
 	for _, event := range events {
 		if event.Sequence != cursor.ProjectedSequence+1 || event.Sequence > cursor.ReceivedSequence || event.StreamID != cursor.StreamID ||
-			event.SessionID != execution.SessionID || event.IncarnationID != execution.DeliveryIncarnationID || event.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) {
+			event.SessionID != deliveryTransportSessionID(execution) || event.IncarnationID != execution.DeliveryIncarnationID || event.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) {
 			return ErrDeliveryOwnerMismatch
 		}
 		if err := sm.projectReceivedDeliveryEvent(ctx, execution, delivery, event); err != nil {

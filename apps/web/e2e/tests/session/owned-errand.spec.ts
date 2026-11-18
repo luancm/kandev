@@ -1,0 +1,22 @@
+import { test } from "../../fixtures/test-base";
+import { exerciseOwnedErrandView } from "../../helpers/owned-errand";
+
+test("desktop opens an owned Errand and returns to its parent", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandView({ page, api, seed, backend, phone: false });
+});
+
+test("desktop stops an owned Errand and retains its transcript", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandView({ page, api, seed, backend, phone: false, stop: true });
+});

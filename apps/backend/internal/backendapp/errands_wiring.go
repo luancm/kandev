@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -77,6 +78,9 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) *errand
 		return nil
 	}
 	adapter := orchestrator.NewErrandAdapter(p.orchestratorSvc)
+	if p.lifecycleMgr != nil {
+		adapter.SetOwnedLaunchRuntime(runtimeapi.New(p.lifecycleMgr), p.taskSvc.GetWorkspaceInfoForSession)
+	}
 	service, err := errands.New(errands.Dependencies{
 		Store:    p.taskRepo,
 		Launcher: adapter,

@@ -18,6 +18,7 @@ import { markSessionTabUserActivationIntent } from "../../session-tab-activation
 import { fetchTaskSession } from "@/lib/api";
 import type { ErrandInspection } from "@/lib/types/errands";
 import { readErrandInspection } from "@/lib/state/slices/errands/errand-browser-read-coordinator";
+import { OwnedErrandNavigationContext } from "./owned-errand-navigation-context";
 
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
 type OpenSession = (target: OpenTaskSessionTarget) => Promise<boolean>;
@@ -44,6 +45,7 @@ async function inspectAndOpenErrand(args: {
   sessions: TaskSessionList;
   errands: ErrandCache;
   ownerOpen: ((target: OpenTaskSessionTarget) => void) | null;
+  openOwned: ((inspection: ErrandInspection) => boolean) | null;
   usesDesktopWorkbench: boolean;
   isCurrent: () => boolean;
   isLatest: () => boolean;
@@ -60,6 +62,7 @@ async function inspectAndOpenErrand(args: {
     sessions,
     errands,
     ownerOpen,
+    openOwned,
     usesDesktopWorkbench,
     isCurrent,
     isLatest,
@@ -73,6 +76,11 @@ async function inspectAndOpenErrand(args: {
     const inspection = await read.promise;
     if (!observationCurrent() || !read.retain(ownerId, inspection)) return false;
     onRetained();
+    if (inspection.owns_conversation === true && openOwned) {
+      opened = openOwned(inspection);
+      if (opened) onTransfer();
+      return opened;
+    }
     const child = await resolveErrandSession({
       store,
       taskId,
@@ -257,6 +265,7 @@ function openOrdinaryTarget(args: {
 /** Select a conversation through its embedded owner or the task workbench, preserving normal tab ownership. */
 export function useOpenTaskSession(): OpenSession {
   const ownerOpen = useContext(TaskSessionNavigationContext);
+  const openOwned = useContext(OwnedErrandNavigationContext);
   const store = useAppStoreApi();
   const { usesDesktopWorkbench } = useResponsiveBreakpoint();
   const ownerId = `errand-open-${useId()}`;
@@ -265,8 +274,10 @@ export function useOpenTaskSession(): OpenSession {
   const mountedRef = useRef(false);
   const provisionalAttemptRef = useRef<number | null>(null);
   const ownerOpenRef = useRef(ownerOpen);
-  if (ownerOpenRef.current !== ownerOpen) {
+  const ownedOpenRef = useRef(openOwned);
+  if (ownerOpenRef.current !== ownerOpen || ownedOpenRef.current !== openOwned) {
     ownerOpenRef.current = ownerOpen;
+    ownedOpenRef.current = openOwned;
     navigationGenerationRef.current++;
   }
 
@@ -301,8 +312,7 @@ export function useOpenTaskSession(): OpenSession {
       store.getState().releaseErrandInspection(ownerId);
       const navigationGeneration = navigationGenerationRef.current;
       const state = store.getState();
-      const selectedTaskId = state.tasks.activeTaskId;
-      const selectedSessionId = state.tasks.activeSessionId;
+      const { activeTaskId: selectedTaskId, activeSessionId: selectedSessionId } = state.tasks;
       const capturedOwner = ownerOpenRef.current;
       const isCurrent = () =>
         openRequestIsCurrent({
@@ -334,6 +344,7 @@ export function useOpenTaskSession(): OpenSession {
           sessions,
           errands,
           ownerOpen: capturedOwner,
+          openOwned: ownedOpenRef.current,
           usesDesktopWorkbench,
           isCurrent,
           isLatest: () => requestAttemptRef.current === requestAttempt,

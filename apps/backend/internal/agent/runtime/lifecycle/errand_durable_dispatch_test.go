@@ -63,9 +63,45 @@ func TestErrandInitialPromptPersistsOwnerBeforeDispatch(t *testing.T) {
 	_, err = sm.sendPrompt(ctx, execution, "hello", false, nil, true, sendPromptCallbacks{deliverySubmissionID: "first"}, false)
 	require.NoError(t, err)
 	require.True(t, reached)
+	started := agentctl.AgentEvent{
+		Type: streams.EventTypeTurnStarted, SessionID: execution.ACPSessionID,
+		DeliveryStreamID: "stream", DeliveryIncarnationID: "incarnation",
+		DeliveryHarnessGeneration: 3, DeliverySequence: 1,
+		DeliverySubmissionID: "prompt:first", TurnID: "turn", PromptGeneration: 1,
+	}
+	foreign := started
+	foreign.TurnID = "other-turn"
+	require.Error(t, stream.processAgentEvent(ctx, execution, client, repo, foreign, 0))
+	require.NoError(t, stream.processAgentEvent(ctx, execution, client, repo, started, 0))
+	cursor, err := repo.GetAgentDeliveryCursor(ctx, "stream")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cursor.ProjectedSequence)
 	var count int
 	require.NoError(t, db.Get(&count, `SELECT COUNT(*) FROM task_sessions`))
 	require.Zero(t, count)
+}
+
+func TestErrandDeliveryAcknowledgementRequiresExactTransportOwner(t *testing.T) {
+	execution := &AgentExecution{
+		Owner:            ExecutionOwner{Kind: ExecutionOwnerErrand, ErrandID: "child", Generation: 1},
+		DeliveryStreamID: "stream", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 3,
+	}
+	retained := journal.Stream{
+		StreamID: "stream", SessionID: "errand:child", IncarnationID: "incarnation",
+		HarnessGeneration: 3, HighWater: 4,
+	}
+	status := &agentctl.DeliveryStatus{
+		StorageCapability: journal.StorageCapability{Durable: true, Version: journal.CurrentProtocolVersion},
+		SessionID:         retained.SessionID, StreamID: retained.StreamID, IncarnationID: retained.IncarnationID,
+		HarnessGeneration: retained.HarnessGeneration, Stream: &retained,
+	}
+	require.True(t, deliveryAckDescriptorMatches(status, execution, retained.StreamID))
+	require.NoError(t, validateRecoveredReplayStream(retained, execution, retained.StreamID, 4))
+	require.Error(t, validateRecoveredReplayStream(retained, execution, retained.StreamID, 5))
+	status.SessionID = "errand:sibling"
+	require.False(t, deliveryAckDescriptorMatches(status, execution, retained.StreamID))
+	retained.SessionID = ""
+	require.Error(t, validateRecoveredReplayStream(retained, execution, retained.StreamID, 4))
 }
 
 func TestErrandDurableEventUsesOwnerTransportIdentity(t *testing.T) {
@@ -179,6 +215,11 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, repo.CreateErrandTurn(ctx, "child-vertical", &models.Turn{ID: "turn-vertical", TaskID: "task-vertical"}))
 	mock := newMockAgentServer(t)
+	mock.deliveryStatus = &agentctl.DeliveryStatus{
+		StorageCapability: journal.StorageCapability{Durable: true, Version: journal.CurrentProtocolVersion},
+		SessionID:         "errand:child-vertical", IncarnationID: "incarnation",
+		HarnessGeneration: 1, StreamID: "stream-vertical",
+	}
 	t.Cleanup(mock.Close)
 	dispatch := make(chan error, 1)
 	mock.handler = func(msg ws.Message) *ws.Message {

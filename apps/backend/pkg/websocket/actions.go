@@ -409,15 +409,16 @@ const (
 	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
 	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
 	// Errand actions
-	ActionErrandList           = "errand.list"
-	ActionErrandCancel         = "errand.cancel"
-	ActionErrandCancelAll      = "errand.cancel_all"
-	ActionErrandSendResult     = "errand.send_result"
-	ActionErrandUpdated        = "errand.updated"
-	ActionErrandBrowserSummary = "errand.browser_summary"
-	ActionErrandHistoryPage    = "errand.history_page"
-	ActionErrandInspect        = "errand.inspect"
-	ActionErrandMessages       = "errand.messages"
+	ActionErrandList              = "errand.list"
+	ActionErrandCancel            = "errand.cancel"
+	ActionErrandCancelAll         = "errand.cancel_all"
+	ActionErrandSendResult        = "errand.send_result"
+	ActionErrandUpdated           = "errand.updated"
+	ActionErrandBrowserSummary    = "errand.browser_summary"
+	ActionErrandHistoryPage       = "errand.history_page"
+	ActionErrandInspect           = "errand.inspect"
+	ActionErrandMessages          = "errand.messages"
+	ActionErrandTranscriptChanged = "errand.transcript_changed"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote

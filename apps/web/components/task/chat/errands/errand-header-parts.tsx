@@ -126,9 +126,11 @@ export function ErrandMetaRow({
 export function BackToParentButton({
   model,
   variant,
+  onBack,
 }: {
   model: ErrandViewModel;
   variant: "desktop" | "phone";
+  onBack?: () => void;
 }) {
   const { t } = useTranslation();
   const openSession = useOpenTaskSession();
@@ -138,14 +140,17 @@ export function BackToParentButton({
       type="button"
       variant="ghost"
       size="sm"
-      disabled={!parentSessionId}
+      disabled={!parentSessionId && !onBack}
       aria-label={t("task:errandBackToParentAria", { parent: parentTitle })}
       data-testid="errand-back-to-parent"
-      onClick={() => {
-        if (parentSessionId) {
-          openSession({ taskId, sessionId: parentSessionId, title: parentTitle });
-        }
-      }}
+      onClick={
+        onBack ??
+        (() => {
+          if (parentSessionId) {
+            openSession({ taskId, sessionId: parentSessionId, title: parentTitle });
+          }
+        })
+      }
       className={cn(
         "min-w-0 shrink cursor-pointer gap-0.5 text-muted-foreground hover:text-foreground",
         variant === "phone" ? "h-11 max-w-[40%] px-2 text-xs" : "h-6 max-w-[35%] px-1.5 text-xs",

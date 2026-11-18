@@ -218,7 +218,8 @@ func (h *TaskHandlers) wsErrandInspect(ctx context.Context, msg *ws.Message) (*w
 	return ws.NewResponse(msg.ID, msg.Action, dto.ErrandInspectionDTO{
 		Scope:  dto.ErrandBrowserScopeDTO{TaskID: req.TaskID, ChildSessionID: req.ChildSessionID},
 		Errand: dto.FromErrandBrowserObservation(inspection.Errand), ChildSessionExists: inspection.ChildSessionExists,
-		Parent: parent,
+		OwnsConversation: inspection.OwnsConversation,
+		Parent:           parent,
 	})
 }
 

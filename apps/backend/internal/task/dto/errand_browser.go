@@ -81,6 +81,7 @@ type ErrandInspectionDTO struct {
 	Scope              ErrandBrowserScopeDTO  `json:"scope"`
 	Errand             ErrandBrowserRowDTO    `json:"errand"`
 	ChildSessionExists bool                   `json:"child_session_exists"`
+	OwnsConversation   bool                   `json:"owns_conversation,omitempty"`
 	Parent             ErrandBrowserParentDTO `json:"parent"`
 }
 

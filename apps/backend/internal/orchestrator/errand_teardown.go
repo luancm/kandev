@@ -65,8 +65,8 @@ func (a *ErrandAdapter) CancelErrandWithTarget(ctx context.Context, row *models.
 	if row == nil || row.ID == "" || commit == nil {
 		return models.ErrInvalidErrand
 	}
-	if a.runtime != nil {
-		return a.cancelOwnedErrand(ctx, row, commit)
+	if handled, err := a.cancelIndependentErrand(ctx, row, commit); handled {
+		return err
 	}
 	if handled, err := a.cancelPendingCompletion(ctx, row, commit); handled {
 		return err

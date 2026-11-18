@@ -276,7 +276,7 @@ function validInspection(inspection: ErrandInspection, taskId: string, sessionId
     inspection.scope.child_session_id === sessionId &&
     inspection.errand.task_id === taskId &&
     inspection.errand.errand_id === sessionId &&
-    inspection.child_session_exists
+    (inspection.child_session_exists || inspection.owns_conversation === true)
   );
 }
 

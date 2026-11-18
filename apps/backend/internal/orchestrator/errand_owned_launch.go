@@ -48,14 +48,8 @@ func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtim
 	return nil
 }
 
-func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest) (errands.LaunchResult, error) {
+func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo) (errands.LaunchResult, error) {
 	blocked := errands.LaunchResult{Disposition: errands.LaunchBlocked}
-	if !validErrandLaunchRequest(req) {
-		return blocked, models.ErrInvalidErrand
-	}
-	if err := a.svc.authorizeTask(ctx, req.TaskID); err != nil {
-		return blocked, err
-	}
 	guard, err := a.svc.lockCancelInFlightGuardWithContext(ctx, "errand-launch:"+req.ErrandID)
 	if err != nil {
 		return blocked, err
@@ -65,7 +59,7 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 		return blocked, err
 	}
 	store, ok := a.svc.repo.(ownedErrandLaunchStore)
-	if !ok || a.workspace == nil {
+	if !ok {
 		return blocked, errors.New("errand launch dependencies are unavailable")
 	}
 	if _, err := store.GetErrandExecutionDescriptor(ctx, req.ErrandID); !errors.Is(err, sql.ErrNoRows) {
@@ -84,10 +78,6 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 		}
 		defer a.svc.sessionCeiling.release(decision.reservationKey)
 	}
-	info, err := a.ownedErrandWorkspace(ctx, req)
-	if err != nil {
-		return blocked, err
-	}
 	if err := prepareOwnedErrandFirstTurn(ctx, store, req); err != nil {
 		return blocked, err
 	}
@@ -105,6 +95,9 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 }
 
 func (a *ErrandAdapter) ownedErrandWorkspace(ctx context.Context, req errands.LaunchRequest) (*runtimeapi.WorkspaceInfo, error) {
+	if a.workspace == nil {
+		return nil, errors.New("errand workspace reader is unavailable")
+	}
 	info, err := a.workspace(ctx, req.TaskID, req.ParentSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve errand workspace: %w", err)

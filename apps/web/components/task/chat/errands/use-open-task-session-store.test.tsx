@@ -10,6 +10,7 @@ import { sessionId, taskId } from "@/lib/types/ids";
 import { useOpenTaskSession } from "./use-open-task-session";
 import { useErrandViewModel } from "./use-errand-view-model";
 import { defaultState } from "@/lib/state/default-state";
+import { OwnedErrandNavigationContext } from "./owned-errand-navigation-context";
 
 const transport = vi.hoisted(() => ({ inspect: vi.fn(), detail: vi.fn() }));
 vi.mock("@/lib/api/domains/errand-api", () => ({ inspectErrand: transport.inspect }));
@@ -45,6 +46,31 @@ function deferred<T>() {
 }
 
 beforeEach(() => vi.clearAllMocks());
+
+it("opens an Errand-owned conversation without a TaskSession request or selection", async () => {
+  const owned = { ...makeInspection(), child_session_exists: false, owns_conversation: true };
+  const openOwned = vi.fn(() => true);
+  transport.inspect.mockResolvedValue(owned);
+  const host = ({ children }: { children: ReactNode }) => (
+    <StateProvider>
+      <OwnedErrandNavigationContext.Provider value={openOwned}>
+        {children}
+      </OwnedErrandNavigationContext.Provider>
+    </StateProvider>
+  );
+  const { result } = renderHook(() => ({ store: useAppStoreApi(), open: useOpenTaskSession() }), {
+    wrapper: host,
+  });
+  act(() => {
+    result.current.store.getState().setConnectionStatus("connected");
+    result.current.store.getState().setActiveSession("task-1", PARENT_ID);
+  });
+  await act(async () => expect(await result.current.open(target)).toBe(true));
+  expect(openOwned).toHaveBeenCalledExactlyOnceWith(owned);
+  expect(transport.detail).not.toHaveBeenCalled();
+  expect(result.current.store.getState().tasks.activeSessionId).toBe(PARENT_ID);
+  expect(result.current.store.getState().taskSessions.items[CHILD_ID]).toBeUndefined();
+});
 
 it("reuses the successful Open inspection when the child view mounts", async () => {
   transport.inspect.mockResolvedValue(makeInspection());

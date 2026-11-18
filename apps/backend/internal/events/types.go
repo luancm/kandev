@@ -368,7 +368,8 @@ const (
 
 // Event types for errands
 const (
-	ErrandUpdated = "errand.updated" // Errand row or projected status changed
+	ErrandUpdated           = "errand.updated"            // Errand row or projected status changed
+	ErrandTranscriptChanged = "errand.transcript_changed" // Durable Errand conversation changed
 )
 
 // Event types for session todos (ACP plan entries)

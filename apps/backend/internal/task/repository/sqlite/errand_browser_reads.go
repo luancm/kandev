@@ -261,13 +261,14 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 	}
 	defer func() { _ = tx.Rollback() }()
 	query := `SELECT ` + errandBrowserColumns(r.ro.DriverName()) + `,
-		CASE WHEN s.id IS NULL THEN 0 ELSE 1 END, COALESCE(s.role, ''), COALESCE(s.parent_session_id, '')
+		CASE WHEN s.id IS NULL THEN 0 ELSE 1 END, COALESCE(s.role, ''), COALESCE(s.parent_session_id, ''),
+		CASE WHEN ` + ownedErrandExists + ` THEN 1 ELSE 0 END
 		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
 		WHERE e.task_id = ? AND e.id = ? AND ` + validErrandBrowserIdentity()
 	row := tx.QueryRowContext(ctx, tx.Rebind(query), taskID, childSessionID)
-	var childExists int
+	var childExists, ownsConversation int
 	var childRole, childParentID string
-	projection, err := scanErrandBrowserProjection(row, &childExists, &childRole, &childParentID)
+	projection, err := scanErrandBrowserProjection(row, &childExists, &childRole, &childParentID, &ownsConversation)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && childExists != 0 && (childRole != string(models.SessionRoleErrand) || childParentID != projection.ParentSessionID)) {
 		return models.ErrandBrowserInspection{}, models.ErrErrandNotFound
 	}
@@ -292,7 +293,9 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 	if err := tx.Commit(); err != nil {
 		return models.ErrandBrowserInspection{}, fmt.Errorf("commit errand inspection: %w", err)
 	}
-	return models.ErrandBrowserInspection{Errand: projection, ChildSessionExists: childExists != 0, Parent: parent}, nil
+	return models.ErrandBrowserInspection{
+		Errand: projection, ChildSessionExists: childExists != 0, OwnsConversation: ownsConversation != 0, Parent: parent,
+	}, nil
 }
 
 func readErrandBrowserCounts(ctx context.Context, tx *sqlx.Tx, driver, scope string, args ...interface{}) (models.ErrandBrowserCounts, error) {

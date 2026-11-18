@@ -95,25 +95,26 @@ func exerciseErrandDeliveryProjection(t *testing.T, repo *Repository, inject boo
 	appended, err := repo.GetErrandMessage(ctx, "projection", "message")
 	require.NoError(t, err)
 	require.Equal(t, "Hello world", appended.Content)
+	projectErrandObservedCommands(t, repo, event)
 	unknownPayload, err := json.Marshal(streams.AgentEvent{Type: "future_event", TurnID: "turn", PromptGeneration: 1})
 	require.NoError(t, err)
 	unknown := *event
-	unknown.Sequence = 3
+	unknown.Sequence = 4
 	unknown.EventType = "future_event"
 	unknown.Payload = unknownPayload
-	_, err = repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx, []*models.AgentDeliveryEvent{&unknown}, []*models.AgentDeliveryEffect{nil}, 3)
+	_, err = repo.ReceiveAndProjectCanonicalAgentDeliveryEvents(ctx, []*models.AgentDeliveryEvent{&unknown}, []*models.AgentDeliveryEffect{nil}, 4)
 	require.Error(t, err)
 	cursor, err = repo.GetAgentDeliveryCursor(ctx, "stream")
 	require.NoError(t, err)
-	require.EqualValues(t, 2, cursor.ReceivedSequence)
+	require.EqualValues(t, 3, cursor.ReceivedSequence)
 	terminalPayload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeComplete, TurnID: "turn", PromptGeneration: 1})
 	require.NoError(t, err)
 	terminal := *event
-	terminal.Sequence = 3
+	terminal.Sequence = 4
 	terminal.EventType = streams.EventTypeComplete
 	terminal.Payload = terminalPayload
 	terminal.Terminal = true
-	received, err := repo.ReceiveAgentDeliveryEvent(ctx, &terminal, 3)
+	received, err := repo.ReceiveAgentDeliveryEvent(ctx, &terminal, 4)
 	require.NoError(t, err)
 	require.True(t, received)
 	projected, err := repo.ProjectAgentDeliveryEvent(ctx, &terminal, nil)
@@ -122,7 +123,7 @@ func exerciseErrandDeliveryProjection(t *testing.T, repo *Repository, inject boo
 	projected, err = repo.ProjectAgentDeliveryEvent(ctx, &terminal, nil)
 	require.NoError(t, err)
 	require.False(t, projected)
-	settled, err := repo.SettleAgentDeliveryTerminal(ctx, "stream", 3, models.DeliverySubmissionCompleted, time.Time{})
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, "stream", 4, models.DeliverySubmissionCompleted, time.Time{})
 	require.NoError(t, err)
 	require.True(t, settled)
 	stored, err := repo.GetAgentDeliverySubmission(ctx, "submission")
@@ -141,6 +142,26 @@ func exerciseErrandDeliveryProjection(t *testing.T, repo *Repository, inject boo
 	var sessions int
 	require.NoError(t, repo.db.GetContext(ctx, &sessions, repo.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id=?`), task))
 	require.Zero(t, sessions)
+}
+
+func projectErrandObservedCommands(t *testing.T, repo *Repository, message *models.AgentDeliveryEvent) {
+	t.Helper()
+	ctx := t.Context()
+	event := *message
+	event.Sequence = 3
+	event.EventType = streams.EventTypeAvailableCommands
+	var err error
+	event.Payload, err = json.Marshal(streams.AgentEvent{Type: event.EventType, TurnID: "turn", PromptGeneration: 1})
+	require.NoError(t, err)
+	received, err := repo.ReceiveAgentDeliveryEvent(ctx, &event, 3)
+	require.NoError(t, err)
+	require.True(t, received)
+	projected, err := repo.ProjectAgentDeliveryEvent(ctx, &event, nil)
+	require.NoError(t, err)
+	require.True(t, projected)
+	messages, _, err := repo.ListErrandMessages(ctx, "projection", "", 10)
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "command availability is a control frame")
 }
 
 func TestErrandUnsubmittedControlReplay(t *testing.T) {

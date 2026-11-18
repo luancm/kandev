@@ -143,9 +143,7 @@ func (r *Repository) validateErrandControlEventTx(ctx context.Context, tx *sqlx.
 	if event.Terminal || agent.Type != event.EventType || agent.TurnID != "" || agent.PromptGeneration != 0 || agent.DeliverySubmissionID != "" {
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
-	switch agent.Type {
-	case streams.EventTypeSessionStatus, streams.EventTypeSessionMode, streams.EventTypeSessionModels, streams.EventTypeSessionModelFallback, streams.EventTypeSessionModelSelectionWarning, streams.EventTypeSessionInfo, streams.EventTypeAgentCapabilities, streams.EventTypeMCPAttachment:
-	default:
+	if !errandSessionObservation(agent.Type) {
 		return fmt.Errorf("unsupported unsubmitted errand delivery event %q", agent.Type)
 	}
 	var valid bool
@@ -163,9 +161,7 @@ func validateErrandSubmittedEvent(errandID, taskID string, event *models.AgentDe
 	if agent.Type != event.EventType {
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
-	switch agent.Type {
-	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError, streams.EventTypeToolCall, streams.EventTypeToolUpdate, streams.EventTypeShellOutputUpdate, streams.EventTypePermissionRequest:
-	default:
+	if !errandSubmittedEventType(agent.Type) {
 		return fmt.Errorf("unsupported errand delivery event type %q", agent.Type)
 	}
 	if agent.ShellOutput != nil && agent.Type != streams.EventTypeShellOutputUpdate {
@@ -182,6 +178,32 @@ func validateErrandSubmittedEvent(errandID, taskID string, event *models.AgentDe
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	return nil
+}
+
+func errandSubmittedEventType(eventType string) bool {
+	switch eventType {
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeComplete, streams.EventTypeError,
+		streams.EventTypeTurnStarted, streams.EventTypeToolCall, streams.EventTypeToolUpdate,
+		streams.EventTypeShellOutputUpdate, streams.EventTypePermissionRequest:
+		return true
+	default:
+		return errandSessionObservation(eventType)
+	}
+}
+
+// A session observation may arrive between prompts or carry a submission
+// stamped by agentctl. Receipt still requires the matching binding.
+func errandSessionObservation(eventType string) bool {
+	switch eventType {
+	case streams.EventTypeSessionStatus, streams.EventTypeSessionMode, streams.EventTypeSessionModels,
+		streams.EventTypeSessionModelFallback, streams.EventTypeSessionModelSelectionWarning, streams.EventTypeSessionInfo,
+		streams.EventTypeAgentCapabilities, streams.EventTypeMCPAttachment, streams.EventTypeAvailableCommands,
+		streams.EventTypeContextWindow, streams.EventTypeUsageObservation, streams.EventTypeRateLimit,
+		streams.EventTypePromptSuggestion:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Repository) errandCanonicalMessageOwnerTx(ctx context.Context, tx *sqlx.Tx, errandID, id, turn, taskID string, typ models.MessageType, event *models.AgentDeliveryEvent, raw string, now time.Time, appended bool) (models.Message, error) {

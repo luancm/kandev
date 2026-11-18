@@ -1734,6 +1734,7 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 				zap.Uint64("startup_generation", startupGeneration))
 			return
 		}
+		m.eventPublisher.publishErrandTranscriptChange(execution, event)
 		m.handleAgentEventWithAttempt(execution, event, attemptID)
 	})
 	if !accepted {

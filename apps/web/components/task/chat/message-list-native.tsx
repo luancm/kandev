@@ -928,6 +928,16 @@ function TurnChangedFilesAfterMessage({
     ));
 }
 
+function useMessageListPagination(
+  sessionId: string | null,
+  ownedPagination: MessageListProps["ownedPagination"],
+) {
+  const sessionPagination = useLazyLoadMessages(sessionId, {
+    minTextPartsPerLoad: OLDER_PAGE_LIMIT,
+  });
+  return ownedPagination ?? sessionPagination;
+}
+
 /**
  * Renders the transcript as plain DOM nodes with `overflow-anchor` for
  * scroll pinning. Wires together lazy-loading of older messages, the
@@ -951,6 +961,7 @@ export const NativeMessageList = memo(
       historyRefreshPending = false,
       historyStatus = "ready",
       historyError = null,
+      ownedPagination,
       onRetryHistory,
       isWorking,
       sessionState,
@@ -1018,9 +1029,10 @@ export const NativeMessageList = memo(
       isWorking,
       sessionState,
     });
-    const { loadMore, hasMore, isLoadingMore } = useLazyLoadMessages(sessionId, {
-      minTextPartsPerLoad: OLDER_PAGE_LIMIT,
-    });
+    const { loadMore, hasMore, isLoadingMore } = useMessageListPagination(
+      sessionId,
+      ownedPagination,
+    );
     const { activeTurnId } = useSessionTurn(sessionId);
     const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
     const streamingMessageId = getStreamingAgentMessageId(visibleMessages);

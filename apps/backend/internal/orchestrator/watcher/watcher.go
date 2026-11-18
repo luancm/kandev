@@ -612,7 +612,7 @@ func (w *Watcher) createAgentStreamEventHandler() bus.EventHandler {
 		}
 
 		// Validate required fields
-		if payload.TaskID == "" {
+		if payload.TaskID == "" && payload.OwnerKind != lifecycle.ExecutionOwnerErrand {
 			w.logger.Warn("Agent stream event missing task_id",
 				zap.String("event_id", event.ID))
 			return nil

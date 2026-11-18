@@ -11,7 +11,9 @@ import {
 } from "./errand-header-parts";
 import { useErrandViewModel, type ErrandViewModel } from "./use-errand-view-model";
 
-function ErrandHeaderDesktop({ model }: { model: ErrandViewModel }) {
+type HeaderProps = { model: ErrandViewModel; onBack?: () => void };
+
+function ErrandHeaderDesktop({ model, onBack }: HeaderProps) {
   const { t } = useTranslation();
   return (
     <header
@@ -24,7 +26,7 @@ function ErrandHeaderDesktop({ model }: { model: ErrandViewModel }) {
           aria-label={t("task:errandBreadcrumbAria")}
           className="flex min-w-0 flex-1 items-center gap-1"
         >
-          <BackToParentButton model={model} variant="desktop" />
+          <BackToParentButton model={model} variant="desktop" onBack={onBack} />
           <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">
             /
           </span>
@@ -46,7 +48,7 @@ function ErrandHeaderDesktop({ model }: { model: ErrandViewModel }) {
 }
 
 /** Phone form: back to the parent, the title, and a visible actions menu. */
-function ErrandHeaderPhone({ model }: { model: ErrandViewModel }) {
+function ErrandHeaderPhone({ model, onBack }: HeaderProps) {
   return (
     <header
       data-testid="errand-header"
@@ -54,7 +56,7 @@ function ErrandHeaderPhone({ model }: { model: ErrandViewModel }) {
       className="shrink-0 space-y-1 border-b border-border/60 bg-card px-1 pb-2 text-xs"
     >
       <div className="flex min-w-0 items-center gap-1">
-        <BackToParentButton model={model} variant="phone" />
+        <BackToParentButton model={model} variant="phone" onBack={onBack} />
         <h2
           className="min-w-0 flex-1 truncate text-center text-sm font-semibold text-foreground"
           title={model.title}
@@ -79,12 +81,18 @@ function ErrandHeaderPhone({ model }: { model: ErrandViewModel }) {
 export function ErrandHeader({
   sessionId,
   taskId,
+  onBack,
 }: {
   sessionId: string | null | undefined;
   taskId: string | null | undefined;
+  onBack?: () => void;
 }) {
   const model = useErrandViewModel(sessionId, taskId);
   const { isMobile } = useResponsiveBreakpoint();
   if (!model) return null;
-  return isMobile ? <ErrandHeaderPhone model={model} /> : <ErrandHeaderDesktop model={model} />;
+  return isMobile ? (
+    <ErrandHeaderPhone model={model} onBack={onBack} />
+  ) : (
+    <ErrandHeaderDesktop model={model} onBack={onBack} />
+  );
 }

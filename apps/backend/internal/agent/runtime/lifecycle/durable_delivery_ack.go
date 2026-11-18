@@ -296,5 +296,7 @@ func validDeliveryAckTarget(execution *AgentExecution, client *agentctl.Client, 
 }
 
 func deliveryAckDescriptorMatches(status *agentctl.DeliveryStatus, execution *AgentExecution, streamID string) bool {
-	return status != nil && status.Durable && journal.SupportsDeliveryVersion(status.Version) && status.Stream != nil && status.SessionID == execution.SessionID && status.IncarnationID == execution.DeliveryIncarnationID && status.HarnessGeneration == execution.DeliveryHarnessGeneration && status.StreamID == streamID
+	return status != nil && status.Durable && journal.SupportsDeliveryVersion(status.Version) && status.Stream != nil &&
+		status.SessionID == deliveryTransportSessionID(execution) && status.IncarnationID == execution.DeliveryIncarnationID &&
+		status.HarnessGeneration == execution.DeliveryHarnessGeneration && status.StreamID == streamID
 }

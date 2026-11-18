@@ -152,6 +152,8 @@ func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventB
 			return ws.ActionSessionStateChanged
 		case events.ErrandUpdated:
 			return ws.ActionErrandUpdated
+		case events.ErrandTranscriptChanged:
+			return ws.ActionErrandTranscriptChanged
 		default:
 			return ""
 		}
@@ -307,7 +309,7 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	msg *ws.Message,
 ) error {
 	switch action {
-	case ws.ActionTaskPlanCommentsChanged, ws.ActionTaskPreviewFeedbackChanged:
+	case ws.ActionTaskPlanCommentsChanged, ws.ActionTaskPreviewFeedbackChanged, ws.ActionErrandTranscriptChanged:
 		taskID := extractStringField(data, "task_id")
 		if snapshot, ok := data.(*models.TaskPlanCommentSnapshot); ok {
 			taskID = snapshot.TaskID

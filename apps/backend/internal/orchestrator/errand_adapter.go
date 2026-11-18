@@ -37,7 +37,13 @@ func (a *ErrandAdapter) SetOwnedLaunchRuntime(runtime runtimeapi.Runtime, worksp
 // LaunchErrand shares guarded classification and admission with direct callers.
 func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) (errands.LaunchResult, error) {
 	if a.runtime != nil {
-		return a.launchOwnedErrand(ctx, request)
+		info, err := a.selectOwnedErrandWorkspace(ctx, request)
+		if err != nil {
+			return errands.LaunchResult{Disposition: errands.LaunchBlocked}, err
+		}
+		if info != nil {
+			return a.launchOwnedErrand(ctx, request, info)
+		}
 	}
 	result, _, err := a.svc.launchErrand(ctx, request)
 	return result, err

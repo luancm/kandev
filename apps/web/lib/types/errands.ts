@@ -129,6 +129,7 @@ export type ErrandInspection = {
   scope: ErrandBrowserScope;
   errand: ErrandBrowserRow;
   child_session_exists: boolean;
+  owns_conversation?: boolean;
   parent: {
     available: boolean;
     id?: string;
@@ -144,6 +145,10 @@ export type ErrandCancelAllResponse = { cancelled: number };
 
 export type ErrandBackendMessageMap = {
   "errand.updated": BackendMessage<"errand.updated", Errand>;
+  "errand.transcript_changed": BackendMessage<
+    "errand.transcript_changed",
+    { task_id: string; errand_id: string }
+  >;
 };
 
 const LIVE_ERRAND_STATUSES: ReadonlySet<ErrandStatus> = new Set([
