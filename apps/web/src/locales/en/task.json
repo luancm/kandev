@@ -758,7 +758,6 @@
   "errandStopAria": "Stop {{title}}",
   "errandStopFailed": "Could not stop the errand",
   "errandStopProgress": "Stopping {{title}}",
-  "errandTabTitle": "Errand: {{title}}",
   "errandUnknownProfile": "Unknown profile",
   "errandUntitled": "Untitled errand",
   "errandWorkspaceWithBranch": "{{path}} ({{branch}})",

@@ -228,7 +228,6 @@ function DrawerRow(props: ErrandsPanelRowPresentationProps) {
               sessionId: errand.errand_id,
               title,
               isErrand: true,
-              errand,
             });
             if (opening && typeof opening.then === "function") {
               void opening.then((opened) => {
@@ -299,7 +298,6 @@ function PopoverRow(props: ErrandsPanelRowPresentationProps) {
           title={title}
           queued={errand.status === "queued"}
           onOpened={onOpened}
-          errand={errand}
           describedBy={
             [
               contextUsage ? contextDescriptionId : null,

@@ -755,7 +755,6 @@
   "errandStopAria": "{{title}}を停止",
   "errandStopFailed": "依頼を停止できませんでした",
   "errandStopProgress": "{{title}}を停止しています",
-  "errandTabTitle": "依頼: {{title}}",
   "errandUnknownProfile": "不明なプロファイル",
   "errandUntitled": "無題の依頼",
   "errandWorkspaceWithBranch": "{{path}} ({{branch}})",

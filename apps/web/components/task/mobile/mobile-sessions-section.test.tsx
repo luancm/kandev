@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   removeSession: vi.fn(),
   restartSession: vi.fn(),
   isRestarting: false,
-  errandsEnabled: false,
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -26,7 +25,7 @@ vi.mock("@/hooks/use-task-sessions", () => ({
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
-      features: { dynamicAgentRouting: false, errands: mocks.errandsEnabled },
+      features: { dynamicAgentRouting: false },
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
@@ -139,7 +138,6 @@ beforeEach(() => {
   mocks.removeSession.mockReset();
   mocks.restartSession.mockReset();
   mocks.isRestarting = false;
-  mocks.errandsEnabled = false;
 });
 
 describe("MobileSessionsPicker selection", () => {

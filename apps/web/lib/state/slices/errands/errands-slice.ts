@@ -1,4 +1,3 @@
-import { evictUnownedErrandConversation } from "./errand-conversation-cache";
 import { forgetErrandInspection } from "./errand-inspection-state";
 import type { StateCreator } from "zustand";
 import { stateReadScopeIdentity } from "../../shared-resource-reads";
@@ -492,7 +491,6 @@ function createErrandInspectionActions(
           delete owners[ownerId];
           if (Object.keys(owners).length === 0) {
             forgetErrandInspection(draft.errands, sessionId);
-            evictUnownedErrandConversation(draft, sessionId);
           }
         }
         const sessionId = inspection.errand.errand_id;
@@ -509,7 +507,6 @@ function createErrandInspectionActions(
           delete owners[ownerId];
           if (Object.keys(owners).length === 0) {
             forgetErrandInspection(draft.errands, sessionId);
-            evictUnownedErrandConversation(draft, sessionId);
           }
         }
       }),

@@ -402,7 +402,6 @@ it("opens an errand without a primary change and closes the popover", async () =
       sessionId: "e1",
       title: "Errand e1",
       isErrand: true,
-      errand: expect.objectContaining({ errand_id: "e1" }),
     }),
   );
   await waitFor(() => expect(screen.queryByTestId(POPOVER)).toBeNull());

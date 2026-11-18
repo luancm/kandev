@@ -307,50 +307,32 @@ describe("Session restart menu", () => {
   );
 });
 
-// @covers AC-TASKS-ERRANDS-005.5
-describe("errand session menu", () => {
-  function renderMenu(isErrand: boolean) {
-    render(
-      <ContextMenu>
-        <ContextMenuTrigger data-testid="errand-tab">Errand</ContextMenuTrigger>
-        <SessionContextMenuItems
-          sessionState="RUNNING"
-          isPrimary={false}
-          isErrand={isErrand}
-          canShare={false}
-          taskId="task-1"
-          sessionId="errand-1"
-          actions={{
-            handleSetPrimary: vi.fn(),
-            handleStop: vi.fn(),
-            handleResume: vi.fn(),
-            handleRestart: vi.fn(),
-          }}
-          onDelete={vi.fn()}
-          onShare={vi.fn()}
-          onHandoffProfile={vi.fn()}
-          onStartRename={vi.fn()}
-        />
-      </ContextMenu>,
-    );
-    fireEvent.contextMenu(screen.getByTestId("errand-tab"));
-  }
-
-  it("omits Set as Primary and Handoff for an errand and keeps lifecycle actions", () => {
-    renderMenu(true);
-
-    expect(screen.queryByRole("menuitem", { name: "Set as Primary" })).toBeNull();
-    expect(screen.queryByTestId("session-handoff-submenu")).toBeNull();
-    expect(screen.getByRole("menuitem", { name: "Stop" })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "Rename…" })).toBeTruthy();
-  });
-
-  it("offers Set as Primary and Handoff for an ordinary session", () => {
-    renderMenu(false);
-
-    expect(screen.getByRole("menuitem", { name: "Set as Primary" })).toBeTruthy();
-    expect(screen.getByTestId("session-handoff-submenu")).toBeTruthy();
-  });
+it("offers Set as Primary and Handoff for a running session", () => {
+  render(
+    <ContextMenu>
+      <ContextMenuTrigger data-testid="running-tab">Agent</ContextMenuTrigger>
+      <SessionContextMenuItems
+        sessionState="RUNNING"
+        isPrimary={false}
+        canShare={false}
+        taskId="task-1"
+        sessionId="session-1"
+        actions={{
+          handleSetPrimary: vi.fn(),
+          handleStop: vi.fn(),
+          handleResume: vi.fn(),
+          handleRestart: vi.fn(),
+        }}
+        onDelete={vi.fn()}
+        onShare={vi.fn()}
+        onHandoffProfile={vi.fn()}
+        onStartRename={vi.fn()}
+      />
+    </ContextMenu>,
+  );
+  fireEvent.contextMenu(screen.getByTestId("running-tab"));
+  expect(screen.getByRole("menuitem", { name: "Set as Primary" })).toBeTruthy();
+  expect(screen.getByTestId("session-handoff-submenu")).toBeTruthy();
 });
 
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.4

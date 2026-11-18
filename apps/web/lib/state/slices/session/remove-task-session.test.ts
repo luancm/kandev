@@ -3,25 +3,18 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
-import { createErrandsSlice } from "../errands/errands-slice";
 import {
   ERRAND_PARENT_ID,
-  makeErrand,
   makeBrowserErrandRow,
-  makeBrowserSummary,
-  makeHistoryPage,
+  makeInspection,
 } from "../errands/errands.test-helpers";
 import { createAppStore } from "../../store";
-import { stateReadScopeIdentity } from "../../shared-resource-reads";
-import { selectErrandBrowserHistoryRows, selectErrandBrowserRows } from "../errands/selectors";
-import { registerErrandsHandlers } from "@/lib/ws/handlers/errands";
 import type { SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
-import type { ErrandsSlice } from "../errands/types";
 
-type CombinedSlice = SessionSlice & SessionRuntimeSlice & ErrandsSlice;
+type CombinedSlice = SessionSlice & SessionRuntimeSlice;
 
-/** Creates a zustand store combining the session, session-runtime, and errands slices. */
+/** Creates a zustand store combining the session and runtime slices. */
 function makeStore() {
   return create<CombinedSlice>()(
     immer((set) => ({
@@ -29,8 +22,6 @@ function makeStore() {
       ...(createSessionSlice as any)(set),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(createSessionRuntimeSlice as any)(set),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...(createErrandsSlice as any)(set),
     })),
   );
 }
@@ -100,25 +91,19 @@ describe("removeTaskSession cleanup cascade", () => {
     expect(after.environmentIdBySessionId[SESSION_ID]).toBeUndefined();
   });
 
-  it("removes the errand row whose ID is the removed session", () => {
-    store.getState().upsertErrand(makeErrand({ errand_id: SESSION_ID, task_id: TASK_ID }));
-    store.getState().upsertErrand(makeErrand({ errand_id: ERRAND_SIBLING_ID, task_id: TASK_ID }));
-
-    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
-
-    const errands = store.getState().errands.byTaskId[TASK_ID];
-    expect(errands?.[SESSION_ID]).toBeUndefined();
-    expect(errands?.[ERRAND_SIBLING_ID]).toBeDefined();
-  });
-
   it("removes an ordinary session without touching the task's errands", () => {
-    store.getState().upsertErrand(makeErrand({ errand_id: ERRAND_SIBLING_ID, task_id: TASK_ID }));
+    const state = createAppStore();
+    const open = {
+      ...makeInspection(makeBrowserErrandRow({ errand_id: ERRAND_SIBLING_ID })),
+      child_session_exists: false,
+      owns_conversation: true,
+    };
+    state.getState().retainErrandInspection("host", open);
+    const before = state.getState().errands;
+    state.getState().removeTaskSession(TASK_ID, ERRAND_PARENT_ID);
 
-    store.getState().removeTaskSession(TASK_ID, "session-without-errand");
-
-    expect(Object.keys(store.getState().errands.byTaskId[TASK_ID] ?? {})).toEqual([
-      ERRAND_SIBLING_ID,
-    ]);
+    expect(state.getState().errands).toBe(before);
+    expect(state.getState().errands.detailBySessionId[ERRAND_SIBLING_ID]).toEqual(open);
   });
 
   it("clears queue metadata and protects a replacement operation token", () => {
@@ -156,99 +141,5 @@ describe("removeTaskSession cleanup cascade", () => {
     expect(replacement).not.toBeNull();
     store.getState().finishQueueOperation(SESSION_ID, first!);
     expect(store.getState().queue.activeOperationBySessionId[SESSION_ID]).toEqual(replacement);
-  });
-});
-
-describe("removed session errand fencing", () => {
-  // @covers AC-TASKS-ERRAND-HISTORY-001.6
-  it.each(["summary", "history"] as const)(
-    "does not let a pending bounded %s response restore a removed session",
-    (kind) => {
-      const store = createAppStore();
-      store.getState().setConnectionStatus("connected");
-      const rows = [SESSION_ID, ERRAND_SIBLING_ID].map((id) =>
-        makeBrowserErrandRow({
-          errand_id: id,
-          task_id: TASK_ID,
-          ...(kind === "summary"
-            ? {
-                status: "running" as const,
-                result_state: "none" as const,
-                live: true,
-                outstanding: true,
-              }
-            : {}),
-        }),
-      );
-      const observation = () => ({
-        connectionGeneration: store.getState().connection.generation ?? 0,
-        readScopeIdentity: stateReadScopeIdentity(store.getState()),
-        taskResetEpoch: store.getState().errands.resetEpochByTaskId[TASK_ID] ?? 0,
-        observationRevision: store.getState().errands.browserRevisionByTaskId[TASK_ID] ?? 0,
-      });
-      store.getState().openErrandHistory("panel", TASK_ID, ERRAND_PARENT_ID);
-      const read = (attemptId: string, responseRows = rows) => {
-        const captured = observation();
-        if (kind === "summary") {
-          store.getState().beginErrandBrowserSummaryRead(TASK_ID, captured, attemptId);
-          return () =>
-            store
-              .getState()
-              .setErrandBrowserSummary(
-                TASK_ID,
-                makeBrowserSummary(responseRows, { live: 2, outstanding: 2 }),
-                captured,
-                attemptId,
-              );
-        }
-        store.getState().beginErrandHistoryRead("panel", captured, null, attemptId);
-        return () =>
-          store
-            .getState()
-            .setErrandHistoryPage(
-              "panel",
-              makeHistoryPage(responseRows),
-              captured,
-              null,
-              attemptId,
-            );
-      };
-      const retainedRows = () =>
-        kind === "summary"
-          ? selectErrandBrowserRows(store.getState(), TASK_ID)
-          : selectErrandBrowserHistoryRows(store.getState(), "panel");
-
-      read("initial")();
-      expect(retainedRows()).toEqual(rows);
-      const completePendingRead = read("pending", [
-        rows[0],
-        { ...rows[1], title: "Stale sibling title" },
-      ]);
-      store.getState().removeTaskSession(TASK_ID, SESSION_ID);
-      expect(retainedRows()).toEqual([rows[1]]);
-      completePendingRead();
-      expect(retainedRows()).toEqual([rows[1]]);
-      // A fresh attempt still filters a deleted identity returned by the server.
-      read("fresh")();
-      expect(retainedRows()).toEqual([rows[1]]);
-    },
-  );
-
-  it("ignores a delayed WebSocket errand update after the session was removed", () => {
-    const store = createAppStore();
-    const handle = registerErrandsHandlers(store)["errand.updated"]!;
-    const update = (errandId: string) =>
-      handle({
-        type: "notification",
-        action: "errand.updated",
-        payload: makeErrand({ errand_id: errandId, task_id: TASK_ID }),
-      } as never);
-    update(SESSION_ID);
-    update(ERRAND_SIBLING_ID);
-    expect(store.getState().errands.byTaskId[TASK_ID][SESSION_ID]).toBeDefined();
-    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
-    update(SESSION_ID);
-
-    expect(Object.keys(store.getState().errands.byTaskId[TASK_ID])).toEqual([ERRAND_SIBLING_ID]);
   });
 });

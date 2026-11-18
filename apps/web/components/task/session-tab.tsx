@@ -22,14 +22,12 @@ import { shareableSessionStateClient } from "@/components/task/share/share-butto
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
 import type { TaskSessionState } from "@/lib/types/http";
-import { sessionId as toSessionId } from "@/lib/types/ids";
 import {
   markSessionTabUserActivationIntent,
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
 import { selectSessionTabTitle } from "./session-tab-title";
-import { isErrandSession } from "@/lib/state/slices/errands/selectors";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
@@ -79,35 +77,20 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!sessions) return null;
     // Sort chronologically (oldest first) so indexes are stable regardless of
     // which session is primary or the backend's default DESC ordering.
-    const sorted = sessions
-      .filter((session) => !isErrandSession(state, activeTaskId, session))
-      .sort(
-        (a: { started_at: string }, b: { started_at: string }) =>
-          new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-      );
+    const sorted = [...sessions].sort(
+      (a: { started_at: string }, b: { started_at: string }) =>
+        new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+    );
     const idx = sorted.findIndex((s: { id: string }) => s.id === sessionId);
     return idx >= 0 ? idx + 1 : null;
   });
   const sessionCount = useAppStore((state) => {
     const activeTaskId = state.tasks.activeTaskId;
     if (!activeTaskId) return 0;
-    return (
-      state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.filter(
-        (session) => !isErrandSession(state, activeTaskId, session),
-      ).length ?? 0
-    );
-  });
-  const isErrand = useAppStore((state) => {
-    if (!sessionId) return false;
-    const session = state.taskSessions.items[sessionId];
-    const ownerTaskId = session?.task_id ?? state.tasks.activeTaskId;
-    return ownerTaskId
-      ? isErrandSession(state, ownerTaskId, { id: toSessionId(sessionId), role: session?.role })
-      : false;
+    return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
   });
   return {
     isPrimary,
-    isErrand,
     sessionState,
     taskId,
     tabTitle,
@@ -437,7 +420,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
   const tabState = useSessionTabState(sessionId);
-  const { isPrimary, isErrand, sessionState, taskId, tabTitle, sessionName } = tabState;
+  const { isPrimary, sessionState, taskId, tabTitle, sessionName } = tabState;
   const { agentName, sessionNumber, sessionCount } = tabState;
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
@@ -503,7 +486,6 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         <SessionContextMenuItems
           sessionState={sessionState}
           isPrimary={isPrimary}
-          isErrand={isErrand}
           canShare={canShare}
           taskId={taskId}
           sessionId={sessionId}

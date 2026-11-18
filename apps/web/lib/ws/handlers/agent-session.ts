@@ -201,19 +201,6 @@ export function shouldAdoptNewSession(
 }
 
 /**
- * Errand role identity keeps selection explicit, including retained sessions
- * after the feature is disabled.
- */
-function isAutoSelectionExcludedErrand(
-  state: AppState,
-  taskId: string,
-  session: { id: string; role?: unknown },
-): boolean {
-  if (session.role === "errand") return true;
-  return Boolean(state.errands?.byTaskId?.[taskId]?.[session.id]);
-}
-
-/**
  * Pick the newest non-terminal session for a task. Used when the currently
  * active session just reached a terminal state — we want to hand focus to the
  * session that replaced it (typically created by a workflow step transition).
@@ -223,7 +210,6 @@ export function pickReplacementSessionId(state: AppState, taskId: string): strin
   if (!sessions) return null;
   for (let i = sessions.length - 1; i >= 0; i -= 1) {
     const candidate = sessions[i];
-    if (isAutoSelectionExcludedErrand(state, taskId, candidate)) continue;
     if (!isTerminalSessionState(candidate.state)) return candidate.id;
   }
   return null;
@@ -252,30 +238,14 @@ export function pickPrimarySessionReplacement(
   return primary && primary !== retiredSessionId ? primary : null;
 }
 
-function findUniqueTaskMatch(taskIds: string[]): { found: boolean; taskId: string | null } {
-  const uniqueTaskIds = [...new Set(taskIds)];
-  return {
-    found: uniqueTaskIds.length > 0,
-    taskId: uniqueTaskIds.length === 1 ? (uniqueTaskIds[0] ?? null) : null,
-  };
-}
-
 function findTaskForRemovedSession(state: AppState, sessionId: string): string | null {
   const sessionTaskId = state.taskSessions?.items?.[sessionId]?.task_id;
   if (sessionTaskId) return sessionTaskId;
 
-  const sessionTaskMatch = findUniqueTaskMatch(
-    Object.entries(state.taskSessionsByTask?.itemsByTaskId ?? {}).flatMap(([taskId, sessions]) =>
-      sessions.some((session) => session.id === sessionId) ? [taskId] : [],
-    ),
-  );
-  if (sessionTaskMatch.found) return sessionTaskMatch.taskId;
-
-  return findUniqueTaskMatch(
-    Object.entries(state.errands?.byTaskId ?? {}).flatMap(([taskId, errands]) =>
-      errands[sessionId]?.task_id === taskId ? [taskId] : [],
-    ),
-  ).taskId;
+  const taskIds = Object.entries(state.taskSessionsByTask?.itemsByTaskId ?? {})
+    .filter(([, sessions]) => sessions.some((session) => session.id === sessionId))
+    .map(([taskId]) => taskId);
+  return taskIds.length === 1 ? (taskIds[0] ?? null) : null;
 }
 
 function handleSessionRemoved(
@@ -320,15 +290,12 @@ function handleSessionRemoved(
 // foreground_activity/active_subagent_count carry the ADR-0049 activity
 // substate; supports_steering carries the live steer-eligibility flip so the
 // composer can switch affordance without a refetch; cancellation_* carry the
-// backend-owned cancellation projection. role and parent_session_id are
-// omitted for ordinary sessions, so absence must never clear a known errand.
+// backend-owned cancellation projection.
 const CARRIED_WHEN_DEFINED = [
   "session_recovery_blocks",
   "review_status",
   "error_message",
   "is_passthrough",
-  "role",
-  "parent_session_id",
   "waiting_on_errands",
   "name",
   "foreground_activity",
@@ -1089,25 +1056,6 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState: newState ?? "-",
       });
 
-      if (
-        !existingSession &&
-        isAutoSelectionExcludedErrand(store.getState(), taskId, {
-          id: sessionId,
-          role: payload.role,
-        })
-      ) {
-        upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
-        maybeNotifySessionFailure(store, {
-          taskId,
-          sessionId,
-          newState,
-          payload,
-          previousState: undefined,
-        });
-        maybeFanOutOfficeRefetch(store, newState, undefined);
-        return;
-      }
-
       maybeMarkQuickChatUnseenIdle(store, sessionId, {
         previousState: existingSession?.state,
         fallbackPreviousState: payload.old_state as TaskSessionState | undefined,
@@ -1135,22 +1083,14 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         clearResumeAndLaunchWarnings(store, sessionId);
       }
 
-      const incomingRole = payload.role ?? existingSession?.role;
-      if (
-        !isAutoSelectionExcludedErrand(store.getState(), taskId, {
-          id: sessionId,
-          role: incomingRole,
-        })
-      ) {
-        maybeAdoptSessionOnTransition(
-          store,
-          taskId,
-          sessionId,
-          newState,
-          !!existingSession,
-          existingSession?.state,
-        );
-      }
+      maybeAdoptSessionOnTransition(
+        store,
+        taskId,
+        sessionId,
+        newState,
+        !!existingSession,
+        existingSession?.state,
+      );
 
       maybeNotifySessionFailure(store, {
         taskId,

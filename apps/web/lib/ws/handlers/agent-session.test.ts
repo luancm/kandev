@@ -6,7 +6,7 @@ import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
 import { getSessionRestartStore } from "@/lib/session/session-restart-state";
-import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
+import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import { makeErrand } from "@/lib/state/slices/errands/errands.test-helpers";
 import type {
   TaskSessionActivityChangedPayload,
@@ -19,24 +19,6 @@ const CURRENT_INCARNATION = `incarnation-2`;
 const CURRENT_STATUS_EPOCH = `status-epoch-1`;
 
 describe("session.removed handler", () => {
-  it("removes the errand row for local and parent-only workspace clients", () => {
-    const sessionId = "errand-removed";
-    const stores = [createAppStore(), createAppStore()];
-    for (const store of stores) {
-      store.getState().upsertErrand(makeErrand({ errand_id: sessionId, task_id: "task-1" }));
-      registerTaskSessionHandlers(store)["session.removed"]?.({
-        id: "session-removed",
-        type: "notification",
-        action: "session.removed",
-        payload: { session_id: sessionId, task_id: "task-1" },
-      } as never);
-    }
-
-    for (const store of stores) {
-      expect(store.getState().errands.byTaskId["task-1"]?.[sessionId]).toBeUndefined();
-    }
-  });
-
   it("resolves a session-only event from its task and selects the newest survivor", () => {
     const store = createAppStore();
     const removed = {
@@ -895,81 +877,22 @@ describe("session.state_changed name propagation", () => {
   });
 });
 
-describe("session.state_changed errand fields", () => {
-  it("carries the errand role, parent, and waiting flag onto the session row", () => {
+describe("session.state_changed parent wait status", () => {
+  it.each([true, false, undefined])("preserves waiting_on_errands value %s", (waiting) => {
     const store = makeStore();
     const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler(
-      makeMessage({
-        task_id: "t-1",
-        session_id: "s-errand",
-        new_state: "RUNNING",
-        role: "errand",
-        parent_session_id: "s-parent",
-      }),
-    );
     handler(
       makeMessage({
         task_id: "t-1",
         session_id: "s-parent",
         new_state: "WAITING_FOR_INPUT",
-        waiting_on_errands: false,
+        ...(waiting === undefined ? {} : { waiting_on_errands: waiting }),
       }),
     );
-
-    const calls = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls;
-    expect(calls[0][1]).toEqual(
-      expect.objectContaining({ role: "errand", parent_session_id: "s-parent" }),
-    );
-    expect(calls[1][1]).toEqual(expect.objectContaining({ waiting_on_errands: false }));
-  });
-
-  it("omits the fields for an ordinary session so they never clobber the row", () => {
-    const store = makeStore();
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-
-    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
 
     const session = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls[0][1];
-    expect(session).not.toHaveProperty("role");
-    expect(session).not.toHaveProperty("parent_session_id");
-    expect(session).not.toHaveProperty("waiting_on_errands");
-  });
-
-  it("keeps a known errand role through a later event that omits it", () => {
-    const store = createAppStore();
-    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
-    store.getState().setTaskSession({
-      id: toSessionId("s-errand"),
-      task_id: toTaskId("t-1"),
-      role: "errand",
-      parent_session_id: toSessionId("s-parent"),
-      state: "RUNNING",
-      started_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-    });
-
-    handler(
-      makeMessage({
-        task_id: "t-1",
-        session_id: "s-errand",
-        new_state: "RUNNING",
-        role: "errand",
-        parent_session_id: "s-parent",
-      }),
-    );
-    handler(
-      makeMessage({ task_id: "t-1", session_id: "s-errand", new_state: "WAITING_FOR_INPUT" }),
-    );
-
-    expect(store.getState().taskSessions.items["s-errand"]).toEqual(
-      expect.objectContaining({
-        state: "WAITING_FOR_INPUT",
-        role: "errand",
-        parent_session_id: "s-parent",
-      }),
-    );
+    if (waiting === undefined) expect(session).not.toHaveProperty("waiting_on_errands");
+    else expect(session.waiting_on_errands).toBe(waiting);
   });
 });
 

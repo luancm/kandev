@@ -186,7 +186,6 @@ function SessionLifecycleMenuItems({
 export function SessionContextMenuItems({
   sessionState,
   isPrimary,
-  isErrand = false,
   canShare,
   taskId,
   sessionId,
@@ -198,8 +197,6 @@ export function SessionContextMenuItems({
 }: {
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
-  /** Errands never take workflow ownership, so they offer neither primary nor handoff. */
-  isErrand?: boolean;
   canShare: boolean;
   taskId: string | null;
   sessionId: string | undefined;
@@ -229,15 +226,13 @@ export function SessionContextMenuItems({
       >
         {t("task:rename2")}
       </ContextMenuItem>
-      {!isErrand && (
-        <ContextMenuItem
-          className="cursor-pointer"
-          onSelect={actions.handleSetPrimary}
-          disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
-        >
-          {t("task:setAsPrimary")}
-        </ContextMenuItem>
-      )}
+      <ContextMenuItem
+        className="cursor-pointer"
+        onSelect={actions.handleSetPrimary}
+        disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
+      >
+        {t("task:setAsPrimary")}
+      </ContextMenuItem>
       <ContextMenuSeparator />
       <SessionLifecycleMenuItems
         sessionState={sessionState}
@@ -252,7 +247,7 @@ export function SessionContextMenuItems({
           </ContextMenuItem>
         </>
       )}
-      {taskId && sessionId && !isErrand && (
+      {taskId && sessionId && (
         <>
           <ContextMenuSeparator />
           <HandoffContextMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />

@@ -43,7 +43,6 @@ export function PreviewSessionTabMenu({
     <SessionContextMenuItems
       sessionState={session.state}
       isPrimary={isPrimary}
-      isErrand={session.role === "errand"}
       canShare={shareableSessionStateClient(session.state)}
       taskId={taskId}
       sessionId={session.id}

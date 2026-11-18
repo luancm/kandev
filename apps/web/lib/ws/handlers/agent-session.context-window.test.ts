@@ -138,24 +138,3 @@ describe("session state context-window ingestion", () => {
     );
   });
 });
-
-it("does not cache context gauges for uninspected Errand state events", () => {
-  const store = createAppStore();
-  for (let index = 0; index < 100; index++) {
-    sendStateChanged(store, {
-      task_id: TASK_ID,
-      session_id: `uninspected-${index}`,
-      role: "errand",
-      parent_session_id: SESSION_ID,
-      new_state: index % 2 === 0 ? "RUNNING" : "COMPLETED",
-      updated_at: LATER_TIME,
-      metadata: { context_window: contextMetadata(1000) },
-    });
-  }
-  expect(Object.keys(store.getState().taskSessions.items)).toHaveLength(0);
-  expect(Object.keys(store.getState().contextWindow.bySessionId)).toHaveLength(0);
-  expect(Object.keys(store.getState().sessionAgentctl.itemsBySessionId)).toHaveLength(0);
-  expect(Object.keys(store.getState().taskSessions.contextWindowEpochBySession ?? {})).toHaveLength(
-    0,
-  );
-});

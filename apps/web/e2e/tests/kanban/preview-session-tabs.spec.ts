@@ -570,8 +570,7 @@ test.describe("Preview Plan tab", () => {
 });
 
 // @covers AC-TASKS-ERRANDS-010.2 AC-TASKS-ERRANDS-010.3
-// Task29 replaces child tabs with a temporary conversation; preview keeps its controlled owner.
-test("task29 preview owns errand Open and Back without adding a child tab", async ({
+test("preview opens an Errand and keeps its ordinary parent tab", async ({
   testPage: page,
   apiClient: api,
   seedData: seed,
@@ -605,33 +604,34 @@ test("task29 preview owns errand Open and Back without adding a child tab", asyn
     ).toBeVisible();
     await preview
       .locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`)
-      .evaluate((node) => node.setAttribute("data-task29-parent", "retained"));
+      .evaluate((node) => node.setAttribute("data-retained-parent", ""));
     await preview.getByTestId("errands-chip").click();
     await page
       .getByTestId("errands-popover")
       .getByTestId(`errand-open-${errands[0].errand_id}`)
       .click();
-    const child = preview.locator(
-      `[data-testid="session-chat"][data-session-id="${errands[0].errand_id}"]`,
+    const conversation = preview.locator(
+      `[data-testid="errand-conversation"][data-errand-id="${errands[0].errand_id}"]`,
     );
-    await expect(child).toHaveCount(1);
-    const childHeader = child.getByTestId("errand-header");
+    await expect(conversation).toHaveCount(1);
+    const childHeader = conversation.getByTestId("errand-header");
     await expect(childHeader).toBeVisible();
     await expect(childHeader.getByTestId("errand-stop-button")).toBeVisible();
     await expect(childHeader.getByRole("button", { name: "Set as Primary" })).toHaveCount(0);
     await expect(childHeader.getByRole("menuitem", { name: /Handoff/ })).toHaveCount(0);
     await expect(
       preview.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
-    ).toHaveAttribute("data-task29-parent", "retained");
+    ).toHaveAttribute("data-retained-parent", "");
+    await expect(parentTab).toHaveAttribute("data-state", "active");
     await expect(preview.getByTestId(`preview-session-tab-${errands[0].errand_id}`)).toHaveCount(0);
-    await child.getByTestId("errand-back-to-parent").click();
+    await conversation.getByTestId("errand-back-to-parent").click();
     await expect(
       preview.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
     ).toBeVisible();
     const start = preview.getByTestId("errand-start-card");
     await start.getByRole("button", { expanded: false }).click();
     await start.getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    await expect(child).toBeVisible();
+    await expect(conversation).toBeVisible();
     expect((await api.listTaskSessions(taskId)).sessions.find((row) => row.is_primary)?.id).toBe(
       primaryBefore,
     );

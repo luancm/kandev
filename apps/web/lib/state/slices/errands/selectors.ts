@@ -1,7 +1,6 @@
 import { stateReadScopeIdentity } from "../../shared-resource-reads";
 import type { AppState } from "@/lib/state/store";
 import type { Errand, ErrandBrowserRow, ErrandBrowserSummary } from "@/lib/types/errands";
-import type { TaskSession } from "@/lib/types/http";
 import type { ErrandHistoryChain } from "./types";
 
 type ErrandsState = Pick<AppState, "errands"> &
@@ -114,16 +113,4 @@ export function selectErrandBrowserRowBySessionId(
     if (row) return row;
   }
   return undefined;
-}
-
-/**
- * Whether a task session is an errand: by its role, or by a known errand row
- * when the session arrived as a partial row before its role.
- */
-export function isErrandSession(
-  state: ErrandsState,
-  taskId: string,
-  session: Pick<TaskSession, "id" | "role">,
-): boolean {
-  return session.role === "errand" || Boolean(taskErrandMap(state, taskId)?.[session.id]);
 }

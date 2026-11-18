@@ -708,7 +708,6 @@
   "errandStopAria": "Parar {{title}}",
   "errandStopFailed": "Não foi possível parar a incumbência",
   "errandStopProgress": "A parar {{title}}",
-  "errandTabTitle": "Incumbência: {{title}}",
   "errandUnknownProfile": "Perfil desconhecido",
   "errandUntitled": "Incumbência sem título",
   "errandWorkspaceWithBranch": "{{path}} ({{branch}})",

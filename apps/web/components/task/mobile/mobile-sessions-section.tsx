@@ -54,24 +54,20 @@ function buildSessionRows(
   const sorted = [...sessions].sort(
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
   );
-  return sorted
-    .filter((session) => session.role !== "errand")
-    .map((s, index) => {
-      const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
-      return {
-        id: s.id,
-        agentName: profile?.agent_name ?? null,
-        agentLabel: sessionAgentLabel(s, profile),
-        repositoryLabel: s.repository_id
-          ? (repositoryLabelsById.get(s.repository_id) ?? null)
-          : null,
-        state: (s.state as TaskSessionState | undefined) ?? null,
-        foregroundActivity: s.foreground_activity ?? null,
-        parkedOnBackgroundWork: !!s.parked_on_background_work,
-        isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
-        index: index + 1,
-      };
-    });
+  return sorted.map((s, index) => {
+    const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
+    return {
+      id: s.id,
+      agentName: profile?.agent_name ?? null,
+      agentLabel: sessionAgentLabel(s, profile),
+      repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
+      state: (s.state as TaskSessionState | undefined) ?? null,
+      foregroundActivity: s.foreground_activity ?? null,
+      parkedOnBackgroundWork: !!s.parked_on_background_work,
+      isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
+      index: index + 1,
+    };
+  });
 }
 
 // The mobile sessions section reads the per-session substate through the same

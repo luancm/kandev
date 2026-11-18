@@ -708,7 +708,6 @@
   "errandStopAria": "停止 {{title}}",
   "errandStopFailed": "無法停止該委託",
   "errandStopProgress": "正在停止 {{title}}",
-  "errandTabTitle": "委託：{{title}}",
   "errandUnknownProfile": "未知設定",
   "errandUntitled": "未命名委託",
   "errandWorkspaceWithBranch": "{{path}} ({{branch}})",

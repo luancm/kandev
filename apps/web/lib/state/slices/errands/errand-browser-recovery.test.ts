@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
+import { registerErrandsHandlers } from "@/lib/ws/handlers/errands";
 import { createAppStore } from "@/lib/state/store";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import { errandBrowserReadCoordinator } from "./errand-browser-read-coordinator";
@@ -39,17 +39,19 @@ function loadedBrowser() {
   return { store, observation, row };
 }
 
-it("invalidates loaded history for a child state event without inserting a normal session", () => {
+it("invalidates loaded history for an Errand update and keeps ordinary sessions untouched", () => {
   const { store, row } = loadedBrowser();
   store.getState().releaseErrandInspection("child");
-  store.getState().upsertTaskSessionFromEvent(taskId, {
-    id: toSessionId(row.errand_id),
-    task_id: toTaskId(taskId),
-    state: "COMPLETED",
-    started_at: row.created_at,
-    updated_at: "2026-11-14T00:00:00Z",
-    metadata: { context_window: { size: 100000, used: 68000 } },
-  });
+  registerErrandsHandlers(store)["errand.updated"]!({
+    type: "notification",
+    action: "errand.updated",
+    payload: makeErrand({
+      errand_id: row.errand_id,
+      status: "done",
+      result_state: "delivered",
+      updated_at: "2026-11-14T00:00:00Z",
+    }),
+  } as never);
   expect(store.getState().errands.historyByOwnerId.panel.stale).toBe(true);
   expect(store.getState().taskSessionsByTask.itemsByTaskId[taskId] ?? []).toEqual([]);
   expect(store.getState().taskSessions.items[row.errand_id]).toBeUndefined();

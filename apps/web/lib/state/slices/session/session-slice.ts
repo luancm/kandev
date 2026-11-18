@@ -39,9 +39,6 @@ import {
 import { mergeTaskSession, mergeWorkspaceRecoveryProjection } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
-import { forgetErrandInspection } from "@/lib/state/slices/errands/errand-inspection-state";
-import type { ErrandsSliceState } from "@/lib/state/slices/errands/types";
-import { selectErrandBrowserRowBySessionId } from "@/lib/state/slices/errands/selectors";
 import {
   readMcpAttachmentHistory,
   shouldReplaceMcpAttachmentHistory,
@@ -945,32 +942,7 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Cascade into the runtime slice (shell/process/git buffers + per-session
       // maps); this also removes the environmentIdBySessionId mapping.
       purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
-      removeErrandSessionState(draft, taskId, sessionId);
     });
-}
-
-function removeErrandSessionState(
-  draft: Draft<SessionSlice>,
-  taskId: string,
-  sessionId: string,
-): void {
-  const errands = (draft as unknown as Partial<ErrandsSliceState>).errands;
-  if (!errands) return;
-  delete errands.byTaskId[taskId]?.[sessionId];
-  const removedIds = (errands.removedSessionIdsByTaskId[taskId] ??= {});
-  removedIds[sessionId] = true;
-  const summary = errands.browserSummaryByTaskId?.[taskId];
-  if (summary) summary.errands = summary.errands.filter((row) => row.errand_id !== sessionId);
-  for (const chain of Object.values(errands.historyByOwnerId ?? {})) {
-    if (chain.taskId !== taskId) continue;
-    chain.stale = true;
-    for (const page of chain.pages) {
-      page.errands = page.errands.filter((row) => row.errand_id !== sessionId);
-    }
-  }
-  forgetErrandInspection(errands, sessionId);
-  const browserRevisions = (errands.browserRevisionByTaskId ??= {});
-  browserRevisions[taskId] = (browserRevisions[taskId] ?? 0) + 1;
 }
 
 function resetQueueStateForReincarnation(
@@ -1048,35 +1020,14 @@ function synchronizeSessionContextSnapshot(
   );
 }
 
-function isErrandSessionIdentity(
-  draft: Draft<SessionSlice>,
-  taskId: string,
-  session: Pick<TaskSession, "id" | "role">,
-): boolean {
-  if (session.role === "errand") return true;
-  const errandState = draft as unknown as Draft<SessionSliceState & ErrandsSliceState>;
-  return Boolean(
-    errandState.errands?.byTaskId?.[taskId]?.[session.id] ||
-    knownBrowserErrand(draft, taskId, session.id),
-  );
-}
-
-function knownBrowserErrand(draft: Draft<SessionSlice>, taskId: string, sessionId: string) {
-  const state = draft as unknown as Parameters<typeof selectErrandBrowserRowBySessionId>[0];
-  return state.errands ? selectErrandBrowserRowBySessionId(state, taskId, sessionId) : undefined;
-}
-
 function reconcileTaskSessionSnapshot(
   draft: Draft<SessionSlice>,
   taskId: string,
   sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
   hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
 ): void {
-  const ordinarySessions = sessions.filter(
-    (session) => !isErrandSessionIdentity(draft, taskId, session),
-  );
-  const explicitContextWindowSessions = explicitContextWindowSnapshots(ordinarySessions);
-  const merged = ordinarySessions.map((session) => {
+  const explicitContextWindowSessions = explicitContextWindowSnapshots(sessions);
+  const merged = sessions.map((session) => {
     const existing = draft.taskSessions.items[session.id];
     const requestEpoch = hydrationEpochsAtRequestStart[session.id];
     resetQueueStateForReincarnation(draft, existing, session);
@@ -1123,9 +1074,6 @@ function reconcileTaskSessionEvent(
   taskId: string,
   session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
 ): void {
-  invalidateErrandHistoryForSnapshot(draft, taskId, session);
-  if (isErrandSessionIdentity(draft, taskId, session) && !draft.taskSessions.items[session.id])
-    return;
   advanceLiveContextWindowEpoch(draft.taskSessions, session);
   if (Object.prototype.hasOwnProperty.call(session, "foreground_activity")) {
     const epochs = (draft.taskSessions.activityEpochBySession ??= {});
@@ -1133,11 +1081,7 @@ function reconcileTaskSessionEvent(
   }
   const existing = draft.taskSessions.items[session.id];
   resetQueueStateForReincarnation(draft, existing, session);
-  if (
-    !existing &&
-    !isErrandSessionIdentity(draft, taskId, session) &&
-    draft.taskSessionsByTask.loadedByTaskId[taskId]
-  ) {
+  if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
     // State events intentionally carry partial session rows. When one
     // introduces a new session, let useTaskSessions hydrate fields such
     // as repository_id instead of treating the old list as authoritative.
@@ -1170,12 +1114,6 @@ function reconcileTaskSessionMembership(
   session: TaskSession,
 ): void {
   const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
-  const errand = isErrandSessionIdentity(draft, taskId, session);
-  if (errand) {
-    const index = list?.findIndex((candidate) => candidate.id === sessionId) ?? -1;
-    if (list && index >= 0) list.splice(index, 1);
-    return;
-  }
   if (!list) {
     draft.taskSessionsByTask.itemsByTaskId[taskId] = [session];
     return;
@@ -1217,23 +1155,6 @@ function setTaskSessionSnapshot(
   synchronizeSessionContextSnapshot(draft, session, mergedSession);
   syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
   reconcileActiveTurnForIdleSession(draft, mergedSession);
-  invalidateErrandHistoryForSnapshot(draft, session.task_id, mergedSession);
-}
-
-function invalidateErrandHistoryForSnapshot(
-  draft: Draft<SessionSlice>,
-  taskId: string,
-  session: TaskSession,
-): void {
-  if (isErrandSessionIdentity(draft, taskId, session)) {
-    const errandState = (draft as unknown as Draft<SessionSlice & ErrandsSliceState>).errands;
-    if (!errandState) return;
-    const revisions = (errandState.browserRevisionByTaskId ??= {});
-    revisions[taskId] = (revisions[taskId] ?? 0) + 1;
-    for (const chain of Object.values(errandState.historyByOwnerId ?? {})) {
-      if (chain.taskId === taskId) chain.stale = true;
-    }
-  }
 }
 
 function updateTaskSessionListMembership(
@@ -1244,11 +1165,7 @@ function updateTaskSessionListMembership(
   const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
   if (!sessionsByTask) return;
   const sessionIndex = sessionsByTask.findIndex((item) => item.id === session.id);
-  if (isErrandSessionIdentity(draft, session.task_id, mergedSession)) {
-    if (sessionIndex >= 0) sessionsByTask.splice(sessionIndex, 1);
-  } else if (sessionIndex >= 0) {
-    sessionsByTask[sessionIndex] = mergedSession;
-  }
+  if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
 }
 
 /** Build actions that reconcile complete session snapshots with partial live events. */

@@ -10,7 +10,7 @@ export type SessionInputMode = "direct" | "queue" | "unavailable";
  */
 export function deriveSessionInputMode(
   session:
-    | Pick<TaskSession, "state" | "foreground_activity" | "supports_steering" | "role">
+    | Pick<TaskSession, "state" | "foreground_activity" | "supports_steering">
     | null
     | undefined,
   queuedCount = 0,
@@ -19,8 +19,7 @@ export function deriveSessionInputMode(
   if (
     session.state === "CREATED" ||
     session.state === "IDLE" ||
-    session.state === "WAITING_FOR_INPUT" ||
-    (session.state === "COMPLETED" && session.role === "errand")
+    session.state === "WAITING_FOR_INPUT"
   ) {
     return "direct";
   }
