@@ -93,7 +93,7 @@ Retained plugin recovery reads the exact authenticated helper using the ready in
 
 Persist the task, Errand, parent, selected profile and reserved turn and submission before launch. Recover an acknowledgement from the authenticated helper's exact accepted journal entry after checking the current native binding. The launcher reconciles that receipt or the original terminal evidence before changing the queued lifecycle. A settled launch reconciles the exact result. Missing or mismatched evidence keeps admission unresolved without another provider prompt or an invented result. Cancellation wins over launch bookkeeping and uses exact teardown compensation.
 
-Public start and queue replay require the owned runtime. A session-backed reservation can retain teardown evidence while the launcher refuses further admission.
+Start and queue replay admit executions through the Errand owner and reconcile any durable generation before creating a new one.
 
 ## Queue provenance and disabled delivery
 

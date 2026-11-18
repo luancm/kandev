@@ -249,8 +249,7 @@ func errandBrowserPadSingleDigitHour(expression string) string {
 		ELSE ` + expression + ` END`
 }
 
-// GetErrandInspection verifies one child identity and reads only its compact
-// bookkeeping row plus the parent's minimal hosting identity.
+// GetErrandInspection reads one compact Errand row and its parent's hosting identity.
 func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessionID string) (models.ErrandBrowserInspection, error) {
 	if taskID == "" || childSessionID == "" {
 		return models.ErrandBrowserInspection{}, errors.New("task and child ids are required")
@@ -261,15 +260,13 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 	}
 	defer func() { _ = tx.Rollback() }()
 	query := `SELECT ` + errandBrowserColumns(r.ro.DriverName()) + `,
-		CASE WHEN s.id IS NULL THEN 0 ELSE 1 END, COALESCE(s.role, ''), COALESCE(s.parent_session_id, ''),
 		CASE WHEN ` + ownedErrandExists + ` THEN 1 ELSE 0 END
 		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
 		WHERE e.task_id = ? AND e.id = ? AND ` + validErrandBrowserIdentity()
 	row := tx.QueryRowContext(ctx, tx.Rebind(query), taskID, childSessionID)
-	var childExists, ownsConversation int
-	var childRole, childParentID string
-	projection, err := scanErrandBrowserProjection(row, &childExists, &childRole, &childParentID, &ownsConversation)
-	if errors.Is(err, sql.ErrNoRows) || (err == nil && childExists != 0 && (childRole != string(models.SessionRoleErrand) || childParentID != projection.ParentSessionID)) {
+	var ownsConversation int
+	projection, err := scanErrandBrowserProjection(row, &ownsConversation)
+	if errors.Is(err, sql.ErrNoRows) {
 		return models.ErrandBrowserInspection{}, models.ErrErrandNotFound
 	}
 	if err != nil {
@@ -294,7 +291,7 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 		return models.ErrandBrowserInspection{}, fmt.Errorf("commit errand inspection: %w", err)
 	}
 	return models.ErrandBrowserInspection{
-		Errand: projection, ChildSessionExists: childExists != 0, OwnsConversation: ownsConversation != 0, Parent: parent,
+		Errand: projection, OwnsConversation: ownsConversation != 0, Parent: parent,
 	}, nil
 }
 

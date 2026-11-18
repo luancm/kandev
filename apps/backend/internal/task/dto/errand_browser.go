@@ -78,11 +78,10 @@ type ErrandBrowserParentDTO struct {
 }
 
 type ErrandInspectionDTO struct {
-	Scope              ErrandBrowserScopeDTO  `json:"scope"`
-	Errand             ErrandBrowserRowDTO    `json:"errand"`
-	ChildSessionExists bool                   `json:"child_session_exists"`
-	OwnsConversation   bool                   `json:"owns_conversation,omitempty"`
-	Parent             ErrandBrowserParentDTO `json:"parent"`
+	Scope            ErrandBrowserScopeDTO  `json:"scope"`
+	Errand           ErrandBrowserRowDTO    `json:"errand"`
+	OwnsConversation bool                   `json:"owns_conversation"`
+	Parent           ErrandBrowserParentDTO `json:"parent"`
 }
 
 func ErrandBrowserCounts(counts models.ErrandBrowserCounts) ErrandBrowserCountsDTO {

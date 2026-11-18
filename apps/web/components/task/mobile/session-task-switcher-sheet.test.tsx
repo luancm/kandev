@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
     taskPRs: { byTaskId: {} },
     taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
+    features: { errands: false },
     userSettings: { sidebarTaskColors: {}, unreadTaskDot: false, unreadTaskDotHideDelaySeconds: 0 },
     tasks: { activeSessionId: null },
     kanban: { tasks: [] },

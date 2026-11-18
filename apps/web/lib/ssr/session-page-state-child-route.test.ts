@@ -54,7 +54,6 @@ it("keeps an owned Errand deep link on its ordinary parent through hydration", a
   const inspection = {
     scope: { task_id: task.id, child_session_id: errandId },
     errand: { task_id: task.id, errand_id: errandId, parent_session_id: parent.id },
-    child_session_exists: false,
     owns_conversation: true,
     parent: { available: true, id: parent.id, task_environment_id: parent.task_environment_id },
   };
@@ -83,7 +82,6 @@ it("keeps an owned retained transcript addressable when the parent is unavailabl
   const inspection = {
     scope: { task_id: task.id, child_session_id: errandId },
     errand: { task_id: task.id, errand_id: errandId, parent_session_id: "missing" },
-    child_session_exists: false,
     owns_conversation: true,
     parent: { available: false },
   };
@@ -104,7 +102,7 @@ it("rejects an inspection without an owned conversation", async () => {
   mocks.inspectErrand.mockResolvedValue({
     scope: { task_id: task.id, child_session_id: errandId },
     errand: { task_id: task.id, errand_id: errandId, parent_session_id: parent.id },
-    child_session_exists: true,
+    owns_conversation: false,
     parent: { available: true, id: parent.id },
   });
   await expect(
@@ -132,7 +130,6 @@ it("admits a retained Errand with the feature off and an unavailable parent", as
   const inspection = {
     scope: { task_id: task.id, child_session_id: "child" },
     errand: { task_id: task.id, errand_id: "child", parent_session_id: "missing" },
-    child_session_exists: false,
     owns_conversation: true,
     parent: { available: false },
   };
@@ -155,7 +152,7 @@ it("does not fall back to a parent when the requested child does not exist", asy
   mocks.inspectErrand.mockResolvedValue({
     scope: { task_id: task.id, child_session_id: "child" },
     errand: { task_id: task.id, errand_id: "child", parent_session_id: parent.id },
-    child_session_exists: false,
+    owns_conversation: false,
   });
   await expect(
     assertRequestedSession(createAppStore(), identity, task.id, "child"),

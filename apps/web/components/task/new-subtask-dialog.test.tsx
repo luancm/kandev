@@ -448,13 +448,6 @@ it("offers only normal parent conversations as subtask context", async () => {
     loaded: true,
     sessions: [
       { ...primary, started_at: "2026-01-01" },
-      {
-        ...primary,
-        id: sessionId("child"),
-        role: "errand",
-        is_primary: false,
-        started_at: "2026-01-02",
-      },
       { ...primary, id: sessionId("normal-b"), is_primary: false, started_at: "2026-01-03" },
     ],
   });

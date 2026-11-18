@@ -20,7 +20,7 @@ var errandsSchemaStatements = []struct{ name, sql string }{
 			title TEXT NOT NULL DEFAULT '',
 			objective TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
-			mcp_server_ids TEXT NOT NULL DEFAULT '[]',
+			mcp_server_ids TEXT NOT NULL DEFAULT '{}',
 			first_turn_id TEXT NOT NULL DEFAULT '',
 			submission_id TEXT NOT NULL DEFAULT '',
 			lifecycle TEXT NOT NULL DEFAULT 'queued',

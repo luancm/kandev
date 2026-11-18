@@ -26,7 +26,6 @@ afterEach(() => {
 function ownedInspection(overrides?: Partial<ErrandBrowserRow>) {
   return {
     ...makeInspection(makeBrowserErrandRow(overrides)),
-    child_session_exists: false,
     owns_conversation: true,
   };
 }

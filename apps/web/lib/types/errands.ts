@@ -128,8 +128,7 @@ export type ErrandHistoryPage = {
 export type ErrandInspection = {
   scope: ErrandBrowserScope;
   errand: ErrandBrowserRow;
-  child_session_exists: boolean;
-  owns_conversation?: boolean;
+  owns_conversation: boolean;
   parent: {
     available: boolean;
     id?: string;

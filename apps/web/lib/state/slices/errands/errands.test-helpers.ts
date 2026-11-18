@@ -101,7 +101,7 @@ export function makeInspection(row = makeBrowserErrandRow()): ErrandInspection {
   return {
     scope: { task_id: row.task_id, child_session_id: row.errand_id },
     errand: row,
-    child_session_exists: true,
+    owns_conversation: true,
     // i18n-exempt: test fixture data, never rendered
     parent: { available: true, id: row.parent_session_id, title: "Parent", role: "primary" },
   };

@@ -19,7 +19,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 const CHILD_ID = "errand-1";
 const PARENT_ID = "session-parent";
 const target = { taskId: "task-1", sessionId: CHILD_ID, title: "Audit", isErrand: true as const };
-const inspection = { ...makeInspection(), child_session_exists: false, owns_conversation: true };
+const inspection = makeInspection();
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -114,11 +114,7 @@ it("starts a fresh owned inspection after a scope reset while the old read is pe
 it("opens only the latest Errand when two inspections overlap", async () => {
   const firstRead = deferred<typeof inspection>();
   const secondRow = makeBrowserErrandRow({ errand_id: "errand-2" });
-  const secondInspection = {
-    ...makeInspection(secondRow),
-    child_session_exists: false,
-    owns_conversation: true,
-  };
+  const secondInspection = makeInspection(secondRow);
   transport.inspect.mockReturnValueOnce(firstRead.promise).mockResolvedValueOnce(secondInspection);
   const { result, openOwned } = mountOpener();
   const first = result.current.open(target);

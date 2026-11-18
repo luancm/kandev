@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { sessionId, taskId } from "@/lib/types/ids";
-import {
-  makeBrowserErrandRow,
-  makeInspection,
-} from "@/lib/state/slices/errands/errands.test-helpers";
 import type { Message } from "@/lib/types/http";
 import { doFetchMessages } from "./use-session-message-fetch";
 
@@ -150,14 +146,12 @@ describe("doFetchMessages", () => {
   });
 });
 
-it("does not recreate child loading metadata after the last reader exits during a fetch", async () => {
+it("does not recreate loading metadata when the session is removed during a fetch", async () => {
   const store = createAppStore();
-  const row = makeBrowserErrandRow({ errand_id: SESSION_ID });
-  store.getState().retainErrandInspection("reader", makeInspection(row));
+  const task = taskId("task-1");
   store.getState().setTaskSession({
     id: sessionId(SESSION_ID),
-    task_id: taskId(row.task_id),
-    role: "errand",
+    task_id: task,
     state: "COMPLETED",
     started_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -168,7 +162,7 @@ it("does not recreate child loading metadata after the last reader exits during 
   const fetch = doFetchMessages({ ...params, store, isActive: () => active } as never);
   expect(store.getState().messages.metaBySession[SESSION_ID]?.isLoading).toBe(true);
   active = false;
-  store.getState().releaseErrandInspection("reader");
+  store.getState().removeTaskSession(task, SESSION_ID);
   expect(store.getState().messages.metaBySession[SESSION_ID]).toBeUndefined();
   result.resolve([]);
   await fetch;

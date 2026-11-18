@@ -123,12 +123,12 @@ it("inspects one child without enumerating task history", async () => {
   request.mockResolvedValue({
     scope: { task_id: TASK_ID, child_session_id: CHILD_SESSION_ID },
     errand: makeBrowserRow("done"),
-    child_session_exists: true,
+    owns_conversation: true,
     parent: { available: false },
   });
 
   await expect(inspectErrand(TASK_ID, CHILD_SESSION_ID)).resolves.toMatchObject({
-    child_session_exists: true,
+    owns_conversation: true,
     parent: { available: false },
   });
   expect(request).toHaveBeenCalledWith("errand.inspect", {

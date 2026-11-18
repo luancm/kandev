@@ -14,52 +14,38 @@ owners:
 
 ## Boundary and existing behavior
 
-This design implements [completed errand sessions](../requirements/errand-completion-cleanup.md), reusing the exact identity, durable settlement and admission boundaries in [errand recovery and delivery](errand-recovery-and-delivery.md). The [task-owned worktree decision](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md) remains authoritative. Conversation retention and execution lifetime are separate: completion releases execution resources, while explicit continuation may restore the retained conversation.
+The [completion requirements](../requirements/errand-completion-cleanup.md) apply to Errand-owned conversations. The [task-owned worktree decision](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md) governs the workspace. Completion releases execution resources. The durable transcript and native conversation binding remain available for explicit continuation.
 
-Both the ready and process-exit paths capture exact completion ownership and settle through the Errands service. The repository commits the exact terminal decision, current result or no-result outcome, and completion obligation atomically. The existing teardown owner closes the captured execution and conditionally projects `COMPLETED` only after acknowledged close or authenticated absence. Generic completed-session resume remains gated by `AllowCompletedSessionResume`; errand follow-up paths supply that permission only after validating the exact completed errand and existing caller authority.
-
-| Acceptance | Owner                                                                    |
-| ---------- | ------------------------------------------------------------------------ |
-| .1         | Exact terminal settlement followed by durable success-close intent       |
-| .2         | Confirmed execution close and conditional session projection             |
-| .3         | Admission arbitration and explicit same-conversation resume              |
-| .4         | Existing startup/sweep recovery and conservative retained-session repair |
+| Acceptance | Owner                                                              |
+| ---------- | ------------------------------------------------------------------ |
+| .1         | Exact terminal settlement and durable close obligation             |
+| .2         | Confirmed physical close of the recorded execution                 |
+| .3         | Admission arbitration and explicit same-conversation continuation   |
+| .4         | Startup and periodic retries of recorded obligations                |
 
 ## Durable close authority
 
-The existing private `ErrandTeardownIntent` carries an explicit completion purpose. A missing purpose remains cancellation for compatibility with stored intents. One versioned JSON contract carries exact target identity; there is no separate completion teardown table or coordinator. Schema/codec changes must preserve both SQLite and PostgreSQL behavior.
+An `ErrandTeardownIntent` with completion purpose records the exact task, Errand, execution generation and ID, turn, submission and prompt generation. Settlement persists the obligation alongside the exact terminal decision and result or no-result disposition. SQLite and PostgreSQL use the same versioned representation. Parent result reception and runtime absence remain independent observations.
 
-Capture task, immutable role/parent, session incarnation, execution, exact terminal turn and submission from existing positive evidence. Commit the completion obligation alongside the exact terminal settlement decision, or recover it idempotently from that committed decision before successor admission. A result's delivery state is independent: neither awaiting nor uncertain parent reception delays or authorizes a different close target. A user-origin turn uses its existing no-result settlement receipt and never creates a parent notification merely because its runtime closes.
+The completion and cancellation paths use the recorded execution identity and confirmation boundary. Cancellation that overtakes completion retains its own decision and outcome. Result delivery, an unrelated historical receipt, and UI status confer no close authority.
 
-Legacy providers can complete an explicit user follow-up without a durable delivery-submission row. If the existing submission inventory read succeeds but supplies no identity, the exact committed successful terminal decision may supply the missing submission for cleanup. The completed current turn must belong to the verified task/session, equal the Errand's latest settled turn and match the persisted teardown target; the decision must match its session, incarnation, turn, submission and captured execution. This is resolution from retained evidence, not synthesis of a submission. A read error, unresolved or conflicting inventory, incomplete turn or missing/conflicting decision cannot authorize it. Runtime inventory, successor admission, stop acknowledgement and post-stop ownership checks remain separate requirements.
+## Ordering and races
 
-The same identity resolution applies when cancellation inherits that pending completion target. It does not turn cancellation into successful completion: the cancellation path retains its outcome and physical-stop obligation. Historical decisions for other turns, a delivered result and `LastOutcome` alone never supply cleanup authority.
+Persist settlement and teardown authority before external calls. Revalidate the target under the owning operation guard and stop the recorded execution through the runtime. The runtime uses its authenticated binding to resolve retained execution evidence and closes its own stream, client and lifecycle indexes. The task owns its workspace. Publish the outcome outside the operation guard.
 
-Successful completion and cancellation share exact-target validation, admission arbitration, confirmed-stop and receipt machinery, with distinct projection effects. Completion uses `errand_completion_cleanup.go` and preserves errand lifecycle/outcome, result revision, delivery claims, transcript, provider resume identity and task-owned environment. Cancellation retains its cancellation reason and precedence; retries must not convert a cancellation into successful completion or lose an outstanding physical-stop obligation. Closed completion obligations can retire obsolete success projection without repeating a confirmed stop or overwriting a cancelled session.
-
-## Ordering, races and session state
-
-Use the existing session cancellation/admission ownership and durable task guard in their established order. Persist settlement and close authority before external I/O; never hold SQL or a non-reentrant completion guard across runtime calls or state publication. Stop only the captured execution, and close its stream/client and lifecycle indexes through the existing runtime API.
-
-Revalidate the exact target under operation ownership before the physical stop. An admitted successor on the same execution invalidates the old close authority. A replacement execution/incarnation must never be stopped or projected completed by an old callback. A queued follow-up admitted before closing may reuse the existing runtime; once close owns the operation, follow-up waits for the close decision and then uses normal recovery. Queue sources and persisted results survive both orderings.
-
-After an acknowledged stop or authenticated absence, conditionally publish the existing `COMPLETED` session state for the unchanged successful turn. Apply that rule to both ready and process-exit paths. Do not use the generic errand Stop action: it means cancellation. Publish outside ownership locks so synchronous subscribers and queue readiness cannot re-enter the same guard. Ordinary sessions retain their current idle policy.
+The next execution generation is admitted only after the recorded predecessor teardown has completed. A late callback can confirm only its recorded operation. Missing or uncertain runtime evidence keeps the intent pending.
 
 ## Recovery and explicit continuation
 
 Reuse the existing bounded startup and errand teardown sweep, including flag-off cleanup of already accepted work. Retry pending completion intents without rerunning provider prompts or result delivery. Provider-stop, inventory and receipt failures leave durable work pending; neither scheduling nor elapsed time proves absence.
 
-For older successful retained sessions, derive repair only from exact durable terminal evidence plus authenticated runtime inventory and unchanged session/turn ownership. Stopped executor SQL rows alone are insufficient physical-absence evidence. Missing provenance remains observable and conservative. Preserve failed/cancelled outcomes and avoid changing unrelated ordinary sessions.
-
-User follow-up and parent `message_task_kandev` use existing authorization, queue, result-supersession, recovery and launch-isolation paths. Permit completed resume only for the admitted retained errand; keep normal-session completion policy unchanged. Restore the same provider conversation when supported; existing explicit recovery errors or fallback policy remain authoritative when restoration is unavailable. New errand admission flags must not disable required cleanup or retained role isolation.
-
-For an Errand-owned conversation, the task-prompt-authorized `errand.continue` action uses a client message ID to reserve one user turn and successor generation together. Admission requires completed teardown of the exact previous execution and its retained native binding. The launch checks the recorded predecessor against the selected runtime and attached task workspace before it loads that same native conversation. An exact retry returns the original turn when prompt acceptance or terminal projection is durable. A user-origin settlement leaves the original parent result and its delivery receipt intact.
+The task-prompt-authorized `errand.continue` action uses a client message ID to reserve one user turn and successor generation together. Admission requires completed teardown of the exact previous execution and its retained native binding. The launch checks the recorded predecessor against the selected runtime and attached task workspace before it loads that same native conversation. An exact retry returns the original turn when prompt acceptance or terminal projection is durable. A user-origin settlement leaves the original parent result and its delivery receipt intact.
 
 The authenticated ordinary parent addresses an owned Errand through the existing explicit `session_id` argument of `message_task_kandev`. The successor reservation saves the parent, turn and submission in the existing admission ledger. Durable prompt acceptance or the exact projected terminal receipt authorizes the parent result transition. Recovery can recognize those saved receipts and finish the admission without dispatching a second prompt.
 
 ## Presentation and validation
 
-Use existing session status rendering and completed-session continuation controls. No new session-state enum, management surface or phone layout is required. The parent still displays the established errand outcome and completed history; the opened child displays a completed session after confirmed cleanup. Opening it does not launch an agent or dispatch work. Explicit continuation returns that child to normal running/attention states, then closes again after settlement. Desktop panel/Open/Back and phone drawer/full-screen child/Back retain their current composition.
+Opening a completed Errand reads its owned transcript and leaves the execution idle. An explicit follow-up may restore the same native conversation and starts a new owned turn. The existing desktop panel and phone drawer open the same Errand view with Back to its ordinary parent.
 
 Use production SQLite/service integration with controlled physical-provider boundaries for settlement/stop/receipt failures, restart, cancellation precedence and successor races. Exercise both ready and process-exit events. Reuse PostgreSQL store conformance for the extended intent codec and record unavailable DSNs as skips. Real browser checks prove retained transcript access, completed status, explicit continuation and shared workspace continuity on desktop and phone; mocked runtime checks do not certify real-provider restoration.
 

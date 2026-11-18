@@ -96,8 +96,7 @@ type ErrandBrowserParentIdentity struct {
 // ErrandBrowserInspection verifies one retained child without fetching a
 // transcript or enumerating its siblings.
 type ErrandBrowserInspection struct {
-	Errand             *ErrandBrowserObservation
-	ChildSessionExists bool
-	OwnsConversation   bool
-	Parent             ErrandBrowserParentIdentity
+	Errand           *ErrandBrowserObservation
+	OwnsConversation bool
+	Parent           ErrandBrowserParentIdentity
 }

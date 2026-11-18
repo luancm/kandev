@@ -46,7 +46,6 @@ describe("temporary conversation view retention", () => {
     const linked = {
       scope: { task_id: "task", child_session_id: CHILD_ID },
       errand: { task_id: "task", errand_id: CHILD_ID, parent_session_id: PARENT_ID },
-      child_session_exists: false,
       owns_conversation: true,
       parent: { available: true, id: PARENT_ID },
     } as ErrandInspection;

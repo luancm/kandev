@@ -1,6 +1,6 @@
 import type { SessionSliceState } from "./types";
 
-/** Remove cache entries shared by session deletion and unowned child eviction. */
+/** Remove cached conversation data for a deleted task session. */
 export function clearConversationCache(state: SessionSliceState, sessionId: string): void {
   delete state.taskSessions.items[sessionId];
   delete state.taskSessions.activityEpochBySession?.[sessionId];

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -512,15 +511,9 @@ func decodeErrandTeardownIntent(encoded string, errand *models.Errand) error {
 }
 
 func encodeErrandMCPSnapshot(row *models.Errand) (string, error) {
-	ids := row.MCPServerIDs
-	if len(ids) == 0 && len(row.MCPExcludedServerIDs) == 0 {
-		return "[]", nil
-	}
-	var value any = ids
-	if len(row.MCPExcludedServerIDs) > 0 {
-		value = errandMCPSnapshot{ServerIDs: ids, ExcludedServerIDs: row.MCPExcludedServerIDs}
-	}
-	encoded, err := json.Marshal(value)
+	encoded, err := json.Marshal(errandMCPSnapshot{
+		ServerIDs: row.MCPServerIDs, ExcludedServerIDs: row.MCPExcludedServerIDs,
+	})
 	if err != nil {
 		return "", fmt.Errorf("encode errand MCP servers: %w", err)
 	}
@@ -533,16 +526,12 @@ type errandMCPSnapshot struct {
 }
 
 func decodeErrandMCPSnapshot(encoded string, row *models.Errand) error {
-	encoded = strings.TrimSpace(encoded)
-	if len(encoded) > 0 && encoded[0] == '{' {
-		var snapshot errandMCPSnapshot
-		if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
-			return err
-		}
-		row.MCPServerIDs, row.MCPExcludedServerIDs = snapshot.ServerIDs, snapshot.ExcludedServerIDs
-		return nil
+	var snapshot errandMCPSnapshot
+	if err := json.Unmarshal([]byte(encoded), &snapshot); err != nil {
+		return err
 	}
-	return json.Unmarshal([]byte(encoded), &row.MCPServerIDs)
+	row.MCPServerIDs, row.MCPExcludedServerIDs = snapshot.ServerIDs, snapshot.ExcludedServerIDs
+	return nil
 }
 
 func utcTimeArg(value *time.Time) interface{} {

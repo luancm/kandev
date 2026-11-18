@@ -71,22 +71,17 @@ These companions own the detailed algorithms; the contracts below remain shared 
 
 ### Persistence
 
-Idempotent `ADD COLUMN` migrations in `runMigrations()` add
-`task_sessions.role` and `task_sessions.parent_session_id`
-(`TEXT NOT NULL DEFAULT ''`), then the index
-`idx_task_sessions_parent_session_id`; `base_schema.go` may list both for
-fresh databases. Every session insert writes both, and no update changes
-them. `role` is `''` or `errand`.
+The [Errand ownership decision](../../../decisions/2026-11-17-errand-owned-conversations.md) defines the persistence boundary. The Errand holds its own conversation and executions. Its parent remains an ordinary task session.
 
 `task_session_errands` is created by `initErrandsSchema` and owned by the task
 repository:
 
-- `id`: Errand ID, equal to the reserved session ID. Primary key.
+- `id`: Errand ID. Primary key.
 - `task_id`: Owning task; foreign key with `ON DELETE CASCADE`.
 - `parent_session_id`: Parent session.
 - `title`, `objective`: Start arguments. The objective is the first prompt.
 - `agent_profile_id`: Resolved effective profile.
-- `mcp_server_ids`: JSON additions/exclusions snapshot; legacy arrays remain readable.
+- `mcp_server_ids`: JSON object with the captured MCP additions and exclusions.
 - `first_turn_id`, `submission_id`: Reserved launch identity.
 - `lifecycle`: `queued`, `launched`, or `cancelled`.
 - `cancel_source`: `''`, `parent`, `user`, or `cascade`.
@@ -98,22 +93,15 @@ repository:
 - `latest_settled_turn_id`: Latest settled turn of any origin, for **Send result to parent**.
 - `version`, `created_at`, `updated_at`, `settled_at`: Compare-and-set version and timestamps.
 
-Indexes: `(task_id, lifecycle)` for live counts and `(parent_session_id)` for
-parent queries. No foreign key points to `task_sessions`, because a queued
-errand has no session row yet. Deleting an errand session deletes its errand
-row in the same transaction. Every errand state change is version-guarded;
-PostgreSQL read-modify-write paths take a transaction-scoped advisory lock on
-the task ID, per the backend schema rules.
+The lifecycle and parent indexes support per-task counts and per-parent reads. Errand rows are owned by the task foreign key. Errand-owned turns, messages and execution generations use the Errand ID. Version checks guard state changes, and PostgreSQL task-scoped writes use the existing advisory lock.
+
 `task_session_errands` joins the `task` descriptor's `RequiredTables` in
 `internal/persistence/requiredstores/catalog.go`, with a `storeconformance`
 scenario and explicit-tag upgrade fixture.
 
 ### Models and API projection
 
-`models.TaskSession` gains `Role` and `ParentSessionID`. `TaskSession.ToAPI`,
-`dto.TaskSessionDTO`, and `dto.TaskSessionSummaryDTO` project `role`,
-`parent_session_id`, and, for parents, `waiting_on_errands`. Errand rows
-project as `dto.ErrandDTO`: `errand_id`, `task_id`, `parent_session_id`,
+Ordinary parent sessions project `waiting_on_errands`. Errand rows project as `dto.ErrandDTO`: `errand_id`, `task_id`, `parent_session_id`,
 `title`, `objective`, `agent_profile_id`, `status`, `result_state`,
 `result_preview` (first 280 characters), `result_truncated`, `created_at`,
 `updated_at`, `settled_at`, and `can_send_result`, the
@@ -122,8 +110,7 @@ returned only to the parent through MCP. Optional `delivery_state` is
 `uncertain` or `received` for applicable current-revision await evidence;
 omission does not imply reception.
 
-Fallback sessions preserve immutable role and parent identity. Task summary
-reads repair the bounded aggregate under the feature flag; CAS conflicts
+Task summary reads repair the bounded aggregate under the feature flag; CAS conflicts
 re-observe the aggregate. An unavailable reader is unobserved, while a
 disabled feature explicitly projects zero.
 
@@ -188,13 +175,7 @@ guards and retention. These reads require workspace authorization, work with
 the flag off, and never fall back to complete lists. API, internal and MCP
 inventories remain complete; mutations retain feature and ownership gates.
 
-The gateway scopes requests through `task_id` and `session_id`. A queued
-errand has no session row: cancel authorization resolves its task from the
-errand record and applies the same workspace membership check. Session
-events, including cancel and recovery, carry `role`, `parent_session_id`,
-and `waiting_on_errands`. Existing `session.removed` events reach authorized
-workspace viewers and remove errands from each client's store; session-only
-synthetic payloads resolve their task from local state.
+The gateway authorizes Errand requests through their owning task. Cancellation resolves the Errand’s task from its durable row, including while queued. Errand updates refresh the owned browser state. The ordinary parent’s session events carry `waiting_on_errands`.
 
 Each result-bearing parent user message persists an `errand_delivery`
 object: `token`, `route`, and `items` (`errand_id`, `title`, `status`,
@@ -211,7 +192,7 @@ Historical result timing follows [the elapsed-time contract](errand-result-durat
 
 `handleStartErrand` verifies the flag/caller and rejects missing, errand or passthrough callers and Office, ephemeral, configuration, coordinator and automation tasks. `Service.Start` serializes per task and caps live errands at five. Profiles resolve by ID, then exact name, defaulting to the caller; passthrough is excluded and executor compatibility uses `ValidateAgentProfileForExecutor`. Profile guidance uses the same filter.
 
-Reserve errand/session, turn and submission identities plus the parent's MCP selection snapshot before launch. `LaunchErrandSession` uses `IntentStart`, `ProfileExplicit`, objective and enabled snapshot definitions. Preparation sets immutable role/parent, `IsPrimary=false` and attach-only workspace context; `applyErrandOriginContext` frames the prompt. Ceiling refusal retains queued work outside the task's deferred-launch slot; synchronous workspace/profile failure deletes the reservation and returns its typed error. [Reserved launch recovery](errand-recovery-and-delivery.md#reserved-launch-recovery) owns uncertain/adopted launch classification. Events follow durable writes.
+Reserve the Errand, turn and submission identities and capture the parent’s MCP selections. The launcher resolves the exact attached task workspace, validates the owning task and parent, applies the ceiling and reserves the execution generation. It launches with an explicit Errand execution owner and the captured profile. The first prompt uses trusted Errand framing. A ceiling refusal keeps the reservation queued. A proved pre-admission failure can remove the initial reservation and return its typed error. [Reserved launch recovery](errand-recovery-and-delivery.md#reserved-launch-recovery) governs uncertain and adopted starts. Publish state after the durable writes.
 
 ### Queued admission
 
@@ -271,25 +252,7 @@ Outstanding means queued, `awaiting_result=true` or `result_state=pending`. Star
 
 ## Workflow-detached predicate
 
-`models.IsWorkflowDetachedSession(session)` is true for
-`Role == SessionRoleErrand` or `IsCompletionFollowUpSession(session.Metadata)`.
-Every orchestrator `IsCompletionFollowUpSession` call site
-(`event_handlers_agent.go`, `event_handlers_workflow.go`,
-`event_handlers_streaming.go`, `workflow_move_preview.go`,
-`ci_automation_dispatch.go`) moves to it, except
-`prepareOnTurnStartSession` and `persistWorkflowSwitchTag`, which only set or
-clear the marker. These selectors also exclude errands:
-
-- `processOnTurnStartViaEngineResult`, `processOnTurnCompleteViaEngineWithCause`: Return early for detached sessions
-- `runtimeSessionOwnsTaskState`, `writeTaskReviewState` callers: Errands never write or block task state
-- `bestPrimarySessionCandidate`, `promoteSessionIfTaskHasNoPrimary`, `promoteNextPrimaryAfterRemoval`, `Repository.SetSessionPrimary`: Never select or accept an errand
-- `GetActiveTaskSessionByTaskID`, `resolvePrimaryOrActiveSession`, `feederCandidateSession`: Skip errands
-- `resolveMessageTargetSession` fallback: Skip errands; explicit `session_id` still works
-- `selectReusableWorkflowSession`, `ciAutomationSessionCanReceivePrompt`: Skip errands
-- Generated-title ownership: Errands never claim it
-
-`validateMoveSessions` keeps counting running errands, so moves stay blocked
-while an errand writes to the shared worktree.
+Workflow actions, primary selection, runtime task state and generated titles are ordinary session responsibilities. Errand executions use an explicit Errand owner and remain outside that selection and transition path. Workflow moves consult live Errand work before transferring the task’s shared workspace.
 
 ## Prompts
 

@@ -131,7 +131,7 @@ describe("selectTaskFromSheet session URL", () => {
 });
 
 describe("normal conversation fallback", () => {
-  it("skips a newer errand when the task has no primary projection", async () => {
+  it("ignores a foreign session when the task has no primary projection", async () => {
     const taskId = "task-with-session";
     const sessionId = "existing-session";
     const navigate = vi.fn();
@@ -146,7 +146,7 @@ describe("normal conversation fallback", () => {
         taskSessionsById: {},
       },
       loadTaskSessionsForTask: vi.fn(async () => [
-        { id: "child", task_id: taskId, role: "errand" } as TaskSession,
+        { id: "foreign", task_id: "other-task", state: "RUNNING" } as TaskSession,
         { id: sessionId, task_id: taskId, state: "COMPLETED" } as TaskSession,
       ]),
       setActiveSession: vi.fn(),

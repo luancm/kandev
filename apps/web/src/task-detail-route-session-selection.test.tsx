@@ -290,7 +290,6 @@ it.each(["scope", "deletion", "current"] as const)(
         errand_id: errandId,
         parent_session_id: parent.id,
       }),
-      child_session_exists: false,
       owns_conversation: true,
       parent: { available: true, id: parent.id },
     };

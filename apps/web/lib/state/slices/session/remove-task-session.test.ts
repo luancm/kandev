@@ -93,11 +93,7 @@ describe("removeTaskSession cleanup cascade", () => {
 
   it("removes an ordinary session without touching the task's errands", () => {
     const state = createAppStore();
-    const open = {
-      ...makeInspection(makeBrowserErrandRow({ errand_id: ERRAND_SIBLING_ID })),
-      child_session_exists: false,
-      owns_conversation: true,
-    };
+    const open = makeInspection(makeBrowserErrandRow({ errand_id: ERRAND_SIBLING_ID }));
     state.getState().retainErrandInspection("host", open);
     const before = state.getState().errands;
     state.getState().removeTaskSession(TASK_ID, ERRAND_PARENT_ID);

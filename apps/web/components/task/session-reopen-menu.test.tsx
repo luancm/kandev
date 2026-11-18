@@ -192,13 +192,12 @@ describe("SessionReopenMenuItems icon rendering (AC-51/52)", () => {
 });
 
 describe("SessionReopenMenuItems normal conversation list", () => {
-  it("omits errands and keeps New Agent available when no normal sessions exist", () => {
-    mocks.sessions = [session("errand-only", { role: "errand" })];
+  it("keeps New Agent available without sessions", () => {
+    mocks.sessions = [];
     const onNewSession = vi.fn();
 
     renderMenu(onNewSession);
 
-    expect(screen.queryByTestId("reopen-session-errand-only")).toBeNull();
     fireEvent.click(screen.getByTestId("new-session-button"));
     expect(onNewSession).toHaveBeenCalledOnce();
   });

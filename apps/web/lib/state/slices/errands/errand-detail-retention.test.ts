@@ -3,11 +3,7 @@ import { createAppStore } from "@/lib/state/store";
 import { makeBrowserErrandRow, makeInspection } from "./errands.test-helpers";
 
 function ownedInspection(errandId: string) {
-  return {
-    ...makeInspection(makeBrowserErrandRow({ errand_id: errandId })),
-    child_session_exists: false,
-    owns_conversation: true,
-  };
+  return makeInspection(makeBrowserErrandRow({ errand_id: errandId }));
 }
 
 it("keeps compact Errand detail until its final reader leaves", () => {

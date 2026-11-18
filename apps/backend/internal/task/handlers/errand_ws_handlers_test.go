@@ -368,7 +368,15 @@ func TestErrandActionsAreRegisteredOnTheDispatcher(t *testing.T) {
 }
 
 func TestErrandBrowserReadsRemainAvailableWhenFeatureFlagIsOff(t *testing.T) {
-	svc := &fakeErrandService{browserSummary: models.ErrandBrowserSummary{TaskID: "task-b"}}
+	svc := &fakeErrandService{
+		browserSummary: models.ErrandBrowserSummary{TaskID: "task-b"},
+		browserInspection: models.ErrandBrowserInspection{
+			Errand: &models.ErrandBrowserObservation{
+				ID: "errand-1", TaskID: "task-b", ParentSessionID: "parent-1",
+			},
+			OwnsConversation: true,
+		},
+	}
 	h := errandHandlers(t, svc, false)
 	ctx := errandCallerAs("user-b")
 
@@ -391,6 +399,10 @@ func TestErrandBrowserReadsRemainAvailableWhenFeatureFlagIsOff(t *testing.T) {
 	require.Equal(t, models.ErrandHistoryPageRequest{TaskID: "task-b", ParentSessionID: "parent-1", Limit: 0}, svc.history[0])
 	require.Equal(t, [][2]string{{"task-b", "errand-1"}}, svc.inspections)
 	require.NotEqual(t, ws.MessageTypeError, response.Type)
+	var payload map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	require.JSONEq(t, `true`, string(payload["owns_conversation"]))
+	require.NotContains(t, payload, "child_session_exists")
 }
 
 // @covers AC-TASKS-ERRANDS-003.3

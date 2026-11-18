@@ -653,26 +653,27 @@ describe("NewSessionDialog", () => {
 });
 
 // @covers AC-TASKS-ERRANDS-005.7
-it.each([true, false])("omits errands before numbering summary sources with flag %s", (enabled) => {
-  mockState.features.errands = enabled;
-  mockState.errands.byTaskId = { "task-1": { partial: { parent_session_id: "normal-a" } } };
-  mockSessions = [
-    { id: "normal-a", started_at: "2026-01-01" },
-    { id: "child", role: "errand", started_at: "2026-01-02" },
-    { id: "partial", started_at: "2026-01-02" },
-    { id: "normal-b", started_at: "2026-01-03" },
-  ] as TaskSession[];
-  const { rerender } = render(
-    <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
-  );
-  expect(mockSessionOptions.map(({ id, index }) => ({ id, index }))).toEqual([
-    { id: "normal-a", index: 1 },
-    { id: "normal-b", index: 2 },
-  ]);
-  mockSessions = mockSessions.filter((session) => session.id === "child");
-  rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
-  expect(mockSessionOptions).toEqual([]);
-  cleanup();
-  mockSessions = [];
-  mockState.errands.byTaskId = {};
-});
+it.each([true, false])(
+  "numbers the ordinary summary sources with Errands enabled %s",
+  (enabled) => {
+    mockState.features.errands = enabled;
+    mockState.errands.byTaskId = { "task-1": { partial: { parent_session_id: "normal-a" } } };
+    mockSessions = [
+      { id: "normal-a", started_at: "2026-01-01" },
+      { id: "normal-b", started_at: "2026-01-03" },
+    ] as TaskSession[];
+    const { rerender } = render(
+      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
+    );
+    expect(mockSessionOptions.map(({ id, index }) => ({ id, index }))).toEqual([
+      { id: "normal-a", index: 1 },
+      { id: "normal-b", index: 2 },
+    ]);
+    mockSessions = [];
+    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    expect(mockSessionOptions).toEqual([]);
+    cleanup();
+    mockSessions = [];
+    mockState.errands.byTaskId = {};
+  },
+);

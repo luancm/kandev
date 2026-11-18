@@ -154,6 +154,17 @@ describe("MobileSessionsPicker selection", () => {
     expect(picker.dataset.state).toBe("closed");
   });
 
+  it("numbers ordinary sessions by start time", () => {
+    mocks.sessions.reverse();
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+    expect(screen.getByTestId(PILL_TESTID).textContent).toContain("1/2");
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    expect(
+      screen.getAllByTestId(/^mobile-session-row-/).map((row) => row.getAttribute("data-testid")),
+    ).toEqual(["mobile-session-row-session-a", SESSION_B_ROW]);
+    expect(within(screen.getByTestId(SESSION_B_ROW)).getByText("2")).toBeTruthy();
+  });
+
   it("uses the effective layout session instead of a stale store session", () => {
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
 
