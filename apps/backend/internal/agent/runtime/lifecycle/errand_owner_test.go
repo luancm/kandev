@@ -3,13 +3,13 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
-	"github.com/kandev/kandev/internal/task/models"
 	"path/filepath"
-
-	"github.com/kandev/kandev/internal/agent/executor"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,7 +75,7 @@ func TestErrandRecoveryStopValidatesOwner(t *testing.T) {
 	mgr.SetExecutorRunningWriter(repo)
 	owner := ExecutionOwner{Kind: ExecutionOwnerErrand, WorkspaceID: "ws", TaskID: "parent", ErrandID: "child", Generation: 1}
 	execution := &AgentExecution{ID: "execution", WorkspaceID: "ws", Owner: owner, OwnerAdmission: allowRunOwner{}, Status: v1.AgentStatusRunning, RuntimeName: executor.NameStandalone}
-	backend := &runOwnerRecoveryExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	backend := &exactErrandRecoveryExecutor{runOwnerRecoveryExecutor: runOwnerRecoveryExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}}
 	mgr.executorRegistry = NewExecutorRegistry(mgr.logger)
 	mgr.executorRegistry.Register(backend)
 	require.NoError(t, mgr.registerAndPublishExecution(ctx, execution, backend, &ExecutorInstance{InstanceID: execution.ID}, ""))
@@ -137,14 +137,24 @@ func TestErrandOwnerRequiresReservedGeneration(t *testing.T) {
 	require.Error(t, mgr.admitExecutionOwner(context.Background(), &LaunchRequest{Owner: owner, OwnerAdmission: allowRunOwner{}}))
 }
 
+type exactErrandRecoveryExecutor struct {
+	runOwnerRecoveryExecutor
+}
+
+func (b *exactErrandRecoveryExecutor) stopErrandInstance(_ context.Context, row *models.ExecutorRunning, _ agentctltypes.ErrandMCPOwner) error {
+	b.stoppedID = row.AgentExecutionID
+	return b.stopErr
+}
+
 type replacingErrandExecutor struct {
 	runOwnerRecoveryExecutor
 	replace func()
 }
 
-func (b *replacingErrandExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, remove bool) error {
+func (b *replacingErrandExecutor) stopErrandInstance(_ context.Context, row *models.ExecutorRunning, _ agentctltypes.ErrandMCPOwner) error {
 	b.replace()
-	return b.runOwnerRecoveryExecutor.StopInstance(ctx, instance, remove)
+	b.stoppedID = row.AgentExecutionID
+	return b.stopErr
 }
 
 func TestErrandRecoveryStopDoesNotSettleSuccessor(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -63,6 +62,9 @@ func (m *Manager) stopOwnerForRecovery(ctx context.Context, owner ExecutionOwner
 	}
 	row, err := reader.GetExecutorRunningBySessionID(ctx, inventoryID)
 	if errors.Is(err, models.ErrExecutorRunningNotFound) || (err == nil && row == nil) {
+		if owner.Kind == ExecutionOwnerErrand {
+			return errors.Join(ErrErrandRecoveryRequiresReconnect, m.runRecoveryErr)
+		}
 		return m.runRecoveryErr
 	}
 	if err != nil {
@@ -71,19 +73,11 @@ func (m *Manager) stopOwnerForRecovery(ctx context.Context, owner ExecutionOwner
 	if err := validateRunRecoveryOwner(row, owner); err != nil {
 		return err
 	}
+	if owner.Kind == ExecutionOwnerErrand {
+		return m.stopRecordedErrandInstance(ctx, row, owner)
+	}
 	if row.Status == models.ExecutorRunningStatusStopped {
 		return nil
-	}
-	var cas executorRunningCASWriter
-	if owner.Kind == ExecutionOwnerErrand {
-		if row.Runtime != executor.NameStandalone {
-			return ErrErrandRecoveryRequiresReconnect
-		}
-		var ok bool
-		cas, ok = m.runningWriter.(executorRunningCASWriter)
-		if !ok {
-			return errors.New("errand recovery requires conditional inventory repair")
-		}
 	}
 	backend, err := m.executorRegistry.GetBackend(row.Runtime)
 	if err != nil {
@@ -97,9 +91,6 @@ func (m *Manager) stopOwnerForRecovery(ctx context.Context, owner ExecutionOwner
 	}
 	if err := m.stopWorkspaceRuntime(ctx, backend, instance, true); err != nil {
 		return fmt.Errorf("stop predecessor run execution: %w", err)
-	}
-	if cas != nil {
-		return cas.RepairExecutorRunningDeadIfCurrent(ctx, row.SessionID, row.AgentExecutionID, row.UpdatedAt)
 	}
 	return m.runningWriter.RepairExecutorRunningDead(ctx, row.SessionID)
 }

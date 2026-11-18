@@ -140,6 +140,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.POST("/instances/:id/stop-errand", m.handleStopErrandInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
