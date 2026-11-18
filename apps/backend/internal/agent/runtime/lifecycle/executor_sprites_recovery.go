@@ -109,7 +109,7 @@ func (r *SpritesExecutor) inspectSavedSprite(
 		}
 		return nil, nil, RecoveryOutcomeUnknown
 	}
-	if sprite == nil || spritesutil.NormalizeSpriteStatus(sprite.Status) != "running" {
+	if sprite == nil || spritesutil.NormalizeSpriteStatus(sprite.Status) != spriteStateRunning {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
 	instanceInfo, err := r.getExistingInstanceInfo(ctx, sprite, instanceID)
