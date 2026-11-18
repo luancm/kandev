@@ -14,6 +14,9 @@ func (r *Resolver) readResolutionInputs(ctx context.Context, rc ResolutionContex
 		return nil, err
 	}
 	inputs := &ResolutionInputs{Origins: origins, Definitions: make(map[string]*MCPServerDefinition, len(origins))}
+	if err := ApplyErrandMCPSelection(rc, inputs); err != nil {
+		return nil, err
+	}
 	for id := range origins {
 		d, err := r.catalog.GetMCPServerDefinition(ctx, rc.WorkspaceID, id)
 		if err != nil && !errors.Is(err, ErrMCPServerDefinitionNotFound) {

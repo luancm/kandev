@@ -1762,6 +1762,7 @@ type LaunchRequest struct {
 	// OnExecutionAllocated advances the restore checkpoint before launch
 	// side effects. It is runtime-only and never serialized with deferred work.
 	OnExecutionAllocated func(context.Context, string) error `json:"-"`
+	ErrandMCPSelection   *mcpconfig.SelectionSnapshot        `json:"-"`
 
 	TaskID                string
 	TaskScope             TaskLaunchScope

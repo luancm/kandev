@@ -18,6 +18,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const executorMCPPolicyMetadataKey = "executor_mcp_policy"
+
 // ResolveAgentProfile resolves an agent profile ID to profile information.
 // This is exposed for external callers (like the orchestrator executor) to get profile info.
 // The profile's model is guaranteed to be non-empty as it's validated at creation time.
@@ -97,14 +99,57 @@ func (m *Manager) resolveMcpServersForLaunch(ctx context.Context, req *LaunchReq
 	if req == nil {
 		return nil, nil
 	}
+	if req.Owner.Kind == ExecutionOwnerErrand && (m.mcpResolver == nil || req.WorkspaceID == "") {
+		return nil, errors.New("errand MCP selection resolver is unavailable")
+	}
 	if m.mcpResolver != nil && req.WorkspaceID != "" {
 		profileID := executionProfileID(req)
-		return m.resolveEffectiveMcpServers(ctx, mcpconfig.ResolutionContext{
+		resolution := mcpconfig.ResolutionContext{
 			WorkspaceID: req.WorkspaceID, RepositoryIDs: repositoryIDsFromLaunch(req),
 			ProfileID: profileID, TaskID: req.TaskID, SessionID: req.SessionID,
-		}, profileID, req.Metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
+		}
+		metadata := req.Metadata
+		if req.Owner.Kind == ExecutionOwnerErrand {
+			var err error
+			metadata, err = m.errandMCPPolicyMetadata(ctx, req.Metadata)
+			if err != nil {
+				return nil, err
+			}
+			resolution.TaskID = req.Owner.TaskID
+			resolution.Errand = &mcpconfig.ErrandMCPContribution{
+				ErrandID: req.Owner.ErrandID, WorkspaceID: req.Owner.WorkspaceID, TaskID: req.Owner.TaskID,
+			}
+			if req.ErrandMCPSelection != nil {
+				resolution.Errand.Snapshot = *req.ErrandMCPSelection
+			}
+		}
+		return m.resolveEffectiveMcpServers(ctx, resolution, profileID, metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
 	}
 	return m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
+}
+
+func (m *Manager) errandMCPPolicyMetadata(ctx context.Context, source map[string]interface{}) (map[string]interface{}, error) {
+	metadata := maps.Clone(source)
+	delete(metadata, executorMCPPolicyMetadataKey)
+	profileID := getMetadataString(source, MetadataKeyExecutorProfileID)
+	if profileID == "" {
+		return metadata, nil
+	}
+	if m.executorProfileReader == nil {
+		return nil, errors.New("errand executor profile reader is unavailable")
+	}
+	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("read errand executor MCP policy: %w", err)
+	}
+	executorID := getMetadataString(source, "executor_id")
+	if profile == nil || profile.ID != profileID || (executorID != "" && profile.ExecutorID != executorID) {
+		return nil, errors.New("errand executor MCP policy owner mismatch")
+	}
+	if profile.McpPolicy != "" {
+		metadata[executorMCPPolicyMetadataKey] = profile.McpPolicy
+	}
+	return metadata, nil
 }
 
 func (m *Manager) resolveEffectiveMcpServers(
@@ -170,7 +215,7 @@ func (m *Manager) applyExecutorMcpPolicy(profileID string, executorID string, me
 	if value, ok := metadata["executor_id"].(string); ok {
 		executorID = value
 	}
-	value, ok := metadata["executor_mcp_policy"]
+	value, ok := metadata[executorMCPPolicyMetadataKey]
 	if !ok {
 		return policy, executorID, nil
 	}

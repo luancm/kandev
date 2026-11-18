@@ -10,8 +10,50 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type ownedMCPResolutionRecorder struct {
+	received mcpconfig.ResolutionContext
+	policy   mcpconfig.Policy
+}
+
+func (r *ownedMCPResolutionRecorder) Resolve(_ context.Context, rc mcpconfig.ResolutionContext, policy mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error) {
+	r.received = rc
+	r.policy = policy
+	return &mcpconfig.EffectiveMCPResolution{}, nil
+}
+
+func TestOwnedErrandMCPResolutionUsesSavedSelection(t *testing.T) {
+	manager := newTestManager(t)
+	resolver := &ownedMCPResolutionRecorder{}
+	manager.mcpResolver = resolver
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "owning-task", WorkspaceID: "workspace",
+		ErrandID: "owned-errand", Generation: 1,
+	}
+	selection := &mcpconfig.SelectionSnapshot{DefinitionIDs: []string{"added"}, ExcludedDefinitionIDs: []string{"removed"}}
+	executorProfile := &models.ExecutorProfile{ID: "saved-profile", ExecutorID: "saved-executor", McpPolicy: `{"allow_stdio":false}`}
+	manager.SetExecutorProfileReader(&fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{executorProfile.ID: executorProfile}})
+	req := &LaunchRequest{
+		Owner: owner, WorkspaceID: owner.WorkspaceID, ErrandMCPSelection: selection, ExecutorType: string(models.ExecutorTypeLocal),
+		Metadata: map[string]interface{}{
+			"executor_id": executorProfile.ExecutorID, MetadataKeyExecutorProfileID: executorProfile.ID,
+			"executor_mcp_policy": `{"allow_stdio":true}`,
+		},
+	}
+	_, err := manager.resolveMcpServersForLaunch(t.Context(), req, &testAgent{id: "agent"})
+	require.NoError(t, err)
+	require.Equal(t, owner.TaskID, resolver.received.TaskID)
+	require.Empty(t, resolver.received.SessionID)
+	require.NotNil(t, resolver.received.Errand)
+	require.Equal(t, owner.ErrandID, resolver.received.Errand.ErrandID)
+	require.Equal(t, owner.WorkspaceID, resolver.received.Errand.WorkspaceID)
+	require.Equal(t, owner.TaskID, resolver.received.Errand.TaskID)
+	require.Equal(t, *selection, resolver.received.Errand.Snapshot)
+	require.False(t, resolver.policy.AllowStdio, "the saved executor profile supplies the MCP policy")
+}
 
 func TestSSHExecutorRequestUsesErrandOwnerForLaunchReceipt(t *testing.T) {
 	log := newTestRegistryLogger()

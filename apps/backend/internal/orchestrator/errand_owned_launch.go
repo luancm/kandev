@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/errands"
@@ -256,6 +258,10 @@ func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.Worksp
 	}
 	launch := runtimeapi.ErrandWorkspaceLaunch(info, environment)
 	launch.ExecutorConfig = executorConfig
+	launch.ErrandMCPSelection = &mcpconfig.SelectionSnapshot{
+		DefinitionIDs:         slices.Clone(req.MCPServerIDs),
+		ExcludedDefinitionIDs: slices.Clone(req.MCPExcludedServerIDs),
+	}
 	launch.CandidateExecutionID = uuid.NewString()
 	launch.StartAgent, launch.SuppressBootStatusMessage = true, true
 	launch.TurnID, launch.InitialDeliverySubmissionID = req.TurnID, req.SubmissionID

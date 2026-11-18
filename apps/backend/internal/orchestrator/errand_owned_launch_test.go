@@ -341,6 +341,8 @@ func (r ownedErrandLaunchFixtureRuntime) StartExecution(ctx context.Context, id 
 func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 	f := newErrandLaunchFixture(t)
 	req := f.request()
+	req.MCPServerIDs = []string{"saved-addition"}
+	req.MCPExcludedServerIDs = []string{"saved-exclusion"}
 	workspace := t.TempDir()
 	var execution *runtimeapi.Execution
 	started := false
@@ -356,6 +358,9 @@ func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 			require.True(t, ok)
 			require.Empty(t, launch.TaskID)
 			require.Empty(t, launch.SessionID)
+			require.NotNil(t, launch.ErrandMCPSelection)
+			require.Equal(t, req.MCPServerIDs, launch.ErrandMCPSelection.DefinitionIDs)
+			require.Equal(t, req.MCPExcludedServerIDs, launch.ErrandMCPSelection.ExcludedDefinitionIDs)
 			require.Empty(t, launch.PreviousExecutionID)
 			require.Empty(t, launch.ACPSessionID)
 			require.NotEqual(t, "parent-stream", launch.DeliveryStreamID)

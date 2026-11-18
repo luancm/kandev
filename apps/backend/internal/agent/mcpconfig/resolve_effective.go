@@ -28,6 +28,7 @@ type SelectionOrigin struct {
 // effective set itself has no scope precedence.
 type ResolutionContext struct {
 	Automation    *AutomationMCPContribution
+	Errand        *ErrandMCPContribution
 	WorkspaceID   string
 	RepositoryIDs []string
 	ProfileID     string

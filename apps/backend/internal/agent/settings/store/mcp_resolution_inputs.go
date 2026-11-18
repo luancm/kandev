@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -13,7 +14,6 @@ import (
 // ReadMCPResolutionInputs freezes catalog definitions and all selecting scopes
 // in one read transaction. No secret values or provider calls occur here.
 func (r *sqliteRepository) ReadMCPResolutionInputs(ctx context.Context, rc mcpconfig.ResolutionContext) (*mcpconfig.ResolutionInputs, error) {
-
 	tx, err := r.ro.BeginTxx(ctx, mcpResolutionReadOptions(r.ro.DriverName()))
 	if err != nil {
 		return nil, err
@@ -47,18 +47,51 @@ func (r *sqliteRepository) ReadMCPResolutionInputs(ctx context.Context, rc mcpco
 	if err := mcpconfig.AddAutomationMCPOrigins(rc, inputs.Origins); err != nil {
 		return nil, err
 	}
-	for id := range inputs.Origins {
-		d, err := scanMCPServerDefinition(tx.QueryRowxContext(ctx, tx.Rebind(`SELECT `+mcpDefinitionColumns+` FROM mcp_server_definitions WHERE workspace_id = ? AND id = ?`), rc.WorkspaceID, id))
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
-		}
-		inputs.Definitions[id] = d
+	if err := mcpconfig.ApplyErrandMCPSelection(rc, inputs); err != nil {
+		return nil, err
+	}
+	if err := readMCPResolutionDefinitions(ctx, tx, rc.WorkspaceID, inputs); err != nil {
+		return nil, err
 	}
 	if err := readMCPSessionResolutionInputs(ctx, tx, rc, inputs); err != nil {
 		return nil, err
 	}
 
 	return inputs, tx.Commit()
+}
+
+func readMCPResolutionDefinitions(ctx context.Context, tx *sqlx.Tx, workspaceID string, inputs *mcpconfig.ResolutionInputs) error {
+	ids := make([]string, 0, len(inputs.Origins))
+	for id := range inputs.Origins {
+		ids = append(ids, id)
+		inputs.Definitions[id] = nil
+	}
+	for batch := range slices.Chunk(ids, 500) {
+		if err := readMCPDefinitionBatch(ctx, tx, workspaceID, batch, inputs.Definitions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readMCPDefinitionBatch(ctx context.Context, tx *sqlx.Tx, workspaceID string, ids []string, definitions map[string]*mcpconfig.MCPServerDefinition) error {
+	query, args, err := sqlx.In(`SELECT `+mcpDefinitionColumns+` FROM mcp_server_definitions WHERE workspace_id = ? AND id IN (?)`, workspaceID, ids)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		definition, err := scanMCPServerDefinition(rows)
+		if err != nil {
+			return err
+		}
+		definitions[definition.ID] = definition
+	}
+	return rows.Err()
 }
 
 func readMCPSelectionIDsTx(ctx context.Context, tx *sqlx.Tx, origin mcpconfig.SelectionOrigin) ([]string, error) {

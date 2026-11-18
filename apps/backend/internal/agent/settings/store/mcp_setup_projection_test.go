@@ -3,12 +3,60 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/jmoiron/sqlx"
 	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
+
+func TestErrandMCPResolutionUsesSavedAdditionsAndExclusions(t *testing.T) {
+	assertErrandMCPResolution(t, newTestRepo(t).(*sqliteRepository))
+}
+
+func TestPostgresErrandMCPResolutionUsesSavedAdditionsAndExclusions(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := newSQLiteRepositoryWithDB(database, database, nil)
+	require.NoError(t, err)
+	assertErrandMCPResolution(t, repo)
+}
+
+func assertErrandMCPResolution(t *testing.T, repo *sqliteRepository) {
+	t.Helper()
+	ctx := t.Context()
+	added := testMCPDefinition()
+	excluded := testMCPDefinition()
+	excluded.ID, excluded.RuntimeName, excluded.NormalizedRuntimeName = "excluded", "excluded", "excluded"
+	for _, definition := range []*mcpconfig.MCPServerDefinition{added, excluded} {
+		definition.ExecutionMode = mcpconfig.ExecutionModeExistingExecutable
+		definition.Transport = mcpconfig.ServerTypeStdio
+		definition.Configuration = mcpconfig.MCPServerConfiguration{Command: "test-mcp"}
+		definition.SecretBindings = nil
+	}
+	require.NoError(t, repo.CreateMCPServerDefinition(ctx, added))
+	require.NoError(t, repo.CreateMCPServerDefinition(ctx, excluded))
+	require.NoError(t, repo.ReplaceMCPSelections(ctx, mcpconfig.SelectionScopeTask, added.WorkspaceID, "task", []string{excluded.ID}))
+	selection := &mcpconfig.ErrandMCPContribution{
+		ErrandID: "errand", WorkspaceID: added.WorkspaceID, TaskID: "task",
+		Snapshot: mcpconfig.SelectionSnapshot{DefinitionIDs: []string{added.ID}, ExcludedDefinitionIDs: []string{excluded.ID}},
+	}
+	resolver := mcpconfig.NewResolver(repo, repo)
+	rc := mcpconfig.ResolutionContext{WorkspaceID: added.WorkspaceID, TaskID: "task", Errand: selection}
+	result, err := resolver.Resolve(ctx, rc, mcpconfig.Policy{AllowStdio: true})
+	require.NoError(t, err)
+	require.Len(t, result.Servers, 1)
+	require.Equal(t, added.ID, result.Servers[0].DefinitionID)
+	require.Equal(t, []mcpconfig.SelectionOrigin{{Scope: mcpconfig.SelectionScope("errand"), WorkspaceID: added.WorkspaceID, OwnerID: selection.ErrandID}}, result.Servers[0].Origins)
+	require.Len(t, result.Decisions, 1)
+	require.Equal(t, excluded.ID, result.Decisions[0].DefinitionID)
+	require.Equal(t, "session_excluded", result.Decisions[0].ReasonCode)
+
+	selection.WorkspaceID = "another-workspace"
+	_, err = resolver.Resolve(ctx, rc, mcpconfig.Policy{AllowStdio: true})
+	require.ErrorIs(t, err, mcpconfig.ErrMCPInvalidSelection)
+}
 
 func TestMCPSetupProjectionUsesUnionAndPreservesUnavailableState(t *testing.T) {
 	repo := newTestRepo(t).(*sqliteRepository)
