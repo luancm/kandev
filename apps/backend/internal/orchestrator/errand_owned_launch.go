@@ -29,11 +29,11 @@ type ownedErrandLaunchStore interface {
 }
 
 type initialErrandAdmission struct {
-	service   *Service
-	request   errands.LaunchRequest
-	owner     runtimeapi.ExecutionOwner
-	store     ownedErrandLaunchStore
-	container *ownedErrandDockerAttachment
+	service    *Service
+	request    errands.LaunchRequest
+	owner      runtimeapi.ExecutionOwner
+	store      ownedErrandLaunchStore
+	attachment *ownedErrandWorkspaceAttachment
 }
 
 func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
@@ -50,7 +50,7 @@ func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtim
 	if current.TaskID != owner.TaskID || current.Generation != owner.Generation {
 		return models.ErrInvalidErrand
 	}
-	return a.verifyContainerWorkspace(ctx)
+	return a.verifyWorkspaceAttachment(ctx)
 }
 
 func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo) (errands.LaunchResult, error) {
@@ -83,7 +83,7 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 		}
 		defer a.svc.sessionCeiling.release(decision.reservationKey)
 	}
-	container, err := a.ownedErrandDockerWorkspace(ctx, info)
+	attachment, err := a.loadOwnedErrandWorkspaceAttachment(ctx, info)
 	if err != nil {
 		return blocked, err
 	}
@@ -94,8 +94,8 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 	if err != nil {
 		return blocked, fmt.Errorf("reserve errand generation: %w", err)
 	}
-	launch := ownedErrandLaunchRequest(req, info, container)
-	if err := a.startOwnedErrandExecution(ctx, store, req, launch, container, descriptor.Generation); err != nil {
+	launch := ownedErrandLaunchRequest(req, info, attachment)
+	if err := a.startOwnedErrandExecution(ctx, store, req, launch, attachment, descriptor.Generation); err != nil {
 		return blocked, err
 	}
 	return errands.LaunchResult{
@@ -195,13 +195,13 @@ func prepareOwnedErrandFirstTurn(ctx context.Context, store ownedErrandLaunchSto
 
 func (a *ErrandAdapter) startOwnedErrandExecution(
 	ctx context.Context, store ownedErrandLaunchStore, req errands.LaunchRequest,
-	launch *runtimeapi.LaunchRequest, container *ownedErrandDockerAttachment, generation uint64,
+	launch *runtimeapi.LaunchRequest, attachment *ownedErrandWorkspaceAttachment, generation uint64,
 ) error {
 	owner := runtimeapi.ExecutionOwner{
 		Kind: runtimeapi.ExecutionOwnerErrand, TaskID: req.TaskID, WorkspaceID: launch.WorkspaceID,
 		ErrandID: req.ErrandID, Generation: generation, AgentProfileID: req.AgentProfileID,
 	}
-	admission := initialErrandAdmission{service: a.svc, request: req, owner: owner, store: store, container: container}
+	admission := initialErrandAdmission{service: a.svc, request: req, owner: owner, store: store, attachment: attachment}
 	launch.OnExecutionAllocated = func(ctx context.Context, executionID string) error {
 		if executionID != launch.CandidateExecutionID {
 			return models.ErrInvalidErrand
@@ -241,11 +241,11 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 	return nil
 }
 
-func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, container *ownedErrandDockerAttachment) *runtimeapi.LaunchRequest {
+func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, attachment *ownedErrandWorkspaceAttachment) *runtimeapi.LaunchRequest {
 	var environment *models.TaskEnvironment
 	var executorConfig map[string]string
-	if container != nil {
-		environment, executorConfig = container.environment, maps.Clone(container.executorConfig)
+	if attachment != nil {
+		environment, executorConfig = attachment.environment, maps.Clone(attachment.executorConfig)
 	}
 	launch := runtimeapi.ErrandWorkspaceLaunch(info, environment)
 	launch.ExecutorConfig = executorConfig

@@ -20,7 +20,7 @@ func SSHWorkspaceExecutorConfig(config map[string]string) map[string]string {
 
 // ErrandWorkspaceLaunch projects the workspace attachment independently of
 // the parent's execution and conversation.
-func ErrandWorkspaceLaunch(info *WorkspaceInfo, container *models.TaskEnvironment) *LaunchRequest {
+func ErrandWorkspaceLaunch(info *WorkspaceInfo, environment *models.TaskEnvironment) *LaunchRequest {
 	request := &LaunchRequest{
 		WorkspaceID: info.WorkspaceID, WorkspacePath: info.WorkspacePath, WorkspaceLayout: info.WorkspaceLayout,
 		WorkspaceFolders: slices.Clone(info.WorkspaceFolders), DetachedWorkspaceRoots: slices.Clone(info.DetachedWorkspaceRoots),
@@ -29,13 +29,18 @@ func ErrandWorkspaceLaunch(info *WorkspaceInfo, container *models.TaskEnvironmen
 		Metadata: map[string]any{lifecycle.MetadataKeyExecutorProfileID: info.ExecutorProfileID},
 	}
 	executorID, _ := info.Metadata["executor_id"].(string)
-	if container != nil {
-		request.WorkspacePath = container.WorkspacePath
-		executorID = container.ExecutorID
-		request.Metadata[lifecycle.MetadataKeyExecutorProfileID] = container.ExecutorProfileID
-		request.Metadata[lifecycle.MetadataKeyContainerID] = container.ContainerID
-		request.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret] = container.ContainerControlAuthTokenSecretID
-		request.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = container.ContainerBootstrapNonceSecretID
+	if environment != nil {
+		request.WorkspacePath = environment.WorkspacePath
+		executorID = environment.ExecutorID
+		request.Metadata[lifecycle.MetadataKeyExecutorProfileID] = environment.ExecutorProfileID
+		switch models.ExecutorType(environment.ExecutorType) {
+		case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker:
+			request.Metadata[lifecycle.MetadataKeyContainerID] = environment.ContainerID
+			request.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret] = environment.ContainerControlAuthTokenSecretID
+			request.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = environment.ContainerBootstrapNonceSecretID
+		case models.ExecutorTypeSSH:
+			request.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir] = environment.WorkspacePath
+		}
 	}
 	if executorID != "" {
 		request.Metadata["executor_id"] = executorID

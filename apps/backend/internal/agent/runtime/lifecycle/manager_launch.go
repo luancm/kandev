@@ -1503,7 +1503,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		IsPassthrough:                    reqWithWorktree.IsPassthrough,
 		CausingRunID:                     reqWithWorktree.CausingRunID,
 		ExecutorType:                     reqWithWorktree.ExecutorType,
-		TaskID:                           reqWithWorktree.TaskID,
+		TaskID:                           launchProviderTaskID(reqWithWorktree),
 		TaskTitle:                        reqWithWorktree.TaskTitle,
 		SessionID:                        launchInventorySessionID(reqWithWorktree),
 		TaskEnvironmentID:                reqWithWorktree.TaskEnvironmentID,

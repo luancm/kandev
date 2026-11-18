@@ -13,6 +13,31 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestSSHExecutorRequestUsesErrandOwnerForLaunchReceipt(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameSSH}}
+	registry.Register(backend)
+	manager := &Manager{executorRegistry: registry, executorFallbackPolicy: ExecutorFallbackDeny, logger: log}
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "owning-task", WorkspaceID: "workspace",
+		ErrandID: "owned-errand", Generation: 1,
+	}
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeSSH), EnvironmentFinalized: true,
+		WorkspaceReuseRequired: true, Owner: owner,
+	}
+	providerRequest, _, _, err := manager.launchBuildExecutorRequest(
+		t.Context(), "candidate", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+	)
+	require.NoError(t, err)
+	require.Same(t, backend.lastRequest, providerRequest)
+	require.Equal(t, owner.TaskID, providerRequest.TaskID, "the SSH receipt requires the explicit owner task")
+	require.Equal(t, models.ErrandExecutionIdentity(owner.ErrandID), providerRequest.SessionID)
+	require.Empty(t, req.TaskID)
+	require.Empty(t, req.SessionID)
+}
+
 func validTestRemoteContribution(number int, sourcePath string) models.RemoteContribution {
 	return models.RemoteContribution{
 		Version:      models.RemoteContributionVersion,

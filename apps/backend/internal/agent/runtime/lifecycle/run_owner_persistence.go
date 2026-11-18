@@ -35,6 +35,14 @@ func launchInventorySessionID(req *LaunchRequest) string {
 	return req.SessionID
 }
 
+// SSH binds the controller receipt to the owning task and transport identity.
+func launchProviderTaskID(req *LaunchRequest) string {
+	if req.Owner.Kind == ExecutionOwnerErrand && req.ExecutorType == string(models.ExecutorTypeSSH) {
+		return req.Owner.TaskID
+	}
+	return req.TaskID
+}
+
 // StopRunOwnerForRecovery proves the predecessor has stopped using its durable
 // runtime inventory. A missing in-memory execution is never liveness evidence.
 func (m *Manager) StopRunOwnerForRecovery(ctx context.Context, owner ExecutionOwner) error {
