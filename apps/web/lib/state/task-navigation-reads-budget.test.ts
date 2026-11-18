@@ -12,7 +12,7 @@ import { identity, temporaryNetworkFailure } from "./task-navigation-reads.test-
 
 const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
-  listTaskSessions: vi.fn(),
+  listOrdinaryTaskSessions: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => apiMocks);
@@ -31,15 +31,17 @@ describe("task navigation attempt cancellation", () => {
       expect(options.init?.signal?.aborted).toBe(false);
       return Promise.reject(new ApiError("busy", 503, { code: "persistence_unavailable" }));
     });
-    apiMocks.listTaskSessions.mockImplementation((_id: string, options: { init?: RequestInit }) => {
-      const signal = options.init?.signal as AbortSignal;
-      sessionSignals.push(signal);
-      return new Promise((_, reject) => {
-        signal.addEventListener("abort", () =>
-          reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
-        );
-      });
-    });
+    apiMocks.listOrdinaryTaskSessions.mockImplementation(
+      (_id: string, options: { init?: RequestInit }) => {
+        const signal = options.init?.signal as AbortSignal;
+        sessionSignals.push(signal);
+        return new Promise((_, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        });
+      },
+    );
     const store = createAppStore();
     const generation = beginTaskNavigation(store, {}, "/t/task-a").generation;
     const result = readTaskNavigationIdentity(store, "task-a", { generation });
@@ -73,14 +75,16 @@ describe("task navigation attempt cancellation fallback", () => {
         );
       });
     });
-    apiMocks.listTaskSessions.mockImplementation((_id: string, options: { init?: RequestInit }) => {
-      sessionRequestSignal = options.init?.signal ?? undefined;
-      return new Promise((_, reject) => {
-        sessionRequestSignal?.addEventListener("abort", () =>
-          reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
-        );
-      });
-    });
+    apiMocks.listOrdinaryTaskSessions.mockImplementation(
+      (_id: string, options: { init?: RequestInit }) => {
+        sessionRequestSignal = options.init?.signal ?? undefined;
+        return new Promise((_, reject) => {
+          sessionRequestSignal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        });
+      },
+    );
     const store = createAppStore();
     const owner = {};
     const context = beginTaskNavigation(store, owner, "/t/task-a");

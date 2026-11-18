@@ -20,6 +20,7 @@ import type {
   MessageTurnCoverage,
 } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
+import type { ErrandInspection } from "@/lib/types/errands";
 import { taskToState, workflowStepToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
@@ -45,7 +46,11 @@ import {
 } from "@/hooks/journey-metadata-resources";
 
 import { hydrateSessionTerminals } from "@/lib/ssr/session-terminal-hydration";
-import { matchingActiveSession, resolveTaskSessionId } from "@/lib/ssr/task-session-route-identity";
+import {
+  matchingActiveSession,
+  requestedOwnedErrand,
+  resolveTaskSessionId,
+} from "@/lib/ssr/task-session-route-identity";
 
 export { OPTIONAL_HYDRATION_TIMEOUT_MS } from "@/lib/ssr/optional-hydration";
 
@@ -295,6 +300,7 @@ function buildPrepareProgressState(allSessions: TaskSession[]) {
 export type FetchedSessionData = {
   task: Task;
   sessionId: string | null;
+  ownedErrand?: ErrandInspection;
   initialState: ReturnType<typeof taskToState>;
   initialTerminals: Terminal[];
   sidebarTaskPage?: SidebarTaskPageResponse;
@@ -310,14 +316,26 @@ export function buildTaskNavigationShellData(
   const allSessions = (allSessionsResponse.sessions ?? []).filter(
     (session) => session.task_id === task.id,
   );
-  const sessionId =
-    resolveTaskSessionId(task, sessions, requestedSessionId, identity.selectedErrandInspection) ??
-    (identity.sessionListUnavailable && !requestedSessionId
-      ? (task.primary_session_id ?? null)
-      : null);
+  const ownedErrand = requestedOwnedErrand(
+    task.id,
+    requestedSessionId,
+    identity.selectedErrandInspection,
+  );
+  const sessionId = ownedErrand
+    ? ownedErrandParentSession(ownedErrand)
+    : (resolveTaskSessionId(
+        task,
+        sessions,
+        requestedSessionId,
+        identity.selectedErrandInspection,
+      ) ??
+      (identity.sessionListUnavailable && !requestedSessionId
+        ? (task.primary_session_id ?? null)
+        : null));
   return {
     task,
     sessionId,
+    ...(ownedErrand ? { ownedErrand } : {}),
     initialState: buildSessionPageState({
       task,
       sessionId,
@@ -327,6 +345,10 @@ export function buildTaskNavigationShellData(
     }),
     initialTerminals: [],
   };
+}
+
+function ownedErrandParentSession(inspection: ErrandInspection): string | null {
+  return inspection.parent.available ? (inspection.parent.id ?? null) : null;
 }
 
 /** Loads full session and optional convenience state after task identity is visible. */
@@ -341,12 +363,19 @@ export async function fetchTaskNavigationEnrichment(
         ? fetchSharedTaskSessions(options.store, task.id)
         : listOrdinaryTaskSessions(task.id, { cache: "no-store" }))
     : identity.allSessionsResponse;
-  const sessionId = resolveTaskSessionId(
-    task,
-    allSessionsResponse.sessions ?? [],
+  const ownedErrand = requestedOwnedErrand(
+    task.id,
     requestedSessionId,
     identity.selectedErrandInspection,
   );
+  const sessionId = ownedErrand
+    ? ownedErrandParentSession(ownedErrand)
+    : resolveTaskSessionId(
+        task,
+        allSessionsResponse.sessions ?? [],
+        requestedSessionId,
+        identity.selectedErrandInspection,
+      );
   const loadAgentList = options.store
     ? () => getAgentListResourceScope(options.store!).ensure()
     : () => listAgents({ cache: "no-store" });
@@ -362,23 +391,38 @@ export async function fetchTaskNavigationEnrichment(
     data = await fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
       activeSessionResponse,
       sessionEnvironmentId: identity.selectedErrandInspection?.parent.task_environment_id,
-      expectedErrandParentSessionId: identity.selectedErrandInspection?.errand.parent_session_id,
+      expectedErrandParentSessionId: ownedErrand
+        ? undefined
+        : identity.selectedErrandInspection?.errand.parent_session_id,
       optionalHydration,
       loadAgentList,
       store: options.store,
     });
   }
-  // Only recovery of an unavailable identity list owns new selection/membership.
+  return mergeTaskNavigationEnrichment(
+    data,
+    ownedErrand,
+    sessionId,
+    identity.sessionListUnavailable,
+  );
+}
+
+// Only recovery of an unavailable identity list owns new selection and membership.
+function mergeTaskNavigationEnrichment(
+  data: FetchedSessionData,
+  ownedErrand: ErrandInspection | undefined,
+  sessionId: string | null,
+  sessionListUnavailable?: boolean,
+): FetchedSessionData {
   return {
     ...data,
+    ...(ownedErrand ? { ownedErrand } : {}),
     initialState: {
       ...data.initialState,
-      tasks: identity.sessionListUnavailable ? data.initialState.tasks : undefined,
+      tasks: sessionListUnavailable ? data.initialState.tasks : undefined,
       taskSessions:
-        !sessionId && !identity.sessionListUnavailable ? undefined : data.initialState.taskSessions,
-      taskSessionsByTask: identity.sessionListUnavailable
-        ? data.initialState.taskSessionsByTask
-        : undefined,
+        !sessionId && !sessionListUnavailable ? undefined : data.initialState.taskSessions,
+      taskSessionsByTask: sessionListUnavailable ? data.initialState.taskSessionsByTask : undefined,
     },
   };
 }

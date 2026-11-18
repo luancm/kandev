@@ -1,12 +1,31 @@
-import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
-import { errandParentSessionId } from "@/lib/task-conversation-navigation";
+import {
+  errandParentSessionId,
+  replaceTaskConversationUrl,
+} from "@/lib/task-conversation-navigation";
 import type { ErrandInspection } from "@/lib/types/errands";
 import { OwnedErrandConversation } from "./chat/errands/owned-errand-conversation";
-import { OwnedErrandNavigationContext } from "./chat/errands/owned-errand-navigation-context";
+import {
+  LinkedOwnedErrandContext,
+  OwnedErrandNavigationContext,
+} from "./chat/errands/owned-errand-navigation-context";
 
 type ConversationRenderer = (sessionId: string | null, inactive: boolean) => ReactNode;
+
+function errandMatchesParent(
+  inspection: ErrandInspection,
+  taskId: string | null,
+  sessionId: string | null,
+) {
+  return (
+    inspection.scope.task_id === taskId &&
+    inspection.errand.parent_session_id === sessionId &&
+    inspection.parent.available &&
+    inspection.parent.id === sessionId
+  );
+}
 
 /** Resolves the shared parent owner for each host's complete conversation region. */
 export function TaskConversationPanel({
@@ -21,6 +40,8 @@ export function TaskConversationPanel({
   const store = useAppStoreApi();
   const ownerId = `errand-host-${useId()}`;
   const readScope = useAppStore(stateReadScopeIdentity);
+  const linked = useContext(LinkedOwnedErrandContext);
+  const [dismissedLink, setDismissedLink] = useState<ErrandInspection | null>(null);
   const [selection, setSelection] = useState<{
     taskId: string;
     parentId: string;
@@ -35,19 +56,14 @@ export function TaskConversationPanel({
       : null;
   if (selection && !active) setSelection(null);
   const open = useCallback(
-    ({ scope, errand, parent }: ErrandInspection) => {
-      if (
-        !taskId ||
-        !sessionId ||
-        scope.task_id !== taskId ||
-        errand.parent_session_id !== sessionId ||
-        !parent.available ||
-        parent.id !== sessionId
-      )
+    (inspection: ErrandInspection) => {
+      if (!taskId || !sessionId || !errandMatchesParent(inspection, taskId, sessionId))
         return false;
+      const errand = inspection.errand;
       const state = store.getState();
       state.releaseErrandInspection(ownerId);
       state.retainErrandDetail(ownerId, errand.errand_id);
+      replaceTaskConversationUrl(taskId, errand.errand_id);
       setSelection({ taskId, parentId: sessionId, errandId: errand.errand_id, readScope });
       return true;
     },
@@ -57,6 +73,16 @@ export function TaskConversationPanel({
     if (!active) store.getState().releaseErrandInspection(ownerId);
   }, [active, ownerId, store]);
   useEffect(() => () => store.getState().releaseErrandInspection(ownerId), [ownerId, store]);
+  const linkedHere =
+    linked && linked !== dismissedLink && errandMatchesParent(linked, taskId, sessionId)
+      ? linked
+      : null;
+  const errandId = active?.errandId ?? linkedHere?.errand.errand_id;
+  const close = () => {
+    setSelection(null);
+    if (linkedHere) setDismissedLink(linkedHere);
+    if (taskId && sessionId) replaceTaskConversationUrl(taskId, sessionId);
+  };
   const parentSessionId = useAppStore((state) =>
     taskId
       ? errandParentSessionId(
@@ -73,12 +99,13 @@ export function TaskConversationPanel({
         sessionId={sessionId}
         parentSessionId={parentSessionId}
         ownedConversation={
-          active && (
+          taskId &&
+          errandId && (
             <OwnedErrandConversation
-              key={active.errandId}
-              taskId={active.taskId}
-              errandId={active.errandId}
-              onClose={() => setSelection(null)}
+              key={errandId}
+              taskId={taskId}
+              errandId={errandId}
+              onClose={close}
             />
           )
         }

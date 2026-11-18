@@ -1,7 +1,18 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { TaskConversationView } from "./task-conversation-view";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import type { ErrandInspection } from "@/lib/types/errands";
+import { LinkedOwnedErrandContext } from "./chat/errands/owned-errand-navigation-context";
+import { TaskConversationPanel, TaskConversationView } from "./task-conversation-view";
+
+vi.mock("./chat/errands/owned-errand-conversation", () => ({
+  OwnedErrandConversation: ({ errandId, onClose }: { errandId: string; onClose?: () => void }) => (
+    <button type="button" data-testid={`owned-${errandId}`} onClick={onClose}>
+      Back
+    </button>
+  ),
+}));
 
 afterEach(cleanup);
 const PARENT_ID = "parent";
@@ -34,6 +45,35 @@ function View({
 }
 
 describe("temporary conversation view retention", () => {
+  it("uses an authorized owned link only in its parent's panel and retains the parent on Back", () => {
+    const linked = {
+      scope: { task_id: "task", child_session_id: CHILD_ID },
+      errand: { task_id: "task", errand_id: CHILD_ID, parent_session_id: PARENT_ID },
+      child_session_exists: false,
+      owns_conversation: true,
+      parent: { available: true, id: PARENT_ID },
+    } as ErrandInspection;
+    render(
+      <StateProvider>
+        <LinkedOwnedErrandContext.Provider value={linked}>
+          <TaskConversationPanel taskId="task" sessionId="sibling">
+            {(id, inactive) => <Conversation id={id} inactive={inactive} />}
+          </TaskConversationPanel>
+          <TaskConversationPanel taskId="task" sessionId={PARENT_ID}>
+            {(id, inactive) => <Conversation id={id} inactive={inactive} />}
+          </TaskConversationPanel>
+        </LinkedOwnedErrandContext.Provider>
+      </StateProvider>,
+    );
+    const parent = screen.getByTestId(PARENT_ID);
+    expect(parent.dataset.inactive).toBe("true");
+    expect(screen.getByTestId("sibling").dataset.inactive).toBe("false");
+    expect(screen.queryByTestId(CHILD_ID)).toBeNull();
+    fireEvent.click(screen.getByTestId(`owned-${CHILD_ID}`));
+    expect(screen.queryByTestId(`owned-${CHILD_ID}`)).toBeNull();
+    expect(screen.getByTestId(PARENT_ID)).toBe(parent);
+    expect(parent.dataset.inactive).toBe("false");
+  });
   it("retains the parent's element and local state through child Open and Back", () => {
     const view = render(<View sessionId={PARENT_ID} />);
     const parent = screen.getByTestId(PARENT_ID);

@@ -26,42 +26,42 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function makeStore() {
+  return createAppStore({
+    workspaces: { activeId: "workspace", items: [] },
+    tasks: { activeTaskId: ACTIVE_TASK_ID },
+    kanban: {
+      workflowId: "workflow",
+      tasks: [
+        {
+          id: ACTIVE_TASK_ID,
+          workspaceId: "workspace",
+          workflowId: "workflow",
+          workflowStepId: "in-progress",
+          updatedAt: "2026-10-15T10:00:00Z",
+          title: "Original task",
+        },
+      ],
+    },
+  } as never);
+}
+
+function refreshedTask() {
+  return {
+    id: ACTIVE_TASK_ID,
+    workspace_id: "workspace",
+    workflow_id: "workflow",
+    workflow_step_id: "review",
+    updated_at: "2026-10-15T10:01:00Z",
+    title: "Refreshed task",
+  } as TaskNavigationIdentity["task"];
+}
+
 describe("task navigation canonical overview refresh", () => {
   afterEach(() => {
     apiMocks.fetchTask.mockReset();
     apiMocks.listOrdinaryTaskSessions.mockReset();
   });
-
-  function makeStore() {
-    return createAppStore({
-      workspaces: { activeId: "workspace", items: [] },
-      tasks: { activeTaskId: ACTIVE_TASK_ID },
-      kanban: {
-        workflowId: "workflow",
-        tasks: [
-          {
-            id: ACTIVE_TASK_ID,
-            workspaceId: "workspace",
-            workflowId: "workflow",
-            workflowStepId: "in-progress",
-            updatedAt: "2026-10-15T10:00:00Z",
-            title: "Original task",
-          },
-        ],
-      },
-    } as never);
-  }
-
-  function refreshedTask() {
-    return {
-      id: ACTIVE_TASK_ID,
-      workspace_id: "workspace",
-      workflow_id: "workflow",
-      workflow_step_id: "review",
-      updated_at: "2026-10-15T10:01:00Z",
-      title: "Refreshed task",
-    } as TaskNavigationIdentity["task"];
-  }
 
   it("repairs shared placement after a move missed before websocket connection", async () => {
     const store = makeStore();
@@ -76,6 +76,22 @@ describe("task navigation canonical overview refresh", () => {
     });
     expect(store.getState().kanban.tasks[0].workflowStepId).toBe("review");
     expect(store.getState().taskOverview.reads).toEqual({});
+  });
+
+  it("retries session membership when the first websocket connection replaces its scope", async () => {
+    const store = makeStore();
+    const stale = deferred<TaskNavigationIdentity["allSessionsResponse"]>();
+    const current = { sessions: [{ id: "current-parent", task_id: ACTIVE_TASK_ID }], total: 1 };
+    apiMocks.fetchTask.mockResolvedValue(refreshedTask());
+    apiMocks.listOrdinaryTaskSessions.mockReturnValueOnce(stale.promise).mockResolvedValue(current);
+    const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+    await vi.waitFor(() => expect(apiMocks.listOrdinaryTaskSessions).toHaveBeenCalledOnce());
+    store.getState().setConnectionStatus("connected");
+    stale.resolve({ sessions: [], total: 0 });
+
+    await expect(read).resolves.toMatchObject({ allSessionsResponse: current });
+    expect(apiMocks.fetchTask).toHaveBeenCalledOnce();
+    expect(apiMocks.listOrdinaryTaskSessions).toHaveBeenCalledTimes(2);
   });
 
   it("preserves a live placement patch while accepting other refreshed fields", async () => {

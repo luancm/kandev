@@ -16,6 +16,59 @@ import {
   waitNewParentTurnSettled,
 } from "./errands";
 
+export async function exerciseOwnedErrandDeepLink({
+  page,
+  api,
+  seed,
+  backend,
+  phone,
+}: {
+  page: Page;
+  api: ApiClient;
+  seed: SeedData;
+  backend: BackendContext;
+  phone: boolean;
+}) {
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    const { taskId, parentId, errands, gates } = await startErrands(api, seed, backend, {
+      count: 1,
+    });
+    const errandId = errands[0].errand_id;
+    const previousTurns = (await api.listSessionTurns(parentId)).turns.map(({ id }) => id);
+    await gates[0].release();
+    await waitDelivered(api, taskId, [errandId]);
+    await waitNewParentTurnSettled(api, parentId, previousTurns);
+
+    const socket = watchWs(page);
+    const inspected = socket.waitForResponse("errand.inspect", {
+      requestWhere: (payload) =>
+        payload.task_id === taskId && payload.child_session_id === errandId,
+    });
+    await page.goto(`/t/${taskId}?sessionId=${encodeURIComponent(errandId)}`);
+    expect(await inspected).toMatchObject({ type: "response" });
+    const conversation = page.getByTestId("errand-conversation");
+    await expect(conversation).toHaveAttribute("data-errand-id", errandId);
+    await expect(conversation.getByTestId("errand-header")).toHaveAttribute(
+      "data-layout",
+      phone ? "phone" : "desktop",
+    );
+    await expect(
+      conversation.getByText(/^(?:Queue blocking turn started\s*)?ERRAND_RESULT_1$/),
+    ).toBeVisible();
+    await expect(
+      page.locator(`[data-testid="session-chat"][data-session-id="${errandId}"]`),
+    ).toHaveCount(0);
+    if (phone) await expectNoHorizontalOverflow(page);
+
+    await returnToErrandParent(conversation, parentChat(page, parentId), phone);
+    expect(new URL(page.url()).searchParams.get("sessionId")).toBe(parentId);
+    expect((await api.listTaskSessions(taskId)).sessions.map(({ id }) => id)).toEqual([parentId]);
+  } finally {
+    await restore();
+  }
+}
+
 export async function exerciseOwnedErrandView({
   page,
   api,

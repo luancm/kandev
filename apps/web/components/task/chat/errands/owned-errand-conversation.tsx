@@ -21,7 +21,7 @@ export function OwnedErrandConversation({
 }: {
   taskId: string;
   errandId: string;
-  onClose: () => void;
+  onClose?: () => void;
 }) {
   const readScope = useAppStore(stateReadScopeIdentity);
   const connected = useAppStore((state) => state.connection.status === "connected");

@@ -2,8 +2,19 @@ import { test } from "../../fixtures/test-base";
 import {
   exerciseOwnedErrandAutomaticPermission,
   exerciseOwnedErrandContinuation,
+  exerciseOwnedErrandDeepLink,
   exerciseOwnedErrandView,
 } from "../../helpers/owned-errand";
+
+test("desktop opens a finished owned Errand from a direct link", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandDeepLink({ page, api, seed, backend, phone: false });
+});
 
 test("desktop opens an owned Errand and returns to its parent", async ({
   testPage: page,

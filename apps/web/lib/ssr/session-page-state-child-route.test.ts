@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { Task, TaskSession } from "@/lib/types/http";
-import { buildTaskNavigationShellData } from "./session-page-state";
+import { buildTaskNavigationShellData, fetchTaskNavigationEnrichment } from "./session-page-state";
 import { assertRequestedSession } from "@/src/task-session-admission";
 import { createAppStore } from "@/lib/state/store";
 
@@ -38,6 +38,64 @@ const task = {
 } as Task;
 
 beforeEach(() => vi.resetAllMocks());
+
+it("keeps an owned Errand deep link on its ordinary parent through hydration", async () => {
+  const parent = {
+    id: "session-parent",
+    task_id: task.id,
+    state: "COMPLETED",
+    task_environment_id: "environment-1",
+    started_at: task.created_at,
+    updated_at: task.updated_at,
+  } as TaskSession;
+  const errandId = "owned-errand";
+  const identity = { task, allSessionsResponse: { sessions: [parent], total: 1 } };
+  const store = createAppStore();
+  const inspection = {
+    scope: { task_id: task.id, child_session_id: errandId },
+    errand: { task_id: task.id, errand_id: errandId, parent_session_id: parent.id },
+    child_session_exists: false,
+    owns_conversation: true,
+    parent: { available: true, id: parent.id, task_environment_id: parent.task_environment_id },
+  };
+  mocks.inspectErrand.mockResolvedValue(inspection);
+  const admission = await assertRequestedSession(store, identity, task.id, errandId);
+  expect(admission?.retain("route")).toBe(true);
+  const route = { ...identity, selectedErrandInspection: admission!.inspection };
+  const shell = buildTaskNavigationShellData(route, errandId);
+
+  expect(shell.sessionId).toBe(parent.id);
+  expect(shell.ownedErrand).toEqual(inspection);
+  expect(shell.initialState.tasks?.activeSessionId).toBe(parent.id);
+  expect(Object.keys(shell.initialState.taskSessions?.items ?? {})).toEqual([parent.id]);
+
+  mocks.fetchTaskSession.mockResolvedValue({ session: parent });
+  mocks.listTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false });
+  mocks.listAgents.mockResolvedValue({ agents: [] });
+  const enriched = await fetchTaskNavigationEnrichment(route, errandId);
+  expect(enriched.ownedErrand).toEqual(inspection);
+  expect(mocks.fetchTaskSession).toHaveBeenCalledExactlyOnceWith(parent.id, { cache: "no-store" });
+});
+
+it("keeps an owned retained transcript addressable when the parent is unavailable", async () => {
+  const errandId = "retained-errand";
+  const identity = { task, allSessionsResponse: { sessions: [], total: 0 } };
+  const inspection = {
+    scope: { task_id: task.id, child_session_id: errandId },
+    errand: { task_id: task.id, errand_id: errandId, parent_session_id: "missing" },
+    child_session_exists: false,
+    owns_conversation: true,
+    parent: { available: false },
+  };
+  mocks.inspectErrand.mockResolvedValue(inspection);
+  const admission = await assertRequestedSession(createAppStore(), identity, task.id, errandId);
+  const route = { ...identity, selectedErrandInspection: admission!.inspection };
+  const shell = buildTaskNavigationShellData(route, errandId);
+
+  expect(shell.sessionId).toBeNull();
+  expect(shell.ownedErrand).toEqual(inspection);
+  expect(mocks.fetchTaskSession).not.toHaveBeenCalled();
+});
 
 it("keeps a directly requested child selected outside ordinary membership", async () => {
   const parent = {

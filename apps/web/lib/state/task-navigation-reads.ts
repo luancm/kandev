@@ -453,13 +453,21 @@ async function fetchTaskNavigationIdentity(
   const overviewReadId = store.getState().beginTaskOverviewRead();
   try {
     const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
-    const release = sessionReads.retain(taskId);
-    const sessionList = raceAbort(
-      sessionReads.read(taskId, (readSignal) =>
-        listOrdinaryTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
-      ),
-      signal,
-    ).finally(release);
+    const readSessionList = (reads: TaskSessionReads) => {
+      const release = reads.retain(taskId);
+      return raceAbort(
+        reads.read(taskId, (readSignal) =>
+          listOrdinaryTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+        ),
+        signal,
+      ).finally(release);
+    };
+    const sessionList = readSessionList(sessionReads).catch((error: unknown) => {
+      if (!isTaskNavigationAbort(error) || signal.aborted || !scopeIsCurrent()) throw error;
+      const currentReads = getTaskSessionReads(store);
+      if (currentReads === sessionReads) throw error;
+      return readSessionList(currentReads);
+    });
     const [task, sessionResponse] = await Promise.all([
       taskRequest,
       sessionList.then(

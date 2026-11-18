@@ -12,17 +12,13 @@ import {
 import { StateHydrator } from "@/components/state-hydrator";
 import { useAppStoreApi } from "@/components/state-provider";
 import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
-import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
+import { TaskDetailConversationShell } from "./task-detail-conversation-shell";
 import {
   buildTaskNavigationShellData,
-  extractInitialRepositories,
-  extractInitialScripts,
   fetchTaskNavigationEnrichment,
   type FetchedSessionData,
 } from "@/lib/ssr/session-page-state";
 import { useTranslation } from "react-i18next";
-import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-conversation";
-import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
 import { captureActiveTurnWindowObservations } from "@/lib/state/slices/session/turn-actions";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
@@ -72,7 +68,10 @@ function routeDataMatchesSelection(
   taskId: string,
   sessionId?: string,
 ): data is FetchedSessionData {
-  return routeDataMatchesTask(data, taskId) && (!sessionId || data.sessionId === sessionId);
+  return (
+    routeDataMatchesTask(data, taskId) &&
+    (!sessionId || data.sessionId === sessionId || data.ownedErrand?.errand.errand_id === sessionId)
+  );
 }
 
 function initialRouteState(
@@ -176,25 +175,12 @@ function TaskDetailRouteBody({
       {route.showShell ? (
         <TaskRouteSessionHydrationProvider isReady={routeDataReady}>
           <div className="h-full min-h-0 w-full" inert={route.isLoadingOverPreviousRoute}>
-            {route.task && isDetachedManagedConversation(route.task) ? (
-              <RetainedManagedConversationTranscript
-                task={route.task}
-                sessionId={route.activeSessionId}
-              />
-            ) : (
-              <KanbanTaskShell
-                task={route.task}
-                taskId={route.shellTaskId}
-                sessionId={route.activeSessionId}
-                initialRepositories={extractInitialRepositories(route.initialState, route.task)}
-                initialScripts={extractInitialScripts(route.initialState, route.task)}
-                initialTerminals={route.data?.initialTerminals ?? []}
-                defaultLayouts={{}}
-                initialLayout={layout}
-                urlSimple={simple}
-                urlMode={mode}
-              />
-            )}
+            <TaskDetailConversationShell
+              route={route}
+              layout={layout}
+              simple={simple}
+              mode={mode}
+            />
           </div>
         </TaskRouteSessionHydrationProvider>
       ) : (
@@ -362,7 +348,8 @@ function useTaskDetailRouteEnrichment(args: {
     const turnWindowObservationsAtRequestStart = captureActiveTurnWindowObservations(
       store.getState(),
     );
-    void fetchTaskNavigationEnrichment(identity, view.data.sessionId ?? undefined, { store })
+    const requestedId = view.data.ownedErrand?.errand.errand_id ?? view.data.sessionId ?? undefined;
+    void fetchTaskNavigationEnrichment(identity, requestedId, { store })
       .then((enriched) => {
         if (!isCurrent()) return;
         const loadedState: TaskDetailRouteState = {

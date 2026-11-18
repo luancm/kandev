@@ -43,6 +43,8 @@ Map unresolved-settlement refusal to `errand_recovery_unresolved` through existi
 
 Reuse the shipped Errands row, desktop popover, phone drawer, full-screen child conversation and Back navigation. Keep existing Open and Stop actions; no new modal, layout or resume button is needed. Show a recovery-specific explanatory line and accessible attention indicator instead of implying permission approval. The opened child shows the same explanation and preserves its transcript. A rejected send shows the stable localized refusal without a new turn. Supported explicit follow-up after proven interruption uses the existing composer.
 
+Direct links resolve the authorized Errand inspection and load the ordinary parent into the task shell. Desktop and phone use the same owned transcript controller. Back reveals the retained parent and restores its URL. When the parent is unavailable, a direct link can still display the retained transcript through the Errand API.
+
 This is content/status work within existing compositions. Shared projection/state owns behavior on both viewport sizes. Preserve the existing scroll owner, focus return, touch targets and safe-area treatment. Add all required translations and focused rendered desktop/phone checks; extend `errands.spec.ts` and `mobile-errands.spec.ts` for attention → Open → explanation → refused send, and separately settled interruption → supported follow-up.
 
 ## Verification
