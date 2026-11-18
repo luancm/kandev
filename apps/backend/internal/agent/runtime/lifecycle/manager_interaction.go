@@ -1409,7 +1409,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	if pendingRecovery != nil && pendingRecovery.record.SessionID != execution.SessionID {
+	if pendingRecovery != nil && pendingRecovery.record.SessionID != executionInventorySessionID(execution) {
 		return fmt.Errorf("execution %q no longer owns the pending remote recovery", executionID)
 	}
 	if m.streamManager != nil {

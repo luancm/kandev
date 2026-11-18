@@ -145,6 +145,12 @@ func (m *Manager) establishRemoteRecoveryCandidates(
 ) []*models.ExecutorRunning {
 	eligible := make([]*models.ExecutorRunning, 0, len(records))
 	for _, record := range records {
+		if supportsOwnedRemoteRecovery(record) {
+			if m.queueRemoteRecovery(record, nil) != nil {
+				eligible = append(eligible, cloneRemoteRecoveryRecord(record))
+			}
+			continue
+		}
 		if remoteRecoveryOwnerUnsupported(record) {
 			m.logger.Debug("run-owned remote inventory remains on the run-owner recovery path",
 				zap.String("session_id", record.SessionID), zap.String("execution_id", record.AgentExecutionID))
@@ -202,6 +208,10 @@ func (m *Manager) retryRemoteRecovery(parent context.Context, entry *remoteRecov
 	ctx, cancel := m.remoteAttemptContext(parent)
 	defer cancel()
 	if ctx.Err() != nil {
+		return
+	}
+	if supportsOwnedRemoteRecovery(entry.record) {
+		m.retryOwnedRemoteRecovery(ctx, entry)
 		return
 	}
 	current, ready := m.currentRemoteRecoveryOwner(ctx, entry)
@@ -346,6 +356,9 @@ func (m *Manager) attachRemoteRecovery(ctx context.Context, entry *remoteRecover
 }
 
 func (m *Manager) processRecoveredRemoteInstance(ctx context.Context, entry *remoteRecoveryRetry, ri *ExecutorInstance) error {
+	if entry != nil && supportsOwnedRemoteRecovery(entry.record) {
+		return m.processRecoveredOwnedRemoteInstance(ctx, entry, ri)
+	}
 	if err := m.proveRecoveredRemoteInstance(ctx, entry, ri); err != nil {
 		return err
 	}

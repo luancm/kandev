@@ -43,7 +43,7 @@ func (r *RemoteDockerExecutor) recoverRemoteDockerRecord(
 	parent context.Context,
 	record *models.ExecutorRunning,
 ) (*ExecutorInstance, RecoveryCandidateOutcome) {
-	req, containerID, ok := remoteDockerRecoveryRequest(record)
+	req, containerID, owner, ok := remoteDockerRecoveryRequest(record)
 	if !ok || r.connect == nil {
 		return nil, RecoveryOutcomeUnknown
 	}
@@ -80,6 +80,10 @@ func (r *RemoteDockerExecutor) recoverRemoteDockerRecord(
 		return nil, RecoveryOutcomeUnknown
 	}
 	instance.DiscardRecovery = discardRecoveredRemoteDocker(r, instance.InstanceID, session, client)
+	if owner.Kind == ExecutionOwnerErrand {
+		instance.recoveredErrandOwner = owner
+		instance.AgentProfileID = record.ExecutionProfileID
+	}
 	if r.watchTransport != nil {
 		r.watchTransport(instance.InstanceID, session)
 	}
@@ -291,10 +295,14 @@ func buildRemoteDockerRecoveredInstance(
 	}
 }
 
-func remoteDockerRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreateRequest, string, bool) {
+func remoteDockerRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreateRequest, string, ExecutionOwner, bool) {
 	if record == nil || strings.TrimSpace(record.AgentExecutionID) == "" ||
-		strings.TrimSpace(record.SessionID) == "" || strings.TrimSpace(record.TaskID) == "" {
-		return nil, "", false
+		strings.TrimSpace(record.SessionID) == "" {
+		return nil, "", ExecutionOwner{}, false
+	}
+	owner, err := recordedErrandExecutionOwner(record)
+	if err != nil || (owner.Kind != ExecutionOwnerErrand && strings.TrimSpace(record.TaskID) == "") {
+		return nil, "", ExecutionOwner{}, false
 	}
 	containerID := strings.TrimSpace(record.ContainerID)
 	metadataContainerID := strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeyContainerID))
@@ -302,15 +310,15 @@ func remoteDockerRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreat
 		containerID = metadataContainerID
 	}
 	if containerID == "" || (metadataContainerID != "" && metadataContainerID != containerID) {
-		return nil, "", false
+		return nil, "", ExecutionOwner{}, false
 	}
 	metadata := cloneKubernetesMetadata(record.Metadata)
 	metadata[MetadataKeyContainerID] = containerID
 	return &ExecutorCreateRequest{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
 		AuthToken: record.TransientAuthToken, BootstrapNonce: record.TransientBootstrapNonce,
-		Metadata: metadata, Env: make(map[string]string),
-	}, containerID, true
+		Metadata: metadata, Env: make(map[string]string), ErrandMCPOwner: errandMCPOwner(owner),
+	}, containerID, owner, true
 }
 
 func recoverRemoteDockerControlInstance(
@@ -338,6 +346,11 @@ func recoverRemoteDockerControlInstance(
 		if err == nil {
 			control.SetAuthToken(token)
 			info, err = control.GetInstance(ctx, agentctlID)
+		}
+	}
+	if err == nil || errors.Is(err, agentctl.ErrInstanceNotFound) {
+		if capabilityErr := requireErrandQuestionPolicy(ctx, control, req.ErrandMCPOwner); capabilityErr != nil {
+			return nil, "", RecoveryOutcomeUnknown
 		}
 	}
 	if errors.Is(err, agentctl.ErrInstanceNotFound) {
@@ -379,7 +392,8 @@ func sameRemoteDockerInstance(
 	req *ExecutorCreateRequest,
 ) bool {
 	return info != nil && info.ID == remoteDockerAgentctlInstanceID(req) &&
-		info.SessionID == record.SessionID && info.TaskID == record.TaskID
+		info.SessionID == record.SessionID && info.TaskID == record.TaskID &&
+		matchErrandMCPOwner(req.ErrandMCPOwner, info.ErrandMCPOwner)
 }
 
 func (r *RemoteDockerExecutor) trackRecoveredRemoteDocker(

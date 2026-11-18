@@ -17,6 +17,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -60,6 +61,57 @@ func TestRemoteDockerRecoveryUsesPersistedAdoptedAgentctlInstanceID(t *testing.T
 		"the instance client must send the actual agentctl identity")
 	require.Zero(t, fixture.createInstanceCalls(), "recovery must not create another instance")
 	require.Zero(t, fixture.engineMutationCalls(), "recovery must not mutate the retained container")
+}
+
+func TestRemoteDockerRecoveryAuthenticatesTheExactErrandOwner(t *testing.T) {
+	owner := ExecutionOwner{Kind: ExecutionOwnerErrand, WorkspaceID: "workspace", TaskID: "task", ErrandID: "errand", Generation: 2}
+	transportID := models.ErrandExecutionIdentity(owner.ErrandID)
+	oldOwner := errandMCPOwner(owner)
+	oldOwner.Generation--
+	for _, test := range []struct {
+		name       string
+		peer       *agentctltypes.ErrandMCPOwner
+		capability bool
+		recovered  bool
+	}{
+		{"exact", errandMCPOwner(owner), true, true},
+		{"older execution generation", oldOwner, true, false},
+		{"missing owner", nil, true, false},
+		{"incompatible helper", errandMCPOwner(owner), false, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRemoteDockerRecoveryFixture(t, "running", remoteDockerRecoveryInstance{
+				errandTransport: transportID, errandOwner: test.peer, errandCapability: test.capability,
+				requiredToken: "saved-token",
+			})
+			record := fixture.record("saved-token", "")
+			record.TaskID = ""
+			record.SessionID = transportID
+			record.ExecutionProfileID = "profile"
+			record.Metadata[runExecutionOwnerMetadataKey] = owner
+			fixture.executor.connect = func(_ context.Context, request *ExecutorCreateRequest) (*remoteDockerSession, error) {
+				require.Equal(t, transportID, request.SessionID)
+				require.Empty(t, request.TaskID)
+				return fixture.remoteSession, nil
+			}
+
+			instances, outcomes := recoverRemoteDockerCandidates(t, fixture.executor, []*models.ExecutorRunning{record})
+			require.True(t, fixture.controlReadWasFor(record.AgentExecutionID))
+			if !test.recovered {
+				require.Empty(t, instances)
+				require.Equal(t, RecoveryOutcomeUnknown, outcomes[transportID])
+				require.False(t, fixture.statusWasChecked())
+				return
+			}
+			require.Empty(t, outcomes)
+			require.Len(t, instances, 1)
+			require.Empty(t, instances[0].TaskID)
+			require.Equal(t, transportID, instances[0].SessionID)
+			require.Equal(t, record.ExecutionProfileID, instances[0].AgentProfileID)
+			require.Equal(t, owner, instances[0].recoveredErrandOwner)
+			require.True(t, fixture.statusWasChecked())
+		})
+	}
 }
 
 func (h *remoteDockerRecoveryHTTP) agentctlIDForPath(path string) string {
@@ -223,6 +275,9 @@ type remoteDockerRecoveryInstance struct {
 	instanceRequiredToken string
 	refreshedPort         int
 	wrongOwner            bool
+	errandTransport       string
+	errandOwner           *agentctltypes.ErrandMCPOwner
+	errandCapability      bool
 }
 
 type remoteDockerRecoveryFixture struct {
@@ -472,6 +527,14 @@ func (h *remoteDockerRecoveryHTTP) serveControl(
 	seen remoteDockerHTTPRequest,
 	refreshed bool,
 ) bool {
+	if request.Method == http.MethodGet && request.URL.Path == "/identity" && h.config.errandTransport != "" {
+		var capabilities []string
+		if h.config.errandCapability {
+			capabilities = append(capabilities, agentctltypes.ErrandMCPOwnerCapability)
+		}
+		_ = json.NewEncoder(w).Encode(agentctl.IdentityInfo{Capabilities: capabilities})
+		return true
+	}
 	if request.Method == http.MethodPost && request.URL.Path == "/auth/handshake" {
 		if seen.nonce == "" {
 			http.Error(w, `{"error":"nonce required"}`, http.StatusUnauthorized)
@@ -508,6 +571,9 @@ func (h *remoteDockerRecoveryHTTP) serveControlInstance(
 	}
 	id := strings.TrimPrefix(request.URL.Path, "/api/v1/instances/")
 	ownerSession, ownerTask := "session-1", "task-1"
+	if h.config.errandTransport != "" {
+		ownerSession, ownerTask = h.config.errandTransport, ""
+	}
 	if h.config.wrongOwner {
 		ownerSession = "another-session"
 	}
@@ -517,6 +583,7 @@ func (h *remoteDockerRecoveryHTTP) serveControlInstance(
 	}
 	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{
 		ID: id, Port: port, SessionID: ownerSession, TaskID: ownerTask,
+		ErrandMCPOwner:             h.config.errandOwner,
 		CopilotNativeSessionEvents: true,
 	})
 }

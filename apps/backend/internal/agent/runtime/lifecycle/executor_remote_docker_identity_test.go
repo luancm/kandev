@@ -49,11 +49,12 @@ func TestRemoteDockerAdoptedIdentitySurvivesPersistenceAndRecoveryRequest(t *tes
 
 	persisted := FilterPersistentMetadata(execution.MetadataSnapshot())
 	require.Equal(t, "agentctl-old", persisted[MetadataKeyRemoteDockerAgentctlInstanceID])
-	req, containerID, ok := remoteDockerRecoveryRequest(&models.ExecutorRunning{
+	req, containerID, owner, ok := remoteDockerRecoveryRequest(&models.ExecutorRunning{
 		AgentExecutionID: execution.ID, SessionID: execution.SessionID, TaskID: execution.TaskID,
 		Runtime: agentruntime.RuntimeRemoteDocker, ContainerID: "container-1", Metadata: persisted,
 	})
 	require.True(t, ok)
+	require.Zero(t, owner)
 	require.Equal(t, "container-1", containerID)
 	require.Equal(t, "backend-new", req.InstanceID)
 	require.Equal(t, "agentctl-old", remoteDockerAgentctlInstanceID(req))

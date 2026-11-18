@@ -79,6 +79,8 @@ Standalone startup correlates an owned Errand with the authenticated helper's ta
 
 The backend restores the admitted turn and prompt generation from the Errand execution record. It compares the immutable SQL submission with the helper's retained journal and validates the projected cursor before replay. Recovery projects the captured prefix through the live Errand pipeline, then connects for later events. It never submits the prompt again. Unresolved evidence leaves the persisted runtime and transcript available for exact reconciliation.
 
+Deferred Remote Docker recovery uses the saved container and agentctl instance identities and requires the helper's Errand-owner capability. Registration uses the current owned inventory and durable journal. An inconclusive probe leaves the owner guarded. Explicit teardown shares the pending recovery entry and checks the exact owner before stopping the instance.
+
 ## Reserved launch recovery
 
 Persist immutable initial launch authority with the session insertion: task/session/parent, reserved turn/submission and selected profile. Reconcile that tuple against durable turn/submission state and authenticated restored runtime inventory. Classify absent, prepared-unattempted, admitted, settled or blocked. Only absent creates a new session. Prepared continues the same session and reserved identity; admitted/uncertain effects never trigger another provider prompt. Settled adopts bookkeeping then reconciles the exact result. Missing/mismatched evidence blocks instead of producing a false launch-failure result. Cancellation wins over bookkeeping adoption and uses exact teardown compensation.

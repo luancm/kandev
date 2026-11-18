@@ -603,8 +603,11 @@ func (m *Manager) ListLiveRemoteExecutorsRunning(ctx context.Context) ([]*models
 	}
 	remote := make([]*models.ExecutorRunning, 0, len(rows))
 	for _, row := range rows {
-		if row == nil || remoteRecoveryOwnerUnsupported(row) || !isRemoteRecoveryRuntime(row.Runtime) || row.Runtime == agentruntime.RuntimePluginRemote ||
+		if row == nil || !isRemoteRecoveryRuntime(row.Runtime) || row.Runtime == agentruntime.RuntimePluginRemote ||
 			row.SessionID == "" || row.AgentExecutionID == "" || isTerminalExecutorRunningStatus(row.Status) {
+			continue
+		}
+		if remoteRecoveryOwnerUnsupported(row) && !supportsOwnedRemoteRecovery(row) {
 			continue
 		}
 		remote = append(remote, cloneRemoteRecoveryRecord(row))

@@ -23,7 +23,7 @@ type errandExecutionRecoveryStore interface {
 }
 
 func (m *Manager) tryRestoreOwnedErrandExecution(ctx context.Context, ri *ExecutorInstance) bool {
-	if err := m.restoreOwnedErrandExecution(ctx, ri); err != nil {
+	if err := m.restoreOwnedErrandExecution(ctx, ri, nil); err != nil {
 		m.logger.Warn("owned errand recovery remains unresolved",
 			zap.String("execution_id", ri.InstanceID), zap.String("errand_id", ri.recoveredErrandOwner.ErrandID), zap.Error(err))
 		m.discardRemoteRecoveryInstance(ri)
@@ -33,7 +33,7 @@ func (m *Manager) tryRestoreOwnedErrandExecution(ctx context.Context, ri *Execut
 	return true
 }
 
-func (m *Manager) restoreOwnedErrandExecution(ctx context.Context, ri *ExecutorInstance) error {
+func (m *Manager) restoreOwnedErrandExecution(ctx context.Context, ri *ExecutorInstance, pending *remoteRecoveryRetry) error {
 	if ri.Client == nil || ri.TaskID != "" || ri.InstanceID == "" || ri.ProviderSessionID == "" ||
 		ri.SessionID != models.ErrandExecutionIdentity(ri.recoveredErrandOwner.ErrandID) {
 		return fmt.Errorf("%w: incomplete retained Errand identity", ErrDurableAdoptionIdentityMismatch)
@@ -49,7 +49,7 @@ func (m *Manager) restoreOwnedErrandExecution(ctx context.Context, ri *ExecutorI
 	if err := ownerCurrent(); err != nil {
 		return err
 	}
-	if err := m.executionStore.Add(execution); err != nil {
+	if err := m.registerRecoveredErrand(execution, pending); err != nil {
 		return err
 	}
 	if err := m.streamManager.ReplayRecoveredDelivery(ctx, execution); err != nil {
@@ -61,8 +61,26 @@ func (m *Manager) restoreOwnedErrandExecution(ctx context.Context, ri *ExecutorI
 		return err
 	}
 	if current, ok := m.executionStore.Get(execution.ID); ok && current == execution {
-		m.streamManager.ConnectAll(execution, nil)
+		if err := m.connectRecoveredErrand(ctx, execution, pending); err != nil {
+			m.executionStore.Remove(execution.ID)
+			return err
+		}
 	}
+	return nil
+}
+
+func (m *Manager) registerRecoveredErrand(execution *AgentExecution, pending *remoteRecoveryRetry) error {
+	if pending != nil {
+		return m.registerRecoveredRemoteExecution(pending, execution)
+	}
+	return m.executionStore.Add(execution)
+}
+
+func (m *Manager) connectRecoveredErrand(ctx context.Context, execution *AgentExecution, pending *remoteRecoveryRetry) error {
+	if pending != nil {
+		return m.streamManager.ConnectAllAndWait(ctx, execution)
+	}
+	m.streamManager.ConnectAll(execution, nil)
 	return nil
 }
 
@@ -81,7 +99,8 @@ func recoveredErrandExecution(ri *ExecutorInstance) *AgentExecution {
 		RuntimeName: ri.RuntimeName, Status: v1.AgentStatusRunning, StartedAt: time.Now(), metadata: ri.Metadata,
 		agentctl: ri.Client, standaloneInstanceID: ri.StandaloneInstanceID, standalonePort: ri.StandalonePort,
 		runtimeEpoch: runtimeEpochFromClient(ri.Client), standaloneHostPID: runtimeProcessIDFromClient(ri.Client),
-		promptDoneCh: make(chan PromptCompletionSignal, 1), ACPSessionID: ri.ProviderSessionID,
+		attachedExistingCompute: ri.ReusedWorkspace,
+		promptDoneCh:            make(chan PromptCompletionSignal, 1), ACPSessionID: ri.ProviderSessionID,
 		CopilotNativeSessionEvents: ri.CopilotNativeSessionEvents,
 	}
 	execution.setSessionInitialized(true)

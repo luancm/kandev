@@ -21,6 +21,16 @@ func (m *Manager) StopErrandOwnerForRecovery(ctx context.Context, owner Executio
 		return errors.New("invalid errand teardown identity")
 	}
 	inventoryID := models.ErrandExecutionIdentity(owner.ErrandID)
+	if pending := m.pendingRemoteRecoveryForSession(inventoryID); pending != nil && supportsOwnedRemoteRecovery(pending.record) {
+		if pending.record.AgentExecutionID != executionID || validateRunRecoveryOwner(pending.record, owner) != nil {
+			return models.ErrExecutionRotated
+		}
+		return m.StopAgentWithReason(ctx, executionID, "errand_cancelled", true)
+	}
+	return m.stopPersistedErrandOwner(ctx, inventoryID, owner, executionID)
+}
+
+func (m *Manager) stopPersistedErrandOwner(ctx context.Context, inventoryID string, owner ExecutionOwner, executionID string) error {
 	if err := m.recoveryGuard.CheckLaunchAllowed(inventoryID); err != nil {
 		return err
 	}

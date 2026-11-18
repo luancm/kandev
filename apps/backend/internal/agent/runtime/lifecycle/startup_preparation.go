@@ -30,7 +30,7 @@ func (m *Manager) PrepareStartupRecovery(ctx context.Context) error {
 		m.recoveryGuard.AcquireOrObserve(id)
 	}
 	for _, record := range append(remote, plugins...) {
-		if record != nil && !remoteRecoveryOwnerUnsupported(record) &&
+		if record != nil && (!remoteRecoveryOwnerUnsupported(record) || supportsOwnedRemoteRecovery(record)) &&
 			(record.Runtime != agentruntime.RuntimePluginRemote || !isTerminalExecutorRunningStatus(record.Status)) {
 			m.queueRemoteRecovery(record, nil)
 		}

@@ -23,6 +23,14 @@ func (m *Manager) stopPendingRemoteRecovery(
 	if reason == StopReasonBackendShutdown || reason == StopReasonRecoverableAgentFailure {
 		return false, nil
 	}
+	if supportsOwnedRemoteRecovery(entry.record) {
+		row, owner, err := m.currentOwnedRemoteRecoveryRecord(ctx, entry)
+		if err != nil {
+			return false, err
+		}
+		err = m.stopRecordedErrandInstance(ctx, row, owner)
+		return err == nil, err
+	}
 	if entry.stopRuntimeCompleted {
 		return m.settlePendingRemoteStop(ctx, entry, reason, force, stopWatch)
 	}
@@ -60,8 +68,17 @@ func (m *Manager) recoverPendingRemoteStopInstance(
 		return nil, "", err
 	}
 	record := m.revealRemoteRecoveryCredentials(ctx, attemptRecord)
+	return m.recoverExactRemoteInstance(ctx, backend, record)
+}
+
+func (m *Manager) recoverExactRemoteInstance(
+	ctx context.Context,
+	backend ExecutorBackend,
+	record *models.ExecutorRunning,
+) (*ExecutorInstance, RecoveryCandidateOutcome, error) {
 	var recovered []*ExecutorInstance
 	var outcomes map[string]RecoveryCandidateOutcome
+	var err error
 	if detailed, ok := backend.(DetailedRecoveryBackend); ok {
 		recovered, outcomes, err = detailed.RecoverInstancesDetailed(ctx, []*models.ExecutorRunning{record})
 	} else {
@@ -71,13 +88,13 @@ func (m *Manager) recoverPendingRemoteStopInstance(
 		m.discardRemoteRecoveryInstances(recovered)
 		return nil, "", err
 	}
-	ri := exactRecoveredRemoteInstance(recovered, entry.record)
+	ri := exactRecoveredRemoteInstance(recovered, record)
 	for _, candidate := range recovered {
 		if candidate != ri {
 			m.discardRemoteRecoveryInstance(candidate)
 		}
 	}
-	return ri, outcomes[entry.record.SessionID], nil
+	return ri, outcomes[record.SessionID], nil
 }
 
 func (m *Manager) stopAbsentRemoteOwner(

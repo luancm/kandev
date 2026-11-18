@@ -600,6 +600,41 @@ func TestRunOwnedRemoteInventoryStaysOnRunOwnerRecoveryPath(t *testing.T) {
 	require.Len(t, backend.stopInstanceCalls, 1)
 }
 
+func TestDeferredStartupRetriesRemoteDockerErrandWithoutTaskSession(t *testing.T) {
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, WorkspaceID: "workspace", TaskID: "task", ErrandID: "errand", Generation: 2,
+	}
+	row := &models.ExecutorRunning{
+		SessionID: models.ErrandExecutionIdentity(owner.ErrandID), AgentExecutionID: "errand-execution",
+		Runtime: agentruntime.RuntimeRemoteDocker, Status: models.ExecutorRunningStatusRunning,
+		Metadata: map[string]interface{}{runExecutionOwnerMetadataKey: owner},
+	}
+	writer := &task08ExecutorInventoryWriter{invariantWriter: invariantWriter{prior: row}, rows: []*models.ExecutorRunning{row}}
+	backend := &task08DetailedRecoveryBackend{
+		MockExecutor:   &MockExecutor{name: executor.NameRemoteDocker},
+		recoveryResult: task08UnknownOutcomes(agentruntime.RuntimeRemoteDocker),
+	}
+	mgr, _ := task08ManagerWithBackend(t, backend)
+	mgr.SetExecutorRunningWriter(writer)
+	ctx := t.Context()
+
+	require.NoError(t, mgr.PrepareStartupRecovery(ctx))
+	entry := mgr.pendingRemoteRecoveryForSession(row.SessionID)
+	require.NotNil(t, entry)
+	require.Empty(t, backend.callsSnapshot(), "startup preparation defers provider I/O")
+
+	mgr.retryRemoteRecovery(ctx, entry)
+
+	calls := backend.callsSnapshot()
+	require.Len(t, calls, 1)
+	require.Len(t, calls[0], 1)
+	require.Equal(t, row.AgentExecutionID, calls[0][0].AgentExecutionID)
+	require.Empty(t, calls[0][0].TaskID)
+	require.Same(t, entry, mgr.pendingRemoteRecoveryForSession(row.SessionID))
+	require.ErrorIs(t, mgr.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)
+	require.Empty(t, backend.stopInstanceCalls)
+}
+
 func TestStopAllAgentsAndManagerStopDetachRemoteExecutionsRegardlessOfLocalFlag(t *testing.T) {
 	remoteRuntimes := []executor.Name{
 		executor.NameSprites, executor.NameSSH, executor.NameRemoteDocker, executor.NameKubernetes, executor.NamePluginRemote,
