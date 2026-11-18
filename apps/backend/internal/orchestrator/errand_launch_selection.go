@@ -4,35 +4,19 @@ import (
 	"context"
 	"errors"
 
-	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 const legacyLocalExecutorType models.ExecutorType = "local_pc"
 
-func (a *ErrandAdapter) selectOwnedErrandWorkspace(ctx context.Context, request errands.LaunchRequest) (*runtimeapi.WorkspaceInfo, error) {
-	if !validErrandLaunchRequest(request) {
-		return nil, models.ErrInvalidErrand
-	}
-	if err := a.svc.authorizeTask(ctx, request.TaskID); err != nil {
-		return nil, err
-	}
-	legacy, err := a.hasLegacyErrandRuntime(ctx, request.ErrandID, request.TaskID, request.ParentSessionID)
-	if err != nil || legacy {
-		return nil, err
-	}
-	info, err := a.ownedErrandWorkspace(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	switch models.ExecutorType(info.ExecutorType) {
+func supportsOwnedErrandWorkspace(provider string) bool {
+	switch models.ExecutorType(provider) {
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, legacyLocalExecutorType,
 		models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites,
 		models.ExecutorTypeKubernetes:
-		return info, nil
+		return true
 	default:
-		return nil, nil
+		return false
 	}
 }
 

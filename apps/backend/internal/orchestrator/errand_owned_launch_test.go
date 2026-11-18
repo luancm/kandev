@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -217,19 +218,20 @@ func TestErrandAdapterRecoversOwnedLaunchReservation(t *testing.T) {
 			f := newErrandLaunchFixture(t)
 			req := f.request()
 			seedOwnedLaunchReceipt(t, f, req, tc.state, tc.attemptID, tc.finish)
-			workspace := t.TempDir()
+			workspaceReads := 0
 			adapter := NewErrandAdapter(f.svc)
 			adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{
 				launch: func(context.Context, runtimeapi.LaunchSpec) (runtimeapi.ExecutionRef, error) {
 					t.Fatal("an existing reservation must never dispatch another launch")
 					return runtimeapi.ExecutionRef{}, nil
 				},
-			}, func(_ context.Context, taskID, parentID string) (*runtimeapi.WorkspaceInfo, error) {
-				return &runtimeapi.WorkspaceInfo{TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1",
-					ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: workspace}, nil
+			}, func(context.Context, string, string) (*runtimeapi.WorkspaceInfo, error) {
+				workspaceReads++
+				return nil, errors.New("parent workspace has changed")
 			})
 			result, err := adapter.LaunchErrand(t.Context(), req)
 			require.Equal(t, tc.disposition, result.Disposition, "recovering launch: %v", err)
+			require.Zero(t, workspaceReads, "adjudicating the saved launch must not depend on a new workspace read")
 			if tc.disposition == errands.LaunchBlocked {
 				require.Error(t, err)
 				return
@@ -243,6 +245,31 @@ func TestErrandAdapterRecoversOwnedLaunchReservation(t *testing.T) {
 			require.Len(t, sessions, 1)
 		})
 	}
+}
+
+func TestErrandAdapterRejectsFreshPluginWorkspaceWithoutChildSession(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	req := f.request()
+	adapter := NewErrandAdapter(f.svc)
+	adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{
+		launch: func(context.Context, runtimeapi.LaunchSpec) (runtimeapi.ExecutionRef, error) {
+			t.Fatal("unsupported executor must never reach runtime launch")
+			return runtimeapi.ExecutionRef{}, nil
+		},
+	}, func(_ context.Context, taskID, parentID string) (*runtimeapi.WorkspaceInfo, error) {
+		return &runtimeapi.WorkspaceInfo{
+			TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1",
+			ExecutorType: string(models.ExecutorTypePluginRemote), WorkspacePath: "/workspace",
+		}, nil
+	})
+	result, err := adapter.LaunchErrand(t.Context(), req)
+	require.Equal(t, errands.LaunchBlocked, result.Disposition)
+	require.ErrorAs(t, err, new(*errands.ErrLaunchRejected))
+	require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsafe)
+	sessions, err := f.repo.ListTaskSessions(t.Context(), req.TaskID)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Empty(t, f.manager.launchedWith)
 }
 
 func seedOwnedLaunchReceipt(t *testing.T, f *errandLaunchFixture, req errands.LaunchRequest, state models.DeliverySubmissionState, attempt string, finish bool) {

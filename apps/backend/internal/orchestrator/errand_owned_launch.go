@@ -53,7 +53,7 @@ func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtim
 	return a.verifyWorkspaceAttachment(ctx)
 }
 
-func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo) (errands.LaunchResult, error) {
+func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest) (errands.LaunchResult, error) {
 	blocked := errands.LaunchResult{Disposition: errands.LaunchBlocked}
 	guard, err := a.svc.lockCancelInFlightGuardWithContext(ctx, "errand-launch:"+req.ErrandID)
 	if err != nil {
@@ -72,6 +72,10 @@ func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.Launc
 			return blocked, fmt.Errorf("read errand launch evidence: %w", err)
 		}
 		return recoverOwnedErrandLaunch(ctx, store, req, current)
+	}
+	info, err := a.ownedErrandWorkspace(ctx, req)
+	if err != nil {
+		return blocked, err
 	}
 	if a.svc.sessionCeiling != nil {
 		decision := a.svc.sessionCeiling.admit(ctx, admissionRequest{
@@ -158,6 +162,9 @@ func (a *ErrandAdapter) ownedErrandWorkspace(ctx context.Context, req errands.La
 		info.WorkspaceID == "" || info.WorkspacePath == "" || info.ExecutorType == "" ||
 		info.TaskArchived || info.WorkspaceOwnerArchived {
 		return nil, errors.New("errand parent has no attachable workspace")
+	}
+	if !supportsOwnedErrandWorkspace(info.ExecutorType) {
+		return nil, &errands.ErrLaunchRejected{Err: fmt.Errorf("%w: executor does not support errand workspace attachment", models.ErrWorkspaceReuseUnsafe)}
 	}
 	return info, nil
 }

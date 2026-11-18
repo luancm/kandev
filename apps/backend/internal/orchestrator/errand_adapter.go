@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ErrandAdapter satisfies the errands service's launcher, teardown, and
@@ -37,12 +38,19 @@ func (a *ErrandAdapter) SetOwnedLaunchRuntime(runtime runtimeapi.Runtime, worksp
 // LaunchErrand shares guarded classification and admission with direct callers.
 func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) (errands.LaunchResult, error) {
 	if a.runtime != nil {
-		info, err := a.selectOwnedErrandWorkspace(ctx, request)
-		if err != nil {
-			return errands.LaunchResult{Disposition: errands.LaunchBlocked}, err
+		blocked := errands.LaunchResult{Disposition: errands.LaunchBlocked}
+		if !validErrandLaunchRequest(request) {
+			return blocked, models.ErrInvalidErrand
 		}
-		if info != nil {
-			return a.launchOwnedErrand(ctx, request, info)
+		if err := a.svc.authorizeTask(ctx, request.TaskID); err != nil {
+			return blocked, err
+		}
+		legacy, err := a.hasLegacyErrandRuntime(ctx, request.ErrandID, request.TaskID, request.ParentSessionID)
+		if err != nil {
+			return blocked, err
+		}
+		if !legacy {
+			return a.launchOwnedErrand(ctx, request)
 		}
 	}
 	result, _, err := a.svc.launchErrand(ctx, request)
