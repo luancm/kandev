@@ -198,13 +198,11 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 }
 
 func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo) *runtimeapi.LaunchRequest {
-	return &runtimeapi.LaunchRequest{
-		WorkspaceID: info.WorkspaceID, WorkspacePath: info.WorkspacePath, WorkspaceLayout: info.WorkspaceLayout,
-		WorkspaceFolders: info.WorkspaceFolders, DetachedWorkspaceRoots: info.DetachedWorkspaceRoots,
-		WorkspaceReuseRequired: true, TaskEnvironmentID: info.TaskEnvironmentID,
-		ExecutorType: info.ExecutorType, ManagedRuntimeOwnerUserID: info.OwnerUserID,
-		CandidateExecutionID: uuid.NewString(), StartAgent: true, SuppressBootStatusMessage: true,
-		TurnID: req.TurnID, InitialDeliverySubmissionID: req.SubmissionID,
-		DeliveryIncarnationID: uuid.NewString(), DeliveryStreamID: uuid.NewString(), DeliveryHarnessGeneration: 1,
-	}
+	launch := runtimeapi.ErrandWorkspaceLaunch(info)
+	launch.CandidateExecutionID = uuid.NewString()
+	launch.StartAgent, launch.SuppressBootStatusMessage = true, true
+	launch.TurnID, launch.InitialDeliverySubmissionID = req.TurnID, req.SubmissionID
+	launch.DeliveryIncarnationID, launch.DeliveryStreamID = uuid.NewString(), uuid.NewString()
+	launch.DeliveryHarnessGeneration = 1
+	return launch
 }

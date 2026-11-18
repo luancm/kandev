@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
@@ -47,6 +48,20 @@ func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 			require.True(t, ok)
 			require.Empty(t, launch.TaskID)
 			require.Empty(t, launch.SessionID)
+			require.Empty(t, launch.PreviousExecutionID)
+			require.Empty(t, launch.ACPSessionID)
+			require.NotEqual(t, "parent-stream", launch.DeliveryStreamID)
+			require.True(t, launch.WorkspaceReuseRequired)
+			require.False(t, launch.UseWorktree, "attach the existing worktree")
+			require.Equal(t, "existing-task-root", launch.TaskDirName)
+			require.Equal(t, "parent-env", launch.TaskEnvironmentID)
+			require.Len(t, launch.RepoSpecs(), 1)
+			require.Equal(t, "source-repo", launch.RepoSpecs()[0].RepositoryID)
+			require.Equal(t, "existing-checkout", launch.RepoSpecs()[0].WorktreeID)
+			require.Equal(t, "existing-branch", launch.RepoSpecs()[0].CheckoutBranch)
+			require.Equal(t, "host-executor", launch.Metadata["executor_id"])
+			require.Equal(t, "host-profile", launch.Metadata[lifecycle.MetadataKeyExecutorProfileID])
+			require.NotContains(t, launch.Metadata, "acp_session_id")
 			require.Equal(t, req.TurnID, launch.TurnID)
 			require.True(t, launch.StartAgent)
 			require.NotEmpty(t, launch.CandidateExecutionID)
@@ -79,7 +94,16 @@ func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 		require.Equal(t, req.ParentSessionID, parentID)
 		return &runtimeapi.WorkspaceInfo{
 			TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1",
-			WorkspacePath: workspace, ExecutorType: string(models.ExecutorTypeLocal),
+			WorkspacePath: workspace, ExecutorType: string(models.ExecutorTypeWorktree),
+			TaskEnvironmentID: "parent-env", TaskDirName: "existing-task-root",
+			AgentExecutionID: "parent-execution", ACPSessionID: "parent-native",
+			DeliveryStreamID:  "parent-stream",
+			ExecutorProfileID: "host-profile",
+			Metadata:          map[string]any{"executor_id": "host-executor", "acp_session_id": "parent-native"},
+			WorkspaceRepositories: []lifecycle.WorkspaceRepositorySpec{{
+				RepositoryID: "source-repo", RepositoryPath: workspace,
+				WorktreeID: "existing-checkout", WorktreePath: workspace, WorktreeBranch: "existing-branch",
+			}},
 		}, nil
 	})
 
