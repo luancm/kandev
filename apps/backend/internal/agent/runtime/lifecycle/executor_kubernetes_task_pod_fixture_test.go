@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -72,6 +73,10 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/instances/")
+	if id, exact := strings.CutSuffix(id, "/stop-errand"); exact && r.Method == http.MethodPost {
+		c.stopErrandInstance(w, r, id)
+		return
+	}
 	request, exists := c.active[id]
 	if !exists {
 		http.NotFound(w, r)
@@ -83,6 +88,21 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath})
+}
+
+func (c *taskPodControl) stopErrandInstance(w http.ResponseWriter, r *http.Request, id string) {
+	var owner agentctltypes.ErrandMCPOwner
+	if json.NewDecoder(r.Body).Decode(&owner) != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	request, exists := c.active[id]
+	if exists && (request.ErrandMCPOwner == nil || *request.ErrandMCPOwner != owner) {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	delete(c.active, id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *taskPodControl) snapshot() ([]agentctl.CreateInstanceRequest, map[string]agentctl.CreateInstanceRequest, int) {
