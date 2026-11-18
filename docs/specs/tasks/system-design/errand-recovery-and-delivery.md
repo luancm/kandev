@@ -79,9 +79,9 @@ Standalone startup correlates an owned Errand with the authenticated helper's ta
 
 The backend restores the admitted turn and prompt generation from the Errand execution record. It compares the immutable SQL submission with the helper's retained journal and validates the projected cursor before replay. Recovery projects the captured prefix through the live Errand pipeline, then connects for later events. It never submits the prompt again. Unresolved evidence leaves the persisted runtime and transcript available for exact reconciliation.
 
-Deferred Remote Docker recovery uses the saved container and agentctl instance identities and requires the helper's Errand-owner capability. Registration uses the current owned inventory and durable journal. An inconclusive probe leaves the owner guarded. Explicit teardown shares the pending recovery entry and checks the exact owner before stopping the instance.
+Deferred Remote Docker recovery uses the saved container and agentctl instance identities with the helper's Errand-owner capability. Registration uses the current inventory and journal. Teardown accepts Docker's `exited` state for the exact recorded container. An inconclusive probe, including an unverified daemon's missing response, leaves the owner guarded.
 
-Shared Kubernetes recovery also validates the saved Pod and PVC identities and the workspace ownership generation from attachment. A descendant task's Errand can use an ancestor task's workspace. Recovery checks that workspace owner against the current environment and the explicit Errand owner against the attached helper. The ordinary sibling and shared resources remain available to their owner.
+Shared Kubernetes recovery validates the recorded Pod, PVC and workspace ownership generation. A descendant task's Errand may use an ancestor's workspace. Recovery checks that owner against the environment and the Errand owner against the helper. A missing Pod object leaves physical teardown unresolved. Shared resources remain with their owner.
 
 SSH recovery requires the exact saved controller launch receipt and verifies the live controller before reading the agentctl instance. The SSH task coordinate identifies the controller's physical owner. The helper's explicit Errand identity and the current Errand binding identify the conversation.
 

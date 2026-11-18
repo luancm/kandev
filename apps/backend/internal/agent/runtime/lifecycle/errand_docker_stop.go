@@ -47,6 +47,9 @@ func (r *DockerExecutor) stopDockerErrandInstance(ctx context.Context, client *d
 	if err != nil {
 		return err
 	}
+	if info.ID == containerID && info.State == containerStateExited {
+		return nil
+	}
 	if info.ID != containerID || info.State != containerStateRunning {
 		return fmt.Errorf("%w: recorded Docker container is not reachable", ErrErrandRecoveryRequiresReconnect)
 	}

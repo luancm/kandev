@@ -9,6 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestKubernetesErrandTeardownKeepsMissingPodUnresolved(t *testing.T) {
+	f := newTaskPodFixture(t)
+	f.launch(t, 1)
+	child := f.launch(t, 2)
+	owner := agentctltypes.ErrandMCPOwner{TaskID: "task-1", ErrandID: "child", Generation: 3}
+	row := &models.ExecutorRunning{
+		AgentExecutionID: child.InstanceID, SessionID: models.ErrandExecutionIdentity(owner.ErrandID),
+		Runtime: f.runtime.Name(), Metadata: child.Metadata,
+	}
+	f.resources.mu.Lock()
+	f.resources.pod = nil
+	f.resources.mu.Unlock()
+
+	require.Error(t, f.runtime.stopErrandInstance(t.Context(), row, owner),
+		"the API can lose the Pod object before the recorded instance stops")
+	_, active, _ := f.control.snapshot()
+	require.Len(t, active, 2, "an unresolved inspection must not mutate the active instances")
+	require.Empty(t, f.resources.deletedPods)
+	require.Empty(t, f.resources.deletedPVCs)
+}
+
 func TestKubernetesErrandTeardownPreservesParentPodAndClaim(t *testing.T) {
 	f := newTaskPodFixture(t)
 	parent := f.launch(t, 1)
