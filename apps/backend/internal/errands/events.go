@@ -61,8 +61,8 @@ func (s *Service) publishSnapshot(ctx context.Context, snapshot Snapshot) {
 	s.events.PublishErrandUpdated(ctx, snapshot.Errand, snapshot.Status)
 }
 
-// PublishPermissionStatus refreshes attention for an owned permission change.
-func (s *Service) PublishPermissionStatus(ctx context.Context, taskID, errandID string) {
+// PublishOwnedStatus refreshes the observed state of an owned Errand.
+func (s *Service) PublishOwnedStatus(ctx context.Context, taskID, errandID string) {
 	row, err := s.store.GetErrand(ctx, errandID)
 	if err == nil && row != nil && row.TaskID == taskID {
 		s.publish(ctx, row)

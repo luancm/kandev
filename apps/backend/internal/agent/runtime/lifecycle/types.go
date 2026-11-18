@@ -1763,6 +1763,7 @@ type LaunchRequest struct {
 	// side effects. It is runtime-only and never serialized with deferred work.
 	OnExecutionAllocated func(context.Context, string) error `json:"-"`
 	ErrandMCPSelection   *mcpconfig.SelectionSnapshot        `json:"-"`
+	ErrandPredecessor    *models.ErrandTeardownTarget        `json:"-"`
 
 	TaskID                string
 	TaskScope             TaskLaunchScope

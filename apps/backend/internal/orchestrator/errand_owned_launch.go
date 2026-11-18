@@ -13,12 +13,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type ownedErrandLaunchStore interface {
+	GetErrand(context.Context, string) (*models.Errand, error)
 	ReserveErrandExecutionGeneration(context.Context, string, uint64) (*models.ErrandExecutionDescriptor, error)
 	BindErrandExecution(context.Context, string, uint64, string) (bool, error)
 	GetErrandExecutionDescriptor(context.Context, string) (*models.ErrandExecutionDescriptor, error)
@@ -30,19 +32,20 @@ type ownedErrandLaunchStore interface {
 	ReadOwnedErrandFirstTerminal(context.Context, string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error)
 }
 
-type initialErrandAdmission struct {
-	service    *Service
-	request    errands.LaunchRequest
-	owner      runtimeapi.ExecutionOwner
-	store      ownedErrandLaunchStore
-	attachment *ownedErrandWorkspaceAttachment
+type ownedErrandAdmission struct {
+	service     *Service
+	request     errands.LaunchRequest
+	owner       runtimeapi.ExecutionOwner
+	store       ownedErrandLaunchStore
+	attachment  *ownedErrandWorkspaceAttachment
+	predecessor *models.ErrandTeardownTarget
 }
 
-func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
+func (a ownedErrandAdmission) AdmitExecution(ctx context.Context, owner runtimeapi.ExecutionOwner) error {
 	if owner != a.owner || a.service.isCancelInFlight(owner.ErrandID) {
 		return models.ErrInvalidErrand
 	}
-	if err := a.service.validateErrandLaunchReservation(ctx, a.request, false); err != nil {
+	if err := a.checkLaunch(ctx); err != nil {
 		return err
 	}
 	current, err := a.store.GetErrandExecutionDescriptor(ctx, owner.ErrandID)
@@ -53,6 +56,23 @@ func (a initialErrandAdmission) AdmitExecution(ctx context.Context, owner runtim
 		return models.ErrInvalidErrand
 	}
 	return a.verifyWorkspaceAttachment(ctx)
+}
+
+func (a ownedErrandAdmission) checkLaunch(ctx context.Context) error {
+	if a.predecessor == nil {
+		return a.service.validateErrandLaunchReservation(ctx, a.request, false)
+	}
+	row, err := a.store.GetErrand(ctx, a.request.ErrandID)
+	if err != nil {
+		return err
+	}
+	if row.TaskID != a.request.TaskID || row.ParentSessionID != a.request.ParentSessionID ||
+		row.Lifecycle != models.ErrandLifecycleLaunched || row.TeardownIntent == nil ||
+		row.TeardownIntent.Purpose != models.ErrandTeardownPurposeCompletion || row.TeardownIntent.State != models.ErrandTeardownIntentCompleted ||
+		row.TeardownIntent.Target != *a.predecessor || a.predecessor.OwnerGeneration+1 != a.owner.Generation {
+		return db.ErrErrandSettlementPending
+	}
+	return nil
 }
 
 func (a *ErrandAdapter) launchOwnedErrand(ctx context.Context, req errands.LaunchRequest) (errands.LaunchResult, error) {
@@ -210,7 +230,7 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 		Kind: runtimeapi.ExecutionOwnerErrand, TaskID: req.TaskID, WorkspaceID: launch.WorkspaceID,
 		ErrandID: req.ErrandID, Generation: generation, AgentProfileID: req.AgentProfileID,
 	}
-	admission := initialErrandAdmission{service: a.svc, request: req, owner: owner, store: store, attachment: attachment}
+	admission := ownedErrandAdmission{service: a.svc, request: req, owner: owner, store: store, attachment: attachment, predecessor: launch.ErrandPredecessor}
 	launch.OnExecutionAllocated = func(ctx context.Context, executionID string) error {
 		if executionID != launch.CandidateExecutionID {
 			return models.ErrInvalidErrand
@@ -228,7 +248,7 @@ func (a *ErrandAdapter) startOwnedErrandExecution(
 	ref, err := a.runtime.Launch(ctx, runtimeapi.LaunchSpec{
 		Owner: owner, OwnerAdmission: admission, AgentProfileID: req.AgentProfileID,
 		ExecutorID: launch.ExecutorType, Workspace: runtimeapi.WorkspaceRef{Path: launch.WorkspacePath},
-		Prompt: prompt, McpMode: mcpmode.Errand,
+		Prompt: prompt, PriorACPSession: launch.RequiredNativeConversationID, McpMode: mcpmode.Errand,
 		Metadata: map[string]any{"launch_request": launch},
 	})
 	if err != nil {

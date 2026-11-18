@@ -248,8 +248,8 @@ func (a *ErrandAdapter) finalizeErrandPermission(ctx context.Context, store owne
 }
 
 func (a *ErrandAdapter) publishErrandPermissionChange(ctx context.Context, owner models.ErrandPermissionOwner) {
-	if a.permissionStatusChanged != nil {
-		a.permissionStatusChanged(ctx, owner.TaskID, owner.ErrandID)
+	if a.ownedStatusChanged != nil {
+		a.ownedStatusChanged(ctx, owner.TaskID, owner.ErrandID)
 	}
 	if a.svc.eventBus != nil {
 		payload := map[string]any{"task_id": owner.TaskID, "errand_id": owner.ErrandID}

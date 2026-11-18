@@ -57,7 +57,7 @@ func (s *Service) errandWorkspaceExecutorConfig(ctx context.Context, env *models
 	return runtimeapi.SSHWorkspaceExecutorConfig(executor.Config), nil
 }
 
-func (a initialErrandAdmission) verifyWorkspaceAttachment(ctx context.Context) error {
+func (a ownedErrandAdmission) verifyWorkspaceAttachment(ctx context.Context) error {
 	expected := a.attachment
 	if expected == nil {
 		return nil

@@ -12,6 +12,7 @@ import { MessageList } from "../message-list";
 import { ErrandHeader } from "./errand-header";
 import { ErrandStatusAnnouncer } from "./errand-status-announcer";
 import { OwnedErrandPermissionContext } from "./owned-errand-permission-context";
+import { OwnedErrandContinuation } from "./owned-errand-continuation";
 
 export function OwnedErrandConversation({
   taskId,
@@ -67,6 +68,18 @@ export function OwnedErrandConversation({
           }}
         />
       </OwnedErrandPermissionContext.Provider>
+      <OwnedErrandContinuation
+        key={readScope}
+        taskId={taskId}
+        errandId={errandId}
+        connected={connected}
+        available={
+          errand?.status === "done" ||
+          errand?.status === "failed" ||
+          errand?.attention_reason === "recovery_unresolved"
+        }
+        onSent={transcript.retry}
+      />
     </section>
   );
 }

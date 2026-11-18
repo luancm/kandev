@@ -12,18 +12,30 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ListOwnedErrandsAwaitingResult returns launched owned Errands that still
-// need their first result. The terminal proof is checked separately.
-func (r *Repository) ListOwnedErrandsAwaitingResult(ctx context.Context) ([]*models.Errand, error) {
-	return r.listErrands(ctx, `lifecycle='launched' AND awaiting_result AND latest_settled_turn_id=''
-		AND EXISTS (SELECT 1 FROM errand_turns t WHERE t.errand_id=task_session_errands.id
-		AND t.id=task_session_errands.first_turn_id AND t.completed_at IS NOT NULL) ORDER BY task_id,created_at,id`)
+// ListOwnedErrandsAwaitingSettlement selects completed work on the current
+// execution. The terminal receipt is verified before an outcome is written.
+func (r *Repository) ListOwnedErrandsAwaitingSettlement(ctx context.Context) ([]*models.Errand, error) {
+	return r.listErrands(ctx, `lifecycle='launched' AND EXISTS (
+		SELECT 1 FROM errand_execution_generations g
+		JOIN agent_delivery_submissions s ON s.session_id=('errand:' || g.errand_id) AND s.dispatch_attempt_id=g.execution_id
+		JOIN agent_delivery_effects a ON a.effect_key=? || s.id AND a.effect_type=?
+		JOIN errand_turns t ON t.errand_id=g.errand_id AND t.id=a.turn_id
+		WHERE g.errand_id=task_session_errands.id AND g.active_submission_id=''
+		 AND g.generation=(SELECT MAX(latest.generation) FROM errand_execution_generations latest WHERE latest.errand_id=g.errand_id)
+		 AND t.completed_at IS NOT NULL AND t.id<>task_session_errands.latest_settled_turn_id
+		 AND (t.id<>task_session_errands.first_turn_id OR task_session_errands.awaiting_result)
+		 AND s.state IN ('completed','failed','cancelled')) ORDER BY task_id,created_at,id`,
+		errandPromptAdmissionEffect+":", errandPromptAdmissionEffect)
 }
 
 // ReadOwnedErrandFirstTerminal returns the current execution's projected
 // terminal receipt for the reserved first turn.
 func (r *Repository) ReadOwnedErrandFirstTerminal(ctx context.Context, errandID string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error) {
-	return readOwnedErrandFirstTerminal(ctx, r.ro, errandID)
+	return readOwnedErrandTerminal(ctx, r.ro, errandID, true)
+}
+
+func (r *Repository) ReadOwnedErrandLatestTerminal(ctx context.Context, errandID string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error) {
+	return readOwnedErrandTerminal(ctx, r.ro, errandID, false)
 }
 
 // HasSettledErrandDeliverySubmission checks the projected terminal effect
@@ -52,25 +64,27 @@ type errandTerminalReader interface {
 	QueryRowxContext(context.Context, string, ...interface{}) *sqlx.Row
 }
 
-func readOwnedErrandFirstTerminal(ctx context.Context, reader errandTerminalReader, errandID string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error) {
+func readOwnedErrandTerminal(ctx context.Context, reader errandTerminalReader, errandID string, firstOnly bool) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error) {
 	var attempt, taskID, turnID, submissionID string
 	var generation, promptGeneration uint64
 	var outcome models.DeliverySubmissionState
 	err := reader.QueryRowxContext(ctx, reader.Rebind(`SELECT a.outcome,e.task_id,t.id,s.id,g.generation,g.prompt_generation,s.state
 		FROM task_session_errands e
-		JOIN errand_turns t ON t.errand_id=e.id AND t.id=e.first_turn_id
 		JOIN errand_execution_generations g ON g.errand_id=e.id
-		JOIN agent_delivery_submissions s ON s.id=e.submission_id AND s.dispatch_attempt_id=g.execution_id
-		JOIN agent_delivery_effects a ON a.effect_key=? || s.id AND a.session_id=s.session_id AND a.turn_id=t.id
+		JOIN agent_delivery_submissions s ON s.session_id=('errand:' || e.id) AND s.dispatch_attempt_id=g.execution_id
+		JOIN agent_delivery_effects a ON a.effect_key=? || s.id AND a.effect_type=? AND a.session_id=s.session_id
+		JOIN errand_turns t ON t.errand_id=e.id AND t.id=a.turn_id
 		WHERE e.id=? AND t.completed_at IS NOT NULL AND g.active_submission_id=''
+		  AND (NOT ? OR (t.id=e.first_turn_id AND s.id=e.submission_id))
 		  AND g.generation=(SELECT MAX(latest.generation) FROM errand_execution_generations latest WHERE latest.errand_id=e.id)
 		  AND s.state IN ('completed','failed','cancelled')
 		  AND EXISTS (SELECT 1 FROM agent_delivery_effects terminal
 		    WHERE terminal.effect_type=? AND terminal.state='block_resolved' AND terminal.sequence>0
 		      AND terminal.session_id=a.session_id AND terminal.stream_id=a.stream_id
 		      AND terminal.incarnation_id=a.incarnation_id AND terminal.harness_generation=a.harness_generation
-		      AND terminal.submission_id=s.id AND terminal.turn_id=t.id AND terminal.outcome=s.state)`),
-		errandPromptAdmissionEffect+":", errandID, models.DeliveryTerminalEffectType).
+		      AND terminal.submission_id=s.id AND terminal.turn_id=t.id AND terminal.outcome=s.state)
+		ORDER BY t.completed_at DESC,t.id DESC LIMIT 1`),
+		errandPromptAdmissionEffect+":", errandPromptAdmissionEffect, errandID, firstOnly, models.DeliveryTerminalEffectType).
 		Scan(&attempt, &taskID, &turnID, &submissionID, &generation, &promptGeneration, &outcome)
 	if err != nil {
 		return models.ErrandTeardownTarget{}, "", err
@@ -90,7 +104,7 @@ func readOwnedErrandFirstTerminal(ctx context.Context, reader errandTerminalRead
 }
 
 func validateOwnedCompletionTarget(ctx context.Context, tx *sqlx.Tx, current, next *models.Errand) error {
-	target, outcome, err := readOwnedErrandFirstTerminal(ctx, tx, current.ID)
+	target, outcome, err := readOwnedErrandTerminal(ctx, tx, current.ID, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.ErrErrandVersionConflict
 	}
@@ -99,16 +113,27 @@ func validateOwnedCompletionTarget(ctx context.Context, tx *sqlx.Tx, current, ne
 	}
 	intent := next.TeardownIntent
 	if current.Lifecycle != models.ErrandLifecycleLaunched || next.Lifecycle != current.Lifecycle ||
-		intent.State != models.ErrandTeardownIntentPending || intent.Target != target ||
-		next.LatestSettledTurnID != target.TurnID || next.ResultTurnID != target.TurnID || next.AwaitingResult ||
-		next.ResultState != models.ErrandResultPending ||
-		(outcome == models.DeliverySubmissionCompleted) != (next.LastOutcome == models.ErrandOutcomeDone) {
+		intent.State != models.ErrandTeardownIntentPending || intent.Target != target || next.LatestSettledTurnID != target.TurnID {
+		return models.ErrInvalidErrand
+	}
+	if !validOwnedCompletionResult(current, next, target, outcome) {
 		return models.ErrInvalidErrand
 	}
 	if current.TeardownIntent != nil {
 		return validateCompletionIntentReplacement(current.TeardownIntent, intent)
 	}
 	return nil
+}
+
+func validOwnedCompletionResult(current, next *models.Errand, target models.ErrandTeardownTarget, outcome models.DeliverySubmissionState) bool {
+	if target.TurnID == current.FirstTurnID {
+		return next.ResultTurnID == target.TurnID && !next.AwaitingResult && next.ResultState == models.ErrandResultPending &&
+			(outcome == models.DeliverySubmissionCompleted) == (next.LastOutcome == models.ErrandOutcomeDone)
+	}
+	return next.ResultState == current.ResultState && next.ResultTurnID == current.ResultTurnID &&
+		next.ResultText == current.ResultText && next.ResultKind == current.ResultKind && next.ResultTruncated == current.ResultTruncated &&
+		next.AwaitingResult == current.AwaitingResult && next.LastOutcome == current.LastOutcome &&
+		next.DeliveredRoute == current.DeliveredRoute && next.DeliveryToken == current.DeliveryToken
 }
 
 // GetErrandLastAssistantMessage reads the final visible assistant text

@@ -37,18 +37,27 @@ func (r *Repository) CreateErrandTurn(ctx context.Context, errandID string, turn
 	}
 	row := *turn
 	row.TaskID = taskID
-	stampTurnDefaults(&row)
-	normalizeErrandTurnTimestamps(&row)
+	if err = insertErrandTurn(ctx, r.db, errandID, &row); err == nil {
+		*turn = row
+	}
+	return err
+}
+
+type errandTurnWriter interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	Rebind(string) string
+}
+
+func insertErrandTurn(ctx context.Context, writer errandTurnWriter, errandID string, row *models.Turn) error {
+	stampTurnDefaults(row)
+	normalizeErrandTurnTimestamps(row)
 	metadata, err := serializeTurnMetadata(row.Metadata)
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO errand_turns
+	_, err = writer.ExecContext(ctx, writer.Rebind(`INSERT INTO errand_turns
  (id,errand_id,execution_profile_id,route_generation,started_at,completed_at,metadata,created_at,updated_at)
  VALUES (?,?,?,?,?,?,?,?,?)`), row.ID, errandID, row.ExecutionProfileID, row.RouteGeneration, row.StartedAt, utcTimeArg(row.CompletedAt), metadata, row.CreatedAt, row.UpdatedAt)
-	if err == nil {
-		*turn = row
-	}
 	return err
 }
 

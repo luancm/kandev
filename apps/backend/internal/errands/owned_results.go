@@ -11,8 +11,8 @@ import (
 )
 
 type ownedErrandResultStore interface {
-	ListOwnedErrandsAwaitingResult(context.Context) ([]*models.Errand, error)
-	ReadOwnedErrandFirstTerminal(context.Context, string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error)
+	ListOwnedErrandsAwaitingSettlement(context.Context) ([]*models.Errand, error)
+	ReadOwnedErrandLatestTerminal(context.Context, string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error)
 }
 
 func (s *Service) reconcileOwnedErrandResults(ctx context.Context) error {
@@ -20,7 +20,7 @@ func (s *Service) reconcileOwnedErrandResults(ctx context.Context) error {
 	if !ok {
 		return nil
 	}
-	rows, err := store.ListOwnedErrandsAwaitingResult(ctx)
+	rows, err := store.ListOwnedErrandsAwaitingSettlement(ctx)
 	if err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ func (s *Service) reconcileOwnedErrandResults(ctx context.Context) error {
 }
 
 func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErrandResultStore, row *models.Errand) error {
-	target, outcome, err := store.ReadOwnedErrandFirstTerminal(ctx, row.ID)
+	target, outcome, err := store.ReadOwnedErrandLatestTerminal(ctx, row.ID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -53,14 +53,16 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 		settlement.Outcome = models.ErrandOutcomeFailed
 		settlement.Interrupted = outcome == models.DeliverySubmissionCancelled
 	}
-	text, truncated, kind := resultOf(settlement, view, true)
+	parentInitiated := target.TurnID == row.FirstTurnID
+	text, truncated, kind := resultOf(settlement, view, parentInitiated)
 	now := s.clock.Now()
 	unlock := s.parentLocks.lock(row.ParentSessionID)
 	next, changed, err := s.update(ctx, row.ID, func(e *models.Errand) bool {
-		if e.Lifecycle != models.ErrandLifecycleLaunched || e.LatestSettledTurnID != "" || !e.AwaitingResult {
+		if e.Lifecycle != models.ErrandLifecycleLaunched || e.LatestSettledTurnID != row.LatestSettledTurnID ||
+			e.LatestSettledTurnID == target.TurnID || (parentInitiated && !e.AwaitingResult) {
 			return false
 		}
-		applySettlement(e, settlement, true, text, truncated, kind, now)
+		applySettlement(e, settlement, parentInitiated, text, truncated, kind, now)
 		e.TeardownIntent = &models.ErrandTeardownIntent{
 			Version: models.ErrandTeardownIntentVersion, ID: uuid.NewString(), RequestedAt: now,
 			State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCompletion,
@@ -72,7 +74,11 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 	if err != nil || !changed {
 		return err
 	}
-	s.recordTerminalSettlement(next, settlement, true, false)
-	s.afterResultWrite(ctx, next)
+	s.recordTerminalSettlement(next, settlement, parentInitiated, false)
+	if parentInitiated {
+		s.afterResultWrite(ctx, next)
+	} else {
+		s.publish(ctx, next)
+	}
 	return nil
 }

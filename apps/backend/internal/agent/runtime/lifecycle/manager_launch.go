@@ -2249,10 +2249,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// still describe a retained worker. A resume request is retained evidence
 	// even when the row cannot be read; refuse that uncertainty before profile
 	// resolution, workspace mutation, or runtime allocation.
-	if err := m.ensureDurableExecutionSelectionCompatible(
-		ctx, req.SessionID, req.TaskEnvironmentID, req.ExecutorType,
-		launchRequestCarriesRetainedEvidence(req),
-	); err != nil {
+	if err := m.validateColdLaunchRuntime(ctx, req); err != nil {
 		return nil, err
 	}
 	m.logger.Debug("launching agent",

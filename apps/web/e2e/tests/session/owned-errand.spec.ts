@@ -1,6 +1,7 @@
 import { test } from "../../fixtures/test-base";
 import {
   exerciseOwnedErrandAutomaticPermission,
+  exerciseOwnedErrandContinuation,
   exerciseOwnedErrandView,
 } from "../../helpers/owned-errand";
 
@@ -42,4 +43,24 @@ test("desktop retains a tool action approved by the Errand's saved policy", asyn
 }) => {
   test.setTimeout(120_000);
   await exerciseOwnedErrandAutomaticPermission({ page, api, seed, backend, phone: false });
+});
+
+test("desktop continues a completed owned Errand and retains its original parent result", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandContinuation({ page, api, seed, backend });
+});
+
+test("desktop sends a follow-up from a finished owned Errand", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandContinuation({ page, api, seed, backend, browser: true });
 });

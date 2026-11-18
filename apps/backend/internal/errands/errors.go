@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -27,7 +28,7 @@ const (
 )
 
 // MaxLiveErrands is the number of live errands one task may hold.
-const MaxLiveErrands = 5
+const MaxLiveErrands = models.ErrandLiveLimit
 
 // MaxAvailableProfiles bounds the profile names a profile failure lists.
 const MaxAvailableProfiles = 20
@@ -61,6 +62,10 @@ func ReasonOf(err error) (Reason, bool) {
 	if isRecoveryRefusal(err) {
 		return ReasonRecoveryUnresolved, true
 	}
+	var capacity *models.ErrandCapacityError
+	if errors.As(err, &capacity) {
+		return ReasonLimitReached, true
+	}
 	var typed *Error
 	if errors.As(err, &typed) {
 		return typed.Reason, true
@@ -90,6 +95,10 @@ func WSError(msgID, action string, err error) (*ws.Message, bool) {
 	if isRecoveryRefusal(err) {
 		err = newError(ReasonRecoveryUnresolved, "Earlier errand work and its external effects remain uncertain. Recovery must verify that work before you can continue. Inspect the conversation or cancel the errand; cancellation does not resolve the uncertainty.", nil)
 	}
+	var capacity *models.ErrandCapacityError
+	if errors.As(err, &capacity) {
+		err = errandCapacityFailure(capacity.Live)
+	}
 
 	var typed *Error
 	if errors.As(err, &typed) {
@@ -105,6 +114,11 @@ func WSError(msgID, action string, err error) (*ws.Message, bool) {
 		return msg, marshalErr == nil
 	}
 	return nil, false
+}
+
+func errandCapacityFailure(live int) *Error {
+	capacity := &models.ErrandCapacityError{Live: live}
+	return newError(ReasonLimitReached, capacity.Error(), map[string]interface{}{"limit": MaxLiveErrands, "live": live})
 }
 
 // Joined operational errors must retain their failure classification.

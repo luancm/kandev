@@ -30,7 +30,7 @@ func (s *Service) handleNonSessionPermissionRequest(ctx context.Context, event w
 // WireOwnedPermissionEvents delivers projected permission events to the owned
 // resolver and refreshes task-scoped status when an action needs attention.
 func (a *ErrandAdapter) WireOwnedPermissionEvents(statusChanged func(context.Context, string, string)) {
-	a.permissionStatusChanged = statusChanged
+	a.ownedStatusChanged = statusChanged
 	a.svc.ownedErrandPermissionHandler = a.handleOwnedPermissionRequest
 }
 
@@ -39,8 +39,8 @@ func (a *ErrandAdapter) handleOwnedPermissionRequest(ctx context.Context, event 
 		return
 	}
 	if !event.AutoApprovalPending {
-		if event.AutoApprovedOptionID == "" && a.permissionStatusChanged != nil {
-			a.permissionStatusChanged(ctx, event.TaskID, event.ErrandID)
+		if event.AutoApprovedOptionID == "" && a.ownedStatusChanged != nil {
+			a.ownedStatusChanged(ctx, event.TaskID, event.ErrandID)
 		}
 		return
 	}

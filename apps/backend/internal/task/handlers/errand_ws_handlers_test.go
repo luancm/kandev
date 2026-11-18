@@ -158,6 +158,27 @@ func TestErrandPermissionResponseRequiresTaskControl(t *testing.T) {
 	}
 }
 
+func TestErrandContinuationRequiresTaskPromptAccess(t *testing.T) {
+	h := errandHandlers(t, &fakeErrandService{}, true)
+	dispatcher := ws.NewDispatcher()
+	h.registerErrandWS(dispatcher)
+	request := errands.ContinuationRequest{TaskID: "task-b", ErrandID: "errand-1", ClientMessageID: "message-1", Content: "Follow up"}
+	var received []errands.ContinuationRequest
+	h.SetErrandContinuation(func(_ context.Context, got errands.ContinuationRequest) (string, error) {
+		received = append(received, got)
+		return "next-turn", nil
+	})
+	message := errandMessage(t, ws.ActionErrandContinue, request)
+	response, err := dispatcher.Dispatch(errandCallerAs("user-a"), message)
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
+	require.Empty(t, received)
+	response, err = dispatcher.Dispatch(errandCallerAs("user-b"), message)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Equal(t, []errands.ContinuationRequest{request}, received)
+}
+
 // @covers AC-TASKS-ERRANDS-012.2
 func TestErrandRequestsFailWithFeatureDisabledWhileTheFlagIsOff(t *testing.T) {
 	svc := &fakeErrandService{errand: sampleErrand()}

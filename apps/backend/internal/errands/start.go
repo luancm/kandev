@@ -122,23 +122,30 @@ func (s *Service) admit(ctx context.Context, prepared *preparedStart) (*models.E
 		return nil, startErr
 	}
 	if live >= MaxLiveErrands {
-		countStarted(StartOutcomeLimitReached)
-		s.logger.Info("errand.started",
-			zap.String("task_id", prepared.req.TaskID), zap.String("parent_session_id", prepared.req.ParentSessionID),
-			zap.String("outcome", string(StartOutcomeLimitReached)), zap.Int("live", live))
-		return nil, newError(ReasonLimitReached, fmt.Sprintf("a task can hold at most %d live errands", MaxLiveErrands),
-			map[string]interface{}{"limit": MaxLiveErrands, "live": live})
+		return nil, s.refuseStartAtCapacity(prepared.req, live)
 	}
 	errand := newQueuedErrand(prepared, s.clock.Now())
 	s.launching.acquire(errand.ID)
 	if err := s.store.CreateErrand(ctx, errand); err != nil {
 		s.launching.release(errand.ID)
+		var capacity *models.ErrandCapacityError
+		if errors.As(err, &capacity) {
+			return nil, s.refuseStartAtCapacity(prepared.req, capacity.Live)
+		}
 		countStarted(StartOutcomeFailed)
 		s.logger.Warn("errand.started", s.errandFields(errand,
 			"outcome", string(StartOutcomeFailed), "error", oneLine(err.Error(), 300))...)
 		return nil, fmt.Errorf("create errand: %w", err)
 	}
 	return errand, nil
+}
+
+func (s *Service) refuseStartAtCapacity(request StartRequest, live int) error {
+	countStarted(StartOutcomeLimitReached)
+	s.logger.Info("errand.started",
+		zap.String("task_id", request.TaskID), zap.String("parent_session_id", request.ParentSessionID),
+		zap.String("outcome", string(StartOutcomeLimitReached)), zap.Int("live", live))
+	return errandCapacityFailure(live)
 }
 
 func newQueuedErrand(prepared *preparedStart, now time.Time) *models.Errand {

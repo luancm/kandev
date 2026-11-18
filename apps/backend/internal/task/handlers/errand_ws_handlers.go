@@ -40,16 +40,47 @@ func (h *TaskHandlers) SetErrandPermissionResponder(respond func(context.Context
 	h.respondToErrandPermission = respond
 }
 
+func (h *TaskHandlers) SetErrandContinuation(continuation func(context.Context, errands.ContinuationRequest) (string, error)) {
+	h.continueErrand = continuation
+}
+
 func (h *TaskHandlers) registerErrandWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionErrandList, h.wsListErrands)
 	dispatcher.RegisterFunc(ws.ActionErrandBrowserSummary, h.wsErrandBrowserSummary)
 	dispatcher.RegisterFunc(ws.ActionErrandHistoryPage, h.wsErrandHistoryPage)
 	dispatcher.RegisterFunc(ws.ActionErrandInspect, h.wsErrandInspect)
 	dispatcher.RegisterFunc(ws.ActionErrandMessages, h.wsErrandMessages)
+	dispatcher.RegisterFunc(ws.ActionErrandContinue, h.wsContinueErrand)
 	dispatcher.RegisterFunc(ws.ActionErrandPermissionRespond, h.wsRespondToErrandPermission)
 	dispatcher.RegisterFunc(ws.ActionErrandCancel, h.wsCancelErrand)
 	dispatcher.RegisterFunc(ws.ActionErrandCancelAll, h.wsCancelAllErrands)
 	dispatcher.RegisterFunc(ws.ActionErrandSendResult, h.wsSendErrandResult)
+}
+
+func (h *TaskHandlers) wsContinueErrand(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.errandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var request errands.ContinuationRequest
+	if err := msg.ParsePayload(&request); err != nil || !request.Valid() || len(request.Content) > maxMessageContentBytes {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid errand continuation", nil)
+	}
+	if err := h.authorizeErrandTask(ctx, request.TaskID, authz.ScopeSessionPrompt); err != nil {
+		return h.errandFailure(msg, models.ErrErrandNotFound)
+	}
+	if h.continueErrand == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "errand continuation is unavailable", nil)
+	}
+	turnID, err := h.continueErrand(ctx, request)
+	if err != nil {
+		if _, classified := errands.ReasonOf(err); !classified && !errors.Is(err, errands.ErrInvalidRequest) && !errors.Is(err, models.ErrErrandNotFound) {
+			h.logger.Warn("errand continuation failed", zap.String("errand_id", request.ErrandID), zap.Error(err))
+		}
+		return h.errandFailure(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, struct {
+		TurnID string `json:"turn_id"`
+	}{TurnID: turnID})
 }
 
 func (h *TaskHandlers) wsRespondToErrandPermission(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

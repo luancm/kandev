@@ -43,15 +43,7 @@ func (r *Repository) CreateErrandMessage(ctx context.Context, errandID string, m
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = externalizeErrandMessageTx(ctx, tx, &row); err != nil {
-		return err
-	}
-	encoded, err := json.Marshal(&row)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages(id,errand_id,turn_id,payload,payload_digest,payload_size,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`), row.ID, errandID, row.TurnID, string(encoded), row.PayloadDigest, row.PayloadSize, row.CreatedAt, row.UpdatedAt)
-	if err != nil {
+	if err = insertErrandMessageTx(ctx, tx, errandID, &row); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
@@ -59,6 +51,18 @@ func (r *Repository) CreateErrandMessage(ctx context.Context, errandID string, m
 	}
 	*message = row
 	return nil
+}
+
+func insertErrandMessageTx(ctx context.Context, tx *sqlx.Tx, errandID string, row *models.Message) error {
+	if err := externalizeErrandMessageTx(ctx, tx, row); err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages(id,errand_id,turn_id,payload,payload_digest,payload_size,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`), row.ID, errandID, row.TurnID, string(encoded), row.PayloadDigest, row.PayloadSize, row.CreatedAt, row.UpdatedAt)
+	return err
 }
 
 const errandMessageColumns = `m.id, e.task_id, m.turn_id, m.payload, m.payload_digest, m.payload_size, m.created_at, m.updated_at`

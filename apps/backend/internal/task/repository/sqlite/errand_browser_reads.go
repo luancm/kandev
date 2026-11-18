@@ -399,8 +399,8 @@ func errandBrowserStatusExpression(driver string) string {
 		WHEN e.lifecycle = 'cancelled' THEN 'cancelled'
 		WHEN e.lifecycle = 'queued' THEN 'queued'
 		WHEN ` + ownedErrandExists + ` THEN CASE
-			WHEN ` + ownedErrandWorking + ` AND ` + ownedErrandPermission(driver) + ` THEN 'needs_attention'
-			WHEN ` + ownedErrandWorking + ` THEN 'running'
+			WHEN ` + ownedErrandWorking(driver) + ` AND ` + ownedErrandPermission(driver) + ` THEN 'needs_attention'
+			WHEN ` + ownedErrandWorking(driver) + ` THEN 'running'
 			ELSE e.last_outcome END
 		WHEN s.id IS NULL OR s.state = 'FAILED' THEN 'failed'
 		WHEN s.state IN ('STARTING', 'RUNNING') AND ` + permission + ` THEN 'needs_attention'
@@ -413,7 +413,7 @@ func errandBrowserStatusExpression(driver string) string {
 
 func errandBrowserAttentionExpression(driver string) string {
 	return `CASE
-		WHEN ` + ownedErrandWorking + ` AND ` + ownedErrandPermission(driver) + ` THEN 'permission'
+		WHEN ` + ownedErrandWorking(driver) + ` AND ` + ownedErrandPermission(driver) + ` THEN 'permission'
 		WHEN s.state IN ('STARTING', 'RUNNING') AND ` + errandBrowserPermissionPredicate(driver) + ` THEN 'permission'
 		WHEN ` + recoveryAttentionPredicate(driver) + ` THEN 'recovery_unresolved' ELSE '' END`
 }

@@ -62,6 +62,11 @@ func (r *Repository) CreateErrand(ctx context.Context, errand *models.Errand) er
 	}
 	row.CreatedAt, row.UpdatedAt = row.CreatedAt.UTC(), row.UpdatedAt.UTC()
 	err = r.withErrandTask(ctx, row.TaskID, func(tx *sqlx.Tx) error {
+		if row.Lifecycle == models.ErrandLifecycleQueued {
+			if err := checkLiveErrandCapacity(ctx, tx, row.TaskID); err != nil {
+				return err
+			}
+		}
 		_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO task_session_errands (`+errandColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 			row.ID, row.TaskID, row.ParentSessionID, row.Title, row.Objective, row.AgentProfileID, mcpServerIDs,
@@ -117,14 +122,35 @@ func (r *Repository) ListQueuedErrands(ctx context.Context) ([]*models.Errand, e
 // CountLiveErrandsByTask counts a task's errands whose projected status is
 // queued, running, or needs_attention.
 func (r *Repository) CountLiveErrandsByTask(ctx context.Context, taskID string) (int, error) {
+	return countLiveErrandsByTask(ctx, r.ro, taskID)
+}
+
+type liveErrandCounter interface {
+	GetContext(context.Context, interface{}, string, ...interface{}) error
+	DriverName() string
+	Rebind(string) string
+}
+
+func countLiveErrandsByTask(ctx context.Context, reader liveErrandCounter, taskID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM task_session_errands e
+	err := reader.GetContext(ctx, &count, reader.Rebind(`SELECT COUNT(*) FROM task_session_errands e
 		LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND `+liveErrandPredicate(r.ro.DriverName())), taskID).Scan(&count)
+		WHERE e.task_id = ? AND `+liveErrandPredicate(reader.DriverName())), taskID)
 	if err != nil {
 		return 0, fmt.Errorf("count live errands for task %s: %w", taskID, err)
 	}
 	return count, nil
+}
+
+func checkLiveErrandCapacity(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	live, err := countLiveErrandsByTask(ctx, tx, taskID)
+	if err != nil {
+		return err
+	}
+	if live >= models.ErrandLiveLimit {
+		return &models.ErrandCapacityError{Live: live}
+	}
+	return nil
 }
 
 // outstandingErrandPredicate mirrors errands.IsOutstanding: a queued errand,

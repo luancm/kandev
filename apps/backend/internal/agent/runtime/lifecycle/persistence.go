@@ -369,7 +369,14 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 		}
 	}
 	if prior != nil && prior.AgentExecutionID != execution.ID {
-		if err := m.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
+		if execution.Owner.Kind == ExecutionOwnerErrand {
+			predecessor := execution.Owner
+			predecessor.Generation--
+			if !matchesStoppedErrandInventory(prior, predecessor) {
+				return models.ErrExecutionRotated
+			}
+			prior = nil
+		} else if err := m.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
 			return err
 		}
 	}

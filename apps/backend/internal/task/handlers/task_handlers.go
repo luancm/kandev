@@ -59,6 +59,7 @@ type TaskHandlers struct {
 	errands                       ErrandService
 	errandsEnabled                bool
 	respondToErrandPermission     func(context.Context, errands.PermissionResponseRequest) error
+	continueErrand                func(context.Context, errands.ContinuationRequest) (string, error)
 	logger                        *logger.Logger
 }
 

@@ -193,6 +193,125 @@ export async function exerciseOwnedErrandAutomaticPermission({
   }
 }
 
+export async function exerciseOwnedErrandContinuation({
+  page,
+  api,
+  seed,
+  backend,
+  phone = false,
+  browser = false,
+}: {
+  page: Page;
+  api: ApiClient;
+  seed: SeedData;
+  backend: BackendContext;
+  phone?: boolean;
+  browser?: boolean;
+}) {
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    const { taskId, parentId, errands, gates } = await startErrands(api, seed, backend, {
+      count: 1,
+    });
+    const errandId = errands[0].errand_id;
+    await gates[0].release();
+    await waitDelivered(api, taskId, [errandId]);
+    const request = {
+      task_id: taskId,
+      errand_id: errandId,
+      client_message_id: "owned-errand-follow-up",
+      content: 'e2e:message("ERRAND_FOLLOW_UP")',
+    };
+    if (browser) {
+      await sendOwnedErrandFollowUp(page, { taskId, parentId, errandId }, request.content, phone);
+    } else {
+      await expectOwnedErrandContinuationRetry(api, backend, request);
+      // A later generation needs the first follow-up's own close receipt.
+      await expectOwnedErrandContinuationRetry(api, backend, {
+        ...request,
+        client_message_id: "owned-errand-second-follow-up",
+        content: 'e2e:message("ERRAND_SECOND_FOLLOW_UP")',
+      });
+    }
+
+    const outputs = browser
+      ? ["ERRAND_FOLLOW_UP"]
+      : ["ERRAND_FOLLOW_UP", "ERRAND_SECOND_FOLLOW_UP"];
+    await expect
+      .poll(async () => readOwnedMessages(api, taskId, errandId))
+      .toEqual(
+        expect.arrayContaining(
+          outputs.map((content) => expect.objectContaining({ content, session_id: "" })),
+        ),
+      );
+    const messages = await readOwnedMessages(api, taskId, errandId);
+    expect(messages.filter((message) => message.content === request.content)).toHaveLength(1);
+    expect((await api.listTaskSessions(taskId)).sessions.map(({ id }) => id)).toEqual([parentId]);
+    expect(await listErrands(api, taskId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          errand_id: errandId,
+          result_state: "delivered",
+          result_preview: expect.stringContaining("ERRAND_RESULT_1"),
+        }),
+      ]),
+    );
+
+    if (!browser) {
+      const { conversation } = await openOwnedErrandConversation(page, taskId, parentId, errandId, {
+        phone,
+        finished: true,
+      });
+      await expect(conversation.getByText("ERRAND_FOLLOW_UP", { exact: true })).toBeVisible();
+    }
+  } finally {
+    await restore();
+  }
+}
+
+async function expectOwnedErrandContinuationRetry(
+  api: ApiClient,
+  backend: BackendContext,
+  request: { task_id: string; errand_id: string; client_message_id: string; content: string },
+) {
+  async function submit() {
+    try {
+      return (await api.wsRequest<{ turn_id: string }>("errand.continue", request)).turn_id;
+    } catch (error) {
+      if (String(error).includes("Earlier errand work and its external effects remain uncertain"))
+        return undefined;
+      const logs = await readFile(backend.logPath, "utf8").catch(() => "");
+      const failure = logs
+        .split("\n")
+        .findLast((line) => line.includes("errand continuation failed"));
+      throw new Error(failure ? `${String(error)}\n${failure}` : String(error), { cause: error });
+    }
+  }
+  let turnId: string | undefined;
+  await expect.poll(async () => (turnId = await submit())).toEqual(expect.any(String));
+  expect(await submit()).toBe(turnId);
+}
+
+async function sendOwnedErrandFollowUp(
+  page: Page,
+  { taskId, parentId, errandId }: { taskId: string; parentId: string; errandId: string },
+  content: string,
+  phone: boolean,
+) {
+  const { conversation } = await openOwnedErrandConversation(page, taskId, parentId, errandId, {
+    phone,
+    finished: true,
+  });
+  const composer = conversation.getByTestId("errand-continuation");
+  await expect(composer).toBeVisible();
+  const send = composer.getByRole("button", { name: "Send" });
+  if (phone) await expectTouchTarget(send);
+  await composer.locator('.tiptap.ProseMirror[contenteditable="true"]').fill(content);
+  await send.click();
+  await expect(conversation.getByText("ERRAND_FOLLOW_UP", { exact: true })).toBeVisible();
+  if (phone) await expectNoHorizontalOverflow(page);
+}
+
 async function returnToErrandParent(conversation: Locator, parent: Locator, phone: boolean) {
   const back = conversation.getByTestId("errand-back-to-parent");
   if (phone) await expectTouchTarget(back);
@@ -238,11 +357,16 @@ async function openOwnedErrandConversation(
 }
 
 async function readOwnedPermission(api: ApiClient, taskId: string, errandId: string) {
+  const messages = await readOwnedMessages(api, taskId, errandId);
+  return messages.find((message) => message.type === "permission_request");
+}
+
+async function readOwnedMessages(api: ApiClient, taskId: string, errandId: string) {
   const page = await api.wsRequest<{ messages: Message[] }>("errand.messages", {
     task_id: taskId,
     errand_id: errandId,
   });
-  return page.messages.find((message) => message.type === "permission_request");
+  return page.messages;
 }
 
 async function expectStalePermissionRefused(api: ApiClient, taskId: string, errandId: string) {

@@ -6,6 +6,7 @@ package errands
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -110,6 +111,18 @@ type PermissionResponseRequest struct {
 	PendingID string `json:"pending_id"`
 	OptionID  string `json:"option_id,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
+}
+
+type ContinuationRequest struct {
+	TaskID          string `json:"task_id"`
+	ErrandID        string `json:"errand_id"`
+	ClientMessageID string `json:"client_message_id"`
+	Content         string `json:"content"`
+}
+
+func (r ContinuationRequest) Valid() bool {
+	return r.TaskID != "" && r.ErrandID != "" && strings.TrimSpace(r.ClientMessageID) != "" &&
+		len(r.ClientMessageID) <= 128 && strings.TrimSpace(r.Content) != ""
 }
 
 func (r PermissionResponseRequest) Valid() bool {
