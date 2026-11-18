@@ -31,7 +31,7 @@ type StartResult struct {
 	ProfileName string
 }
 
-// Start creates an errand and launches its session. It returns without
+// Start creates an errand and launches its execution. It returns without
 // waiting for the errand's first turn. A ceiling refusal leaves the errand
 // queued. Only a positively proved pre-admission rejection may remove or
 // fail the reservation; uncertain inspection/dispatch errors retain it.
@@ -169,13 +169,10 @@ type launchOutcome struct {
 }
 
 // launchQueued launches one queued errand and records the result. With
-// removeOnFailure a proved rejection that created no session deletes the row.
+// removeOnFailure a proved pre-admission rejection deletes the row.
 // Other errors retain the reservation without a synthetic failed result.
 func (s *Service) launchQueued(ctx context.Context, errand *models.Errand, removeOnFailure bool) (launchOutcome, error) {
-	launchCtx := models.WithReservedLaunchIdentity(ctx, models.ReservedLaunchIdentity{
-		TaskID: errand.TaskID, SessionID: errand.ID, TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID,
-	})
-	result, err := s.launcher.LaunchErrand(launchCtx, LaunchRequest{
+	result, err := s.launcher.LaunchErrand(ctx, LaunchRequest{
 		ErrandID: errand.ID, TaskID: errand.TaskID, ParentSessionID: errand.ParentSessionID,
 		Title: errand.Title, Objective: errand.Objective, AgentProfileID: errand.AgentProfileID,
 		TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID, MCPServerIDs: errand.MCPServerIDs,
@@ -279,8 +276,8 @@ func (s *Service) recordLaunched(ctx context.Context, errand *models.Errand) (la
 	return launchOutcome{snapshot: snapshot}, nil
 }
 
-// recordLaunchFailure settles an errand whose launch failed. A failure that
-// left no session row removes the errand when the caller asked for removal.
+// recordLaunchFailure settles a proved pre-admission rejection. An initial
+// request removes its reservation. A queued retry reports a failure to its parent.
 func (s *Service) recordLaunchFailure(
 	ctx context.Context, errand *models.Errand, launchErr error, removeOnFailure bool,
 ) (launchOutcome, error) {
@@ -294,11 +291,7 @@ func (s *Service) recordLaunchFailure(
 		}
 		return launchOutcome{snapshot: Snapshot{Errand: current, Status: models.ErrandStatusCancelled}}, nil
 	}
-	session, err := s.store.GetTaskSession(ctx, errand.ID)
-	if err != nil && !isMissingSession(err) {
-		return launchOutcome{}, errors.Join(launchErr, fmt.Errorf("inspect failed errand launch: %w", err))
-	}
-	if session == nil && removeOnFailure {
+	if removeOnFailure {
 		return launchOutcome{}, s.removeFailedStart(ctx, errand, launchErr)
 	}
 	row, changed, err := s.update(ctx, errand.ID, func(e *models.Errand) bool {
@@ -327,8 +320,7 @@ func (s *Service) recordLaunchFailure(
 	return launchOutcome{snapshot: snapshot}, nil
 }
 
-// removeFailedStart deletes an errand whose start failed before any session
-// existed and tells clients it never ran.
+// removeFailedStart removes the reservation and notifies waiting clients.
 func (s *Service) removeFailedStart(ctx context.Context, errand *models.Errand, launchErr error) error {
 	if err := s.store.DeleteErrand(ctx, errand.ID); err != nil {
 		return errors.Join(launchErr, fmt.Errorf("remove errand after failed launch: %w", err))

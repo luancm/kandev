@@ -24,15 +24,15 @@ func TestStartLaunchesWithReservedIdentityAndTheParentMCPSnapshot(t *testing.T) 
 	if len(calls) != 1 {
 		t.Fatalf("launch calls = %d, want 1", len(calls))
 	}
-	call, identity := calls[0], h.launcher.identity[0]
+	call := calls[0]
 	errand := result.Errand
 	if call.ErrandID != errand.ID || call.TaskID != testTask || call.ParentSessionID != testParent ||
 		call.AgentProfileID != "profile-1" || call.Objective != "Do audit" || call.Title != "audit" {
 		t.Fatalf("launch request = %+v", call)
 	}
-	if identity.SessionID != errand.ID || identity.TurnID != errand.FirstTurnID ||
-		identity.SubmissionID != errand.SubmissionID || identity.TaskID != testTask {
-		t.Fatalf("reserved identity = %+v, want the errand's reserved identity", identity)
+	if call.TurnID == "" || call.TurnID != errand.FirstTurnID ||
+		call.SubmissionID == "" || call.SubmissionID != errand.SubmissionID {
+		t.Fatalf("launch request = %+v, want the errand's reserved turn and submission", call)
 	}
 	if strings.Join(call.MCPServerIDs, ",") != "mcp-1,mcp-2" || strings.Join(errand.MCPServerIDs, ",") != "mcp-1,mcp-2" {
 		t.Fatalf("MCP snapshot = %v/%v, want the parent's selections", call.MCPServerIDs, errand.MCPServerIDs)
@@ -163,8 +163,9 @@ func TestStartQueuesWhenTheCeilingRefusesAndWritesNoSession(t *testing.T) {
 }
 
 // @covers AC-TASKS-ERRANDS-001.3
-func TestStartRemovesTheErrandWhenLaunchFailsBeforeAnySession(t *testing.T) {
+func TestStartRemovesTheErrandAfterProvedPreAdmissionRejection(t *testing.T) {
 	h := newHarness(t)
+	h.service.store = parentOnlyLaunchStore{Store: h.store}
 	workspaceErr := errors.New("workspace preparing")
 	h.launcher.behave = func(int, LaunchRequest) error { return &ErrLaunchRejected{Err: workspaceErr} }
 	_, err := h.start("audit")
@@ -182,27 +183,13 @@ func TestStartRemovesTheErrandWhenLaunchFailsBeforeAnySession(t *testing.T) {
 	}
 }
 
-func TestStartKeepsAFailedErrandWhenTheLaunchLeftASession(t *testing.T) {
-	h := newHarness(t)
-	h.launcher.behave = func(_ int, request LaunchRequest) error {
-		h.store.addSession(&models.TaskSession{
-			ID: request.ErrandID, TaskID: request.TaskID, Role: models.SessionRoleErrand,
-			ParentSessionID: request.ParentSessionID, State: models.TaskSessionStateFailed,
-		})
-		return &ErrLaunchRejected{Err: errors.New("agent failed to start")}
-	}
-	result := h.mustStart("audit")
+type parentOnlyLaunchStore struct{ Store }
 
-	if result.Status != models.ErrandStatusFailed || result.Errand.LastOutcome != models.ErrandOutcomeFailed {
-		t.Fatalf("result = %s/%s, want a failed errand", result.Status, result.Errand.LastOutcome)
+func (s parentOnlyLaunchStore) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if id != testParent {
+		return nil, fmt.Errorf("non-parent ID %q looked up in session storage", id)
 	}
-	if result.Errand.ResultKind != models.ErrandResultFailure || result.Errand.ResultState != models.ErrandResultPending ||
-		!strings.Contains(result.Errand.ResultText, "agent failed to start") {
-		t.Fatalf("result = %+v, want a pending failure result", result.Errand)
-	}
-	if got := h.deliverer.delivered(); len(got) != 1 || got[0] != testParent {
-		t.Fatalf("deliveries = %v, want one for the parent", got)
-	}
+	return s.Store.GetTaskSession(ctx, id)
 }
 
 func assertReason(t *testing.T, err error, want Reason) {

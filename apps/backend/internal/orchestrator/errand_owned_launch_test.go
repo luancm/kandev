@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,36 +24,15 @@ type ownedErrandLaunchFixtureRuntime struct {
 	start  func(context.Context, string) error
 }
 
-func TestErrandAdapterDoesNotLaunchSessionBackedErrands(t *testing.T) {
-	t.Run("owned runtime unavailable", func(t *testing.T) {
-		f := newErrandLaunchFixture(t)
-		req := f.request()
-		result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), req)
-		require.Error(t, err)
-		require.Equal(t, errands.LaunchBlocked, result.Disposition)
-		sessions, err := f.repo.ListTaskSessions(t.Context(), req.TaskID)
-		require.NoError(t, err)
-		require.Len(t, sessions, 1)
-	})
-	t.Run("legacy launch prepared", func(t *testing.T) {
-		f := newErrandLaunchFixture(t)
-		req := f.request()
-		prepareReservedErrand(t, f, req, true)
-		adapter := NewErrandAdapter(f.svc)
-		adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{
-			launch: func(context.Context, runtimeapi.LaunchSpec) (runtimeapi.ExecutionRef, error) {
-				t.Fatal("a legacy reservation cannot be launched as an independent Errand")
-				return runtimeapi.ExecutionRef{}, nil
-			},
-		}, nil)
-		result, err := adapter.LaunchErrand(t.Context(), req)
-		require.Error(t, err)
-		require.Equal(t, errands.LaunchBlocked, result.Disposition)
-		require.Empty(t, f.manager.launchedWith)
-		session, err := f.repo.GetTaskSession(t.Context(), req.ErrandID)
-		require.NoError(t, err)
-		require.Equal(t, models.SessionRoleErrand, session.Role)
-	})
+func TestErrandAdapterRequiresOwnedRuntime(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	req := f.request()
+	result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), req)
+	require.Error(t, err)
+	require.Equal(t, errands.LaunchBlocked, result.Disposition)
+	sessions, err := f.repo.ListTaskSessions(t.Context(), req.TaskID)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
 }
 
 func TestErrandAdapterAttachesDockerTaskEnvironment(t *testing.T) {
@@ -233,6 +213,25 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 	require.Len(t, sessions, 1)
 }
 
+type ownedLaunchRepository struct {
+	*sqliterepo.Repository
+	errandID string
+}
+
+func (r ownedLaunchRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	if id == r.errandID {
+		return nil, errors.New("errand identity is not in task session storage")
+	}
+	return r.Repository.GetTaskSession(ctx, id)
+}
+
+func (r ownedLaunchRepository) GetExecutorRunningBySessionID(ctx context.Context, id string) (*models.ExecutorRunning, error) {
+	if id == r.errandID {
+		return nil, errors.New("errand inventory requires its transport identity")
+	}
+	return r.Repository.GetExecutorRunningBySessionID(ctx, id)
+}
+
 func TestErrandAdapterRecoversOwnedLaunchReservation(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -250,6 +249,7 @@ func TestErrandAdapterRecoversOwnedLaunchReservation(t *testing.T) {
 			f := newErrandLaunchFixture(t)
 			req := f.request()
 			seedOwnedLaunchReceipt(t, f, req, tc.state, tc.attemptID, tc.finish)
+			f.svc.repo = ownedLaunchRepository{Repository: f.repo, errandID: req.ErrandID}
 			workspaceReads := 0
 			adapter := NewErrandAdapter(f.svc)
 			adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{

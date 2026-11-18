@@ -5,25 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 )
-
-// RepairLegacyErrandCompletion adopts only a latest exact successful receipt
-// whose retained session identity is unchanged and whose runtime is confirmed absent.
-func (a *ErrandAdapter) RepairLegacyErrandCompletion(ctx context.Context, observed *models.Errand) error {
-	if observed == nil || observed.ID == "" {
-		return models.ErrInvalidErrand
-	}
-	_, err := a.withErrandTeardownOwner(ctx, observed.ID, func(ctx context.Context, owner *errandTeardownOwner, store errandTeardownStore) (errands.TeardownOutcome, error) {
-		return owner.repairLegacyCompletion(ctx, store, observed)
-	})
-	return err
-}
 
 func (o *errandTeardownOwner) retryCompletion(ctx context.Context, store errandTeardownStore, row *models.Errand, intent models.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
 	switch row.TeardownIntent.State {
@@ -282,81 +268,6 @@ func (a *ErrandAdapter) retryCompletionCancellation(ctx context.Context, store e
 	return err
 }
 
-func (owner *errandTeardownOwner) repairLegacyCompletion(ctx context.Context, store errandTeardownStore, observed *models.Errand) (errands.TeardownOutcome, error) {
-	row, err := store.GetErrand(ctx, observed.ID)
-	if err != nil {
-		return "", err
-	}
-	if !legacyCompletionRowEligible(row) {
-		return errands.TeardownSuperseded, nil
-	}
-	session, err := owner.svc.repo.GetTaskSession(ctx, row.ID)
-	if errors.Is(err, models.ErrTaskSessionNotFound) {
-		return errands.TeardownSuperseded, nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if !legacyCompletionSessionEligible(row, session) {
-		return errands.TeardownSuperseded, nil
-	}
-	turn, err := owner.svc.currentErrandTurn(ctx, store, row.ID)
-	if err != nil {
-		return "", err
-	}
-	if turn == nil || turn.ID != row.LatestSettledTurnID || turn.CompletedAt == nil {
-		return errands.TeardownSuperseded, nil
-	}
-	effect, err := store.GetErrandTurnSettlementDecision(ctx, row.ID, session.QueueIncarnationID, turn.ID)
-	if err != nil {
-		return "", err
-	}
-	if !successfulCompletionDecision(effect) {
-		return errands.TeardownSuperseded, nil
-	}
-	executionID, absent, err := owner.executionForSession(ctx, row.ID)
-	if err != nil {
-		return "", err
-	}
-	if !absent {
-		return errands.TeardownSuperseded, nil
-	}
-	return owner.adoptLegacyCompletion(ctx, store, row, session, turn, effect, executionID)
-}
-
-func (owner *errandTeardownOwner) adoptLegacyCompletion(ctx context.Context, store errandTeardownStore, row *models.Errand, session *models.TaskSession, turn *models.Turn, effect *models.AgentDeliveryEffect, executionID string) (errands.TeardownOutcome, error) {
-	target := models.ErrandTeardownTarget{
-		TaskID: row.TaskID, SessionID: row.ID, SessionIncarnation: session.QueueIncarnationID,
-		ExecutionID: executionID, TurnID: turn.ID, SubmissionID: effect.SubmissionID,
-	}
-	intent := &models.ErrandTeardownIntent{
-		Version: models.ErrandTeardownIntentVersion, ID: fmt.Sprintf("legacy-completion-%s", uuid.NewString()),
-		State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCompletion,
-		RequestedAt: time.Now().UTC(), Target: target,
-	}
-	candidate := *row
-	candidate.TeardownIntent = intent
-	effect.TaskID = row.TaskID
-	if _, err := store.CommitErrandTurnSettlement(ctx, &candidate, effect); err != nil {
-		return "", err
-	}
-	committed, err := store.GetErrand(ctx, row.ID)
-	if err != nil {
-		return "", err
-	}
-	if committed.TeardownIntent == nil || !sameTeardownIntent(*committed.TeardownIntent, *intent) {
-		return errands.TeardownSuperseded, nil
-	}
-	return owner.retry(ctx, store, *committed.TeardownIntent)
-}
-
-func legacyCompletionRowEligible(row *models.Errand) bool {
-	return row.Lifecycle == models.ErrandLifecycleLaunched && row.TeardownIntent == nil && row.LatestSettledTurnID != ""
-}
-func legacyCompletionSessionEligible(row *models.Errand, session *models.TaskSession) bool {
-	return errandTeardownSessionMatches(row, session) && session.QueueIncarnationID != "" &&
-		session.State != models.TaskSessionStateCancelled && session.State != models.TaskSessionStateFailed
-}
 func successfulCompletionDecision(effect *models.AgentDeliveryEffect) bool {
 	return effect != nil && effect.State == models.DeliveryEffectCompleted && strings.HasSuffix(effect.Outcome, ":done")
 }

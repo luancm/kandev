@@ -26,48 +26,6 @@ func (m *errandCompletionAbsenceInventory) GetExecution(executionID string) (*ag
 }
 
 // @covers AC-TASKS-ERRAND-COMPLETION-001.4
-func TestErrandCompletionLegacyRepairRejectsTerminalSessionWithExactReceipt(t *testing.T) {
-	for _, state := range []models.TaskSessionState{models.TaskSessionStateCancelled, models.TaskSessionStateFailed} {
-		t.Run(string(state), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				f := errandCompletionFixtureWithoutQueuedSuccessor(t)
-				f.ready(t)
-				synctest.Wait()
-
-				before, err := f.repo.GetErrand(t.Context(), f.child.ID)
-				require.NoError(t, err)
-				require.Equal(t, models.ErrandTeardownIntentCompleted, before.TeardownIntent.State)
-				session, err := f.repo.GetTaskSession(t.Context(), f.child.ID)
-				require.NoError(t, err)
-				effect, err := f.repo.GetErrandTurnSettlementDecision(t.Context(), f.child.ID,
-					session.QueueIncarnationID, before.LatestSettledTurnID)
-				require.NoError(t, err)
-				require.True(t, successfulCompletionDecision(effect), "the historical receipt is exact and successful")
-
-				_, err = f.repo.DB().ExecContext(t.Context(), "UPDATE task_session_errands SET teardown_intent = '' WHERE id = ?", f.child.ID)
-				require.NoError(t, err)
-				require.NoError(t, f.repo.UpdateTaskSessionState(t.Context(), f.child.ID, state, ""))
-				f.manager.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
-					return "", agentruntime.ErrNoExecutionForSession
-				}
-
-				require.NoError(t, f.errands.RetryErrandCompletion(t.Context(), f.child.ID))
-
-				after, err := f.repo.GetErrand(t.Context(), f.child.ID)
-				require.NoError(t, err)
-				require.Nil(t, after.TeardownIntent, "a terminal session cannot acquire a legacy success-close obligation")
-				require.Equal(t, before.ResultRevision, after.ResultRevision)
-				require.Equal(t, before.ResultText, after.ResultText)
-				require.Equal(t, before.ResultTurnID, after.ResultTurnID)
-				afterSession, err := f.repo.GetTaskSession(t.Context(), f.child.ID)
-				require.NoError(t, err)
-				require.Equal(t, state, afterSession.State)
-			})
-		})
-	}
-}
-
-// @covers AC-TASKS-ERRAND-COMPLETION-001.4
 func TestErrandCompletionPendingCloseKeepsCancellationAndRetriesExactStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := errandCompletionFixtureWithoutQueuedSuccessor(t)

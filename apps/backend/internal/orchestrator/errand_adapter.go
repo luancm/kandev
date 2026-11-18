@@ -49,13 +49,6 @@ func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.Launch
 	if a.runtime == nil {
 		return blocked, errors.New("errand runtime is unavailable")
 	}
-	legacy, err := a.hasLegacyErrandRuntime(ctx, request.ErrandID, request.TaskID, request.ParentSessionID)
-	if err != nil {
-		return blocked, err
-	}
-	if legacy {
-		return blocked, fmt.Errorf("%w: session-backed Errand launch is retired", models.ErrInvalidErrand)
-	}
 	return a.launchOwnedErrand(ctx, request)
 }
 

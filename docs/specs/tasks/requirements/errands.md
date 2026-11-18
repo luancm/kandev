@@ -36,10 +36,9 @@ An errand is delegated work with its own transcript, profile, and follow-up inpu
 #### Acceptance criteria
 
 - **AC-TASKS-ERRANDS-001.1:** When an eligible task session starts an errand
-  with a title and an objective, the system shall create a child session of
-  the same task whose parent is the caller, and shall return the errand ID,
-  which equals its session ID, and its status without waiting for the errand's
-  turn.
+  with a title and an objective, the system shall create an Errand that owns
+  its conversation and execution under the caller's task. It shall return the
+  Errand ID and status without waiting for the Errand's turn.
 - **AC-TASKS-ERRANDS-001.2:** The errand shall use exactly the requested agent
   profile, given as an ID or an exact profile name, or the caller's profile
   when none is given. A workflow step profile shall not override it, and the
@@ -52,7 +51,7 @@ An errand is delegated work with its own transcript, profile, and follow-up inpu
 - **AC-TASKS-ERRANDS-001.4:** A start from an errand, from a passthrough
   terminal session, or from a session of an Office, quick chat,
   configuration, automation, or coordinator task, shall fail with
-  `errand_not_supported` and create no session.
+  `errand_not_supported` before creating an Errand.
 - **AC-TASKS-ERRANDS-001.5:** An unknown, ambiguous, passthrough, or
   executor-incompatible profile shall fail with `errand_profile_not_found`,
   `errand_profile_ambiguous`, or `errand_profile_incompatible`, list at most
@@ -238,9 +237,8 @@ An errand is delegated work with its own transcript, profile, and follow-up inpu
 #### Acceptance criteria
 
 - **AC-TASKS-ERRANDS-010.1:** Superseded by criterion 010.7.
-- **AC-TASKS-ERRANDS-010.2:** Normal task conversations shall remain in regular session tabs. Errands shall be accessed through their parent session's Errands panel. **Open** shall temporarily show the child conversation with explicit **Back to parent**, without adding a regular session tab or changing the primary session or workflow owner. Direct child URLs, reload and restored legacy layouts shall preserve transcript access without restoring regular errand tabs.
-- **AC-TASKS-ERRANDS-010.3:** The errand view shall show the full session
-  transcript and composer, plus a header with a link back to the parent,
+- **AC-TASKS-ERRANDS-010.2:** Normal task conversations shall remain in regular session tabs. Errands shall be accessed through their parent session's Errands panel. **Open** shall temporarily show the child conversation with explicit **Back to parent**, without adding a regular session tab or changing the primary session or workflow owner. Direct Errand URLs and reload shall preserve transcript access in the owning surface.
+- **AC-TASKS-ERRANDS-010.3:** The errand view shall show its full transcript and composer, plus a header with a link back to the parent,
   title, objective, profile, status, shared workspace path and branch,
   **Stop** while live, and **Send result to parent** when eligible.
 - **AC-TASKS-ERRANDS-010.4:** The parent chat status bar shall show an errands chip when that parent has errands. Its panel shall show active work first and completed history in an initially collapsed disclosure, with status and **Open**. It shall remain available after all its errands settle. Switching normal conversations shall show only the selected parent's errands; a retained child shall remain directly viewable while the release toggle is off.

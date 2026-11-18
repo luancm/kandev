@@ -123,18 +123,7 @@ func (s *Service) RetryErrandCompletion(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if row.TeardownIntent == nil {
-		if !legacyCompletionCandidate(row) {
-			return nil
-		}
-		if repair, ok := s.stopper.(interface {
-			RepairLegacyErrandCompletion(context.Context, *models.Errand) error
-		}); ok {
-			return repair.RepairLegacyErrandCompletion(ctx, row)
-		}
-		return nil
-	}
-	if row.TeardownIntent.Purpose != models.ErrandTeardownPurposeCompletion {
+	if row.TeardownIntent == nil || row.TeardownIntent.Purpose != models.ErrandTeardownPurposeCompletion {
 		return nil
 	}
 	return s.retryTeardown(ctx, row)
@@ -153,7 +142,7 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 	}
 	candidates := rows[:0]
 	for _, row := range rows {
-		if pendingTeardown(row) || legacyTeardown(row) || legacyCompletionCandidate(row) {
+		if pendingTeardown(row) {
 			candidates = append(candidates, row)
 		}
 	}
@@ -168,19 +157,7 @@ func (s *Service) retryPendingTeardowns(ctx context.Context) error {
 		row := candidates[(start+i)%len(candidates)]
 		s.teardownCursor = row.ID
 		attemptCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		var err error
-		switch {
-		case legacyTeardown(row):
-			_, _, err = s.cancelCaptured(attemptCtx, row, row.CancelSource)
-		case legacyCompletionCandidate(row):
-			if repair, ok := s.stopper.(interface {
-				RepairLegacyErrandCompletion(context.Context, *models.Errand) error
-			}); ok {
-				err = repair.RepairLegacyErrandCompletion(attemptCtx, row)
-			}
-		default:
-			err = s.retryTeardown(attemptCtx, row)
-		}
+		err := s.retryTeardown(attemptCtx, row)
 		cancel()
 		if err != nil {
 			if !s.shouldReportTeardownFailure(row.ID, err) {
@@ -225,12 +202,4 @@ func (s *Service) shouldReportTeardownFailure(errandID string, err error) bool {
 	}
 	s.teardownEvidenceWarnings[errandID] = key
 	return true
-}
-
-func legacyTeardown(row *models.Errand) bool {
-	return row.Lifecycle == models.ErrandLifecycleCancelled && row.TeardownIntent == nil
-}
-
-func legacyCompletionCandidate(row *models.Errand) bool {
-	return row != nil && row.Lifecycle == models.ErrandLifecycleLaunched && row.TeardownIntent == nil && row.LatestSettledTurnID != ""
 }

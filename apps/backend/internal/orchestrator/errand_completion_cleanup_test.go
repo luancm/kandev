@@ -12,7 +12,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -723,37 +722,6 @@ func TestErrandCompletionCleanupClosedReceiptCannotCompleteReplacement(t *testin
 		require.NoError(t, err)
 		require.NotEqual(t, models.TaskSessionStateCompleted, session.State)
 	})
-}
-
-// @covers AC-TASKS-ERRAND-COMPLETION-001.4
-func TestErrandCompletionCleanupLegacyRepairRequiresExactReceipt(t *testing.T) {
-	for _, exact := range []bool{true, false} {
-		t.Run(map[bool]string{true: "exact", false: "unknown"}[exact], func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				f := errandCompletionFixtureWithoutQueuedSuccessor(t)
-				gate := installErrandCompletionStopGate(f)
-				gate.allow()
-				f.ready(t)
-				synctest.Wait()
-				_, err := f.repo.DB().ExecContext(t.Context(), "UPDATE task_session_errands SET teardown_intent = '' WHERE id = ?", f.child.ID)
-				require.NoError(t, err)
-				require.NoError(t, f.repo.UpdateTaskSessionState(t.Context(), f.child.ID, models.TaskSessionStateWaitingForInput, ""))
-				if !exact {
-					_, err = f.repo.DB().ExecContext(t.Context(), "DELETE FROM agent_delivery_effects WHERE session_id = ?", f.child.ID)
-					require.NoError(t, err)
-				}
-				f.manager.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) { return "", agentruntime.ErrNoExecutionForSession }
-				require.NoError(t, f.errands.RetryErrandCompletion(t.Context(), f.child.ID))
-				session, err := f.repo.GetTaskSession(t.Context(), f.child.ID)
-				require.NoError(t, err)
-				if exact {
-					require.Equal(t, models.TaskSessionStateCompleted, session.State)
-				} else {
-					require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
-				}
-			})
-		})
-	}
 }
 
 // @covers AC-TASKS-ERRAND-COMPLETION-001.1 AC-TASKS-ERRAND-COMPLETION-001.4

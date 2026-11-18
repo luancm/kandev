@@ -266,7 +266,6 @@ type fakeLauncher struct {
 	mu       sync.Mutex
 	store    *memoryStore
 	requests []LaunchRequest
-	identity []models.ReservedLaunchIdentity
 	// behave decides the result per call; nil launches successfully.
 	behave func(call int, request LaunchRequest) error
 	// onCall runs inside the launch, before it returns.
@@ -277,8 +276,6 @@ func (l *fakeLauncher) LaunchErrand(ctx context.Context, request LaunchRequest) 
 	l.mu.Lock()
 	call := len(l.requests)
 	l.requests = append(l.requests, request)
-	identity, _ := models.ReservedLaunchIdentityFromContext(ctx)
-	l.identity = append(l.identity, identity)
 	l.mu.Unlock()
 	if l.onCall != nil {
 		l.onCall(request)

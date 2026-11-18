@@ -25,9 +25,10 @@ func TestDrainQueuedLaunchesInCreationOrderWithTheStoredIdentityAndSnapshot(t *t
 		t.Fatalf("drain launched %+v, want first then second", calls)
 	}
 	for index, call := range calls {
-		identity := h.launcher.identity[index+2]
-		if identity.SessionID != call.ErrandID || identity.TurnID != call.TurnID || identity.SubmissionID != call.SubmissionID {
-			t.Fatalf("drain identity %+v does not match the errand's reserved identity", identity)
+		reservation := []*models.Errand{first, second}[index]
+		if call.TaskID != reservation.TaskID || call.ParentSessionID != reservation.ParentSessionID ||
+			call.TurnID != reservation.FirstTurnID || call.SubmissionID != reservation.SubmissionID {
+			t.Fatalf("drain request %+v does not match the stored reservation", call)
 		}
 		if len(call.MCPServerIDs) != 2 || call.MCPServerIDs[0] != "mcp-1" {
 			t.Fatalf("drain MCP = %v, want the stored snapshot", call.MCPServerIDs)

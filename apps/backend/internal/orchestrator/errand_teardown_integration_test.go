@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -74,40 +73,6 @@ func teardownIntegrationServiceWithLogger(t *testing.T, f *errandTeardownFixture
 	require.NoError(t, err)
 	f.svc.SetErrandController(service)
 	return service, recorder
-}
-
-// @covers AC-TASKS-ERRAND-COMPLETION-001.4
-func TestErrandLegacyAdmissionRefusalLogsOnceAndRetriesChangedEvidence(t *testing.T) {
-	f := newErrandTeardownFixture(t)
-	now := time.Now().UTC()
-	f.row.Lifecycle, f.row.CancelSource, f.row.SettledAt = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser, &now
-	require.NoError(t, f.repo.UpdateErrand(t.Context(), f.row))
-
-	core, logs := observer.New(zapcore.DebugLevel)
-	zapLogger := zap.New(core)
-	wrapped, err := logger.NewFromZap(zapLogger)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = zapLogger.Sync() })
-	service, _ := teardownIntegrationServiceWithLogger(t, f, f.repo, wrapped)
-
-	require.ErrorContains(t, service.Reconcile(t.Context()), "legacy errand lacks positive initial admission authority")
-	require.NoError(t, service.Reconcile(t.Context()), "unchanged evidence keeps retrying without repeating the diagnostic")
-	require.Len(t, logs.FilterMessage("errand teardown remains pending").All(), 1)
-	row, err := f.repo.GetErrand(t.Context(), f.row.ID)
-	require.NoError(t, err)
-	require.Nil(t, row.TeardownIntent, "unknown admission remains protected")
-	require.Empty(t, f.provider.stops)
-	assertChangedAdmissionRefusals(t, f, service, logs, "submission_id", "sender_session_id", "state")
-
-	require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
-		errandAdmissionTurnMetadataKey: map[string]interface{}{"submission_id": f.row.SubmissionID,
-			"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)},
-	}))
-	require.NoError(t, service.Reconcile(t.Context()), "new exact admission evidence makes the retry eligible")
-	row, err = f.repo.GetErrand(t.Context(), f.row.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
-	require.Equal(t, []string{"exec-1"}, f.provider.stops)
 }
 
 func TestErrandPendingReservedAdmissionDiagnosticLogsOnceAndRetriesChangedEvidence(t *testing.T) {
@@ -399,82 +364,6 @@ func TestErrandTeardownRecoveryWaitsForAuthenticatedInventory(t *testing.T) {
 	row, err = f.repo.GetErrand(t.Context(), f.row.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
-}
-
-func TestErrandTeardownLegacyRecoveryRequiresInitialAdmissionProof(t *testing.T) {
-	for _, variant := range []string{
-		"unknown", "missing submission", "conflicting submission", "missing sender", "conflicting sender",
-		"missing state", "conflicting state", "initial", "later user turn",
-	} {
-		t.Run(variant, func(t *testing.T) {
-			f := newErrandTeardownFixture(t)
-			var err error
-			admission := map[string]interface{}{
-				"submission_id": f.row.SubmissionID, "sender_session_id": f.row.ParentSessionID,
-				"state": string(models.ErrandAdmissionAccepted),
-			}
-			if strings.HasPrefix(variant, "missing ") || strings.HasPrefix(variant, "conflicting ") {
-				field := strings.TrimPrefix(strings.TrimPrefix(variant, "missing "), "conflicting ")
-				switch field {
-				case "submission":
-					field = "submission_id"
-				case "sender":
-					field = "sender_session_id"
-				}
-				if strings.HasPrefix(variant, "missing ") {
-					delete(admission, field)
-				} else {
-					admission[field] = "foreign-authority"
-				}
-			}
-			if variant != "unknown" {
-				require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
-					errandAdmissionTurnMetadataKey: admission,
-				}))
-			}
-			if variant == "later user turn" {
-				f.successor(t, true, false)
-			}
-			f.row, err = f.repo.GetErrand(t.Context(), f.row.ID)
-			require.NoError(t, err)
-			now := time.Now().UTC()
-			f.row.Lifecycle, f.row.CancelSource, f.row.SettledAt = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser, &now
-			require.NoError(t, f.repo.UpdateErrand(t.Context(), f.row))
-			before, err := f.repo.GetErrand(t.Context(), f.row.ID)
-			require.NoError(t, err)
-			service, recorder := teardownIntegrationService(t, f, f.repo)
-			err = service.Reconcile(t.Context())
-			row, readErr := f.repo.GetErrand(t.Context(), f.row.ID)
-			require.NoError(t, readErr)
-			evidenceRefusal := variant == "unknown" || strings.HasPrefix(variant, "missing ") || strings.HasPrefix(variant, "conflicting ")
-			if evidenceRefusal {
-				require.ErrorContains(t, err, "legacy errand lacks positive initial admission authority")
-				require.Nil(t, row.TeardownIntent)
-				require.Empty(t, f.provider.stops)
-				require.NoError(t, f.svc.turnService.PatchTurnMetadata(t.Context(), f.row.ID, f.row.FirstTurnID, map[string]interface{}{
-					errandAdmissionTurnMetadataKey: map[string]interface{}{"submission_id": f.row.SubmissionID,
-						"sender_session_id": f.row.ParentSessionID, "state": string(models.ErrandAdmissionAccepted)},
-				}))
-				require.NoError(t, service.Reconcile(t.Context()), "changed exact authority is retried")
-				row, readErr = f.repo.GetErrand(t.Context(), f.row.ID)
-				require.NoError(t, readErr)
-				require.Equal(t, models.ErrandTeardownIntentCompleted, row.TeardownIntent.State)
-				require.Equal(t, []string{"exec-1"}, f.provider.stops)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, row.TeardownIntent)
-				require.Equal(t, f.row.FirstTurnID, row.TeardownIntent.Target.FirstTurnID)
-				if variant == "initial" {
-					require.Equal(t, []string{"exec-1"}, f.provider.stops)
-				} else {
-					require.Empty(t, f.provider.stops)
-					require.Equal(t, models.ErrandTeardownIntentSuperseded, row.TeardownIntent.State)
-				}
-			}
-			require.Equal(t, before.ResultRevision, row.ResultRevision)
-			require.Empty(t, recorder.seen(), "legacy cleanup creates no new logical cancellation")
-		})
-	}
 }
 
 type teardownNoticeRecorder struct {
