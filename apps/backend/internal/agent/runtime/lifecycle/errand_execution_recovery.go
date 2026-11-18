@@ -148,7 +148,7 @@ func (m *Manager) restoreErrandDelivery(ctx context.Context, execution *AgentExe
 	execution.DeliveryReplayCursor = cursor
 	execution.DeliveryDescriptor = cloneDeliveryStatus(status)
 	execution.DeliveryMode = DurableDeliveryV1
-	return ownerCurrent, restoreErrandSubmission(ctx, execution, ri.Client, store, descriptor)
+	return ownerCurrent, m.restoreErrandSubmission(ctx, execution, ri.Client, store, descriptor, ownerCurrent)
 }
 
 func readCurrentErrandRecoveryDescriptor(ctx context.Context, execution *AgentExecution, store errandExecutionRecoveryStore) (*models.ErrandExecutionDescriptor, error) {
@@ -164,9 +164,9 @@ func readCurrentErrandRecoveryDescriptor(ctx context.Context, execution *AgentEx
 	return descriptor, nil
 }
 
-func restoreErrandSubmission(
+func (m *Manager) restoreErrandSubmission(
 	ctx context.Context, execution *AgentExecution, client *agentctl.Client, store errandExecutionRecoveryStore,
-	descriptor *models.ErrandExecutionDescriptor,
+	descriptor *models.ErrandExecutionDescriptor, ownerCurrent func() error,
 ) error {
 	status := execution.DeliveryDescriptor
 	id := descriptor.ActiveSubmissionID
@@ -194,7 +194,16 @@ func restoreErrandSubmission(
 	execution.dispatchedPromptGeneration = descriptor.PromptGeneration
 	execution.promptTurnIDs = map[uint64]string{descriptor.PromptGeneration: descriptor.ActiveTurnID}
 	execution.armAcceptedPromptActivity()
-	return nil
+	if peer.State != journal.SubmissionAccepted || stored.State != models.DeliverySubmissionDispatching {
+		return nil
+	}
+	if err := ownerCurrent(); err != nil {
+		return err
+	}
+	if m.sessionManager == nil {
+		return ErrDurableAdoptionEvidenceUnavailable
+	}
+	return m.sessionManager.recordErrandPromptAccepted(ctx, execution, stored)
 }
 
 func matchesRecoveredErrandSubmission(

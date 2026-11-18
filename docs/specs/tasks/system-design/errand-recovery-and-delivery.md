@@ -91,7 +91,7 @@ Retained plugin recovery reads the exact authenticated helper using the ready in
 
 ## Reserved launch recovery
 
-Persist immutable initial launch authority with the session insertion: task/session/parent, reserved turn/submission and selected profile. Reconcile that tuple against durable turn/submission state and authenticated restored runtime inventory. Classify absent, prepared-unattempted, admitted, settled or blocked. Only absent creates a new session. Prepared continues the same session and reserved identity; admitted/uncertain effects never trigger another provider prompt. Settled adopts bookkeeping then reconciles the exact result. Missing/mismatched evidence blocks instead of producing a false launch-failure result. Cancellation wins over bookkeeping adoption and uses exact teardown compensation.
+Persist the task, Errand, parent, selected profile and reserved turn and submission before launch. Recover an acknowledgement from the authenticated helper's exact accepted journal entry after checking the current native binding. The launcher reconciles that receipt or the original terminal evidence before changing the queued lifecycle. A settled launch reconciles the exact result. Missing or mismatched evidence keeps admission unresolved without another provider prompt or an invented result. Cancellation wins over launch bookkeeping and uses exact teardown compensation.
 
 ## Queue provenance and disabled delivery
 
