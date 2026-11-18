@@ -83,6 +83,8 @@ Deferred Remote Docker recovery uses the saved container and agentctl instance i
 
 Shared Kubernetes recovery also validates the saved Pod and PVC identities and the workspace ownership generation from attachment. A descendant task's Errand can use an ancestor task's workspace. Recovery checks that workspace owner against the current environment and the explicit Errand owner against the attached helper. The ordinary sibling and shared resources remain available to their owner.
 
+SSH recovery requires the exact saved controller launch receipt and verifies the live controller before reading the agentctl instance. The SSH task coordinate identifies the controller's physical owner. The helper's explicit Errand identity and the current Errand binding identify the conversation.
+
 ## Reserved launch recovery
 
 Persist immutable initial launch authority with the session insertion: task/session/parent, reserved turn/submission and selected profile. Reconcile that tuple against durable turn/submission state and authenticated restored runtime inventory. Classify absent, prepared-unattempted, admitted, settled or blocked. Only absent creates a new session. Prepared continues the same session and reserved identity; admitted/uncertain effects never trigger another provider prompt. Settled adopts bookkeeping then reconciles the exact result. Missing/mismatched evidence blocks instead of producing a false launch-failure result. Cancellation wins over bookkeeping adoption and uses exact teardown compensation.

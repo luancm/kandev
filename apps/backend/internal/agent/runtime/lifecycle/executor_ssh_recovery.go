@@ -176,19 +176,31 @@ type sshRecoveryProcessIdentity struct {
 	taskDir       string
 	nativeID      string
 	backendID     string
+	taskID        string
 	authToken     string
 	launchReceipt *sshlaunch.Receipt
+	errandOwner   ExecutionOwner
 }
 
 func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIdentity, bool) {
-	if !hasCanonicalSSHRecoveryRecordIdentity(record) {
+	if record == nil {
+		return sshRecoveryProcessIdentity{}, false
+	}
+	owner, err := recordedErrandExecutionOwner(record)
+	taskID := record.TaskID
+	if owner.Kind == ExecutionOwnerErrand {
+		taskID = owner.TaskID
+	}
+	if err != nil || !hasCanonicalSSHRecoveryRecordIdentity(record, taskID) {
 		return sshRecoveryProcessIdentity{}, false
 	}
 	identity := sshRecoveryProcessIdentity{
-		backendID: strings.TrimSpace(record.AgentExecutionID),
-		authToken: strings.TrimSpace(record.TransientAuthToken),
-		taskDir:   strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHRemoteTaskDir)),
-		nativeID:  strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHAgentctlInstanceID)),
+		backendID:   strings.TrimSpace(record.AgentExecutionID),
+		taskID:      taskID,
+		errandOwner: owner,
+		authToken:   strings.TrimSpace(record.TransientAuthToken),
+		taskDir:     strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHRemoteTaskDir)),
+		nativeID:    strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHAgentctlInstanceID)),
 	}
 	controlPort, ok := sshRecoveryControlPort(record.Metadata)
 	if !ok {
@@ -208,8 +220,11 @@ func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIden
 	// Recovery may only reattach to a record whose own launch proof still
 	// describes it. A present but foreign or malformed receipt fails closed;
 	// a legacy record without one keeps the existing guarded path.
-	receipt, ok := sshLaunchReceiptForRecord(record.Metadata, record.TaskID, record.SessionID)
+	receipt, ok := sshLaunchReceiptForRecord(record.Metadata, identity.taskID, record.SessionID)
 	if !ok {
+		return sshRecoveryProcessIdentity{}, false
+	}
+	if owner.Kind == ExecutionOwnerErrand && (receipt == nil || receipt.Owner.ControllerInstanceID != identity.backendID) {
 		return sshRecoveryProcessIdentity{}, false
 	}
 	if receipt != nil && receipt.Process.PID != identity.pid {
@@ -221,12 +236,9 @@ func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIden
 	return identity, true
 }
 
-func hasCanonicalSSHRecoveryRecordIdentity(record *models.ExecutorRunning) bool {
-	if record == nil {
-		return false
-	}
+func hasCanonicalSSHRecoveryRecordIdentity(record *models.ExecutorRunning, taskID string) bool {
 	return strings.TrimSpace(record.SessionID) != "" && record.SessionID == strings.TrimSpace(record.SessionID) &&
-		strings.TrimSpace(record.TaskID) != "" && record.TaskID == strings.TrimSpace(record.TaskID) &&
+		strings.TrimSpace(taskID) != "" && taskID == strings.TrimSpace(taskID) &&
 		record.AgentExecutionID == strings.TrimSpace(record.AgentExecutionID)
 }
 
@@ -292,8 +304,12 @@ func (r *SSHExecutor) readSSHRecoveryInstanceInfo(
 		return nil, 0, fmt.Errorf("read exact agentctl instance: %w", err)
 	}
 	if info == nil || info.ID != identity.nativeID || info.SessionID != record.SessionID ||
-		info.TaskID != record.TaskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir || !matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) {
+		info.TaskID != identity.taskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir ||
+		!matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) {
 		return nil, 0, errors.New("live agentctl metadata does not match the persisted SSH instance")
+	}
+	if err := requireErrandQuestionPolicy(ctx, control, errandMCPOwner(identity.errandOwner)); err != nil {
+		return nil, 0, err
 	}
 	return info, controlPort, nil
 }
@@ -352,12 +368,13 @@ func sshAgentctlBoundAddress(line string) (string, error) {
 
 func sshRecoveryRequest(record *models.ExecutorRunning, identity sshRecoveryProcessIdentity) *ExecutorCreateRequest {
 	return &ExecutorCreateRequest{
-		InstanceID: identity.backendID,
-		TaskID:     record.TaskID,
-		SessionID:  record.SessionID,
-		AuthToken:  identity.authToken,
-		Metadata:   cloneSSHMetadata(record.Metadata),
-		Env:        make(map[string]string),
+		InstanceID:     identity.backendID,
+		TaskID:         identity.taskID,
+		SessionID:      record.SessionID,
+		AuthToken:      identity.authToken,
+		Metadata:       cloneSSHMetadata(record.Metadata),
+		Env:            make(map[string]string),
+		ErrandMCPOwner: errandMCPOwner(identity.errandOwner),
 	}
 }
 
@@ -410,6 +427,13 @@ func (r *SSHExecutor) preparedSSHRecoveryState(
 		Env:                  cloneStringMap(instanceInfo.Env),
 		WorkspaceSourceRoots: append([]string(nil), instanceInfo.WorkspaceSourceRoots...),
 		Metadata:             metadata,
+	}
+	if identity.errandOwner.Kind == ExecutionOwnerErrand {
+		instance.recoveredErrandOwner = identity.errandOwner
+		instance.AgentProfileID = record.ExecutionProfileID
+		instance.ProviderSessionID = instanceInfo.ProviderSessionID
+		instance.CopilotNativeSessionEvents = instanceInfo.CopilotNativeSessionEvents
+		instance.ReusedWorkspace = true
 	}
 	instance.DiscardRecovery = func() {
 		r.discardRecoveredSSHState(identity.backendID, state)

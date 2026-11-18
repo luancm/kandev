@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -169,6 +170,10 @@ func TestSSHRecoveryReattachesRecordedRemoteProcessWithoutStartingWork(t *testin
 func newSSHRecoveryInstanceInfoServer(t *testing.T, info agentctl.InstanceInfo) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/identity" && info.ErrandMCPOwner != nil {
+			_ = json.NewEncoder(w).Encode(agentctl.IdentityInfo{Capabilities: []string{agentctltypes.ErrandMCPOwnerCapability}})
+			return
+		}
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/instances/"+info.ID {
 			http.NotFound(w, r)
 			return
