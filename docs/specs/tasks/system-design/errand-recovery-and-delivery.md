@@ -87,6 +87,8 @@ SSH recovery requires the exact saved controller launch receipt and verifies the
 
 Sprites recovery checks the saved Sprite name and creation time before opening its authenticated proxy. An existing secret reference supplies the credential. When an Errand used a literal credential and the process cache is gone, recovery and exact Stop read it from the saved executor profile after checking its executor identity. The runtime inventory carries that profile reference and the typed owner.
 
+Retained plugin recovery reads the exact authenticated helper using the ready inventory's provider installation, environment generation and resource lease. Allocation and cleanup remain with the environment owner.
+
 ## Reserved launch recovery
 
 Persist immutable initial launch authority with the session insertion: task/session/parent, reserved turn/submission and selected profile. Reconcile that tuple against durable turn/submission state and authenticated restored runtime inventory. Classify absent, prepared-unattempted, admitted, settled or blocked. Only absent creates a new session. Prepared continues the same session and reserved identity; admitted/uncertain effects never trigger another provider prompt. Settled adopts bookkeeping then reconciles the exact result. Missing/mismatched evidence blocks instead of producing a false launch-failure result. Cancellation wins over bookkeeping adoption and uses exact teardown compensation.

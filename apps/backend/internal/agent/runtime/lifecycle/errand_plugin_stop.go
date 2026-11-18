@@ -9,21 +9,8 @@ import (
 )
 
 func (r *PluginRemoteExecutor) stopErrandInstance(ctx context.Context, row *models.ExecutorRunning, owner agentctltypes.ErrandMCPOwner) error {
-	if r.operations == nil || r.profileLoader == nil || row.TransientAuthToken == "" {
-		return ErrErrandRecoveryRequiresReconnect
-	}
-	// Provider operations remain scoped to the task environment that owns
-	// the shared resource. The execution inventory keeps its independent owner.
-	providerRecord := *row
-	providerRecord.TaskID = owner.TaskID
-	state, err := r.loadPluginExecutorRecoveryState(ctx, &providerRecord)
+	state, err := r.loadErrandPluginExecutorState(ctx, row, owner.TaskID)
 	if err != nil {
-		return err
-	}
-	if state == nil || state.resource == nil {
-		return ErrErrandRecoveryRequiresReconnect
-	}
-	if err := validatePluginExecutorResourceForProvider(state.profile.Provider, state.resource); err != nil {
 		return err
 	}
 	resolver := r.connectionResolver(state.operationContext, state.resource, pluginExecutorRuntimePort)
@@ -33,4 +20,23 @@ func (r *PluginRemoteExecutor) stopErrandInstance(ctx context.Context, row *mode
 	}
 	defer control.Close()
 	return control.StopErrandInstance(ctx, row.AgentExecutionID, owner)
+}
+
+func (r *PluginRemoteExecutor) loadErrandPluginExecutorState(ctx context.Context, row *models.ExecutorRunning, taskID string) (*pluginExecutorRecoveryState, error) {
+	if r.operations == nil || r.profileLoader == nil || row.TransientAuthToken == "" {
+		return nil, ErrErrandRecoveryRequiresReconnect
+	}
+	providerRecord := *row
+	providerRecord.TaskID = taskID
+	state, err := r.loadPluginExecutorRecoveryState(ctx, &providerRecord)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil || state.resource == nil {
+		return nil, ErrErrandRecoveryRequiresReconnect
+	}
+	if err := validatePluginExecutorResourceForProvider(state.profile.Provider, state.resource); err != nil {
+		return nil, err
+	}
+	return state, nil
 }

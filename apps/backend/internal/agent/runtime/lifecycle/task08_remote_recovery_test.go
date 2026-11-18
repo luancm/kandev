@@ -616,6 +616,38 @@ func TestDeferredStartupRetriesSpritesErrandWithoutTaskSession(t *testing.T) {
 	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeSprites)
 }
 
+func TestDeferredStartupQueuesRetainedPluginErrandWithoutTaskSession(t *testing.T) {
+	row := pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, nil)
+	owner := ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: row.TaskID, ErrandID: "child",
+		WorkspaceID: "workspace", Generation: 2, AgentProfileID: row.ExecutionProfileID}
+	row.SessionID, row.TaskID = models.ErrandExecutionIdentity(owner.ErrandID), ""
+	row.Metadata[runExecutionOwnerMetadataKey] = owner
+	backend := &task08DetailedRecoveryBackend{
+		MockExecutor:   &MockExecutor{name: agentruntime.RuntimePluginRemote},
+		recoveryResult: task08UnknownOutcomes(agentruntime.RuntimePluginRemote),
+	}
+	manager, _ := task08ManagerWithBackend(t, backend)
+	writer := &task08ExecutorInventoryWriter{invariantWriter: invariantWriter{prior: row}, rows: []*models.ExecutorRunning{row}}
+	manager.SetExecutorRunningWriter(writer)
+
+	require.NoError(t, manager.PrepareStartupRecovery(t.Context()))
+	entry := manager.pendingRemoteRecoveryForSession(row.SessionID)
+	require.NotNil(t, entry, "the retained plugin runtime should be queued on the Errand recovery route")
+	manager.retryRemoteRecovery(t.Context(), entry)
+	require.Len(t, backend.callsSnapshot(), 1)
+	require.Same(t, entry, manager.pendingRemoteRecoveryForSession(row.SessionID))
+	require.Empty(t, backend.stopInstanceCalls)
+	records := manager.initialRemoteRecoveryRecords(t.Context(), []*models.ExecutorRunning{row}, nil)
+	require.Len(t, records, 1, "eager startup also keeps the retained owned inventory")
+
+	stopped := *row
+	stopped.Status = models.ExecutorRunningStatusStopped
+	writer.prior = &stopped
+	current, _, err := manager.currentOwnedRemoteRecoveryRecord(t.Context(), entry)
+	require.NoError(t, err)
+	require.Equal(t, stopped.Status, current.Status, "a saved stop must win over the pinned live snapshot")
+}
+
 func exerciseDeferredOwnedRemoteRetry(t *testing.T, runtime agentruntime.Runtime) {
 	t.Helper()
 	owner := ExecutionOwner{

@@ -27,6 +27,13 @@ type pluginExecutorRecoveryState struct {
 }
 
 func (r *PluginRemoteExecutor) recoverPluginExecutor(ctx context.Context, record *models.ExecutorRunning) (*ExecutorInstance, error) {
+	owner, err := recordedErrandExecutionOwner(record)
+	if err != nil {
+		return nil, err
+	}
+	if owner.Kind == ExecutionOwnerErrand {
+		return r.recoverRetainedPluginErrand(ctx, record, owner)
+	}
 	state, err := r.loadPluginExecutorRecoveryState(ctx, record)
 	if err != nil || state == nil {
 		return nil, err

@@ -59,6 +59,16 @@ func (m *Manager) currentPluginRemoteRecoveryAttemptRecord(
 	if err := validatePluginRecoveryCheckpoint(record, current); err != nil {
 		return nil, err
 	}
+	owner, err := recordedErrandExecutionOwner(record)
+	if err != nil {
+		return nil, err
+	}
+	if owner.Kind == ExecutionOwnerErrand {
+		if err := validateRunRecoveryOwner(current, owner); err != nil {
+			return nil, err
+		}
+		return cloneRemoteRecoveryRecord(current), nil
+	}
 	if record.Metadata == nil {
 		record.Metadata = make(map[string]interface{})
 	}

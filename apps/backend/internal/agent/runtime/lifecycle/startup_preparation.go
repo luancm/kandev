@@ -63,7 +63,8 @@ func (m *Manager) initialRemoteRecoveryRecords(ctx context.Context, pluginRecord
 	pluginTerminalRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
 	pluginLiveRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
 	for _, record := range pluginRecords {
-		if record == nil || remoteRecoveryOwnerUnsupported(record) {
+		if record == nil || (remoteRecoveryOwnerUnsupported(record) &&
+			(!supportsOwnedRemoteRecovery(record) || isTerminalExecutorRunningStatus(record.Status))) {
 			continue
 		}
 		copyRecord := cloneRemoteRecoveryRecord(record)

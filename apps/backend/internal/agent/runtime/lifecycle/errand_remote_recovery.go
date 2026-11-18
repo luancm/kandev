@@ -14,7 +14,8 @@ func supportsOwnedRemoteRecovery(row *models.ExecutorRunning) bool {
 		return false
 	}
 	switch row.Runtime {
-	case agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeKubernetes, agentruntime.RuntimeSSH, agentruntime.RuntimeSprites:
+	case agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeKubernetes, agentruntime.RuntimeSSH, agentruntime.RuntimeSprites,
+		agentruntime.RuntimePluginRemote:
 		return true
 	default:
 		return false
