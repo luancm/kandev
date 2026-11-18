@@ -452,9 +452,7 @@ func (r *SpritesExecutor) createAgentInstance(
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := requireBuiltinRemoteHelper(stepCtx, req, func(ctx context.Context) ([]byte, error) {
-		return sprite.CommandContext(ctx, "curl", "-sf", fmt.Sprintf("http://localhost:%d/identity", r.agentctlPort)).Output()
-	}); err != nil {
+	if err := r.requireSpriteMCPHelper(stepCtx, sprite, req); err != nil {
 		return 0, err
 	}
 
@@ -608,6 +606,9 @@ func (r *SpritesExecutor) getExistingInstanceInfo(
 		return nil, fmt.Errorf("instance %s not found: %w", instanceID, err)
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("instance %s: %w", instanceID, agentctl.ErrInstanceNotFound)
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("instance %s lookup returned HTTP %d", instanceID, response.StatusCode)
 	}
@@ -725,4 +726,10 @@ func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Spr
 		time.Sleep(spriteHealthRetryWait)
 	}
 	return fmt.Errorf("agentctl did not become healthy within %v", spriteHealthTimeout)
+}
+
+func (r *SpritesExecutor) requireSpriteMCPHelper(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
+	return requireBuiltinRemoteHelper(ctx, req, func(ctx context.Context) ([]byte, error) {
+		return sprite.CommandContext(ctx, "curl", "-sf", fmt.Sprintf("http://localhost:%d/identity", r.agentctlPort)).Output()
+	})
 }

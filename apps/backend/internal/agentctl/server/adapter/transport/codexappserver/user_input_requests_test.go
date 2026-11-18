@@ -179,3 +179,15 @@ func TestToolUserInputAppendsAnswerAttachmentPaths(t *testing.T) {
 		t.Fatalf("attachment reference = %q", values[1])
 	}
 }
+
+func TestToolUserInputErrandRefusalReportsParentBlocker(t *testing.T) {
+	adapter := newUserInputTestAdapter(t)
+	adapter.SetUserInputRequestHandler(func(context.Context, *agenttypes.UserInputRequest) (*agenttypes.UserInputResponse, error) {
+		return nil, agenttypes.ErrErrandQuestion
+	})
+	response, err := adapter.handleServerRequest(context.Background(), userInputRequest())
+	var rpcErr *protocol.RPCError
+	if response != nil || !errors.As(err, &rpcErr) || !strings.Contains(rpcErr.Message, "parent") {
+		t.Fatalf("response=%v error=%v", response, err)
+	}
+}

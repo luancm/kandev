@@ -13,19 +13,19 @@ import (
 
 func TestErrandInstanceRequiresOwnerProjectionCapability(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		owner     bool
-		supported bool
-		want      bool
-	}{{"old", true, false, false}, {"current", true, true, true}, {"ordinary", false, false, true}} {
+		name       string
+		owner      bool
+		capability string
+		want       bool
+	}{{"old", true, "errand-mcp-owner.v1", false}, {"current", true, "errand-mcp-owner.v2", true}, {"ordinary", false, "", true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			created, identities := 0, 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/identity" {
 					identities++
 					caps := []string{}
-					if tc.supported {
-						caps = append(caps, "errand-mcp-owner.v1")
+					if tc.capability != "" {
+						caps = append(caps, tc.capability)
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": caps})
 					return

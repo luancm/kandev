@@ -1,7 +1,9 @@
 package lifecycle
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -49,4 +51,44 @@ func validRecordedErrandOwner(record *models.ExecutorRunning, owner ExecutionOwn
 	return owner.ErrandID != "" && owner.Generation > 0 && owner.TaskID != "" && owner.WorkspaceID != "" &&
 		owner.SessionID == "" && owner.RunID == "" && owner.RunSessionID == "" && owner.Attempt == 0 &&
 		record.TaskID == "" && record.SessionID == models.ErrandExecutionIdentity(owner.ErrandID)
+}
+
+type errandCapabilityChecker interface {
+	RequireCapability(context.Context, string) error
+}
+
+func requireErrandQuestionPolicy(ctx context.Context, control any, owner *agentctltypes.ErrandMCPOwner) error {
+	if owner == nil {
+		return nil
+	}
+	checker, ok := control.(errandCapabilityChecker)
+	if !ok {
+		return errors.New("agentctl errand question policy capability is unavailable")
+	}
+	return checker.RequireCapability(ctx, agentctltypes.ErrandMCPOwnerCapability)
+}
+
+func recordedErrandMCPOwner(record *models.ExecutorRunning) (*agentctltypes.ErrandMCPOwner, error) {
+	if record == nil {
+		return nil, errors.New("missing execution inventory")
+	}
+	rawOwner, present := record.Metadata[runExecutionOwnerMetadataKey]
+	if !present {
+		return nil, nil
+	}
+	raw, err := json.Marshal(rawOwner)
+	if err != nil {
+		return nil, err
+	}
+	var owner ExecutionOwner
+	if err := json.Unmarshal(raw, &owner); err != nil {
+		return nil, err
+	}
+	if owner.Kind == ExecutionOwnerRun && owner.ErrandID == "" && owner.Generation == 0 {
+		return nil, nil
+	}
+	if owner.Kind != ExecutionOwnerErrand || !validRecordedErrandOwner(record, owner) {
+		return nil, errors.New("invalid execution owner inventory")
+	}
+	return errandMCPOwner(owner), nil
 }

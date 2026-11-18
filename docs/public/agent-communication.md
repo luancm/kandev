@@ -43,7 +43,7 @@ Attention projections can include `attention_reason`: `permission` for approval 
 
 Use separate start calls and retain each returned identity. Errands have depth one, share the task workspace and are limited to five live children per task. Their parent retains workflow ownership while outstanding results keep it in progress. Parent-turn cancellation does not stop children; explicit Stop and parent/task termination have different scopes.
 
-A child has exactly these read-only Kandev tools: `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, `list_tasks_kandev`, `list_related_tasks_kandev`, `list_task_sessions_kandev`, `get_task_conversation_kandev`, and `get_task_plan_kandev`. The child cannot redelegate, mutate task plans, ask a workflow question, or complete a step. The parent's selected external MCP servers are snapshotted at start, subject to their current enabled definitions.
+A child has exactly these read-only Kandev tools: `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, `list_tasks_kandev`, `list_related_tasks_kandev`, `list_task_sessions_kandev`, `get_task_conversation_kandev`, and `get_task_plan_kandev`. The child cannot redelegate, mutate task plans, ask an operator or workflow question, or complete a step. It returns questions and blockers to its parent in its result; genuine action permissions remain available. The parent's selected external MCP servers are snapshotted at start, subject to their current enabled definitions.
 
 ## Discovering task IDs
 

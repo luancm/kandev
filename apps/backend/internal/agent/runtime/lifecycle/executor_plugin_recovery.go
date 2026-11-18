@@ -309,12 +309,17 @@ func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
 	if record == nil || state == nil || r.recoveredAgentctlInfoReader == nil {
 		return nil, errors.New("plugin executor instance metadata reader is unavailable")
 	}
+	owner, err := recordedErrandMCPOwner(record)
+	if err != nil {
+		return nil, err
+	}
 	info, err := r.recoveredAgentctlInfoReader(
 		ctx,
 		r.connectionResolver(state.operationContext, state.inventory.Resource, pluginExecutorRuntimePort),
 		r.logger,
 		record.AgentExecutionID,
 		record.TransientAuthToken,
+		owner,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("read authenticated plugin agentctl instance metadata: %w", err)

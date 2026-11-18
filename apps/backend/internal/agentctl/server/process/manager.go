@@ -4575,6 +4575,9 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	}
 
 	req.HumanInput = m.classifyHumanInputPermission(req)
+	if req.HumanInput && m.cfg.ErrandMCPOwner != nil {
+		return nil, types.ErrErrandQuestion
+	}
 	m.logger.Info("handling permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),

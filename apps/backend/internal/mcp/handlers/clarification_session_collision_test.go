@@ -14,7 +14,7 @@ func TestAskUserQuestionRejectsForeignWaiterCollision(t *testing.T) {
 	store := clarification.NewStore(time.Second)
 	questions := []clarification.Question{{ID: "question", Prompt: "Which?", Options: []clarification.Option{{ID: "one", Label: "One"}, {ID: "two", Label: "Two"}}}}
 	pendingID := clarification.PendingIDForRequest("session", "retry", questions, "")
-	_, created, err := store.CreateRequest(&clarification.Request{PendingID: pendingID, WaiterScope: clarification.WaiterScope{Kind: clarification.WaiterScopeErrand, ErrandID: "child", Generation: 1}, Questions: questions})
+	_, created, err := store.CreateRequest(&clarification.Request{PendingID: pendingID, SessionID: "other-session", Questions: questions})
 	require.NoError(t, err)
 	require.True(t, created)
 	h := &Handlers{clarificationSvc: store, logger: testLogger(t).WithFields()}
@@ -23,5 +23,5 @@ func TestAskUserQuestionRejectsForeignWaiterCollision(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeError, response.Type)
 	require.True(t, store.HasWaiter(pendingID))
-	require.Equal(t, []string{pendingID}, store.CancelErrand("child", 1))
+	require.Equal(t, []string{pendingID}, store.CancelSession("other-session"))
 }

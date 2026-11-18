@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,3 +109,29 @@ func TestSharedKubernetesAmbiguousMatchingOwnerIsAdoptedWithoutCleanupAuthority(
 	require.NotNil(t, response)
 	require.False(t, created)
 }
+
+type unsupportedErrandControl struct{ gets, creates int }
+
+func (c *unsupportedErrandControl) RequireCapability(context.Context, string) error {
+	return errors.New("old helper")
+}
+func (c *unsupportedErrandControl) GetInstance(context.Context, string) (*agentctl.InstanceInfo, error) {
+	c.gets++
+	return &agentctl.InstanceInfo{ID: "remote", Port: 41001, WorkspacePath: kubernetesWorkspacePath, ErrandMCPOwner: errandMCPOwner(ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", ErrandID: "child", Generation: 1})}, nil
+}
+func (c *unsupportedErrandControl) CreateInstance(context.Context, *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error) {
+	c.creates++
+	return nil, nil
+}
+func TestSharedKubernetesRejectsOldErrandHelperBeforeReadOrCreate(t *testing.T) {
+	control := &unsupportedErrandControl{}
+	req := &ExecutorCreateRequest{ErrandMCPOwner: errandMCPOwner(ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", ErrandID: "child", Generation: 1})}
+	_, created, err := getOrCreateSharedKubernetesInstance(context.Background(), control, req, "remote")
+	require.Error(t, err)
+	require.False(t, created)
+	require.Zero(t, control.gets)
+	require.Zero(t, control.creates)
+}
+
+func (*ambiguousForeignSharedControl) RequireCapability(context.Context, string) error  { return nil }
+func (*ambiguousMatchingSharedControl) RequireCapability(context.Context, string) error { return nil }

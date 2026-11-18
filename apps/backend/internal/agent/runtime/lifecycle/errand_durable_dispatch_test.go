@@ -400,7 +400,7 @@ func TestErrandLaunchStartDispatchesDurably(t *testing.T) {
 	permission.PromptGeneration, permission.TurnID = 0, ""
 	permission.ToolCallID, permission.NormalizedPayload = "", nil
 	permission.RequestID, permission.PendingID = "current-request", "current-pending"
-	permission.PermissionHumanInput = true
+	permission.PermissionHumanInput = false
 	require.NoError(t, mgr.streamManager.processAgentEvent(ctx, execution, client, repo, permission, 0))
 	require.Equal(t, 1, callbacks)
 	require.Equal(t, second.ID, notification.DeliverySubmissionID)

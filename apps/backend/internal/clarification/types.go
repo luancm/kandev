@@ -19,13 +19,12 @@ type Question = protocol.Question
 // one or more questions; the agent stays blocked until every question has been
 // answered (or the bundle is rejected as a whole).
 type Request struct {
-	WaiterScope WaiterScope `json:"-"`
-	PendingID   string      `json:"pending_id"`
-	SessionID   string      `json:"session_id"`
-	TaskID      string      `json:"task_id"`
-	Questions   []Question  `json:"questions"`         // 1-N questions, all required
-	Context     string      `json:"context,omitempty"` // Optional shared context for all questions
-	CreatedAt   time.Time   `json:"created_at"`
+	PendingID string     `json:"pending_id"`
+	SessionID string     `json:"session_id"`
+	TaskID    string     `json:"task_id"`
+	Questions []Question `json:"questions"`         // 1-N questions, all required
+	Context   string     `json:"context,omitempty"` // Optional shared context for all questions
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // Answer is the wire type used by clarification responses.
@@ -40,7 +39,7 @@ type Response = protocol.Response
 // PendingClarification represents a clarification request waiting for a response.
 type PendingClarification struct {
 	Request   *Request
-	scope     WaiterScope
+	sessionID string
 	done      chan struct{} // Closed when a response is submitted (broadcast to all waiters)
 	resp      *Response
 	mu        sync.Mutex

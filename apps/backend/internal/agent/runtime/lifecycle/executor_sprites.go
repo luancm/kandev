@@ -505,8 +505,20 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 	var instancePort int
 	var reusingExisting bool
 	if reconnect {
+		if req.ErrandMCPOwner != nil {
+			if err := r.requireSpriteMCPHelper(ctx, sprite, req); err != nil {
+				completeStepError(&step, err.Error())
+				report(spriteStepAgentInstance, step)
+				return 0, false, err
+			}
+		}
 		instanceID := spritesAgentInstanceID(req)
-		port, portErr := r.getExistingInstancePort(ctx, sprite, instanceID)
+		port, portErr := r.spriteReconnectPort(ctx, sprite, req, instanceID)
+		if req.ErrandMCPOwner != nil && portErr != nil && !errors.Is(portErr, agentctl.ErrInstanceNotFound) {
+			completeStepError(&step, portErr.Error())
+			report(spriteStepAgentInstance, step)
+			return 0, false, portErr
+		}
 		if portErr == nil && port > 0 {
 			switch {
 			case hasManagedGitHubBrokerEnv(req.Env):
@@ -606,3 +618,17 @@ func (r *SpritesExecutor) GetInteractiveRunner() *process.InteractiveRunner {
 func (r *SpritesExecutor) RequiresCloneURL() bool          { return true }
 func (r *SpritesExecutor) ShouldApplyPreferredShell() bool { return false }
 func (r *SpritesExecutor) IsAlwaysResumable() bool         { return true }
+
+func (r *SpritesExecutor) spriteReconnectPort(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest, instanceID string) (int, error) {
+	if req.ErrandMCPOwner == nil {
+		return r.getExistingInstancePort(ctx, sprite, instanceID)
+	}
+	info, err := r.getExistingInstanceInfo(ctx, sprite, instanceID)
+	if err != nil {
+		return 0, err
+	}
+	if !matchErrandMCPOwner(req.ErrandMCPOwner, info.ErrandMCPOwner) {
+		return 0, errors.New("retained agentctl errand owner mismatch")
+	}
+	return info.Port, nil
+}

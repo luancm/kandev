@@ -2,12 +2,14 @@ package process
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/mcp/profile"
@@ -209,5 +211,41 @@ func assertAutoApprovalRetained(t *testing.T, m *Manager, toolCallID string) {
 	result := waitPermissionCall(t, resultCh)
 	if result.err != nil || result.response == nil || result.response.OptionID != "allow-once" {
 		t.Fatalf("response = %+v, err = %v", result.response, result.err)
+	}
+}
+
+func TestErrandHumanInputIsRefusedWithoutPermissionEvent(t *testing.T) {
+	m := antigravityPermissionManager(t, &config.InstanceConfig{AgentType: acpcompat.AntigravityAgentID, AutoApprovePermissions: true, ErrandMCPOwner: &types.ErrandMCPOwner{TaskID: "task", ErrandID: "child", Generation: 1}})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := startPermissionCall(m, ctx, &adapter.PermissionRequest{SessionID: "native", ToolCallID: acpcompat.AntigravityHumanInputPrefix + "question", PendingID: "question", Options: antigravityQuestionOptions()})
+	select {
+	case got := <-result:
+		if got.err == nil || !strings.Contains(got.err.Error(), "parent") || got.response != nil {
+			t.Fatalf("response=%+v err=%v", got.response, got.err)
+		}
+	case event := <-m.updatesCh:
+		t.Fatalf("question emitted permission event: %+v", event)
+	case <-time.After(time.Second):
+		t.Fatal("question was neither refused nor reported")
+	}
+	if len(m.pendingPermissions) != 0 {
+		t.Fatal("question created pending permission")
+	}
+}
+
+func TestErrandActionPermissionStillWaitsForUser(t *testing.T) {
+	m := antigravityPermissionManager(t, &config.InstanceConfig{AgentType: acpcompat.AntigravityAgentID, ErrandMCPOwner: &types.ErrandMCPOwner{TaskID: "task", ErrandID: "child", Generation: 1}})
+	result := startPermissionCall(m, context.Background(), &adapter.PermissionRequest{SessionID: "native", ToolCallID: "shell-1", PendingID: "action", Options: antigravityQuestionOptions()})
+	event := waitPermissionEvent(t, m)
+	if event.PermissionHumanInput {
+		t.Fatal("action permission classified as question")
+	}
+	if err := m.RespondToPermission(event.PendingID, "option-b", false); err != nil {
+		t.Fatal(err)
+	}
+	got := waitPermissionCall(t, result)
+	if got.err != nil || got.response == nil || got.response.Cancelled || got.response.OptionID != "option-b" {
+		t.Fatalf("response=%+v err=%v", got.response, got.err)
 	}
 }

@@ -62,6 +62,9 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 }
 
 func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetesAgentctlInstanceControl, req *ExecutorCreateRequest, remoteID string) (*agentctl.CreateInstanceResponse, bool, error) {
+	if err := requireErrandQuestionPolicy(ctx, control, req.ErrandMCPOwner); err != nil {
+		return nil, false, err
+	}
 	request := buildReconnectCreateInstanceRequest(req, remoteID)
 	applyKubernetesDurableJournalPath(request, req)
 	info, err := control.GetInstance(ctx, remoteID)

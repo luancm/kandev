@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcp "github.com/kandev/kandev/internal/mcp/server"
@@ -171,4 +172,18 @@ func respondToBackendRequest(t *testing.T, backend *mcp.ChannelBackendClient, re
 		t.Fatalf("create backend response: %v", err)
 	}
 	backend.HandleResponse(response)
+}
+
+func TestCodexUserInputHandlerUsesInstanceErrandOwner(t *testing.T) {
+	cfg, err := (&config.Config{}).NewInstanceConfig(0, &config.InstanceOverrides{SessionID: "errand:child", ErrandMCPOwner: &agentctltypes.ErrandMCPOwner{TaskID: "task", ErrandID: "child", Generation: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := newCodexUserInputRequestHandler(cfg, nil, logger.Default())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = handler(ctx, &adapter.UserInputRequest{})
+	if !errors.Is(err, agentctltypes.ErrErrandQuestion) {
+		t.Fatalf("error = %v, want errand refusal", err)
+	}
 }

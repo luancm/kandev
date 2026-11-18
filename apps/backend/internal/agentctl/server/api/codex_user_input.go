@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	clarificationprotocol "github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcp "github.com/kandev/kandev/internal/mcp/server"
@@ -22,6 +23,9 @@ func newCodexUserInputRequestHandler(
 	log *logger.Logger,
 ) adapter.UserInputRequestHandler {
 	return func(ctx context.Context, request *adapter.UserInputRequest) (*adapter.UserInputResponse, error) {
+		if cfg.ErrandMCPOwner != nil {
+			return nil, agentctltypes.ErrErrandQuestion
+		}
 		questions, err := clarificationQuestions(request.Questions)
 		if err != nil {
 			return nil, err

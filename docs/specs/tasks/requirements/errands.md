@@ -10,11 +10,7 @@ owners:
 
 ## Overview
 
-An errand is a visible, steerable child session started by a task's agent.
-It uses the task's shared workspace, has its own transcript, profile, and
-follow-up input, and returns results to a conversational parent. The task
-system owns its identity, workspace binding, workflow isolation, and parent
-relationship. The rationale and boundaries are in
+An errand is delegated work with its own transcript, profile, and follow-up input. It shares the task workspace and returns results to its parent. The task system owns its identity, workspace binding, workflow isolation, and parent relationship. See
 [ADR-2026-10-23-errands-first-class-delegation](../../../decisions/2026-10-23-errands-first-class-delegation.md).
 
 ## Terminology
@@ -66,7 +62,7 @@ relationship. The rationale and boundaries are in
   set under REQ-AGENTS-WORKSPACE-MCP-CONFIGURATION-003. Later parent changes
   shall not reach it; the user can add servers from the errand's composer.
 
-The [Errand status and continuation contract](errand-status-and-continuation.md) owns REQ-TASKS-ERRANDS-002, including recovery attention and explicit follow-up.
+[Errand status and continuation](errand-status-and-continuation.md) owns REQ-TASKS-ERRANDS-002.
 
 ### REQ-TASKS-ERRANDS-003: Errand results
 
@@ -103,11 +99,11 @@ The [Errand status and continuation contract](errand-status-and-continuation.md)
 
 ## Result delivery
 
-The [result delivery contract](errand-result-delivery.md) owns REQ-TASKS-ERRANDS-004 and its existing acceptance IDs.
+[Result delivery](errand-result-delivery.md) owns REQ-TASKS-ERRANDS-004.
 
 ### REQ-TASKS-ERRANDS-005: Workflow and ownership isolation
 
-**Intent:** Keep workflow, task state, and routing with parents and peers.
+**Intent:** Keep workflow ownership with parents and peers.
 
 #### Acceptance criteria
 
@@ -124,12 +120,13 @@ The [result delivery contract](errand-result-delivery.md) owns REQ-TASKS-ERRANDS
   not transfer workflow ownership. Session menus shall not offer
   **Set as Primary** or **Handoff** for an errand.
 
-- **AC-TASKS-ERRANDS-005.6:** Automatic conversation selection and replacement in task routes, previews and desktop/phone task pickers shall choose only normal sessions. With no normal candidate they shall retain the existing sessionless behavior. Explicit child URLs, remembered child selections and permission/input-owner navigation shall remain available.
+- **AC-TASKS-ERRANDS-005.6:** Automatic conversation selection and replacement in task routes, previews and desktop/phone task pickers shall choose only normal sessions. With no normal candidate they shall retain the existing sessionless behavior. Explicit child URLs, remembered child selections and permission-owner navigation shall remain available.
+- **AC-TASKS-ERRANDS-005.8:** An independent errand shall return questions and blockers to its parent in its result, without opening operator clarifications or native human-input requests. Genuine action permissions remain available.
 - **AC-TASKS-ERRANDS-005.7:** New Agent and New Subtask summary-source menus shall list only normal task conversations, numbered contiguously after filtering. Retained errands shall remain excluded when the feature is disabled. Blank and explicit summary selection semantics shall remain unchanged; transcript APIs shall retain child access.
 
 ### REQ-TASKS-ERRANDS-006: Parent session while errands run
 
-**Intent:** Keep parents conversational and defer workflow for outstanding errands.
+**Intent:** Keep parents conversational while deferring workflow.
 
 #### Acceptance criteria
 

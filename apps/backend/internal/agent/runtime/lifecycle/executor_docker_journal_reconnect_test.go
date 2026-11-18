@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -374,3 +375,22 @@ func TestDockerReconnectErrandRejectsForeignSameSessionWithoutMutation(t *testin
 		})
 	}
 }
+
+type oldErrandReconnectControl struct{ *journalReconnectControl }
+
+func (*oldErrandReconnectControl) RequireCapability(context.Context, string) error {
+	return errors.New("old helper")
+}
+func TestDockerRejectsOldErrandHelperBeforeInventory(t *testing.T) {
+	control := &oldErrandReconnectControl{newJournalReconnectControl(func(string) string { return "" })}
+	control.addInstance("exec-old", "", "errand:child", 41001, true)
+	server := newReconnectStatusServer(t, control.journalReconnectControl)
+	exec, req, docker := reconnectRequest(t, server, "exec-new", "exec-old", "errand:child")
+	req.TaskID = ""
+	req.ErrandMCPOwner = errandMCPOwner(ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", ErrandID: "child", Generation: 1})
+	_, _, _, err := exec.findExistingInstance(context.Background(), docker, control, req, "container", "172.17.0.2", "exec-new", "token")
+	require.Error(t, err)
+	require.Empty(t, control.recordedMethods())
+}
+
+func (*journalReconnectControl) RequireCapability(context.Context, string) error { return nil }

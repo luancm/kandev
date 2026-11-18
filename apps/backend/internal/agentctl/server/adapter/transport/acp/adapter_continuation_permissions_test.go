@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/stretchr/testify/require"
 )
@@ -180,4 +181,14 @@ func TestCursorContinuationEvidenceHandoffCannotOwnLatePermission(t *testing.T) 
 	_, serial := a.registerPromptTurn(t.Context(), 9)
 	t.Cleanup(func() { a.clearPromptTurn(serial) })
 	require.True(t, a.continuationSafetySnapshot(serial).SafeFor(9), "a serialized successor starts with fresh evidence")
+}
+
+func TestPermissionHandlerRefusalPropagatesWithoutApproval(t *testing.T) {
+	a, _, req := continuationPermissionFixture(t)
+	a.SetPermissionHandler(func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
+		return nil, agentctltypes.ErrErrandQuestion
+	})
+	response, err := a.handlePermissionRequest(t.Context(), req)
+	require.Nil(t, response)
+	require.ErrorIs(t, err, agentctltypes.ErrErrandQuestion)
 }

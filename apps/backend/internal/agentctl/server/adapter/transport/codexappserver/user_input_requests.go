@@ -38,6 +38,9 @@ func (a *Adapter) handleUserInputRequest(ctx context.Context, raw json.RawMessag
 	}
 	response, err := handler(ctx, request)
 	if err != nil {
+		if errors.Is(err, agenttypes.ErrErrandQuestion) {
+			return nil, &protocol.RPCError{Code: -32603, Message: agenttypes.ErrErrandQuestion.Error()}
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

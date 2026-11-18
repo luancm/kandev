@@ -475,6 +475,11 @@ func createOrReconcileKubernetesAgentctlInstanceWithOwnership(
 	control kubernetesAgentctlInstanceControl,
 	request *agentctl.CreateInstanceRequest,
 ) (*agentctl.CreateInstanceResponse, bool, error) {
+	if request != nil {
+		if err := requireErrandQuestionPolicy(ctx, control, request.ErrandMCPOwner); err != nil {
+			return nil, false, err
+		}
+	}
 	response, createErr := control.CreateInstance(ctx, request)
 	if createErr == nil {
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {

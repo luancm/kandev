@@ -38,7 +38,7 @@ func TestErrandMCPRemoteHelperRequiresCapability(t *testing.T) {
 	req := &ExecutorCreateRequest{ErrandMCPOwner: errandMCPOwner(ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: "task", ErrandID: "child", Generation: 1})}
 	fetch := func(context.Context) ([]byte, error) { return []byte(`{"capabilities":[]}`), nil }
 	require.Error(t, requireBuiltinRemoteHelper(context.Background(), req, fetch))
-	fetch = func(context.Context) ([]byte, error) { return []byte(`{"capabilities":["errand-mcp-owner.v1"]}`), nil }
+	fetch = func(context.Context) ([]byte, error) { return []byte(`{"capabilities":["errand-mcp-owner.v2"]}`), nil }
 	require.NoError(t, requireBuiltinRemoteHelper(context.Background(), req, fetch))
 }
 

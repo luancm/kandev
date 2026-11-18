@@ -51,9 +51,11 @@ protocol generation fields retain their established meaning.
 Reuse conversation rendering through explicit data and action interfaces.
 Ordinary task chat keeps its session adapter; Errand chat receives Errand-owned
 data. Remove replaced ordinary-session exceptions after the new path is wired.
-Preserve steering, permission handling, transcript inspection, workspace
-interactions, and desktop/phone navigation; independent ownership is not a
-reduction in user capabilities.
+Preserve steering, genuine action permission handling, transcript inspection, workspace
+interactions, and desktop/phone navigation. Independent Errands do not open
+operator clarifications or provider-native human-input questions: they return
+questions and blockers in their result to the ordinary parent. This keeps one
+user-facing decision owner while preserving action permission approvals.
 
 Result settlement, parent reception, and physical runtime absence remain
 separate facts. Preserve exact submission and execution identities, atomic

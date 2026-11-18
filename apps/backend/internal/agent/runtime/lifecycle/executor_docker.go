@@ -593,6 +593,9 @@ func (r *DockerExecutor) findExistingInstance(
 	requestedInstanceID string,
 	authToken string,
 ) (port int, reusingProcess bool, instanceID string, err error) {
+	if err := requireErrandQuestionPolicy(ctx, ctl, req.ErrandMCPOwner); err != nil {
+		return 0, false, "", fmt.Errorf("%w: %w", errReconnectOwnerBlocked, err)
+	}
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, requestedInstanceID)
 	if err == nil && instance != nil && instance.Port > 0 {
@@ -630,6 +633,9 @@ func (r *DockerExecutor) findExistingInstance(
 		status, statusErr := client.GetStatus(ctx)
 		processRunning := statusErr == nil && status != nil && status.IsAgentRunning()
 		return instance.Port, processRunning, instance.ID, nil
+	}
+	if err != nil && req.ErrandMCPOwner != nil && !errors.Is(err, agentctl.ErrInstanceNotFound) {
+		return 0, false, "", fmt.Errorf("%w: inspect requested agent instance: %w", errReconnectOwnerBlocked, err)
 	}
 	if err != nil && isAgentctlAuthError(err) {
 		return 0, false, "", err

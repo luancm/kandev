@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"slices"
 	"strings"
 	"testing"
@@ -452,7 +453,7 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 
 func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteExecutor) {
 	t.Helper()
-	runtime.recoveredAgentctlInfoReader = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string) (*agentctl.InstanceInfo, error) {
+	runtime.recoveredAgentctlInfoReader = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string, _ *agentctltypes.ErrandMCPOwner) (*agentctl.InstanceInfo, error) {
 		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 			t.Fatalf("instance metadata read identity = %q token=%q", executionID, token)
 		}
@@ -482,6 +483,7 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 		_ *logger.Logger,
 		executionID string,
 		token string,
+		_ *agentctltypes.ErrandMCPOwner,
 	) (*agentctl.InstanceInfo, error) {
 		gotExecutionID = executionID
 		gotAuthToken = token

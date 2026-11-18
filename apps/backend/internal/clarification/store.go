@@ -62,7 +62,7 @@ type Store struct {
 
 type deliveryMissKey struct {
 	pendingID string
-	scope     WaiterScope
+	sessionID string
 }
 
 // NewStore creates a new clarification store.
@@ -138,7 +138,7 @@ func (s *Store) CreateRetryRequestWithWaiter(req *Request) (
 func (s *Store) waitForRetryResponse(ctx context.Context, pendingID string, pending *PendingClarification, recorded *Response) (*Response, error) {
 	if recorded != nil {
 		s.mu.RLock()
-		_, deliveryMissed := s.deliveryMisses[deliveryMissKey{pendingID: pendingID, scope: pending.scope}]
+		_, deliveryMissed := s.deliveryMisses[deliveryMissKey{pendingID: pendingID, sessionID: pending.sessionID}]
 		_, unknownMiss := s.deliveryMisses[deliveryMissKey{pendingID: pendingID}]
 		deliveryMissed = deliveryMissed || unknownMiss
 		s.mu.RUnlock()
@@ -156,22 +156,19 @@ func (s *Store) waitForRetryResponse(ctx context.Context, pendingID string, pend
 }
 
 func (s *Store) createRetryRequestLocked(req *Request) (pendingID string, isNew, deliveryMissed bool, err error) {
-	scope, err := requestWaiterScope(req)
+	sessionID, err := requestWaiterSession(req)
 	if err != nil {
 		return "", false, false, err
 	}
 	s.pruneDeliveryMissesLocked(time.Now())
 	if req.PendingID != "" {
-		if existing := s.pending[req.PendingID]; existing != nil && existing.scope != scope {
-			return "", false, false, ErrWaiterScopeCollision
+		if existing := s.pending[req.PendingID]; existing != nil && existing.sessionID != sessionID {
+			return "", false, false, ErrWaiterSessionCollision
 		}
-		if _, missed := s.deliveryMisses[deliveryMissKey{pendingID: req.PendingID, scope: scope}]; missed {
+		if _, missed := s.deliveryMisses[deliveryMissKey{pendingID: req.PendingID, sessionID: sessionID}]; missed {
 			return req.PendingID, false, true, nil
 		}
 		if _, missed := s.deliveryMisses[deliveryMissKey{pendingID: req.PendingID}]; missed {
-			if scope.Kind == WaiterScopeErrand {
-				return "", false, false, ErrWaiterScopeUnknownDelivery
-			}
 			return req.PendingID, false, true, nil
 		}
 	}
@@ -184,14 +181,14 @@ func (s *Store) createRetryRequestLocked(req *Request) (pendingID string, isNew,
 
 // ClearSessionDeliveryMiss clears the verified session's receipt and any
 // ownerless receipt after its durable bundle has been restored. Known receipts
-// for other scopes remain untouched.
+// for other sessions remain untouched.
 func (s *Store) ClearSessionDeliveryMiss(pendingID, sessionID string) {
 	if pendingID == "" || sessionID == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.deliveryMisses, deliveryMissKey{pendingID: pendingID, scope: WaiterScope{Kind: WaiterScopeSession, SessionID: sessionID}})
+	delete(s.deliveryMisses, deliveryMissKey{pendingID: pendingID, sessionID: sessionID})
 	delete(s.deliveryMisses, deliveryMissKey{pendingID: pendingID})
 }
 
@@ -206,7 +203,7 @@ func (s *Store) HasWaiter(pendingID string) bool {
 }
 
 func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (string, bool, error) {
-	scope, err := requestWaiterScope(req)
+	sessionID, err := requestWaiterSession(req)
 	if err != nil {
 		return "", false, err
 	}
@@ -219,8 +216,8 @@ func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (st
 	// entry would orphan waiters on a done channel nobody closes.
 	if req.PendingID != "" {
 		if existing, ok := s.pending[req.PendingID]; ok {
-			if existing.scope != scope {
-				return "", false, ErrWaiterScopeCollision
+			if existing.sessionID != sessionID {
+				return "", false, ErrWaiterSessionCollision
 			}
 			return existing.Request.PendingID, false, nil
 		}
@@ -230,7 +227,7 @@ func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (st
 	// normalised questions already exists, return the existing pending ID.
 	if deduplicateQuestions {
 		for _, existing := range s.pending {
-			if existing.scope == scope && questionsEqual(existing.Request.Questions, req.Questions) {
+			if existing.sessionID == sessionID && questionsEqual(existing.Request.Questions, req.Questions) {
 				return existing.Request.PendingID, false, nil
 			}
 		}
@@ -243,7 +240,7 @@ func (s *Store) createRequestLocked(req *Request, deduplicateQuestions bool) (st
 
 	s.pending[req.PendingID] = &PendingClarification{
 		Request:   req,
-		scope:     scope,
+		sessionID: sessionID,
 		done:      make(chan struct{}),
 		CancelCh:  make(chan struct{}),
 		CreatedAt: time.Now(),
@@ -518,8 +515,8 @@ func (s *Store) recordDeliveryMissAfterCancellation(
 	defer s.mu.Unlock()
 	now := time.Now()
 	s.pruneDeliveryMissesLocked(now)
-	s.deliveryMisses[deliveryMissKey{pendingID: pendingID, scope: loaded.scope}] = now
-	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded && replacement.scope == loaded.scope {
+	s.deliveryMisses[deliveryMissKey{pendingID: pendingID, sessionID: loaded.sessionID}] = now
+	if replacement := s.pending[pendingID]; replacement != nil && replacement != loaded && replacement.sessionID == loaded.sessionID {
 		s.cancelPendingLocked(pendingID, replacement)
 	}
 }
@@ -630,22 +627,11 @@ func (s *Store) CancelSession(sessionID string) []string {
 	if sessionID == "" {
 		return nil
 	}
-	return s.cancelScope(WaiterScope{Kind: WaiterScopeSession, SessionID: sessionID})
-}
 
-// CancelErrand cancels waiters for exactly one Errand execution generation.
-func (s *Store) CancelErrand(errandID string, generation uint64) []string {
-	if errandID == "" || generation == 0 {
-		return nil
-	}
-	return s.cancelScope(WaiterScope{Kind: WaiterScopeErrand, ErrandID: errandID, Generation: generation})
-}
-
-func (s *Store) cancelScope(scope WaiterScope) []string {
 	s.mu.RLock()
 	var toCancel []*PendingClarification
 	for _, pending := range s.pending {
-		if pending.scope == scope {
+		if pending.sessionID == sessionID {
 			toCancel = append(toCancel, pending)
 		}
 	}

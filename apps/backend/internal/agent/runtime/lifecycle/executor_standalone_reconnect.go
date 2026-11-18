@@ -41,6 +41,9 @@ func (r *StandaloneExecutor) reconcileRetainedStandaloneOwner(
 	if control == nil {
 		return nil, standaloneOwnerBlocked(errors.New("agentctl instance inventory is unavailable"))
 	}
+	if err := requireErrandQuestionPolicy(ctx, control, req.ErrandMCPOwner); err != nil {
+		return nil, standaloneOwnerBlocked(err)
+	}
 	instances, err := control.ListInstances(ctx)
 	if err != nil {
 		return nil, standaloneOwnerBlocked(fmt.Errorf("list agent instances before journal open: %w", err))

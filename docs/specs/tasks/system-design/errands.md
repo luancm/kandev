@@ -299,6 +299,8 @@ objective, final-message result contract, no destructive Git operations
 follow-ups use an errand `wrapAgentMessage` variant instead of a sibling
 reply hint.
 
+Independent Errands return questions and blockers in their result to the parent. The host-owned agentctl instance identity refuses Codex native user-input callbacks and classified provider-native human-input permission requests before they create clarification or permission waiters. Ordinary task-session questions and genuine action permissions retain their existing paths. The independent Errand helper capability requires this policy as well as MCP owner projection; unsupported helpers fail admission. See [the independent ownership decision](../../../decisions/2026-11-17-errand-owned-conversations.md).
+
 `kandev-context.md` uses `{delegation_policy_section}` and
 `{errand_tools_section}`, populated through `KandevContextOptions` fields
 `IncludeErrandTools` and `ErrandProfiles` (at most 20 names/agents/models).

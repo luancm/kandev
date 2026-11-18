@@ -66,7 +66,7 @@ When recovery cannot verify earlier work, an idle errand shows **Recovery needs 
 
 Continuing is blocked until all earlier work has verified settlement. Once an interruption is settled, send a new instruction through the existing composer; Kandev restores the same conversation where supported and does not replay the uncertain instruction. These explanations and actions are available in both the desktop panel and phone drawer.
 
-Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. Native provider subagents remain a separate mechanism and keep separate counts.
+Errands are limited to one level and five live children per task. Starts may queue behind session capacity. Their Kandev MCP catalog contains only read operations: they cannot create more errands, tasks or sessions, change plans, or advance workflow steps. When an errand needs a user decision, it returns the question or blocker to its parent in its result. Genuine action permission requests can still require approval. Native provider subagents remain a separate mechanism and keep separate counts.
 
 All errands share the canonical task workspace, including uncommitted files. Give concurrent writers disjoint files or use separate tasks/workspaces when isolation matters. Errands snapshot the parent's session MCP additions and exclusions at start; later parent selection changes do not rewrite that snapshot. Removed or disabled servers are omitted at launch.
 

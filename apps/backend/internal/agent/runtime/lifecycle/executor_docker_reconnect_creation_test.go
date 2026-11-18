@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/docker"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/config"
 )
 
@@ -163,4 +164,33 @@ func requestsContain(requests []string, suffix string) bool {
 		}
 	}
 	return false
+}
+
+func TestDockerReconnectBlocksUncertainErrandLookup(t *testing.T) {
+	_, dockerClient := newRetainedContainerEngine(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/identity", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"capabilities": []string{agentctltypes.ErrandMCPOwnerCapability}})
+	})
+	lookups := 0
+	mux.HandleFunc("/api/v1/instances/", func(w http.ResponseWriter, _ *http.Request) {
+		lookups++
+		http.Error(w, "inventory unavailable", http.StatusInternalServerError)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	_, port := parseHTTPURL(t, server.URL)
+	exec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	exec.endpoints = &remoteDockerRecoveryEndpoints{AgentCtlPort: uint16(port)}
+	request := &ExecutorCreateRequest{InstanceID: "requested-exec", SessionID: "errand-namespace", Metadata: map[string]interface{}{MetadataKeyContainerID: "container-retained"}, AuthToken: "control-token", ErrandMCPOwner: &agentctltypes.ErrandMCPOwner{TaskID: "task-1", ErrandID: "errand-1", Generation: 1}}
+	ordinary := *request
+	ordinary.ErrandMCPOwner = nil
+	_, ok, err := exec.tryReconnect(context.Background(), dockerClient, &ordinary)
+	require.NoError(t, err)
+	require.False(t, ok)
+	_, ok, err = exec.tryReconnect(context.Background(), dockerClient, request)
+	require.Equal(t, 2, lookups)
+	require.ErrorIs(t, err, errReconnectOwnerBlocked)
+	require.False(t, ok)
 }
