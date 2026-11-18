@@ -16,7 +16,8 @@ type ownedErrandWorkspaceAttachment struct {
 
 func (a *ErrandAdapter) loadOwnedErrandWorkspaceAttachment(ctx context.Context, info *runtimeapi.WorkspaceInfo) (*ownedErrandWorkspaceAttachment, error) {
 	switch models.ExecutorType(info.ExecutorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites:
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites,
+		models.ExecutorTypeKubernetes:
 	default:
 		return nil, nil
 	}
@@ -87,10 +88,17 @@ func attachableErrandWorkspace(env *models.TaskEnvironment) bool {
 	case models.ExecutorTypeSSH:
 		return true
 	case models.ExecutorTypeSprites:
-		return env.SandboxID != "" && env.ExecutorID != "" && env.ExecutorProfileID != ""
+		return env.SandboxID != "" && hasSavedExecutorProfile(env)
+	case models.ExecutorTypeKubernetes:
+		return env.Status == models.TaskEnvironmentStatusReady && env.OwnershipGeneration > 0 &&
+			hasSavedExecutorProfile(env)
 	default:
 		return env.ContainerID != "" && (env.ContainerControlAuthTokenSecretID != "" || env.ContainerBootstrapNonceSecretID != "")
 	}
+}
+
+func hasSavedExecutorProfile(env *models.TaskEnvironment) bool {
+	return env.ExecutorID != "" && env.ExecutorProfileID != ""
 }
 
 func sameErrandWorkspace(current, expected *models.TaskEnvironment) bool {

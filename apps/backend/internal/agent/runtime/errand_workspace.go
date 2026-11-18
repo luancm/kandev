@@ -42,6 +42,9 @@ func ErrandWorkspaceLaunch(info *WorkspaceInfo, environment *models.TaskEnvironm
 			request.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir] = environment.WorkspacePath
 		case models.ExecutorTypeSprites:
 			request.Metadata[lifecycle.MetadataKeySpriteName] = environment.SandboxID
+		case models.ExecutorTypeKubernetes:
+			request.EnvironmentOwnerTaskID = environment.TaskID
+			request.EnvironmentOwnershipGeneration = environment.OwnershipGeneration
 		}
 	}
 	if executorID != "" {

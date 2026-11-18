@@ -20,6 +20,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 		return nil, nil, "", 0, err
 	}
 	defer func() { _ = forward.Close() }()
+	defer control.Close()
 	unlock := r.lockInstance("control:" + req.TaskEnvironmentID)
 	defer unlock()
 	token, err := r.sharedKubernetesControlToken(ctx, req)
@@ -33,7 +34,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 		if returnedErr != nil && created {
 			rollbackCtx, cancel := kubernetesDurableContext(ctx)
 			defer cancel()
-			returnedErr = errors.Join(returnedErr, control.DeleteInstance(rollbackCtx, remoteID))
+			returnedErr = errors.Join(returnedErr, stopKubernetesAgentctlAttachment(rollbackCtx, control, remoteID, req.ErrandMCPOwner))
 		}
 	}()
 	if isAgentctlAuthError(err) && req.BootstrapNonce != "" {

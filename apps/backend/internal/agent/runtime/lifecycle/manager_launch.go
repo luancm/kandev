@@ -1510,6 +1510,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                        reqWithWorktree.TaskTitle,
 		SessionID:                        launchInventorySessionID(reqWithWorktree),
 		TaskEnvironmentID:                reqWithWorktree.TaskEnvironmentID,
+		EnvironmentOwnershipGeneration:   reqWithWorktree.EnvironmentOwnershipGeneration,
 		WorkspaceID:                      reqWithWorktree.WorkspaceID,
 		RepositoryIDs:                    repositoryIDsFromLaunch(reqWithWorktree),
 		WorkspaceReuseRequired:           reqWithWorktree.WorkspaceReuseRequired,

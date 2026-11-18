@@ -73,11 +73,23 @@ func (m *Manager) checkpointKubernetesRuntimeInventory(
 		}
 	}
 	execution := &AgentExecution{
-		ID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
+		ID:                req.InstanceID,
 		TaskEnvironmentID: req.TaskEnvironmentID, AgentProfileID: req.AgentProfileID,
 		OriginalWorkspacePath: req.OriginalWorkspacePath,
 		RuntimeName:           agentruntime.RuntimeKubernetes, Status: v1.AgentStatusStarting,
 		metadata: metadata,
+	}
+	if owner := req.ErrandMCPOwner; owner != nil {
+		if req.SessionID != models.ErrandExecutionIdentity(owner.ErrandID) || req.WorkspaceID == "" {
+			return models.ErrInvalidErrand
+		}
+		execution.Owner = ExecutionOwner{
+			Kind: ExecutionOwnerErrand, TaskID: owner.TaskID, WorkspaceID: req.WorkspaceID,
+			ErrandID: owner.ErrandID, Generation: owner.Generation, AgentProfileID: req.OfficeAgentProfileID,
+		}
+		execution.WorkspaceID = req.WorkspaceID
+	} else {
+		execution.TaskID, execution.SessionID = req.TaskID, req.SessionID
 	}
 	running := buildRunningFromExecution(execution, prior)
 	running.Runtime = agentruntime.RuntimeKubernetes

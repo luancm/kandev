@@ -15,7 +15,9 @@ func (r *KubernetesExecutor) stopErrandInstance(ctx context.Context, row *models
 	envID := getMetadataString(row.Metadata, MetadataKeyKubernetesResourceEnvironmentID)
 	podUID := getMetadataString(row.Metadata, MetadataKeyKubernetesPodUID)
 	remoteID := getMetadataString(row.Metadata, MetadataKeyKubernetesAgentctlInstanceID)
-	if envID == "" || podUID == "" || remoteID == "" {
+	workspaceOwnerTaskID := getMetadataString(row.Metadata, MetadataKeyKubernetesResourceTaskID)
+	if envID == "" || podUID == "" || remoteID == "" || workspaceOwnerTaskID == "" ||
+		row.SessionID != models.ErrandExecutionIdentity(owner.ErrandID) {
 		return errors.New("errand stop requires the recorded Kubernetes environment, Pod UID and instance")
 	}
 
@@ -27,11 +29,11 @@ func (r *KubernetesExecutor) stopErrandInstance(ctx context.Context, row *models
 	if err != nil {
 		return err
 	}
-	if environment.TaskID != owner.TaskID || getMetadataString(environment.Metadata, MetadataKeyKubernetesPodUID) != podUID {
+	if environment.TaskID != workspaceOwnerTaskID || getMetadataString(environment.Metadata, MetadataKeyKubernetesPodUID) != podUID {
 		return models.ErrWorkspaceReuseUnsafe
 	}
 	instance, err := r.taskKubernetesStopInstance(ctx, &ExecutorInstance{
-		InstanceID: row.AgentExecutionID, TaskID: owner.TaskID, SessionID: row.SessionID, Metadata: row.Metadata,
+		InstanceID: row.AgentExecutionID, TaskID: workspaceOwnerTaskID, SessionID: row.SessionID, Metadata: row.Metadata,
 	}, environment)
 	if err != nil {
 		return err

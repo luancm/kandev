@@ -28,7 +28,8 @@ func (a *ErrandAdapter) selectOwnedErrandWorkspace(ctx context.Context, request 
 	}
 	switch models.ExecutorType(info.ExecutorType) {
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree, legacyLocalExecutorType,
-		models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites:
+		models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites,
+		models.ExecutorTypeKubernetes:
 		return info, nil
 	default:
 		return nil, nil

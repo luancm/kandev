@@ -41,6 +41,10 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	if r.Method == http.MethodGet && r.URL.Path == "/identity" {
+		_ = json.NewEncoder(w).Encode(agentctl.IdentityInfo{Capabilities: []string{agentctltypes.ErrandMCPOwnerCapability}})
+		return
+	}
 	if r.URL.Path == "/auth/handshake" {
 		c.handshakes++
 		if c.handshakes > 1 {
@@ -87,7 +91,7 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath})
+	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath, ErrandMCPOwner: request.ErrandMCPOwner})
 }
 
 func (c *taskPodControl) stopErrandInstance(w http.ResponseWriter, r *http.Request, id string) {

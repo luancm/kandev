@@ -3,8 +3,10 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 
+	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
@@ -66,7 +68,7 @@ func (r *KubernetesExecutor) stopSharedKubernetesInstance(ctx context.Context, i
 }
 
 // Rollback owns only the newly attached agent, even if credential persistence failed.
-func (r *KubernetesExecutor) rollbackTaskKubernetesAttachment(ctx context.Context, instance *ExecutorInstance) error {
+func (r *KubernetesExecutor) rollbackTaskKubernetesAttachment(ctx context.Context, instance *ExecutorInstance, owner *agentctltypes.ErrandMCPOwner) error {
 	session := r.closeKubernetesSession(instance.InstanceID)
 	runtime, err := r.kubernetesCleanupRuntime(instance, session)
 	if err != nil {
@@ -77,7 +79,7 @@ func (r *KubernetesExecutor) rollbackTaskKubernetesAttachment(ctx context.Contex
 		return err
 	}
 	pod, err := runtime.resources.GetPod(ctx, recorded.namespace, recorded.podName)
-	if apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) && owner == nil {
 		return nil
 	}
 	if err != nil {
@@ -91,8 +93,16 @@ func (r *KubernetesExecutor) rollbackTaskKubernetesAttachment(ctx context.Contex
 		return err
 	}
 	defer func() { _ = forward.Close() }()
+	defer control.Close()
 	control.SetAuthToken(instance.AuthToken)
-	return control.DeleteInstance(ctx, getMetadataString(instance.Metadata, MetadataKeyKubernetesAgentctlInstanceID))
+	return stopKubernetesAgentctlAttachment(ctx, control, getMetadataString(instance.Metadata, MetadataKeyKubernetesAgentctlInstanceID), owner)
+}
+
+func stopKubernetesAgentctlAttachment(ctx context.Context, control *agentctl.ControlClient, remoteID string, owner *agentctltypes.ErrandMCPOwner) error {
+	if owner != nil {
+		return control.StopErrandInstance(ctx, remoteID, *owner)
+	}
+	return control.DeleteInstance(ctx, remoteID)
 }
 
 func (r *KubernetesExecutor) resolveTaskKubernetesStopOwnership(ctx context.Context, instance *ExecutorInstance) error {

@@ -1769,6 +1769,10 @@ type LaunchRequest struct {
 	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID             string
 	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	// EnvironmentOwnerTaskID and EnvironmentOwnershipGeneration identify the
+	// physical environment selected for an attach-only Kubernetes Errand.
+	EnvironmentOwnerTaskID         string
+	EnvironmentOwnershipGeneration int64
 	// CausingRunID is carried separately from Owner.RunID because Office task
 	// sessions remain task-owned while a scheduler run initiates their launch.
 	CausingRunID string

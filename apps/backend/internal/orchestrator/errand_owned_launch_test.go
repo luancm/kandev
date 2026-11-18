@@ -52,6 +52,15 @@ func TestErrandAdapterAttachesSpritesTaskEnvironment(t *testing.T) {
 	}
 }
 
+func TestErrandAdapterAttachesKubernetesTaskEnvironment(t *testing.T) {
+	for _, tc := range []ownedWorkspaceLaunchCase{
+		{name: "saved shared environment", provider: models.ExecutorTypeKubernetes},
+		{name: "workspace changed", provider: models.ExecutorTypeKubernetes, rotateWorkspace: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) { exerciseOwnedWorkspaceLaunch(t, tc) })
+	}
+}
+
 type ownedWorkspaceLaunchCase struct {
 	name            string
 	provider        models.ExecutorType
@@ -84,11 +93,16 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 		env.ContainerID = "environment-container"
 		env.ContainerControlAuthTokenSecretID = "environment-control-secret"
 		env.ContainerBootstrapNonceSecretID = "environment-bootstrap-secret"
-	case models.ExecutorTypeSprites:
+	case models.ExecutorTypeSprites, models.ExecutorTypeKubernetes:
 		profile := &models.ExecutorProfile{ID: "saved-profile", ExecutorID: executor.ID, Name: "Saved profile"}
 		require.NoError(t, f.repo.CreateExecutorProfile(ctx, profile))
 		env.ExecutorProfileID = profile.ID
-		env.SandboxID = "saved-sandbox"
+		if tc.provider == models.ExecutorTypeSprites {
+			env.SandboxID = "saved-sandbox"
+		} else {
+			env.TaskID = "workspace-owner"
+			require.NoError(t, f.repo.CreateTask(ctx, &models.Task{ID: env.TaskID, WorkspaceID: "ws1", Title: "Inherited workspace"}))
+		}
 	}
 	require.NoError(t, f.repo.CreateTaskEnvironment(ctx, env))
 	var launch *runtimeapi.LaunchRequest
@@ -100,7 +114,7 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 			if tc.rotateWorkspace {
 				rotated := *env
 				switch tc.provider {
-				case models.ExecutorTypeSSH:
+				case models.ExecutorTypeSSH, models.ExecutorTypeKubernetes:
 					rotated.WorkspacePath = "/changed-workspace"
 				case models.ExecutorTypeSprites:
 					rotated.SandboxID = "changed-sandbox"
@@ -160,6 +174,11 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 		require.Equal(t, env.SandboxID, launch.Metadata[lifecycle.MetadataKeySpriteName])
 		require.Equal(t, env.ExecutorProfileID, launch.Metadata[lifecycle.MetadataKeyExecutorProfileID])
 		require.NotContains(t, launch.Metadata, lifecycle.MetadataKeyContainerID)
+	case models.ExecutorTypeKubernetes:
+		require.Equal(t, env.ExecutorProfileID, launch.Metadata[lifecycle.MetadataKeyExecutorProfileID])
+		require.NotContains(t, launch.Metadata, lifecycle.MetadataKeyKubernetesPodName)
+		require.Equal(t, env.TaskID, launch.EnvironmentOwnerTaskID)
+		require.Equal(t, env.OwnershipGeneration, launch.EnvironmentOwnershipGeneration)
 	default:
 		require.Equal(t, env.ContainerID, launch.Metadata[lifecycle.MetadataKeyContainerID])
 		require.Equal(t, env.ContainerControlAuthTokenSecretID, launch.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret])

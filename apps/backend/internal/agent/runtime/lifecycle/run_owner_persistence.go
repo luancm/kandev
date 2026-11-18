@@ -35,12 +35,18 @@ func launchInventorySessionID(req *LaunchRequest) string {
 	return req.SessionID
 }
 
-// SSH binds the controller receipt to the owning task and transport identity.
 func launchProviderTaskID(req *LaunchRequest) string {
-	if req.Owner.Kind == ExecutionOwnerErrand && req.ExecutorType == string(models.ExecutorTypeSSH) {
-		return req.Owner.TaskID
+	if req.Owner.Kind != ExecutionOwnerErrand {
+		return req.TaskID
 	}
-	return req.TaskID
+	switch models.ExecutorType(req.ExecutorType) {
+	case models.ExecutorTypeSSH:
+		return req.Owner.TaskID
+	case models.ExecutorTypeKubernetes:
+		return req.EnvironmentOwnerTaskID
+	default:
+		return req.TaskID
+	}
 }
 
 // StopRunOwnerForRecovery proves the predecessor has stopped using its durable

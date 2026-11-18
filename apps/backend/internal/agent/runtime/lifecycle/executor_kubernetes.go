@@ -116,6 +116,9 @@ func (r *KubernetesExecutor) Name() executor.Name { return executor.NameKubernet
 func (r *KubernetesExecutor) HealthCheck(context.Context) error { return nil }
 
 func (r *KubernetesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	if req != nil && req.ErrandMCPOwner != nil && (r.environmentStore == nil || req.TaskEnvironmentID == "" || !req.WorkspaceReuseRequired) {
+		return nil, fmt.Errorf("%w: Kubernetes errand requires a shared task environment", models.ErrWorkspaceReuseUnsafe)
+	}
 	if req != nil && r.environmentStore != nil && req.TaskEnvironmentID != "" {
 		return r.createTaskInstance(ctx, req)
 	}
@@ -134,6 +137,9 @@ func (r *KubernetesExecutor) createSessionInstance(ctx context.Context, req *Exe
 		return nil, err
 	}
 	reconnect := getMetadataString(req.Metadata, MetadataKeyKubernetesPodName) != ""
+	if req.ErrandMCPOwner != nil && !reconnect {
+		return nil, fmt.Errorf("%w: Kubernetes errand requires a recorded Pod", models.ErrWorkspaceReuseUnsafe)
+	}
 	var profile kubeexecutor.ProfileConfig
 	if !reconnect {
 		profile, err = kubernetesProfileConfigFromMetadata(req.Metadata)

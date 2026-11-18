@@ -51,6 +51,9 @@ func (r *KubernetesExecutor) createTaskInstance(ctx context.Context, original *E
 		return nil, err
 	}
 	if legacy {
+		if original.ErrandMCPOwner != nil {
+			return nil, fmt.Errorf("%w: Kubernetes errand requires task-owned inventory", models.ErrWorkspaceReuseUnsafe)
+		}
 		return r.createSessionInstance(ctx, original)
 	}
 	record, err := r.claimTaskKubernetesEnvironment(ctx, original)
@@ -76,7 +79,7 @@ func (r *KubernetesExecutor) createTaskInstance(ctx context.Context, original *E
 		if returnedErr != nil {
 			rollbackCtx, cancel := kubernetesDurableContext(ctx)
 			defer cancel()
-			returnedErr = errors.Join(returnedErr, r.rollbackTaskKubernetesAttachment(rollbackCtx, instance))
+			returnedErr = errors.Join(returnedErr, r.rollbackTaskKubernetesAttachment(rollbackCtx, instance, req.ErrandMCPOwner))
 		}
 	}()
 	instance.Metadata[metadataKubernetesTaskOwned] = true
@@ -220,6 +223,10 @@ func (r *KubernetesExecutor) claimTaskKubernetesEnvironment(ctx context.Context,
 	}
 	if env == nil || env.TaskID != original.TaskID || env.ExecutorType != string(executor.NameKubernetes) {
 		return nil, fmt.Errorf("%w: task environment does not match the requested Kubernetes task", models.ErrWorkspaceReuseUnsafe)
+	}
+	if original.ErrandMCPOwner != nil && (original.EnvironmentOwnershipGeneration <= 0 ||
+		env.OwnershipGeneration != original.EnvironmentOwnershipGeneration) {
+		return nil, fmt.Errorf("%w: Kubernetes errand workspace ownership changed", models.ErrWorkspaceReuseUnsafe)
 	}
 	if original.WorkspaceReuseRequired && env.Status != models.TaskEnvironmentStatusReady {
 		if env.Status == models.TaskEnvironmentStatusCreating {

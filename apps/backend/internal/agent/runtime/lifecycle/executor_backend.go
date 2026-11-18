@@ -685,8 +685,11 @@ type ExecutorCreateRequest struct {
 	TaskTitle         string
 	SessionID         string
 	TaskEnvironmentID string // Env this execution belongs to (shared across sessions in same task)
-	WorkspaceID       string
-	RepositoryIDs     []string
+	// EnvironmentOwnershipGeneration fences an Errand attachment to the
+	// Kubernetes workspace selected by the owner admission.
+	EnvironmentOwnershipGeneration int64
+	WorkspaceID                    string
+	RepositoryIDs                  []string
 	// WorkspaceReuseRequired means this runtime must attach to the supplied
 	// environment handle and must never fall back to provisioning a replacement.
 	WorkspaceReuseRequired bool
