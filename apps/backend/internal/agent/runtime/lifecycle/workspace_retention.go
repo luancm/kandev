@@ -84,6 +84,12 @@ func (m *Manager) stopLaunchRuntimeOnRollback(
 	instance *ExecutorInstance,
 	execution *AgentExecution,
 ) error {
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand {
+		if adoptionPreservesPeer(instance, execution) {
+			return nil
+		}
+		return stopAllocatedErrandInstance(ctx, backend, instance, *errandMCPOwner(execution.Owner), execution.MetadataSnapshot())
+	}
 	if backend == nil || instance == nil {
 		return nil
 	}

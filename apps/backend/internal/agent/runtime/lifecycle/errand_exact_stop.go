@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
@@ -79,4 +80,26 @@ func (r *StandaloneExecutor) stopErrandInstance(ctx context.Context, row *models
 		return lease.CheckCurrent()
 	}
 	return nil
+}
+
+func stopAllocatedErrandInstance(ctx context.Context, backend ExecutorBackend, instance *ExecutorInstance, owner agentctltypes.ErrandMCPOwner, launchMetadata map[string]interface{}) error {
+	stopper, ok := backend.(errandInstanceStopper)
+	if !ok || instance == nil || instance.InstanceID == "" ||
+		instance.SessionID != models.ErrandExecutionIdentity(owner.ErrandID) ||
+		instance.RuntimeName != backend.Name() {
+		return ErrErrandRecoveryRequiresReconnect
+	}
+	metadata := make(map[string]interface{}, len(launchMetadata)+len(instance.Metadata))
+	maps.Copy(metadata, launchMetadata)
+	maps.Copy(metadata, instance.Metadata)
+	token := instance.AuthToken
+	if token == "" && instance.Client != nil {
+		token = instance.Client.AuthToken()
+	}
+	row := &models.ExecutorRunning{
+		AgentExecutionID: instance.InstanceID, SessionID: instance.SessionID, Runtime: instance.RuntimeName,
+		ContainerID: instance.ContainerID, PID: metadataInt(metadata, MetadataKeySSHRemoteAgentctlPID),
+		TransientAuthToken: token, Metadata: metadata,
+	}
+	return stopper.stopErrandInstance(ctx, row, owner)
 }
