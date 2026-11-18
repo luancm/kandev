@@ -308,8 +308,12 @@ func (m *Manager) executorProfileEnvironmentDefinitions(ctx context.Context, pro
 	if err != nil {
 		return nil, fmt.Errorf("load executor profile: %w", err)
 	}
+	return executorProfileDefinitions(profile), nil
+}
+
+func executorProfileDefinitions(profile *models.ExecutorProfile) []runtimeenv.Definition {
 	if profile == nil {
-		return nil, nil
+		return nil
 	}
 	definitions := make([]runtimeenv.Definition, 0, len(profile.EnvVars))
 	for _, value := range profile.EnvVars {
@@ -323,5 +327,5 @@ func (m *Manager) executorProfileEnvironmentDefinitions(ctx context.Context, pro
 			Key: value.Key, Literal: value.Value, SecretID: value.SecretID, Origin: runtimeenv.OriginExecutorProfile,
 		})
 	}
-	return definitions, nil
+	return definitions
 }

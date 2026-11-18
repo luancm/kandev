@@ -18,16 +18,15 @@ const spriteStateRunning = "running"
 func (r *SpritesExecutor) stopErrandInstance(ctx context.Context, row *models.ExecutorRunning, owner agentctltypes.ErrandMCPOwner) error {
 	name := getMetadataString(row.Metadata, MetadataKeySpriteName)
 	createdAt := recordedErrandSpriteBirth(row.Metadata[MetadataKeySpriteCreatedAt])
-	tokenID := getMetadataString(row.Metadata, "env_secret_id_SPRITES_API_TOKEN")
-	if name == "" || createdAt.IsZero() || tokenID == "" || r.secretStore == nil {
+	if name == "" || createdAt.IsZero() {
 		return ErrErrandRecoveryRequiresReconnect
 	}
-	token, err := revealGlobalSecret(ctx, r.secretStore, tokenID)
+	token, err := r.errandStopCredential(ctx, row)
 	if err != nil {
 		return err
 	}
 	if token == "" {
-		return errors.New("errand stop requires the Sprite credential")
+		return ErrErrandRecoveryRequiresReconnect
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, spriteHealthTimeout)
@@ -40,7 +39,28 @@ func (r *SpritesExecutor) stopErrandInstance(ctx context.Context, row *models.Ex
 		spritesutil.NormalizeSpriteStatus(sprite.Status) != spriteStateRunning {
 		return ErrErrandRecoveryRequiresReconnect
 	}
-	return r.stopErrandInSprite(ctx, row.AgentExecutionID, sprite, owner)
+	if err := r.stopErrandInSprite(ctx, row.AgentExecutionID, sprite, owner); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	proxy := r.proxies[row.AgentExecutionID]
+	delete(r.proxies, row.AgentExecutionID)
+	delete(r.tokens, row.AgentExecutionID)
+	r.mu.Unlock()
+	r.closeProxySession(proxy)
+	return nil
+}
+
+func (r *SpritesExecutor) errandStopCredential(ctx context.Context, row *models.ExecutorRunning) (string, error) {
+	if tokenID := getMetadataString(row.Metadata, spritesAPITokenSecretMetadataKey); tokenID != "" {
+		if r.secretStore == nil {
+			return "", ErrErrandRecoveryRequiresReconnect
+		}
+		return revealGlobalSecret(ctx, r.secretStore, tokenID)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.tokens[row.AgentExecutionID], nil
 }
 
 func (r *SpritesExecutor) stopErrandInSprite(ctx context.Context, executionID string, sprite *sprites.Sprite, owner agentctltypes.ErrandMCPOwner) error {

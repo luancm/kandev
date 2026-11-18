@@ -40,6 +40,8 @@ func ErrandWorkspaceLaunch(info *WorkspaceInfo, environment *models.TaskEnvironm
 			request.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret] = environment.ContainerBootstrapNonceSecretID
 		case models.ExecutorTypeSSH:
 			request.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir] = environment.WorkspacePath
+		case models.ExecutorTypeSprites:
+			request.Metadata[lifecycle.MetadataKeySpriteName] = environment.SandboxID
 		}
 	}
 	if executorID != "" {

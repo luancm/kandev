@@ -1137,6 +1137,9 @@ func (m *Manager) launchPrepareRequest(ctx context.Context, req *LaunchRequest, 
 		reqWithWorktree.Metadata[initialDeliverySubmissionIDMetadataKey] = req.InitialDeliverySubmissionID
 	}
 
+	if err := m.prepareOwnedSpriteEnvironment(ctx, &reqWithWorktree); err != nil {
+		return LaunchRequest{}, "", err
+	}
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
 	}

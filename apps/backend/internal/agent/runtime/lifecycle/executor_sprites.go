@@ -171,7 +171,7 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 	if _, err := validateContributionDestinations(req.ContributionDestinations); err != nil {
 		return nil, err
 	}
-	token := req.Env["SPRITES_API_TOKEN"]
+	token := req.Env[spritesAPITokenEnvKey]
 	if token == "" {
 		return nil, fmt.Errorf("SPRITES_API_TOKEN not set in execution environment (configure it in the executor profile)")
 	}

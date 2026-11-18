@@ -8,7 +8,65 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
+
+func TestOwnedSpriteLaunchUsesSavedProfileCredential(t *testing.T) {
+	const tokenKey = "SPRITES_API_TOKEN"
+	const secretID = "sprite-token"
+	for _, tc := range []struct {
+		name          string
+		credential    models.ProfileEnvVar
+		wantSecretRef bool
+	}{
+		{name: "saved secret", credential: models.ProfileEnvVar{Key: tokenKey, SecretID: secretID}, wantSecretRef: true},
+		{name: "saved literal", credential: models.ProfileEnvVar{Key: tokenKey, Value: "fixture-token"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exerciseOwnedSpriteProfileCredential(t, tc.credential, tc.wantSecretRef)
+		})
+	}
+}
+
+func exerciseOwnedSpriteProfileCredential(t *testing.T, credential models.ProfileEnvVar, wantSecretRef bool) {
+	t.Helper()
+	profile := &models.ExecutorProfile{
+		ID: "saved-profile", ExecutorID: "saved-executor",
+		EnvVars: []models.ProfileEnvVar{credential},
+	}
+	reader := &fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{profile.ID: profile}}
+	manager := newExecutorProfileEnvManager(t, reader)
+	if wantSecretRef {
+		require.NoError(t, manager.secretStore.Create(t.Context(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: credential.SecretID, Name: "Sprite token"}, Value: "fixture-token",
+		}))
+	}
+	tokenReferenceKey := "env_secret_id_" + credential.Key
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeSprites), WorkspaceReuseRequired: true,
+		WorkspaceID: "workspace", Owner: ExecutionOwner{
+			Kind: ExecutionOwnerErrand, TaskID: "task", WorkspaceID: "workspace", ErrandID: "errand", Generation: 1,
+		},
+		Metadata: map[string]interface{}{
+			"executor_id": profile.ExecutorID, MetadataKeyExecutorProfileID: profile.ID,
+			tokenReferenceKey: "stale-reference",
+		},
+	}
+	agentProfile := &AgentProfileInfo{}
+	prepared, executionID, err := manager.launchPrepareRequest(t.Context(), req, agentProfile, "/workspace")
+	require.NoError(t, err)
+	env, err := manager.buildEnvForExecution(t.Context(), executionID, &prepared, &testAgent{id: "agent"}, agentProfile)
+	require.NoError(t, err)
+	require.Equal(t, "fixture-token", env[credential.Key], "the saved executor profile supplies the provider credential")
+	if wantSecretRef {
+		require.Equal(t, credential.SecretID, prepared.Metadata[tokenReferenceKey])
+	} else {
+		require.NotContains(t, prepared.Metadata, tokenReferenceKey)
+	}
+	require.Equal(t, []string{profile.ID}, reader.profileArgs)
+	require.Empty(t, prepared.TaskID)
+	require.Empty(t, prepared.SessionID)
+}
 
 type fakeExecutorProfileReader struct {
 	task          *models.Task

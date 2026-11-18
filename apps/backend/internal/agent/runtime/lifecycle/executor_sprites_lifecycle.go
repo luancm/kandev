@@ -215,7 +215,7 @@ func (r *SpritesExecutor) resolveTokenFromMetadata(ctx context.Context, instance
 	if r.secretStore == nil || instance == nil {
 		return ""
 	}
-	secretID := getMetadataString(instance.Metadata, "env_secret_id_SPRITES_API_TOKEN")
+	secretID := getMetadataString(instance.Metadata, spritesAPITokenSecretMetadataKey)
 	if secretID == "" {
 		return ""
 	}

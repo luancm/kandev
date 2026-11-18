@@ -68,13 +68,29 @@ func TestSpritesErrandTeardownUsesRecordedSpriteAndOwner(t *testing.T) {
 	}}
 	exact, ok := any(exec).(errandInstanceStopper)
 	require.True(t, ok, "Sprites teardown must support the exact owned instance")
-	require.NoError(t, exact.stopErrandInstance(t.Context(), row, owner))
-	select {
-	case got := <-calls:
-		require.Equal(t, owner, got)
-	default:
-		t.Fatal("the expected instance stop request was not sent")
-	}
+	t.Run("saved secret", func(t *testing.T) {
+		require.NoError(t, exact.stopErrandInstance(t.Context(), row, owner))
+		require.NotEmpty(t, calls)
+		require.Equal(t, owner, <-calls)
+	})
+	t.Run("live literal credential and proxy", func(t *testing.T) {
+		delete(row.Metadata, "env_secret_id_SPRITES_API_TOKEN")
+		t.Cleanup(func() { row.Metadata["env_secret_id_SPRITES_API_TOKEN"] = "provider-secret" })
+		exec.tokens[row.AgentExecutionID] = "sprite-token"
+		exec.tokens["sibling-execution"] = "sprite-token"
+		closed := false
+		exec.proxies[row.AgentExecutionID] = &SpritesProxySession{cancel: func() { closed = true }}
+		sibling := &SpritesProxySession{}
+		exec.proxies["sibling-execution"] = sibling
+		require.NoError(t, exact.stopErrandInstance(t.Context(), row, owner))
+		require.NotEmpty(t, calls)
+		require.Equal(t, owner, <-calls)
+		require.True(t, closed)
+		require.NotContains(t, exec.proxies, row.AgentExecutionID)
+		require.NotContains(t, exec.tokens, row.AgentExecutionID)
+		require.Same(t, sibling, exec.proxies["sibling-execution"])
+		require.Contains(t, exec.tokens, "sibling-execution")
+	})
 
 	controlStatus.Store(http.StatusNotFound)
 	require.Error(t, exact.stopErrandInstance(t.Context(), row, owner))

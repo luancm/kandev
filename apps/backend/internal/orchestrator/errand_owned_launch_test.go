@@ -43,6 +43,15 @@ func TestErrandAdapterAttachesSSHTaskEnvironment(t *testing.T) {
 	}
 }
 
+func TestErrandAdapterAttachesSpritesTaskEnvironment(t *testing.T) {
+	for _, tc := range []ownedWorkspaceLaunchCase{
+		{name: "saved sandbox", provider: models.ExecutorTypeSprites},
+		{name: "sandbox changed", provider: models.ExecutorTypeSprites, rotateWorkspace: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) { exerciseOwnedWorkspaceLaunch(t, tc) })
+	}
+}
+
 type ownedWorkspaceLaunchCase struct {
 	name            string
 	provider        models.ExecutorType
@@ -70,10 +79,16 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 		ExecutorType: string(tc.provider), ExecutorID: executor.ID, Status: models.TaskEnvironmentStatusReady,
 		WorkspacePath: "/workspace",
 	}
-	if tc.provider != models.ExecutorTypeSSH {
+	switch tc.provider {
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker:
 		env.ContainerID = "environment-container"
 		env.ContainerControlAuthTokenSecretID = "environment-control-secret"
 		env.ContainerBootstrapNonceSecretID = "environment-bootstrap-secret"
+	case models.ExecutorTypeSprites:
+		profile := &models.ExecutorProfile{ID: "saved-profile", ExecutorID: executor.ID, Name: "Saved profile"}
+		require.NoError(t, f.repo.CreateExecutorProfile(ctx, profile))
+		env.ExecutorProfileID = profile.ID
+		env.SandboxID = "saved-sandbox"
 	}
 	require.NoError(t, f.repo.CreateTaskEnvironment(ctx, env))
 	var launch *runtimeapi.LaunchRequest
@@ -84,9 +99,12 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 			launch = spec.Metadata["launch_request"].(*runtimeapi.LaunchRequest)
 			if tc.rotateWorkspace {
 				rotated := *env
-				if tc.provider == models.ExecutorTypeSSH {
+				switch tc.provider {
+				case models.ExecutorTypeSSH:
 					rotated.WorkspacePath = "/changed-workspace"
-				} else {
+				case models.ExecutorTypeSprites:
+					rotated.SandboxID = "changed-sandbox"
+				default:
 					rotated.ContainerID = "rotated-container"
 				}
 				require.NoError(t, f.repo.UpdateTaskEnvironment(ctx, &rotated))
@@ -106,7 +124,7 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 		start: func(context.Context, string) error { return nil },
 	}, func(_ context.Context, taskID, parentID string) (*runtimeapi.WorkspaceInfo, error) {
 		return &runtimeapi.WorkspaceInfo{
-			TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1", ExecutorType: env.ExecutorType,
+			TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1", ExecutorType: env.ExecutorType, ExecutorProfileID: "parent-runtime-profile",
 			WorkspacePath: "/parent-runtime-directory", TaskEnvironmentID: env.ID, EnvironmentOwnerTaskID: env.TaskID,
 			OwnershipGeneration: env.OwnershipGeneration, AgentExecutionID: "parent-execution",
 			Metadata: map[string]any{
@@ -116,6 +134,7 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 				lifecycle.MetadataKeyAuthTokenSecret:            "parent-instance-secret",
 				lifecycle.MetadataKeySSHHost:                    "parent-runtime.example",
 				lifecycle.MetadataKeySSHRemoteTaskDir:           "/parent-runtime-directory",
+				lifecycle.MetadataKeySpriteName:                 "parent-runtime-sandbox",
 				"executor_id":                                   "parent-runtime-executor",
 			},
 		}, nil
@@ -133,16 +152,21 @@ func exerciseOwnedWorkspaceLaunch(t *testing.T, tc ownedWorkspaceLaunchCase) {
 	require.True(t, launch.WorkspaceReuseRequired)
 	require.Equal(t, env.ID, launch.TaskEnvironmentID)
 	require.Equal(t, env.WorkspacePath, launch.WorkspacePath)
-	if tc.provider == models.ExecutorTypeSSH {
+	switch tc.provider {
+	case models.ExecutorTypeSSH:
 		require.Equal(t, env.WorkspacePath, launch.Metadata[lifecycle.MetadataKeySSHRemoteTaskDir])
 		require.NotContains(t, launch.Metadata, lifecycle.MetadataKeyContainerID)
-	} else {
+	case models.ExecutorTypeSprites:
+		require.Equal(t, env.SandboxID, launch.Metadata[lifecycle.MetadataKeySpriteName])
+		require.Equal(t, env.ExecutorProfileID, launch.Metadata[lifecycle.MetadataKeyExecutorProfileID])
+		require.NotContains(t, launch.Metadata, lifecycle.MetadataKeyContainerID)
+	default:
 		require.Equal(t, env.ContainerID, launch.Metadata[lifecycle.MetadataKeyContainerID])
 		require.Equal(t, env.ContainerControlAuthTokenSecretID, launch.Metadata[lifecycle.MetadataKeyContainerControlAuthSecret])
 		require.Equal(t, env.ContainerBootstrapNonceSecretID, launch.Metadata[lifecycle.MetadataKeyBootstrapNonceSecret])
 	}
 	require.Equal(t, executor.ID, launch.Metadata["executor_id"])
-	if tc.provider != models.ExecutorTypeLocalDocker {
+	if tc.provider == models.ExecutorTypeRemoteDocker || tc.provider == models.ExecutorTypeSSH {
 		require.Equal(t, executor.Config[lifecycle.MetadataKeySSHHost], launch.ExecutorConfig[lifecycle.MetadataKeySSHHost])
 		require.Equal(t, executor.Config[lifecycle.MetadataKeySSHUser], launch.ExecutorConfig[lifecycle.MetadataKeySSHUser])
 		require.Equal(t, executor.Config[lifecycle.MetadataKeySSHHostFingerprint], launch.ExecutorConfig[lifecycle.MetadataKeySSHHostFingerprint])

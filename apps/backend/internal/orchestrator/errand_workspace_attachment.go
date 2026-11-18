@@ -16,7 +16,7 @@ type ownedErrandWorkspaceAttachment struct {
 
 func (a *ErrandAdapter) loadOwnedErrandWorkspaceAttachment(ctx context.Context, info *runtimeapi.WorkspaceInfo) (*ownedErrandWorkspaceAttachment, error) {
 	switch models.ExecutorType(info.ExecutorType) {
-	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH:
+	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker, models.ExecutorTypeSSH, models.ExecutorTypeSprites:
 	default:
 		return nil, nil
 	}
@@ -83,17 +83,21 @@ func attachableErrandWorkspace(env *models.TaskEnvironment) bool {
 		(env.Status != models.TaskEnvironmentStatusReady && env.Status != models.TaskEnvironmentStatusStopped) {
 		return false
 	}
-	if env.ExecutorType == string(models.ExecutorTypeSSH) {
+	switch models.ExecutorType(env.ExecutorType) {
+	case models.ExecutorTypeSSH:
 		return true
+	case models.ExecutorTypeSprites:
+		return env.SandboxID != "" && env.ExecutorID != "" && env.ExecutorProfileID != ""
+	default:
+		return env.ContainerID != "" && (env.ContainerControlAuthTokenSecretID != "" || env.ContainerBootstrapNonceSecretID != "")
 	}
-	return env.ContainerID != "" && (env.ContainerControlAuthTokenSecretID != "" || env.ContainerBootstrapNonceSecretID != "")
 }
 
 func sameErrandWorkspace(current, expected *models.TaskEnvironment) bool {
 	return current.ID == expected.ID && current.TaskID == expected.TaskID &&
 		current.OwnershipGeneration == expected.OwnershipGeneration && current.ExecutorType == expected.ExecutorType &&
 		current.ExecutorID == expected.ExecutorID && current.ExecutorProfileID == expected.ExecutorProfileID &&
-		current.WorkspacePath == expected.WorkspacePath && current.ContainerID == expected.ContainerID &&
+		current.WorkspacePath == expected.WorkspacePath && current.ContainerID == expected.ContainerID && current.SandboxID == expected.SandboxID &&
 		current.ContainerControlAuthTokenSecretID == expected.ContainerControlAuthTokenSecretID &&
 		current.ContainerBootstrapNonceSecretID == expected.ContainerBootstrapNonceSecretID
 }
