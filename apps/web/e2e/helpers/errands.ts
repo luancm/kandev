@@ -249,16 +249,19 @@ export async function startErrands(
   backend: BackendContext,
   options: {
     count?: number;
+    prompts?: string[];
     await?: boolean;
     after?: string;
     waitForParentIdle?: boolean;
     errandAgentProfileId?: string;
   } = {},
 ) {
-  const count = options.count ?? 2;
-  const gates = Array.from({ length: count }, (_, index) =>
-    mockTurnGate(backend.tmpDir, `ERRAND_RESULT_${index + 1}`),
-  );
+  const count = options.prompts?.length ?? options.count ?? 2;
+  const gates = options.prompts
+    ? []
+    : Array.from({ length: count }, (_, index) =>
+        mockTurnGate(backend.tmpDir, `ERRAND_RESULT_${index + 1}`),
+      );
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
     "Errands daily-use proof",
@@ -273,7 +276,7 @@ export async function startErrands(
   );
   const request = JSON.stringify({
     profile: options.errandAgentProfileId ?? seed.agentProfileId,
-    prompts: gates.map((gate) => gate.prompt),
+    prompts: options.prompts ?? gates.map((gate) => gate.prompt),
     after: options.after,
   });
   const launched = await api.launchSession({
@@ -282,9 +285,25 @@ export async function startErrands(
     executor_profile_id: seed.worktreeExecutorProfileId,
     prompt: `/e2e:errands${options.await ? "-await" : ""} ${request}`,
   });
+  await waitForErrandAdmission(api, backend, task.id, launched.session_id, count);
+  if (!options.await && options.waitForParentIdle !== false) {
+    await waitParentIdle(api, task.id, launched.session_id);
+  }
+  await api.setQueueAutoRun(await api.getQueueSessionIdentity(task.id, launched.session_id), true);
+  const errands = await listErrands(api, task.id);
+  return { taskId: task.id, parentId: launched.session_id, errands, gates };
+}
+
+async function waitForErrandAdmission(
+  api: ApiClient,
+  backend: BackendContext,
+  taskId: string,
+  parentId: string,
+  count: number,
+) {
   try {
     await expect
-      .poll(async () => (await listErrands(api, task.id)).length, {
+      .poll(async () => (await listErrands(api, taskId)).length, {
         timeout: 60_000,
         message: "Errands admitted through real MCP start responses",
       })
@@ -297,7 +316,7 @@ export async function startErrands(
     ] as const) {
       try {
         const contents = await readFile(source);
-        const destination = join("/tmp", `errands-task04c-admission-${task.id}-${name}.log`);
+        const destination = join("/tmp", `errands-task04c-admission-${taskId}-${name}.log`);
         await writeFile(destination, contents);
         savedBackendLogs.push(`${destination} (${contents.byteLength} bytes)`);
       } catch {
@@ -306,8 +325,8 @@ export async function startErrands(
     }
     const savedBackendLogSummary = savedBackendLogs.join(", ");
     const [taskSessions, messages] = await Promise.all([
-      api.listTaskSessions(task.id),
-      api.listSessionMessages(launched.session_id),
+      api.listTaskSessions(taskId),
+      api.listSessionMessages(parentId),
     ]).catch((diagnosticError: unknown) => {
       throw new Error(
         `Backend fixture logs: ${savedBackendLogSummary}\n` +
@@ -315,7 +334,7 @@ export async function startErrands(
         { cause: diagnosticError },
       );
     });
-    const parent = taskSessions.sessions.find((session) => session.id === launched.session_id);
+    const parent = taskSessions.sessions.find((session) => session.id === parentId);
     const recentMessages = messages.messages.slice(-8).map((message) => ({
       author_type: message.author_type,
       type: message.type,
@@ -336,12 +355,6 @@ export async function startErrands(
         `Backend fixture logs: ${savedBackendLogSummary}`,
     );
   }
-  if (!options.await && options.waitForParentIdle !== false) {
-    await waitParentIdle(api, task.id, launched.session_id);
-  }
-  await api.setQueueAutoRun(await api.getQueueSessionIdentity(task.id, launched.session_id), true);
-  const errands = await listErrands(api, task.id);
-  return { taskId: task.id, parentId: launched.session_id, errands, gates };
 }
 
 export async function waitDelivered(api: ApiClient, taskId: string, ids: string[]) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -22,7 +22,9 @@ import {
   type PermissionActionChoice,
   type PermissionDecision,
   type PermissionOption,
+  type PermissionRequestIdentity,
 } from "@/lib/permissions/respond";
+import { OwnedErrandPermissionContext } from "../errands/owned-errand-permission-context";
 
 export type { PermissionActionChoice, PermissionOption };
 
@@ -51,6 +53,7 @@ export type PermissionRequestMetadata = {
   action_details: PermissionActionDetails;
   status?: "pending" | "approved" | "rejected" | "expired";
   permission_presentation?: PermissionPresentation;
+  permission_human_input?: boolean;
 };
 
 export type ParsedPermission = {
@@ -119,12 +122,39 @@ type UsePermissionHandlersParams = {
   permissionMessage: Message | undefined;
 };
 
+function sendPermissionResponse(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  identity: PermissionRequestIdentity,
+  decision: PermissionDecision,
+  errandId?: string,
+) {
+  if (errandId) {
+    return client.request("errand.permission.respond", {
+      task_id: identity.task_id,
+      errand_id: errandId,
+      request_id: identity.request_id,
+      pending_id: identity.pending_id,
+      option_id: decision.cancelled ? undefined : decision.optionId,
+      cancelled: decision.cancelled,
+    });
+  }
+  return client.request("permission.respond", buildPermissionRespondRequest(identity, decision));
+}
+
 export function usePermissionResponseHandlers({
   permissionMetadata,
   permissionMessage,
 }: UsePermissionHandlersParams) {
   const [isResponding, setIsResponding] = useState(false);
   const [isUnavailable, setIsUnavailable] = useState(false);
+  const owner = useContext(OwnedErrandPermissionContext);
+  const unavailableInErrand =
+    owner !== null &&
+    permissionMessage !== undefined &&
+    (permissionMessage.session_id !== "" ||
+      permissionMessage.task_id !== owner.taskId ||
+      permissionMetadata?.permission_human_input === true);
+  const errandId = owner?.errandId;
   const requestId = permissionMetadata?.request_id;
   const currentRequestIdRef = useRef(requestId);
 
@@ -136,7 +166,7 @@ export function usePermissionResponseHandlers({
 
   const handleRespond = useCallback(
     async (decision: PermissionDecision) => {
-      if (!permissionMessage) return;
+      if (!permissionMessage || unavailableInErrand) return;
       if (!requestId) {
         setIsUnavailable(true);
         toast.warning(t("task:permissionRequestNoLongerAvailable"));
@@ -149,17 +179,16 @@ export function usePermissionResponseHandlers({
       }
       setIsResponding(true);
       try {
-        await client.request(
-          "permission.respond",
-          buildPermissionRespondRequest(
-            {
-              task_id: permissionMessage.task_id,
-              session_id: permissionMessage.session_id,
-              request_id: requestId,
-              pending_id: permissionMetadata.pending_id,
-            },
-            decision,
-          ),
+        await sendPermissionResponse(
+          client,
+          {
+            task_id: permissionMessage.task_id,
+            session_id: permissionMessage.session_id,
+            request_id: requestId,
+            pending_id: permissionMetadata.pending_id,
+          },
+          decision,
+          errandId,
         );
       } catch (error) {
         console.error("Failed to respond to permission request:", error);
@@ -176,7 +205,7 @@ export function usePermissionResponseHandlers({
         }
       }
     },
-    [permissionMessage, permissionMetadata, requestId],
+    [errandId, permissionMessage, permissionMetadata, requestId, unavailableInErrand],
   );
 
   const handleApprove = useCallback(() => {
@@ -205,7 +234,7 @@ export function usePermissionResponseHandlers({
 
   return {
     isResponding,
-    isUnavailable,
+    isUnavailable: isUnavailable || unavailableInErrand,
     handleApprove,
     handleAllowAlways,
     hasAllowAlways,

@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -57,6 +58,7 @@ type TaskHandlers struct {
 	backgroundWorkEnabled         bool
 	errands                       ErrandService
 	errandsEnabled                bool
+	respondToErrandPermission     func(context.Context, errands.PermissionResponseRequest) error
 	logger                        *logger.Logger
 }
 

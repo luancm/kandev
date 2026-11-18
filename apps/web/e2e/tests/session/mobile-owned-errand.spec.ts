@@ -20,3 +20,13 @@ test("phone stops an owned Errand from its Actions menu", async ({
   test.setTimeout(120_000);
   await exerciseOwnedErrandView({ page, api, seed, backend, phone: true, stop: true });
 });
+
+test("phone approves a live Errand tool action", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandView({ page, api, seed, backend, phone: true, permission: true });
+});

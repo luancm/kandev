@@ -102,6 +102,21 @@ type ErrLaunchRejected struct{ Err error }
 func (e *ErrLaunchRejected) Error() string { return "errand launch rejected: " + e.Err.Error() }
 func (e *ErrLaunchRejected) Unwrap() error { return e.Err }
 
+// PermissionResponseRequest identifies an exact provider action in an Errand.
+type PermissionResponseRequest struct {
+	TaskID    string `json:"task_id"`
+	ErrandID  string `json:"errand_id"`
+	RequestID string `json:"request_id"`
+	PendingID string `json:"pending_id"`
+	OptionID  string `json:"option_id,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
+}
+
+func (r PermissionResponseRequest) Valid() bool {
+	return r.TaskID != "" && r.ErrandID != "" && r.RequestID != "" && r.PendingID != "" &&
+		(r.Cancelled || r.OptionID != "")
+}
+
 // Launcher inspects or launches the same reservation under admission ownership.
 // Queued is a definite capacity refusal before effects. Blocked plus an error
 // retains unknown evidence without manufacturing a failure result.

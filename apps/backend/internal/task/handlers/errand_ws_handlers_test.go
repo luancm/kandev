@@ -123,6 +123,41 @@ func errandCallerAs(userID string) context.Context {
 	return authn.WithIdentity(context.Background(), authn.Identity{UserID: userID, Role: authn.RoleMember})
 }
 
+func TestErrandPermissionResponseRequiresTaskControl(t *testing.T) {
+	for _, tc := range []struct {
+		name, user, optionID, errorCode string
+		enabled                         bool
+	}{
+		{name: "owner", user: "user-b", optionID: "allow", enabled: true},
+		{name: "foreign", user: "user-a", optionID: "allow", enabled: true, errorCode: ws.ErrorCodeNotFound},
+		{name: "invalid", user: "user-b", enabled: true, errorCode: ws.ErrorCodeValidation},
+		{name: "disabled", user: "user-b", optionID: "allow", errorCode: ws.ErrorCodeNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := errandHandlers(t, &fakeErrandService{}, tc.enabled)
+			request := errands.PermissionResponseRequest{
+				TaskID: "task-b", ErrandID: "errand-1", RequestID: "request-1", PendingID: "pending-1", OptionID: tc.optionID,
+			}
+			var received []errands.PermissionResponseRequest
+			h.respondToErrandPermission = func(_ context.Context, got errands.PermissionResponseRequest) error {
+				received = append(received, got)
+				return nil
+			}
+			dispatcher := ws.NewDispatcher()
+			h.registerErrandWS(dispatcher)
+			response, err := dispatcher.Dispatch(errandCallerAs(tc.user), errandMessage(t, ws.ActionErrandPermissionRespond, request))
+			require.NoError(t, err)
+			if tc.errorCode != "" {
+				require.Equal(t, tc.errorCode, decodeError(t, response).Code)
+				require.Empty(t, received)
+				return
+			}
+			require.Equal(t, ws.MessageTypeResponse, response.Type)
+			require.Equal(t, []errands.PermissionResponseRequest{request}, received)
+		})
+	}
+}
+
 // @covers AC-TASKS-ERRANDS-012.2
 func TestErrandRequestsFailWithFeatureDisabledWhileTheFlagIsOff(t *testing.T) {
 	svc := &fakeErrandService{errand: sampleErrand()}

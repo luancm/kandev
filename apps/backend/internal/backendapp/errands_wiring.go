@@ -122,5 +122,6 @@ func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) *errand
 		return nil
 	})
 	taskHandlers.SetErrands(service, p.features.Errands)
+	taskHandlers.SetErrandPermissionResponder(adapter.RespondToErrandPermission)
 	return service
 }

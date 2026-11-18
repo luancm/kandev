@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -34,15 +35,58 @@ func (h *TaskHandlers) SetErrands(service ErrandService, enabled bool) {
 	h.errandsEnabled = enabled
 }
 
+// SetErrandPermissionResponder wires action approval for owned executions.
+func (h *TaskHandlers) SetErrandPermissionResponder(respond func(context.Context, errands.PermissionResponseRequest) error) {
+	h.respondToErrandPermission = respond
+}
+
 func (h *TaskHandlers) registerErrandWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionErrandList, h.wsListErrands)
 	dispatcher.RegisterFunc(ws.ActionErrandBrowserSummary, h.wsErrandBrowserSummary)
 	dispatcher.RegisterFunc(ws.ActionErrandHistoryPage, h.wsErrandHistoryPage)
 	dispatcher.RegisterFunc(ws.ActionErrandInspect, h.wsErrandInspect)
 	dispatcher.RegisterFunc(ws.ActionErrandMessages, h.wsErrandMessages)
+	dispatcher.RegisterFunc(ws.ActionErrandPermissionRespond, h.wsRespondToErrandPermission)
 	dispatcher.RegisterFunc(ws.ActionErrandCancel, h.wsCancelErrand)
 	dispatcher.RegisterFunc(ws.ActionErrandCancelAll, h.wsCancelAllErrands)
 	dispatcher.RegisterFunc(ws.ActionErrandSendResult, h.wsSendErrandResult)
+}
+
+func (h *TaskHandlers) wsRespondToErrandPermission(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.errandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var request errands.PermissionResponseRequest
+	if err := msg.ParsePayload(&request); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid permission response payload", nil)
+	}
+	if !request.Valid() {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid permission response identity", nil)
+	}
+	if err := h.authorizeErrandTask(ctx, request.TaskID, authz.ScopeSessionControl); err != nil {
+		return h.errandFailure(msg, models.ErrErrandNotFound)
+	}
+	if h.respondToErrandPermission == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "errand permissions are unavailable", nil)
+	}
+	if err := h.respondToErrandPermission(ctx, request); err != nil {
+		return h.errandPermissionFailure(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, struct {
+		Success bool `json:"success"`
+	}{Success: true})
+}
+
+func (h *TaskHandlers) errandPermissionFailure(msg *ws.Message, err error) (*ws.Message, error) {
+	for _, unavailable := range []error{orchestrator.ErrPermissionNotFound, orchestrator.ErrPermissionStale, orchestrator.ErrPermissionAlreadyResolved} {
+		if errors.Is(err, unavailable) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, unavailable.Error(), nil)
+		}
+	}
+	if errors.Is(err, orchestrator.ErrPermissionResolutionInProgress) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, orchestrator.ErrPermissionResolutionInProgress.Error(), nil)
+	}
+	return h.errandFailure(msg, err)
 }
 
 type errandListResponse struct {

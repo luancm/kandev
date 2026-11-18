@@ -235,11 +235,14 @@ func TestErrandHumanInputIsRefusedWithoutPermissionEvent(t *testing.T) {
 }
 
 func TestErrandActionPermissionStillWaitsForUser(t *testing.T) {
-	m := antigravityPermissionManager(t, &config.InstanceConfig{AgentType: acpcompat.AntigravityAgentID, ErrandMCPOwner: &types.ErrandMCPOwner{TaskID: "task", ErrandID: "child", Generation: 1}})
+	m := antigravityPermissionManager(t, &config.InstanceConfig{SessionID: "errand:child", AgentType: acpcompat.AntigravityAgentID, ErrandMCPOwner: &types.ErrandMCPOwner{TaskID: "task", ErrandID: "child", Generation: 1}})
 	result := startPermissionCall(m, context.Background(), &adapter.PermissionRequest{SessionID: "native", ToolCallID: "shell-1", PendingID: "action", Options: antigravityQuestionOptions()})
 	event := waitPermissionEvent(t, m)
 	if event.PermissionHumanInput {
 		t.Fatal("action permission classified as question")
+	}
+	if event.SessionID != "native" {
+		t.Errorf("permission payload session = %q, want native provider identity", event.SessionID)
 	}
 	if err := m.RespondToPermission(event.PendingID, "option-b", false); err != nil {
 		t.Fatal(err)

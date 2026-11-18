@@ -1,5 +1,6 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import type { Message } from "../../lib/types/http";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
@@ -21,6 +22,7 @@ export async function exerciseOwnedErrandView({
   backend,
   phone,
   stop = false,
+  permission = false,
 }: {
   page: Page;
   api: ApiClient;
@@ -28,14 +30,16 @@ export async function exerciseOwnedErrandView({
   backend: BackendContext;
   phone: boolean;
   stop?: boolean;
+  permission?: boolean;
 }) {
   const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
   let release: (() => Promise<void>) | undefined;
   try {
     const { taskId, parentId, errands, gates } = await startErrands(api, seed, backend, {
       count: 1,
+      prompts: permission ? ["/e2e:permission-flow"] : undefined,
     });
-    release = gates[0].release;
+    release = gates[0]?.release;
     const errandId = errands[0].errand_id;
     try {
       await expect
@@ -43,7 +47,7 @@ export async function exerciseOwnedErrandView({
           async () =>
             (await listErrands(api, taskId)).find((e) => e.errand_id === errandId)?.status,
         )
-        .toBe("running");
+        .toMatch(permission ? /^(running|needs_attention)$/ : /^running$/);
     } catch (error) {
       const logs = await readFile(backend.logPath, "utf8").catch(() => "");
       const launch = logs
@@ -63,31 +67,18 @@ export async function exerciseOwnedErrandView({
     expect((await api.listTaskSessions(taskId)).sessions.map(({ id }) => id)).toEqual([parentId]);
 
     const socket = watchWs(page);
-    await page.goto(`/t/${taskId}`);
-    const parent = parentChat(page, parentId);
-    const chip = parent.getByTestId("errands-chip");
-    await (phone ? chip.tap() : chip.click());
-    const choices = page.getByTestId(phone ? "errands-drawer-content" : "errands-popover");
-    const open = choices.getByTestId(
-      phone ? `errands-panel-row-${errandId}` : `errand-open-${errandId}`,
+    const { parent, conversation } = await openOwnedErrandConversation(
+      page,
+      taskId,
+      parentId,
+      errandId,
+      phone,
     );
-    await expect(open).toBeVisible();
-    if (phone) await expectTouchTarget(open);
-    await (phone ? open.tap() : open.click());
-
-    const conversation = page.getByTestId("errand-conversation");
-    await expect(conversation).toBeVisible();
-    await expect(conversation).toHaveAttribute("data-errand-id", errandId);
-    await expect(conversation.getByTestId("errand-header")).toHaveAttribute(
-      "data-layout",
-      phone ? "phone" : "desktop",
-    );
-    await expect(
-      page.locator(`[data-testid="session-chat"][data-session-id="${errandId}"]`),
-    ).toHaveCount(0);
     try {
       await expect(
-        conversation.getByText("Queue blocking turn started", { exact: true }),
+        permission
+          ? conversation.getByTestId("permission-approve")
+          : conversation.getByText("Queue blocking turn started", { exact: true }),
       ).toBeVisible();
     } catch (error) {
       const logs = await readFile(backend.logPath, "utf8").catch(() => "");
@@ -103,7 +94,19 @@ export async function exerciseOwnedErrandView({
     }
     if (phone) await expectNoHorizontalOverflow(page);
 
-    if (stop) {
+    if (permission) {
+      await expectStalePermissionRefused(api, taskId, errandId);
+      await approveOwnedErrand(page, socket, taskId, errandId, phone);
+      expect(await readOwnedPermission(api, taskId, errandId)).toMatchObject({
+        session_id: "",
+        metadata: {
+          status: "approved",
+          permission_resolution: { option_id: "allow", source: "web", result: "accepted" },
+        },
+      });
+      await waitDelivered(api, taskId, [errandId]);
+      expect((await api.listTaskSessions(taskId)).sessions.map(({ id }) => id)).toEqual([parentId]);
+    } else if (stop) {
       await stopOwnedErrand(page, socket, errandId, phone);
       await expect
         .poll(
@@ -119,7 +122,7 @@ export async function exerciseOwnedErrandView({
       const transcriptChanged = socket.waitForEvent("errand.transcript_changed", {
         where: (payload) => payload.task_id === taskId && payload.errand_id === errandId,
       });
-      await release();
+      await release?.();
       await transcriptChanged;
       await expect(
         conversation.getByText(/^(?:Queue blocking turn started\s*)?ERRAND_RESULT_1$/),
@@ -132,11 +135,7 @@ export async function exerciseOwnedErrandView({
         ),
       ).toBe(true);
     }
-    const back = conversation.getByTestId("errand-back-to-parent");
-    if (phone) await expectTouchTarget(back);
-    await (phone ? back.tap() : back.click());
-    await expect(conversation).toHaveCount(0);
-    await expect(parent).toBeVisible();
+    await returnToErrandParent(conversation, parent, phone);
   } finally {
     try {
       await release?.();
@@ -144,6 +143,95 @@ export async function exerciseOwnedErrandView({
       await restore();
     }
   }
+}
+
+async function returnToErrandParent(conversation: Locator, parent: Locator, phone: boolean) {
+  const back = conversation.getByTestId("errand-back-to-parent");
+  if (phone) await expectTouchTarget(back);
+  await (phone ? back.tap() : back.click());
+  await expect(conversation).toHaveCount(0);
+  await expect(parent).toBeVisible();
+}
+
+async function openOwnedErrandConversation(
+  page: Page,
+  taskId: string,
+  parentId: string,
+  errandId: string,
+  phone: boolean,
+) {
+  await page.goto(`/t/${taskId}`);
+  const parent = parentChat(page, parentId);
+  const chip = parent.getByTestId("errands-chip");
+  await (phone ? chip.tap() : chip.click());
+  const choices = page.getByTestId(phone ? "errands-drawer-content" : "errands-popover");
+  const open = choices.getByTestId(
+    phone ? `errands-panel-row-${errandId}` : `errand-open-${errandId}`,
+  );
+  await expect(open).toBeVisible();
+  if (phone) await expectTouchTarget(open);
+  await (phone ? open.tap() : open.click());
+
+  const conversation = page.getByTestId("errand-conversation");
+  await expect(conversation).toBeVisible();
+  await expect(conversation).toHaveAttribute("data-errand-id", errandId);
+  await expect(conversation.getByTestId("errand-header")).toHaveAttribute(
+    "data-layout",
+    phone ? "phone" : "desktop",
+  );
+  await expect(
+    page.locator(`[data-testid="session-chat"][data-session-id="${errandId}"]`),
+  ).toHaveCount(0);
+  return { parent, conversation };
+}
+
+async function readOwnedPermission(api: ApiClient, taskId: string, errandId: string) {
+  const page = await api.wsRequest<{ messages: Message[] }>("errand.messages", {
+    task_id: taskId,
+    errand_id: errandId,
+  });
+  return page.messages.find((message) => message.type === "permission_request");
+}
+
+async function expectStalePermissionRefused(api: ApiClient, taskId: string, errandId: string) {
+  const message = await readOwnedPermission(api, taskId, errandId);
+  expect(message?.metadata?.pending_id).toEqual(expect.any(String));
+  await expect(
+    api.wsRequest("errand.permission.respond", {
+      task_id: taskId,
+      errand_id: errandId,
+      request_id: "stale-provider-request",
+      pending_id: message?.metadata?.pending_id,
+      option_id: "allow",
+    }),
+  ).rejects.toThrow("permission_stale");
+}
+
+async function approveOwnedErrand(
+  page: Page,
+  socket: ReturnType<typeof watchWs>,
+  taskId: string,
+  errandId: string,
+  phone: boolean,
+) {
+  const conversation = page.getByTestId("errand-conversation");
+  const approve = conversation.getByTestId("permission-approve");
+  if (phone) await expectTouchTarget(approve);
+  const confirmed = socket.waitForResponse("errand.permission.respond", {
+    requestWhere: (payload) =>
+      payload.task_id === taskId &&
+      payload.errand_id === errandId &&
+      typeof payload.request_id === "string" &&
+      typeof payload.pending_id === "string" &&
+      payload.option_id === "allow" &&
+      !("session_id" in payload),
+  });
+  await (phone ? approve.tap() : approve.click());
+  await confirmed;
+  await expect(approve).toHaveCount(0);
+  await expect(
+    conversation.getByText("Permission was granted and command executed."),
+  ).toBeVisible();
 }
 
 async function stopOwnedErrand(

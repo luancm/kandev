@@ -20,3 +20,13 @@ test("desktop stops an owned Errand and retains its transcript", async ({
   test.setTimeout(120_000);
   await exerciseOwnedErrandView({ page, api, seed, backend, phone: false, stop: true });
 });
+
+test("desktop approves a live Errand tool action", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandView({ page, api, seed, backend, phone: false, permission: true });
+});

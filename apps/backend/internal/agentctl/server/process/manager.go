@@ -4772,9 +4772,15 @@ func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.Age
 			Kind:     option.Kind,
 		}
 	}
+	sessionID := m.permissionSessionID(pending)
+	if m.cfg != nil && m.cfg.ErrandMCPOwner != nil {
+		// The Errand transport identity belongs to the journal envelope. The
+		// event payload carries the provider conversation bound to the prompt.
+		sessionID = pending.Request.SessionID
+	}
 	event := adapter.AgentEvent{
 		Type:                 adapter.EventTypePermissionRequest,
-		SessionID:            m.permissionSessionID(pending),
+		SessionID:            sessionID,
 		ToolCallID:           pending.Request.ToolCallID,
 		RequestID:            pending.RequestID,
 		PendingID:            pending.ID,

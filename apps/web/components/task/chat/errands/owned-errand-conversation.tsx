@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useOwnedErrandTranscript } from "@/hooks/domains/session/use-owned-errand-transcript";
 import { useErrandTranscriptRevision } from "@/hooks/domains/session/use-errand-transcript-revision";
@@ -10,6 +11,7 @@ import { isLiveErrand } from "@/lib/types/errands";
 import { MessageList } from "../message-list";
 import { ErrandHeader } from "./errand-header";
 import { ErrandStatusAnnouncer } from "./errand-status-announcer";
+import { OwnedErrandPermissionContext } from "./owned-errand-permission-context";
 
 export function OwnedErrandConversation({
   taskId,
@@ -36,6 +38,7 @@ export function OwnedErrandConversation({
     historyInitialized: transcript.status === "ready",
     hasOlderMessages: transcript.hasMore,
   });
+  const permissionOwner = useMemo(() => ({ taskId, errandId }), [taskId, errandId]);
   return (
     <section
       data-testid="errand-conversation"
@@ -44,24 +47,26 @@ export function OwnedErrandConversation({
     >
       <ErrandHeader taskId={taskId} sessionId={errandId} onBack={onClose} />
       <ErrandStatusAnnouncer taskId={taskId} sessionId={errandId} active />
-      <MessageList
-        taskId={taskId}
-        sessionId={null}
-        items={processed.groupedItems}
-        messages={transcript.messages}
-        permissionsByToolCallId={processed.permissionsByToolCallId}
-        childrenByParentToolCallId={processed.childrenByParentToolCallId}
-        messagesLoading={transcript.status === "loading"}
-        historyStatus={transcript.status}
-        historyError={transcript.error}
-        onRetryHistory={transcript.retry}
-        isWorking={errand !== undefined && isLiveErrand(errand)}
-        ownedPagination={{
-          hasMore: transcript.hasMore,
-          isLoadingMore: transcript.loadingMore,
-          loadMore: transcript.loadMore,
-        }}
-      />
+      <OwnedErrandPermissionContext.Provider value={permissionOwner}>
+        <MessageList
+          taskId={taskId}
+          sessionId={null}
+          items={processed.groupedItems}
+          messages={transcript.messages}
+          permissionsByToolCallId={processed.permissionsByToolCallId}
+          childrenByParentToolCallId={processed.childrenByParentToolCallId}
+          messagesLoading={transcript.status === "loading"}
+          historyStatus={transcript.status}
+          historyError={transcript.error}
+          onRetryHistory={transcript.retry}
+          isWorking={errand !== undefined && isLiveErrand(errand)}
+          ownedPagination={{
+            hasMore: transcript.hasMore,
+            isLoadingMore: transcript.loadingMore,
+            loadMore: transcript.loadMore,
+          }}
+        />
+      </OwnedErrandPermissionContext.Provider>
     </section>
   );
 }

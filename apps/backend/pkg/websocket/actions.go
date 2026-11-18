@@ -418,6 +418,7 @@ const (
 	ActionErrandHistoryPage       = "errand.history_page"
 	ActionErrandInspect           = "errand.inspect"
 	ActionErrandMessages          = "errand.messages"
+	ActionErrandPermissionRespond = "errand.permission.respond"
 	ActionErrandTranscriptChanged = "errand.transcript_changed"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote

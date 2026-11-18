@@ -246,16 +246,8 @@ func (s *Service) cancelAgentPermission(ctx context.Context, request ResolveAgen
 }
 
 func findPermissionForCancellation(permissions []streams.PendingAgentPermission, request ResolveAgentPermissionRequest) error {
-	for _, permission := range permissions {
-		if permission.PendingID != request.PendingID {
-			continue
-		}
-		if permission.RequestID != request.RequestID {
-			return ErrPermissionStale
-		}
-		return nil
-	}
-	return ErrPermissionNotFound
+	_, err := findPendingPermission(permissions, request.RequestID, request.PendingID)
+	return err
 }
 
 func (s *Service) authorizedPermissionSessions(ctx context.Context, taskID, sessionID string) ([]*models.TaskSession, error) {
@@ -283,22 +275,35 @@ func (s *Service) authorizedPermissionSessions(ctx context.Context, taskID, sess
 }
 
 func findPermissionOption(permissions []streams.PendingAgentPermission, request ResolveAgentPermissionRequest) (*streams.PendingAgentPermission, *streams.PermissionChoice, error) {
+	permission, err := findPendingPermission(permissions, request.RequestID, request.PendingID)
+	if err != nil {
+		return nil, nil, err
+	}
+	option, err := offeredPermissionOption(permission, request.OptionID)
+	return permission, option, err
+}
+
+func findPendingPermission(permissions []streams.PendingAgentPermission, requestID, pendingID string) (*streams.PendingAgentPermission, error) {
 	for i := range permissions {
 		permission := &permissions[i]
-		if permission.PendingID != request.PendingID {
+		if permission.PendingID != pendingID {
 			continue
 		}
-		if permission.RequestID != request.RequestID {
-			return nil, nil, ErrPermissionStale
+		if permission.RequestID != requestID {
+			return nil, ErrPermissionStale
 		}
-		for j := range permission.Options {
-			if permission.Options[j].OptionID == request.OptionID {
-				return permission, &permission.Options[j], nil
-			}
-		}
-		return permission, nil, ErrPermissionOptionNotOffered
+		return permission, nil
 	}
-	return nil, nil, ErrPermissionNotFound
+	return nil, ErrPermissionNotFound
+}
+
+func offeredPermissionOption(permission *streams.PendingAgentPermission, optionID string) (*streams.PermissionChoice, error) {
+	for i := range permission.Options {
+		if permission.Options[i].OptionID == optionID {
+			return &permission.Options[i], nil
+		}
+	}
+	return nil, ErrPermissionOptionNotOffered
 }
 
 func (s *Service) permissionLookupError(ctx context.Context, request ResolveAgentPermissionRequest, lookupErr error) error {
