@@ -30,6 +30,9 @@ func (r *Repository) PrepareErrandDeliverySubmission(ctx context.Context, a *mod
 	if err = r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 		return false, err
 	}
+	if err = validateErrandNewWorkTx(ctx, tx, a.ErrandID); err != nil {
+		return false, err
+	}
 	key := models.ErrandExecutionIdentity(a.ErrandID)
 	if err = lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{key}, []string{a.StreamID}); err != nil {
 		return false, err

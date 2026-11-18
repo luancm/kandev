@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -23,6 +25,9 @@ func (r *Repository) ReserveErrandExecutionGeneration(ctx context.Context, erran
 		return nil, err
 	}
 	if err = r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+		return nil, err
+	}
+	if err = validateErrandNewWorkTx(ctx, tx, errandID); err != nil {
 		return nil, err
 	}
 	var current int64
@@ -85,4 +90,25 @@ func (r *Repository) GetErrandExecutionDescriptor(ctx context.Context, errandID 
 	result.Generation = uint64(generation)
 	result.PromptGeneration = uint64(promptGeneration)
 	return &result, nil
+}
+
+// validateErrandNewWorkTx runs after the task lock shared with cancellation.
+// Binding and receipt writes remain available to capture late runtime evidence.
+func validateErrandNewWorkTx(ctx context.Context, tx *sqlx.Tx, errandID string) error {
+	var row models.Errand
+	var encoded string
+	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT id,task_id,lifecycle,cancel_source,first_turn_id,submission_id,teardown_intent FROM task_session_errands WHERE id=?`), errandID).Scan(&row.ID, &row.TaskID, &row.Lifecycle, &row.CancelSource, &row.FirstTurnID, &row.SubmissionID, &encoded)
+	if err != nil {
+		return err
+	}
+	if row.Lifecycle == models.ErrandLifecycleCancelled {
+		return fmt.Errorf("errand is cancelled")
+	}
+	if err := decodeErrandTeardownIntent(encoded, &row); err != nil {
+		return err
+	}
+	if row.TeardownIntent != nil && row.TeardownIntent.State != models.ErrandTeardownIntentCompleted && row.TeardownIntent.State != models.ErrandTeardownIntentSuperseded {
+		return fmt.Errorf("errand teardown is unresolved")
+	}
+	return nil
 }
