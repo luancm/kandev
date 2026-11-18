@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -36,26 +37,26 @@ func (a *ErrandAdapter) SetOwnedLaunchRuntime(runtime runtimeapi.Runtime, worksp
 	a.workspace = workspace
 }
 
-// LaunchErrand shares guarded classification and admission with direct callers.
+// LaunchErrand admits only independent Errand-owned executions.
 func (a *ErrandAdapter) LaunchErrand(ctx context.Context, request errands.LaunchRequest) (errands.LaunchResult, error) {
-	if a.runtime != nil {
-		blocked := errands.LaunchResult{Disposition: errands.LaunchBlocked}
-		if !validErrandLaunchRequest(request) {
-			return blocked, models.ErrInvalidErrand
-		}
-		if err := a.svc.authorizeTask(ctx, request.TaskID); err != nil {
-			return blocked, err
-		}
-		legacy, err := a.hasLegacyErrandRuntime(ctx, request.ErrandID, request.TaskID, request.ParentSessionID)
-		if err != nil {
-			return blocked, err
-		}
-		if !legacy {
-			return a.launchOwnedErrand(ctx, request)
-		}
+	blocked := errands.LaunchResult{Disposition: errands.LaunchBlocked}
+	if !validErrandLaunchRequest(request) {
+		return blocked, models.ErrInvalidErrand
 	}
-	result, _, err := a.svc.launchErrand(ctx, request)
-	return result, err
+	if err := a.svc.authorizeTask(ctx, request.TaskID); err != nil {
+		return blocked, err
+	}
+	if a.runtime == nil {
+		return blocked, errors.New("errand runtime is unavailable")
+	}
+	legacy, err := a.hasLegacyErrandRuntime(ctx, request.ErrandID, request.TaskID, request.ParentSessionID)
+	if err != nil {
+		return blocked, err
+	}
+	if legacy {
+		return blocked, fmt.Errorf("%w: session-backed Errand launch is retired", models.ErrInvalidErrand)
+	}
+	return a.launchOwnedErrand(ctx, request)
 }
 
 // SessionSnapshot returns the session-level MCP additions and exclusions for a

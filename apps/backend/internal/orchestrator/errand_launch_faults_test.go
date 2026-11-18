@@ -139,11 +139,12 @@ func TestErrandLaunchRecoveryNilInventoryIsUnknown(t *testing.T) {
 	f := newErrandLaunchFixture(t)
 	req := f.request()
 	f.svc.repo = &launchInventoryUnknownRepo{Repository: f.repo}
-	result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), req)
+	launcher := legacyErrandTestLauncher{f.svc}
+	result, err := launcher.LaunchErrand(t.Context(), req)
 	require.Error(t, err)
 	require.Equal(t, errands.LaunchBlocked, result.Disposition)
 	require.Empty(t, f.manager.launchedWith)
-	result, err = NewErrandAdapter(f.svc).LaunchErrand(t.Context(), req)
+	result, err = launcher.LaunchErrand(t.Context(), req)
 	require.NoError(t, err)
 	require.Equal(t, errands.LaunchAdmitted, result.Disposition)
 	require.Len(t, f.manager.launchedWith, 1)
@@ -274,7 +275,7 @@ func TestErrandLaunchRecoveryAttemptedSuccessorBlocksAdoption(t *testing.T) {
 	// Recovery must also reject legacy invalid state that admission now prevents.
 	successor = seedLegacyUnsettledSuccessor(t, f, row)
 	require.NoError(t, f.svc.turnService.MarkReservedTurnDispatchAttempted(t.Context(), successor))
-	result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), errands.LaunchRequest{
+	result, err := (legacyErrandTestLauncher{f.svc}).LaunchErrand(t.Context(), errands.LaunchRequest{
 		ErrandID: row.ID, TaskID: row.TaskID, ParentSessionID: row.ParentSessionID, AgentProfileID: row.AgentProfileID,
 		Title: row.Title, Objective: row.Objective, TurnID: row.FirstTurnID, SubmissionID: row.SubmissionID,
 	})
@@ -299,7 +300,7 @@ func TestErrandLaunchRecoveryPreparedHonorsNativeRecoveryBlock(t *testing.T) {
 	before, err := f.svc.GetOpenSessionRecoveryBlock(t.Context(), req.ErrandID)
 	require.NoError(t, err)
 	require.NotNil(t, before)
-	result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), req)
+	result, err := (legacyErrandTestLauncher{f.svc}).LaunchErrand(t.Context(), req)
 	require.ErrorIs(t, err, ErrSessionRecoveryRequired, "prepared continuation must retain the existing native recovery gate")
 	require.Equal(t, errands.LaunchBlocked, result.Disposition)
 	require.Empty(t, f.manager.launchedWith)

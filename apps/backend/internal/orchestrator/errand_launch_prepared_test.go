@@ -156,7 +156,7 @@ func TestErrandLaunchRecoveryRejectsMismatchedAuthority(t *testing.T) {
 			authority := session.Metadata[models.SessionMetaKeyErrandLaunchAuthority].(map[string]interface{})
 			authority[field] = "foreign-" + field
 			require.NoError(t, f.repo.UpdateSessionMetadata(t.Context(), session.ID, session.Metadata))
-			result, err := NewErrandAdapter(f.svc).LaunchErrand(t.Context(), req)
+			result, err := (legacyErrandTestLauncher{f.svc}).LaunchErrand(t.Context(), req)
 			require.Error(t, err)
 			require.Equal(t, errands.LaunchBlocked, result.Disposition)
 			_, err = f.svc.LaunchErrandSession(t.Context(), req)

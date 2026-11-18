@@ -177,7 +177,7 @@ func TestQueuedErrandCancellationAcceptancePublishesAfterGuardRelease(t *testing
 	f := newErrandLaunchFixture(t)
 	adapter := NewErrandAdapter(f.svc)
 	publisher := &errandAcceptancePublisher{svc: f.svc, observed: make(chan error, 2)}
-	service, err := errands.New(errands.Dependencies{Store: f.repo, Launcher: adapter, Stopper: adapter,
+	service, err := errands.New(errands.Dependencies{Store: f.repo, Launcher: legacyErrandTestLauncher{f.svc}, Stopper: adapter,
 		MCP: adapter, Profiles: errandProfileStub{}, Events: publisher, Logger: testLogger()})
 	require.NoError(t, err)
 	f.svc.SetErrandController(service)

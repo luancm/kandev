@@ -93,6 +93,8 @@ Retained plugin recovery reads the exact authenticated helper using the ready in
 
 Persist the task, Errand, parent, selected profile and reserved turn and submission before launch. Recover an acknowledgement from the authenticated helper's exact accepted journal entry after checking the current native binding. The launcher reconciles that receipt or the original terminal evidence before changing the queued lifecycle. A settled launch reconciles the exact result. Missing or mismatched evidence keeps admission unresolved without another provider prompt or an invented result. Cancellation wins over launch bookkeeping and uses exact teardown compensation.
 
+Public start and queue replay require the owned runtime. A session-backed reservation can retain teardown evidence while the launcher refuses further admission.
+
 ## Queue provenance and disabled delivery
 
 Send Now retains the immutable original source IDs through initial transcript creation, subsequent envelope update, durable claim and recovery. A notification source is not the same as an empty notification-only dispatch. Preserve all source delivery receipts and ordinary content/attachments/references without merging them under an unrelated token. Already accepted or uncertain admission is not restored/replayed as a fresh claim.

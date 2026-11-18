@@ -52,7 +52,7 @@ func newErrandServiceOnRealStack(t *testing.T, f *errandLaunchFixture) (*errands
 	adapter := NewErrandAdapter(f.svc)
 	recorder := &errandEventRecorder{}
 	service, err := errands.New(errands.Dependencies{
-		Store: f.repo, Launcher: adapter, Stopper: adapter, MCP: adapter,
+		Store: f.repo, Launcher: legacyErrandTestLauncher{f.svc}, Stopper: adapter, MCP: adapter,
 		Profiles: errandProfileStub{}, Events: recorder, Logger: testLogger(),
 	})
 	require.NoError(t, err)
@@ -219,7 +219,7 @@ func newLifecycleService(t *testing.T, f *errandLaunchFixture, store errands.Sto
 		require.NoError(t, f.svc.messageQueue.SetAutoRun(t.Context(), f.parent, false))
 	}
 	delivery := &lifecycleDeliveryRecorder{ParentDeliverer: NewErrandParentDeliverer(f.svc)}
-	service, err := errands.New(errands.Dependencies{Store: store, Launcher: adapter, Stopper: adapter,
+	service, err := errands.New(errands.Dependencies{Store: store, Launcher: legacyErrandTestLauncher{f.svc}, Stopper: adapter,
 		MCP: adapter, Profiles: errandProfileStub{}, Events: &errandEventRecorder{}, Deliverer: delivery, Logger: testLogger()})
 	require.NoError(t, err)
 	f.svc.SetErrandController(service)

@@ -58,6 +58,14 @@ type errandLaunchFixture struct {
 	launchError models.TaskLaunchError
 }
 
+// legacyErrandTestLauncher seeds session-backed data for compatibility tests.
+type legacyErrandTestLauncher struct{ service *Service }
+
+func (l legacyErrandTestLauncher) LaunchErrand(ctx context.Context, req errands.LaunchRequest) (errands.LaunchResult, error) {
+	result, _, err := l.service.launchErrand(ctx, req)
+	return result, err
+}
+
 func newErrandLaunchFixture(t *testing.T) *errandLaunchFixture {
 	t.Helper()
 	ctx := context.Background()
@@ -263,6 +271,12 @@ func TestErrandAdapterMapsCeilingRefusal(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
 	adapter := NewErrandAdapter(f.svc)
+	adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{}, func(_ context.Context, taskID, parentID string) (*agentruntime.WorkspaceInfo, error) {
+		return &agentruntime.WorkspaceInfo{
+			TaskID: taskID, SessionID: parentID, WorkspaceID: "ws1",
+			ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: "/workspace",
+		}, nil
+	})
 
 	f.svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	require.True(t, f.svc.sessionCeiling.admit(ctx, admissionRequest{

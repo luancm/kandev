@@ -82,7 +82,7 @@ func installLaunchAdoptionProvider(t *testing.T, f *errandLaunchFixture) <-chan 
 func launchRecoveryService(t *testing.T, f *errandLaunchFixture, store errands.Store) *errands.Service {
 	t.Helper()
 	adapter := NewErrandAdapter(f.svc)
-	service, err := errands.New(errands.Dependencies{Store: store, Launcher: adapter, Stopper: adapter,
+	service, err := errands.New(errands.Dependencies{Store: store, Launcher: legacyErrandTestLauncher{f.svc}, Stopper: adapter,
 		MCP: adapter, Profiles: errandProfileStub{}, Events: &errandEventRecorder{}, Logger: testLogger()})
 	require.NoError(t, err)
 	f.svc.SetErrandController(service)

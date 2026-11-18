@@ -493,7 +493,7 @@ func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettl
 	store := &parentSettlementFaultStore{Store: repo}
 	adapter := NewErrandAdapter(service)
 	errService, err := errands.New(errands.Dependencies{
-		Store: store, Launcher: adapter, Stopper: adapter, MCP: adapter,
+		Store: store, Launcher: legacyErrandTestLauncher{service}, Stopper: adapter, MCP: adapter,
 		Profiles: errandProfileStub{}, Events: &errandEventRecorder{}, Logger: testLogger(),
 	})
 	require.NoError(t, err)
