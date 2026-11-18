@@ -13,10 +13,43 @@ type errandInstanceStopper interface {
 	stopErrandInstance(context.Context, *models.ExecutorRunning, agentctltypes.ErrandMCPOwner) error
 }
 
+// StopErrandOwnerForRecovery closes only the execution captured by the
+// Errand teardown intent. It settles inventory after provider confirmation.
+func (m *Manager) StopErrandOwnerForRecovery(ctx context.Context, owner ExecutionOwner, executionID string) error {
+	if owner.Kind != ExecutionOwnerErrand || owner.ErrandID == "" || owner.Generation == 0 || executionID == "" {
+		return errors.New("invalid errand teardown identity")
+	}
+	inventoryID := models.ErrandExecutionIdentity(owner.ErrandID)
+	if err := m.recoveryGuard.CheckLaunchAllowed(inventoryID); err != nil {
+		return err
+	}
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		return errors.New("errand teardown requires durable runtime inventory")
+	}
+	row, err := reader.GetExecutorRunningBySessionID(ctx, inventoryID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) || (err == nil && row == nil) {
+		return errors.Join(ErrErrandRecoveryRequiresReconnect, m.runRecoveryErr)
+	}
+	if err != nil {
+		return err
+	}
+	if row.AgentExecutionID != executionID || !validRecordedErrandOwner(row, owner) {
+		return models.ErrExecutionRotated
+	}
+	if err := validateRunRecoveryOwner(row, owner); err != nil {
+		return err
+	}
+	return m.stopRecordedErrandInstance(ctx, row, owner)
+}
+
 func (m *Manager) stopRecordedErrandInstance(ctx context.Context, row *models.ExecutorRunning, owner ExecutionOwner) error {
 	cas, ok := m.runningWriter.(executorRunningCASWriter)
 	if !ok {
 		return errors.New("errand recovery requires conditional inventory repair")
+	}
+	if m.executorRegistry == nil {
+		return ErrErrandRecoveryRequiresReconnect
 	}
 	backend, err := m.executorRegistry.GetBackend(row.Runtime)
 	if err != nil {

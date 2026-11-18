@@ -14,6 +14,15 @@ import (
 )
 
 func TestErrandRecoveryStopRequiresVerifiedControlAbsence(t *testing.T) {
+	exerciseErrandStopRequiresVerifiedControlAbsence(t, false)
+}
+
+func TestErrandLiveStopRequiresVerifiedControlAbsence(t *testing.T) {
+	exerciseErrandStopRequiresVerifiedControlAbsence(t, true)
+}
+
+func exerciseErrandStopRequiresVerifiedControlAbsence(t *testing.T, live bool) {
+	t.Helper()
 	for _, status := range []int{http.StatusNoContent, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			observed := make(chan agentctltypes.ErrandMCPOwner, 1)
@@ -45,9 +54,15 @@ func TestErrandRecoveryStopRequiresVerifiedControlAbsence(t *testing.T) {
 			owner := ExecutionOwner{Kind: ExecutionOwnerErrand, WorkspaceID: "ws", TaskID: "parent", ErrandID: "child", Generation: 1}
 			execution := &AgentExecution{ID: "execution", WorkspaceID: "ws", Owner: owner, OwnerAdmission: allowRunOwner{}, Status: v1.AgentStatusRunning, RuntimeName: backend.Name()}
 			require.NoError(t, mgr.registerAndPublishExecution(ctx, execution, backend, &ExecutorInstance{InstanceID: execution.ID}, ""))
-			mgr.RemoveExecution(execution.ID)
-
-			err := mgr.StopErrandOwnerForRecovery(ctx, owner)
+			var err error
+			if live {
+				err = mgr.StopAgentWithReason(ctx, execution.ID, "errand_cancellation", true)
+				_, tracked := mgr.GetExecution(execution.ID)
+				require.Equal(t, status != http.StatusNoContent, tracked)
+			} else {
+				mgr.RemoveExecution(execution.ID)
+				err = mgr.StopErrandOwnerForRecovery(ctx, owner, execution.ID)
+			}
 			row, readErr := repo.GetExecutorRunningBySessionID(ctx, "errand:child")
 			require.NoError(t, readErr)
 			if status == http.StatusNoContent {

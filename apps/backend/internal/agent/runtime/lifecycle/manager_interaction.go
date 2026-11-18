@@ -1538,7 +1538,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
 	stopWatch.advance(stopWaitRuntimeCleanup)
-	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
+	if execution.Owner.Kind != ExecutionOwnerErrand && execution.RuntimeName == executor.NameKubernetes &&
+		(backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
 		cancelCleanup()
@@ -1569,7 +1570,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// live consumer. A passthrough TUI also needs its stopped execution ID to
 	// resume the same conversation after a graceful backend restart.
 	stopWatch.advance(stopWaitPersistence)
-	if (execution.Owner.Kind == ExecutionOwnerRun || execution.Owner.Kind == ExecutionOwnerErrand) || preservePassthroughConversation {
+	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 			return err
 		}
@@ -3408,6 +3409,9 @@ func (m *Manager) ProbeBackgroundWorkloadsBySessionID(ctx context.Context, sessi
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
 func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) error {
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return m.StopErrandOwnerForRecovery(ctx, execution.Owner, executionID)
+	}
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
 		return nil
 	}

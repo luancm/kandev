@@ -81,14 +81,15 @@ func TestErrandRecoveryStopValidatesOwner(t *testing.T) {
 	require.NoError(t, mgr.registerAndPublishExecution(ctx, execution, backend, &ExecutorInstance{InstanceID: execution.ID}, ""))
 	mgr.RemoveExecution(execution.ID)
 	recovery, ok := any(mgr).(interface {
-		StopErrandOwnerForRecovery(context.Context, ExecutionOwner) error
+		StopErrandOwnerForRecovery(context.Context, ExecutionOwner, string) error
 	})
 	require.True(t, ok, "errand owner must support exact inventory recovery stop")
 	wrong := owner
 	wrong.Generation++
-	require.Error(t, recovery.StopErrandOwnerForRecovery(ctx, wrong))
+	require.Error(t, recovery.StopErrandOwnerForRecovery(ctx, wrong, execution.ID))
+	require.ErrorIs(t, recovery.StopErrandOwnerForRecovery(ctx, owner, "foreign-execution"), models.ErrExecutionRotated)
 	require.Empty(t, backend.stoppedID)
-	require.NoError(t, recovery.StopErrandOwnerForRecovery(ctx, owner))
+	require.NoError(t, recovery.StopErrandOwnerForRecovery(ctx, owner, execution.ID))
 	require.Equal(t, "execution", backend.stoppedID)
 	row, err := repo.GetExecutorRunningBySessionID(ctx, "errand:child")
 	require.NoError(t, err)
@@ -175,7 +176,7 @@ func TestErrandRecoveryStopDoesNotSettleSuccessor(t *testing.T) {
 		row.AgentExecutionID = "successor"
 		require.NoError(t, repo.UpsertExecutorRunning(ctx, row))
 	}
-	_ = mgr.StopErrandOwnerForRecovery(ctx, owner)
+	_ = mgr.StopErrandOwnerForRecovery(ctx, owner, execution.ID)
 	row, err := repo.GetExecutorRunningBySessionID(ctx, "errand:child")
 	require.NoError(t, err)
 	require.Equal(t, "successor", row.AgentExecutionID)
@@ -213,7 +214,7 @@ func TestErrandRecoveryRejectsSharedAndUnconfirmedRuntimes(t *testing.T) {
 			mgr.executorRegistry.Register(backend)
 			require.NoError(t, mgr.registerAndPublishExecution(ctx, execution, backend, &ExecutorInstance{InstanceID: execution.ID}, ""))
 			mgr.RemoveExecution(execution.ID)
-			require.ErrorIs(t, mgr.StopErrandOwnerForRecovery(ctx, owner), ErrErrandRecoveryRequiresReconnect)
+			require.ErrorIs(t, mgr.StopErrandOwnerForRecovery(ctx, owner, execution.ID), ErrErrandRecoveryRequiresReconnect)
 			require.Empty(t, backend.stoppedID)
 			row, err := repo.GetExecutorRunningBySessionID(ctx, "errand:child")
 			require.NoError(t, err)

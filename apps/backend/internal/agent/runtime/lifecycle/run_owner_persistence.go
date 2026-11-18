@@ -44,14 +44,6 @@ func (m *Manager) StopRunOwnerForRecovery(ctx context.Context, owner ExecutionOw
 	return m.stopOwnerForRecovery(ctx, owner, owner.RunSessionID, "office_run_recovery")
 }
 
-// StopErrandOwnerForRecovery stops only the runtime recorded for the exact Errand owner.
-func (m *Manager) StopErrandOwnerForRecovery(ctx context.Context, owner ExecutionOwner) error {
-	if owner.Kind != ExecutionOwnerErrand || owner.ErrandID == "" || owner.Generation == 0 || owner.TaskID == "" || owner.WorkspaceID == "" || owner.SessionID != "" || owner.RunID != "" || owner.RunSessionID != "" || owner.Attempt != 0 {
-		return errors.New("invalid errand recovery owner")
-	}
-	return m.stopOwnerForRecovery(ctx, owner, models.ErrandExecutionIdentity(owner.ErrandID), "errand_recovery")
-}
-
 func (m *Manager) stopOwnerForRecovery(ctx context.Context, owner ExecutionOwner, inventoryID, stopReason string) error {
 	if err := m.recoveryGuard.CheckLaunchAllowed(inventoryID); err != nil {
 		return err
@@ -62,9 +54,6 @@ func (m *Manager) stopOwnerForRecovery(ctx context.Context, owner ExecutionOwner
 	}
 	row, err := reader.GetExecutorRunningBySessionID(ctx, inventoryID)
 	if errors.Is(err, models.ErrExecutorRunningNotFound) || (err == nil && row == nil) {
-		if owner.Kind == ExecutionOwnerErrand {
-			return errors.Join(ErrErrandRecoveryRequiresReconnect, m.runRecoveryErr)
-		}
 		return m.runRecoveryErr
 	}
 	if err != nil {
@@ -72,9 +61,6 @@ func (m *Manager) stopOwnerForRecovery(ctx context.Context, owner ExecutionOwner
 	}
 	if err := validateRunRecoveryOwner(row, owner); err != nil {
 		return err
-	}
-	if owner.Kind == ExecutionOwnerErrand {
-		return m.stopRecordedErrandInstance(ctx, row, owner)
 	}
 	if row.Status == models.ExecutorRunningStatusStopped {
 		return nil
