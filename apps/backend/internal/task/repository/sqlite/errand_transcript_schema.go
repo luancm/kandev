@@ -14,7 +14,7 @@ func (r *Repository) initErrandTranscriptSchema() error {
 		{"errand_harness_bindings.table", `CREATE TABLE IF NOT EXISTS errand_harness_bindings (
  errand_id TEXT NOT NULL, owner_generation BIGINT NOT NULL, binding_sequence BIGINT NOT NULL CHECK(binding_sequence > 0),
  execution_id TEXT NOT NULL, incarnation_id TEXT NOT NULL, harness_generation BIGINT NOT NULL CHECK(harness_generation > 0),
- stream_id TEXT NOT NULL UNIQUE, native_session_id TEXT NOT NULL DEFAULT '',
+ stream_id TEXT NOT NULL UNIQUE, native_session_id TEXT NOT NULL DEFAULT '', context_metadata TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(errand_id,owner_generation,binding_sequence), UNIQUE(errand_id,owner_generation,incarnation_id,harness_generation),
  FOREIGN KEY(errand_id,owner_generation) REFERENCES errand_execution_generations(errand_id,generation) ON DELETE CASCADE)`},
 		{"errand_turns.table", `CREATE TABLE IF NOT EXISTS errand_turns (

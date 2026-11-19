@@ -397,6 +397,22 @@ func newPostgresErrandBrowserRepoWithWriter(t *testing.T) *Repository {
 	return repo
 }
 
+func seedErrandHistoryContext(t *testing.T, repo *Repository, row *models.Errand) {
+	t.Helper()
+	ctx := t.Context()
+	generation, err := repo.ReserveErrandExecutionGeneration(ctx, row.ID, 0)
+	require.NoError(t, err)
+	binding := models.ErrandHarnessBinding{
+		ErrandID: row.ID, Generation: generation.Generation, ExecutionID: "history-execution",
+		IncarnationID: "history-incarnation", HarnessGeneration: 1, StreamID: "history-stream", NativeSessionID: "history-native",
+	}
+	bound, err := repo.BindErrandExecution(ctx, row.ID, generation.Generation, binding.ExecutionID)
+	require.NoError(t, err)
+	require.True(t, bound)
+	require.NoError(t, repo.AppendErrandHarnessBinding(ctx, &binding, 0))
+	projectErrandContextWindow(t, repo, row.TaskID, binding, 1, 120000, 3000)
+}
+
 func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
@@ -417,14 +433,14 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 		createErrandScenarioSession(t, repo, &models.TaskSession{
 			ID: id, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
 			State: models.TaskSessionStateCompleted, StartedAt: base, TokensIn: int64(index + 1),
-			Metadata: map[string]interface{}{models.SessionMetaKeyContextWindow: map[string]interface{}{
-				"size": 120000, "used": 3000, "source": "agent",
-			}},
 		})
 		if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET tokens_in = ? WHERE id = ?`), index+1, id); err != nil {
 			t.Fatalf("set token usage for %s: %v", id, err)
 		}
 		mustCreateErrand(t, repo, row)
+		if index == 0 {
+			seedErrandHistoryContext(t, repo, row)
+		}
 	}
 	pending := sampleErrand("browser-history-pending", taskID, parentID, base.Add(time.Minute))
 	pending.Lifecycle, pending.LastOutcome = models.ErrandLifecycleLaunched, models.ErrandOutcomeDone

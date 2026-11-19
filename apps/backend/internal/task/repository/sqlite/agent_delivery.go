@@ -640,6 +640,14 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 			return false, err
 		}
 	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && stored.EventType == streams.EventTypeContextWindow {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("errand context window event sequence gap")
+		}
+		if err := persistErrandContextWindowTx(ctx, tx, errandID, &stored); err != nil {
+			return false, err
+		}
+	}
 	if topLevelToolStart {
 		if stored.Sequence != projectedSequence+1 {
 			return false, fmt.Errorf("top-level tool boundary sequence gap: expected %d, got %d", projectedSequence+1, stored.Sequence)

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -371,8 +372,6 @@ func validErrandBrowserIdentity() string {
 }
 
 func errandBrowserColumns(driver string) string {
-	metadata := "s.metadata"
-	contextColumns := strings.Join(sessionSummaryContextWindowColumns(driver, metadata), ", ")
 	createdAtKey := errandBrowserCreatedAtKey(driver, "e.created_at")
 	return `e.id, e.task_id, e.parent_session_id, e.title, e.agent_profile_id,
 		` + errandBrowserStatusExpression(driver) + `,
@@ -384,7 +383,7 @@ func errandBrowserColumns(driver string) string {
 	` + errandBrowserUnreadPredicate(driver) + `,
 	e.latest_settled_turn_id, e.result_turn_id,
 	COALESCE(s.tokens_in, 0), COALESCE(s.tokens_cached_in, 0), COALESCE(s.tokens_out, 0),
-	` + contextColumns
+	` + errandContextMetadataColumn
 }
 
 func errandBrowserStatusExpression(driver string) string {
@@ -519,11 +518,7 @@ func scanErrandBrowserProjection(row errandRowScanner, extra ...interface{}) (*m
 		settledAt                                     sql.NullTime
 		live, outstanding, unread                     bool
 		latestSettled, resultTurn                     string
-		contextWindowType                             sql.NullString
-		contextWindowSize, contextWindowUsed          sql.NullFloat64
-		contextRemaining, contextEfficiency           sql.NullFloat64
-		contextSource, contextTimestamp               sql.NullString
-		compactionCount                               sql.NullFloat64
+		contextMetadata                               sql.NullString
 	)
 	destinations := []interface{}{
 		&item.ID, &item.TaskID, &item.ParentSessionID, &item.Title, &item.AgentProfileID,
@@ -531,8 +526,7 @@ func scanErrandBrowserProjection(row errandRowScanner, extra ...interface{}) (*m
 		&rawCreatedAt, &item.UpdatedAt, &settledAt, &item.Version,
 		&live, &outstanding, &unread, &latestSettled, &resultTurn,
 		&item.TokensIn, &item.TokensCachedIn, &item.TokensOut,
-		&contextWindowType, &contextWindowSize, &contextWindowUsed, &contextRemaining,
-		&contextEfficiency, &contextSource, &contextTimestamp, &compactionCount,
+		&contextMetadata,
 	}
 	destinations = append(destinations, extra...)
 	if err := row.Scan(destinations...); err != nil {
@@ -550,17 +544,13 @@ func scanErrandBrowserProjection(row errandRowScanner, extra ...interface{}) (*m
 	item.CanSendResult = (&models.Errand{
 		LatestSettledTurnID: latestSettled, ResultTurnID: resultTurn, ResultState: item.ResultState,
 	}).CanSendResult(item.Status)
-	contextMetadata := make(map[string]interface{})
-	if contextWindowType.Valid {
-		contextMetadata[models.SessionMetaKeyContextWindow] = sessionSummaryContextWindowProjection{
-			typeName: contextWindowType.String, size: contextWindowSize, used: contextWindowUsed,
-			remaining: contextRemaining, efficiency: contextEfficiency, source: contextSource, timestamp: contextTimestamp,
-		}.metadataValue()
+	if contextMetadata.String != "" {
+		var metadata map[string]interface{}
+		if err := json.Unmarshal([]byte(contextMetadata.String), &metadata); err != nil {
+			return nil, fmt.Errorf("decode stored errand context: %w", err)
+		}
+		item.ContextMetadata = models.ProjectSessionContextMetadata(metadata)
 	}
-	if compactionCount.Valid {
-		contextMetadata[models.SessionMetaKeyContextCompactionCount] = compactionCount.Float64
-	}
-	item.ContextMetadata = models.ProjectSessionContextMetadata(contextMetadata)
 	return item, nil
 }
 
