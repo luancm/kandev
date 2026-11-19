@@ -15,6 +15,36 @@ type ownedErrandTeardownStore interface {
 	GetErrandExecutionDescriptor(context.Context, string) (*models.ErrandExecutionDescriptor, error)
 }
 
+// CancelErrandWithTarget records the exact owned runtime before trying Stop.
+func (a *ErrandAdapter) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
+	if row == nil || row.ID == "" || commit == nil {
+		return models.ErrInvalidErrand
+	}
+	if a.runtime == nil {
+		return errors.New("errand runtime is unavailable")
+	}
+	return a.cancelOwnedErrand(ctx, row, commit)
+}
+
+// RetryErrandTeardown uses the original recorded target.
+func (a *ErrandAdapter) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
+	if intent.Target.ErrandID == "" || intent.Target.SessionID != "" || intent.ID == "" {
+		return "", models.ErrInvalidErrand
+	}
+	if a.runtime == nil {
+		return "", errors.New("errand runtime is unavailable")
+	}
+	return a.retryOwnedErrandTeardown(ctx, intent)
+}
+
+func sameObservedErrand(current, observed *models.Errand) bool {
+	return current != nil && current.Version == observed.Version && current.TaskID == observed.TaskID && current.ParentSessionID == observed.ParentSessionID
+}
+
+func sameTeardownIntent(a, b models.ErrandTeardownIntent) bool {
+	return a.ID == b.ID && a.Version == b.Version && a.Purpose == b.Purpose && a.RequestedAt.Equal(b.RequestedAt) && a.Target == b.Target
+}
+
 func (a *ErrandAdapter) cancelOwnedErrand(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
 	guard, err := a.svc.lockCancelInFlightGuardWithContext(ctx, row.ID)
 	if err != nil {

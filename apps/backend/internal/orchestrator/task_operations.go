@@ -5886,9 +5886,6 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	if err = s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
-	if handled, stopErr := s.stopErrandOnUserStop(ctx, sessionID); handled || stopErr != nil {
-		return stopErr
-	}
 	defer func() {
 		if err == nil {
 			s.cascadeErrandsOfParent(sessionID)
@@ -5995,14 +5992,6 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 	taskID := session.TaskID
 	wasPrimary := session.IsPrimary
-	// The errand row is removed with its session, so its cancellation notice is
-	// admitted first and a refusal keeps the row. A deleted parent cancels its
-	// errands once it is gone.
-	session, err = s.preserveErrandDeletionWithOwnership(ctx, session, guard)
-	if err != nil {
-		return fmt.Errorf("record errand deletion: %w", err)
-	}
-
 	// A settled DB state can still own a workspace execution or detached
 	// background work. Quiesce that runtime boundary before removing the row.
 	if err := s.quiesceSessionExecutionBeforeDeletion(ctx, taskID, sessionID); err != nil {

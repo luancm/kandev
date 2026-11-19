@@ -28,6 +28,25 @@ func (r ownedErrandStopRuntime) Stop(_ context.Context, id, _ string) error {
 	return r.stop(id)
 }
 
+func TestErrandStopRequiresTheOwnedRuntime(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	req := f.request()
+	f.svc.repo = ownedLaunchRepository{Repository: f.repo, errandID: req.ErrandID}
+	row, err := f.repo.GetErrand(t.Context(), req.ErrandID)
+	require.NoError(t, err)
+	adapter := NewErrandAdapter(f.svc)
+	err = adapter.CancelErrandWithTarget(t.Context(), row, func(models.ErrandTeardownTarget) error {
+		t.Fatal("cancellation cannot capture a target without its runtime")
+		return nil
+	})
+	require.ErrorContains(t, err, "errand runtime is unavailable")
+
+	_, err = adapter.RetryErrandTeardown(t.Context(), models.ErrandTeardownIntent{
+		ID: "exact-intent", Target: models.ErrandTeardownTarget{TaskID: req.TaskID, ErrandID: req.ErrandID},
+	})
+	require.ErrorContains(t, err, "errand runtime is unavailable")
+}
+
 func TestCancelOwnedErrandRetainsTargetUntilRuntimeConfirmsStop(t *testing.T) {
 	ctx := t.Context()
 	f := newErrandLaunchFixture(t)

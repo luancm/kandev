@@ -22,10 +22,9 @@ type fakeErrandComposer struct {
 	released    []string
 }
 
-func (f *fakeErrandComposer) DrainQueued(context.Context)                       {}
-func (f *fakeErrandComposer) CascadeParent(string) bool                         { return false }
-func (f *fakeErrandComposer) CancelOnSessionStop(context.Context, string) error { return nil }
-func (f *fakeErrandComposer) CascadeTask(string) bool                           { return false }
+func (f *fakeErrandComposer) DrainQueued(context.Context) {}
+func (f *fakeErrandComposer) CascadeParent(string) bool   { return false }
+func (f *fakeErrandComposer) CascadeTask(string) bool     { return false }
 
 func (f *fakeErrandComposer) ComposeParentTurn(
 	_ context.Context, _ string, route models.ErrandDeliveryRoute,

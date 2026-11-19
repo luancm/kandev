@@ -66,9 +66,6 @@ func (s *Service) cancelCaptured(ctx context.Context, row *models.Errand, source
 	changed := false
 	intentID, requestedAt := uuid.NewString(), s.clock.Now()
 	err := s.stopper.CancelErrandWithTarget(ctx, row, func(target ErrandTeardownTarget) error {
-		if expected, ok := ctx.Value(cancellationTargetFenceKey{}).(ErrandTeardownTarget); ok && expected != target {
-			return models.ErrErrandVersionConflict
-		}
 		s.applyCancel(&next, source)
 		next.TeardownIntent = &models.ErrandTeardownIntent{Version: models.ErrandTeardownIntentVersion,
 			ID: intentID, State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCancellation,

@@ -14,7 +14,6 @@ import (
 type recordingErrandController struct {
 	mu        sync.Mutex
 	events    []string
-	stopErr   error
 	drainCall int
 }
 
@@ -35,17 +34,10 @@ func (c *recordingErrandController) CascadeParent(parentSessionID string) bool {
 	return true
 }
 
-func (c *recordingErrandController) CancelOnSessionStop(_ context.Context, sessionID string) error {
-	c.record("cancel-on-stop:" + sessionID)
-	return c.stopErr
-}
-
 func (c *recordingErrandController) CascadeTask(taskID string) bool {
 	c.record("cascade-task:" + taskID)
 	return true
 }
-
-func (*recordingErrandController) OnSessionStateChanged(context.Context, string) error { return nil }
 
 func (*recordingErrandController) OnErrandTurnSettled(context.Context, errands.TurnSettlement) error {
 	return nil

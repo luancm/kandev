@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -22,23 +21,16 @@ func (absentPreparedDeliveryLog) HasDeliveryToken(context.Context, string, strin
 func preparedOwnershipCancelledChild(t *testing.T, f *sendNowErrandFixture, id string) *models.Errand {
 	t.Helper()
 	row := f.result(t, id)
-	require.NoError(t, f.repo.CreateTaskSession(t.Context(), &models.TaskSession{
-		ID: row.ID, TaskID: row.TaskID, ParentSessionID: row.ParentSessionID, Role: models.SessionRoleErrand,
-		State: models.TaskSessionStateWaitingForInput, StartedAt: time.Now().UTC(),
-	}))
-	session, err := f.repo.GetTaskSession(t.Context(), row.ID)
-	require.NoError(t, err)
-	row.TeardownIntent = &models.ErrandTeardownIntent{Version: models.ErrandTeardownIntentVersion, ID: "teardown-" + id,
+	row.TeardownIntent = &models.ErrandTeardownIntent{
+		Version: models.ErrandTeardownIntentVersion, ID: "teardown-" + id,
 		State: models.ErrandTeardownIntentPending, RequestedAt: time.Now().UTC(),
-		Target: models.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID, SessionIncarnation: session.QueueIncarnationID, NoTurn: true}}
-	require.NoError(t, f.repo.UpdateErrand(t.Context(), row))
-	f.manager.getExecutionIDForSessionFunc = func(_ context.Context, sessionID string) (string, error) {
-		if sessionID == row.ID {
-			return "", agentruntime.ErrNoExecutionForSession
-		}
-		return "exec-1", nil
+		Purpose: models.ErrandTeardownPurposeCancellation,
+		Target:  models.ErrandTeardownTarget{TaskID: row.TaskID, ErrandID: row.ID, NoTurn: true},
 	}
-	outcome, err := NewErrandAdapter(f.svc).RetryErrandTeardown(t.Context(), *row.TeardownIntent)
+	require.NoError(t, f.repo.UpdateErrand(t.Context(), row))
+	adapter := NewErrandAdapter(f.svc)
+	adapter.SetOwnedLaunchRuntime(ownedErrandStopRuntime{}, nil)
+	outcome, err := adapter.RetryErrandTeardown(t.Context(), *row.TeardownIntent)
 	require.NoError(t, err)
 	require.Equal(t, errands.TeardownCompleted, outcome)
 	row, err = f.repo.GetErrand(t.Context(), row.ID)

@@ -141,19 +141,6 @@ func (s *Service) cancelObserved(ctx context.Context, row *models.Errand, source
 	return s.cancelRow(ctx, row.ID, source)
 }
 
-// CancelOnSessionStop owns the complete errand stop. The generic stop caller
-// must return its result rather than stopping the same session again.
-func (s *Service) CancelOnSessionStop(ctx context.Context, sessionID string) error {
-	row, changed, err := s.cancelRow(ctx, sessionID, models.ErrandCancelSourceUser)
-	if errors.Is(err, models.ErrErrandNotFound) {
-		return nil
-	}
-	if changed {
-		s.deliverPending(ctx, row.ParentSessionID)
-	}
-	return err
-}
-
 // applyCancel moves an errand to cancelled. A user cancel of an outstanding
 // errand leaves a cancellation notice as its result; a cascade discards an
 // undelivered result; a parent cancel leaves no result.

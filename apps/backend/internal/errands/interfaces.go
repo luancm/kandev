@@ -141,14 +141,6 @@ type Launcher interface {
 type ErrandTeardownTarget = models.ErrandTeardownTarget
 type ErrandTeardownIntent = models.ErrandTeardownIntent
 
-type cancellationTargetFenceKey struct{}
-
-// WithCancellationTargetFence keeps a deletion handoff bound to the target
-// captured before releasing admission. Only a trusted lifecycle caller sets it.
-func WithCancellationTargetFence(ctx context.Context, target ErrandTeardownTarget) context.Context {
-	return context.WithValue(ctx, cancellationTargetFenceKey{}, target)
-}
-
 type TeardownOutcome string
 
 const (

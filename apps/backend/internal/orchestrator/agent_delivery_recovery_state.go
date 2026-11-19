@@ -255,5 +255,4 @@ func (s *Service) publishAgentDeliveryRecoveryState(ctx context.Context, session
 	updatedAt := session.UpdatedAt
 	s.publishTaskSessionStateChanged(ctx, session.TaskID, session.ID,
 		session.State, session.State, session.ErrorMessage, &updatedAt, session)
-	s.notifyErrandSessionStateChanged(ctx, session.ID)
 }

@@ -1,75 +1,14 @@
 package orchestrator
 
 import (
-	"context"
 	"strings"
 	"testing"
-	"time"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
-
-// @covers AC-TASKS-ERRANDS-003.5 AC-TASKS-ERRANDS-004.9
-func TestPreparedErrandAdmissionFailurePreventsRealDeletion(t *testing.T) {
-	for _, failure := range []string{"capacity", "storage", "accepted"} {
-		t.Run(failure, func(t *testing.T) {
-			f := newSendNowErrandFixture(t)
-			f.restartDelivery(t, true)
-			row := f.result(t, "child-delete")
-			f.manager.getExecutionIDForSessionFunc = func(ctx context.Context, id string) (string, error) {
-				if id == row.ID {
-					return "", agentruntime.ErrNoExecutionForSession
-				}
-				return "exec-1", nil
-			}
-			f.manager.getPromptActivityForSessionFunc = func(string) (string, uint64, uint64, time.Time, error) {
-				return "", 0, 0, time.Time{}, agentruntime.ErrNoExecutionForSession
-			}
-			require.NoError(t, f.repo.CreateTaskSession(t.Context(), &models.TaskSession{
-				ID: row.ID, TaskID: row.TaskID, ParentSessionID: row.ParentSessionID, Role: models.SessionRoleErrand,
-				State: models.TaskSessionStateWaitingForInput, StartedAt: time.Now().UTC(),
-			}))
-			ordinary := f.queue(t, "ordinary input", messagequeue.QueuedByUser, nil)
-			if failure == "capacity" {
-				f.svc.messageQueue.SetMaxPerSession(1)
-			}
-			if failure == "storage" {
-				_, err := f.repo.DB().Exec(`CREATE TRIGGER refuse_prepared BEFORE INSERT ON queued_messages WHEN NEW.queued_by = 'server' BEGIN SELECT RAISE(ABORT, 'admission unavailable'); END`)
-				require.NoError(t, err)
-			}
-			err := f.svc.DeleteSession(t.Context(), row.ID)
-			if failure != "accepted" {
-				require.Error(t, err, "failed durable admission must prevent session and errand deletion")
-				if failure == "capacity" {
-					require.ErrorIs(t, err, messagequeue.ErrQueueFull)
-				} else {
-					require.ErrorContains(t, err, "admission unavailable")
-				}
-				_, err = f.repo.GetTaskSession(t.Context(), row.ID)
-				require.NoError(t, err)
-				_, err = f.repo.GetErrand(t.Context(), row.ID)
-				require.NoError(t, err)
-				entries := f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries
-				require.Len(t, entries, 1)
-				require.Equal(t, ordinary.ID, entries[0].ID)
-				return
-			}
-			require.NoError(t, err)
-			_, err = f.repo.GetTaskSession(t.Context(), row.ID)
-			require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
-			_, err = f.repo.GetErrand(t.Context(), row.ID)
-			require.ErrorIs(t, err, models.ErrErrandNotFound)
-			_, queue := f.reopen(t)
-			entries := queue.GetStatus(t.Context(), "session-1").Entries
-			require.Len(t, entries, 2)
-			require.Contains(t, entries[1].Content, row.ResultText)
-		})
-	}
-}
 
 // @covers AC-TASKS-ERRANDS-003.5 AC-TASKS-ERRANDS-004.9
 func TestPreparedErrandCancellationOwnsImmutableRevisionAndFullBlock(t *testing.T) {

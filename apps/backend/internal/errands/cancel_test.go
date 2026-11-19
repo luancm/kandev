@@ -225,21 +225,3 @@ func TestCancelForTaskCancelsQueuedErrandsToo(t *testing.T) {
 		t.Fatalf("queued errand = %s/%s, want cascade-cancelled", row.Lifecycle, row.CancelSource)
 	}
 }
-
-func TestCancelOnSessionStopOwnsTheExactRuntimeStop(t *testing.T) {
-	h := newHarness(t)
-	errand := h.mustStart("audit").Errand
-	if err := h.service.CancelOnSessionStop(context.Background(), errand.ID); err != nil {
-		t.Fatalf("CancelOnSessionStop: %v", err)
-	}
-	row, _ := h.store.GetErrand(context.Background(), errand.ID)
-	if row.Lifecycle != models.ErrandLifecycleCancelled || row.CancelSource != models.ErrandCancelSourceUser {
-		t.Fatalf("errand = %s/%s, want cancelled by the user", row.Lifecycle, row.CancelSource)
-	}
-	if len(h.stopper.stops()) != 1 {
-		t.Fatal("the identity-aware stop hook must own exactly one physical stop")
-	}
-	if err := h.service.CancelOnSessionStop(context.Background(), testParent); err != nil {
-		t.Fatalf("an ordinary session must be ignored, got %v", err)
-	}
-}
