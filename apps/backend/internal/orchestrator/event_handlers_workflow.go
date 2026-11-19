@@ -6016,9 +6016,6 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if s.resumeAttemptStore().holdsInitialPromptForSession(sessionID) {
 		return queueDrainSkipped
 	}
-	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
-		return queueDrainSkipped
-	}
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
 	if err != nil {
 		return queueDrainSkipped

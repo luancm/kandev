@@ -784,8 +784,6 @@ type startCreatedSessionOptions struct {
 	deliveryProtocol                      string
 	deliveryPayloadHash                   string
 	deliveryClaimUpdater                  deliveryClaimUpdater
-	errandParentOrigin                    errands.ParentPromptOrigin
-	errandParentSources                   []messagequeue.QueuedMessage
 	prepareInitialPrompt                  func(context.Context, string) (string, bool, error)
 	cacheEffectivePromptForTransientRetry bool
 	// ceilingEntryBinding is carried by a replay and checked at both the
@@ -1131,9 +1129,6 @@ func (s *Service) startCreatedSession(
 		return nil, err
 	}
 	if effectivePrompt != "" || len(attachments) > 0 || options.deliverySubmissionID != "" {
-		if options.errandParentOrigin.SenderSessionID == "" {
-			options.errandParentOrigin = errands.ParentPromptOriginFromContext(ctx)
-		}
 		s.configureInitialDeliveryAdmission(session, options, &launchOptions)
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
@@ -6987,13 +6982,10 @@ type promptTaskOptions struct {
 	// Durable queue claims negotiate their delivery protocol immediately before
 	// harness dispatch. The updater persists that choice on the exact claim so
 	// a restart can reconcile the same immutable submission.
-	deliveryProtocol      string
-	deliverySubmissionID  string
-	deliveryPayloadHash   string
-	deliveryClaimUpdater  deliveryClaimUpdater
-	errandParentOrigin    errands.ParentPromptOrigin
-	errandParentSources   []messagequeue.QueuedMessage
-	errandAdmissionTurnID string
+	deliveryProtocol     string
+	deliverySubmissionID string
+	deliveryPayloadHash  string
+	deliveryClaimUpdater deliveryClaimUpdater
 }
 
 type allowRouteActionPromptClaim struct{}
@@ -7068,14 +7060,6 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
-	if options.claimEntryID == "" {
-		if err := s.retryErrandCompletionBeforeAdmission(ctx, sessionID); err != nil {
-			return nil, err
-		}
-	}
-	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
-		return nil, err
-	}
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -7344,16 +7328,6 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		}
 	}
 
-	if models.IsErrandSession(session) && session.ParentSessionID != "" &&
-		errandPromptOrigin(resumePromptCtx, session, options).SenderSessionID == session.ParentSessionID {
-		options.reserveTurnUntilDispatch = true
-		options.requireNonterminalSession = true
-		if options.expectedSessionIdentity == nil {
-			options.expectedSessionIdentity = &messagequeue.QueueSessionIdentity{
-				TaskID: taskID, SessionID: sessionID, SessionIncarnationID: session.QueueIncarnationID,
-			}
-		}
-	}
 	session, rollback, releaseDispatchGuard, err := s.claimAndGuardDispatch(
 		resumePromptCtx, taskID, sessionID, foregroundClaim, options, foregroundDispatch, resumeAttempt,
 		queuedDispatchGuard,
@@ -7440,11 +7414,6 @@ func (s *Service) runPromptTurn(
 		return nil, deliveryErr
 	}
 	options.deliveryProtocol = protocol
-	options.errandParentOrigin = errandPromptOrigin(promptCtx, session, options)
-	options.errandAdmissionTurnID = rollback.turnID
-	if options.deliverySubmissionID == "" {
-		options.deliverySubmissionID = options.errandParentOrigin.SubmissionID
-	}
 	if options.deliverySubmissionID == "" {
 		options.deliverySubmissionID = "internal:" + uuid.NewString()
 	}
@@ -8083,18 +8052,6 @@ func (s *Service) finishPromptDispatchFailure(
 	rollback.dispatchOutcome = dispatchOutcome
 	resolution := dispatchOutcome.snapshot()
 	fallbackStartOptions := options.fallbackStartOptions
-	if options.errandParentOrigin.SenderSessionID != "" {
-		copied := startCreatedSessionOptions{}
-		if fallbackStartOptions != nil {
-			copied = *fallbackStartOptions
-		}
-		copied.errandParentOrigin = options.errandParentOrigin
-		copied.deliverySubmissionID = options.deliverySubmissionID
-		copied.deliveryProtocol = options.deliveryProtocol
-		copied.deliveryPayloadHash = options.deliveryPayloadHash
-		copied.deliveryClaimUpdater = options.deliveryClaimUpdater
-		fallbackStartOptions = &copied
-	}
 	if fallbackStartOptions != nil && options.retainPromptPayload != nil {
 		copied := *fallbackStartOptions
 		accepted := copied.onInitialPromptAccepted
@@ -10484,9 +10441,6 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 }
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
-	if err := s.reconcileErrandTerminalDecisions(ctx, identity.SessionID); err != nil {
-		return false, err
-	}
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
 		return false, nil
 	}

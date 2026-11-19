@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
+
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -17,7 +19,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"github.com/stretchr/testify/require"
 )
 
 type sendNowErrandFixture struct {
@@ -26,6 +27,21 @@ type sendNowErrandFixture struct {
 	manager *mockAgentManager
 	payload chan string
 	release chan struct{}
+}
+
+type prototypeSettlementProbe struct{ *fakeErrandComposer }
+
+func (*prototypeSettlementProbe) ReconcileTerminalDecisions(context.Context, string) error {
+	return errors.New("prototype settlement is unavailable")
+}
+
+func TestSendNowOrdinaryQueueDoesNotReadPrototypeSettlement(t *testing.T) {
+	f := newSendNowErrandFixture(t)
+	f.svc.SetErrandController(&prototypeSettlementProbe{fakeErrandComposer: &fakeErrandComposer{}})
+	f.queue(t, "ordinary queued input", messagequeue.QueuedByUser, nil)
+	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
+	require.NoError(t, err)
+	require.Contains(t, f.receivePrompt(t), "ordinary queued input")
 }
 
 func newSendNowErrandFixture(t *testing.T) *sendNowErrandFixture {

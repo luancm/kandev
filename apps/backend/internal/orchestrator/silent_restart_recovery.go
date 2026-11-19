@@ -669,11 +669,6 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 		return errors.New("silent restart recovery checkpoint changed before commit")
 	}
 	if err == nil {
-		if settleErr := s.reconcileErrandTerminalDecisions(ownerCtx, inputs.session.ID); settleErr != nil {
-			s.logger.Warn("recovered errand settlement remains pending", zap.String("session_id", inputs.session.ID), zap.Error(settleErr))
-		}
-	}
-	if err == nil {
 		if session, readErr := s.repo.GetTaskSession(ownerCtx, inputs.session.ID); readErr == nil && session != nil {
 			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 		}

@@ -16,7 +16,6 @@ type ErrandController interface {
 	OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error
 	OnParentTurnSettled(ctx context.Context, parentSessionID string, cause errands.SettleCause) (bool, error)
 	RetryErrandCompletion(ctx context.Context, sessionID string) error
-	ReconcileTerminalDecisions(ctx context.Context, sessionID string) error
 	ReconcileLifecycle(ctx context.Context) error
 	Reconcile(ctx context.Context) error
 }

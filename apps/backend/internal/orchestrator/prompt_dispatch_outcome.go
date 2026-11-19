@@ -17,7 +17,6 @@ const (
 
 type promptDispatchResolution struct {
 	evidence                promptDispatchEvidence
-	admissionErr            error
 	publicationErr          error
 	ordinaryFailureRollback bool
 }
@@ -25,11 +24,11 @@ type promptDispatchResolution struct {
 func (r promptDispatchResolution) accepted() bool { return r.evidence == promptDispatchAccepted }
 
 func (r promptDispatchResolution) refused() bool {
-	return r.evidence == promptDispatchRejected || (r.evidence == promptDispatchNotSent && r.admissionErr == nil)
+	return r.evidence == promptDispatchRejected || r.evidence == promptDispatchNotSent
 }
 
 func (r promptDispatchResolution) rollbackEligible() bool {
-	return !r.accepted() && (r.refused() || (r.admissionErr == nil && r.ordinaryFailureRollback))
+	return !r.accepted() && (r.refused() || r.ordinaryFailureRollback)
 }
 
 func (r promptDispatchResolution) failure(cause error) error {
@@ -37,15 +36,14 @@ func (r promptDispatchResolution) failure(cause error) error {
 }
 
 func (r promptDispatchResolution) dispatchError(cause error) error {
-	err := errors.Join(cause, r.admissionErr)
-	if err != nil && r.accepted() {
-		return &acceptedPromptDispatchError{err: err}
+	if cause != nil && r.accepted() {
+		return &acceptedPromptDispatchError{err: cause}
 	}
-	return err
+	return cause
 }
 
 // promptDispatchOutcome keeps one attempt's evidence separate from failures in
-// recording admission or publishing an accepted turn. Acceptance is irreversible.
+// publishing an accepted turn. Acceptance is irreversible.
 type promptDispatchOutcome struct {
 	mu sync.Mutex
 	promptDispatchResolution
@@ -63,31 +61,24 @@ func (o *promptDispatchOutcome) recordAccepted(publicationErr error) {
 	o.publicationErr = errors.Join(o.publicationErr, publicationErr)
 }
 
-func (o *promptDispatchOutcome) recordRejection(admissionErr error) {
-	o.recordEvidence(promptDispatchRejected, admissionErr)
+func (o *promptDispatchOutcome) recordRejection() {
+	o.recordEvidence(promptDispatchRejected)
 }
 
-func (o *promptDispatchOutcome) recordNonDelivery(admissionErr error) {
-	o.recordEvidence(promptDispatchNotSent, admissionErr)
+func (o *promptDispatchOutcome) recordNonDelivery() {
+	o.recordEvidence(promptDispatchNotSent)
 }
 
-func (o *promptDispatchOutcome) recordUnresolved(admissionErr error) {
-	o.recordEvidence(promptDispatchUnresolved, admissionErr)
+func (o *promptDispatchOutcome) recordUnresolved() {
+	o.recordEvidence(promptDispatchUnresolved)
 }
 
-func (o *promptDispatchOutcome) recordEvidence(evidence promptDispatchEvidence, admissionErr error) {
+func (o *promptDispatchOutcome) recordEvidence(evidence promptDispatchEvidence) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.evidence != promptDispatchAccepted {
 		o.evidence = evidence
 	}
-	o.admissionErr = errors.Join(o.admissionErr, admissionErr)
-}
-
-func (o *promptDispatchOutcome) recordAdmissionError(err error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.admissionErr = errors.Join(o.admissionErr, err)
 }
 
 func (o *promptDispatchOutcome) recordPublicationError(err error) {

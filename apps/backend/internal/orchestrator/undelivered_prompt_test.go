@@ -62,12 +62,12 @@ func TestUndeliveredPromptDispatch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			service, repo := newHandoffService(t)
 			seedSession(t, repo, "task-rejected", "session-rejected", "", "session-rejected")
-			delivery, session := admitHandoffSubmission(t, service, repo, "session-rejected", "rejected", "original")
+			delivery, _ := admitHandoffSubmission(t, service, repo, "session-rejected", "rejected", "original")
 			outcome := &promptDispatchOutcome{}
 			if tc.accepted {
 				outcome.recordAccepted(nil)
 			}
-			cause := service.resolvePromptDispatchOutcome(t.Context(), session, nil, delivery, outcome, messagequeue.DeliveryProtocolV1, tc.cause)
+			cause := service.resolvePromptDispatchOutcome(t.Context(), delivery, outcome, messagequeue.DeliveryProtocolV1, tc.cause)
 			_, err := service.finishPromptExecutorDispatch(t.Context(), "task-rejected", "session-rejected", "original", false, false, nil,
 				promptClaimRollback{}, promptTaskOptions{}, nil, nil, nil, cause, outcome, nil, delivery)
 			require.Error(t, err)
@@ -100,10 +100,7 @@ func TestUndeliveredPromptDispatchPreservesChangedOwner(t *testing.T) {
 }
 
 func TestOrdinaryDispatchFailureRollbackRequiresLegacyProtocol(t *testing.T) {
-	service, repo := newHandoffService(t)
-	seedSession(t, repo, "task-ordinary-protocol", "session-ordinary-protocol", "", "session-ordinary-protocol")
-	session, err := repo.GetTaskSession(t.Context(), "session-ordinary-protocol")
-	require.NoError(t, err)
+	service, _ := newHandoffService(t)
 	for _, tc := range []struct {
 		protocol string
 		want     bool
@@ -113,7 +110,7 @@ func TestOrdinaryDispatchFailureRollbackRequiresLegacyProtocol(t *testing.T) {
 	} {
 		t.Run(tc.protocol, func(t *testing.T) {
 			outcome := &promptDispatchOutcome{}
-			err := service.resolvePromptDispatchOutcome(t.Context(), session, nil, nil, outcome, tc.protocol, errors.New("generic dispatch failure"))
+			err := service.resolvePromptDispatchOutcome(t.Context(), nil, outcome, tc.protocol, errors.New("generic dispatch failure"))
 			require.Error(t, err)
 			require.Equal(t, tc.want, outcome.snapshot().rollbackEligible())
 			require.Equal(t, promptDispatchUnresolved, outcome.snapshot().evidence, "generic failure remains distinct from non-delivery evidence")

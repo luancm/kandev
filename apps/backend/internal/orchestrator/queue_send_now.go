@@ -369,9 +369,6 @@ func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID strin
 }
 
 func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *messagequeue.QueueSessionIdentity, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
-	if err := s.reconcileErrandTerminalDecisions(ctx, sessionID); err != nil {
-		return false, err
-	}
 	var claim *messagequeue.SendNowClaim
 	var err error
 	if identity == nil && s.sendNowHasErrandContext(&messagequeue.SendNowClaim{Sources: entries}) {
@@ -718,7 +715,6 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		return false, fmt.Errorf("load session before send now launch: %w", err)
 	} else if session != nil && session.State == models.TaskSessionStateCreated {
 		startOptions := startCreatedSessionOptions{
-			errandParentSources:  claim.Sources,
 			deliveryProtocol:     deliveryProtocol,
 			deliverySubmissionID: deliverySubmissionID,
 			deliveryPayloadHash:  deliveryPayloadHash,
@@ -852,7 +848,6 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	}
 
 	fallbackStartOptions := startCreatedSessionOptions{
-		errandParentSources:                   claim.Sources,
 		deliveryProtocol:                      deliveryProtocol,
 		deliverySubmissionID:                  deliverySubmissionID,
 		deliveryPayloadHash:                   deliveryPayloadHash,
@@ -873,7 +868,6 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	var fallbackStarted atomic.Bool
 	_, err = s.promptTask(ctx, claim.Dispatch.TaskID, sessionID, promptContent, claim.Dispatch.Model,
 		claim.Dispatch.PlanMode, attachments, false, launchOriginManual, promptTaskOptions{
-			errandParentSources:    claim.Sources,
 			capacityIntent:         turnCapacityOverride,
 			claimEntryID:           claim.Dispatch.ID,
 			afterClaim:             s.sendNowAfterClaim(ctx, claim, attachments, durablePlanComments),

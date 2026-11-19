@@ -19,13 +19,7 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 	deliveryOptions := promptTaskOptions{
 		deliveryProtocol: options.deliveryProtocol, deliverySubmissionID: options.deliverySubmissionID,
 		deliveryPayloadHash: options.deliveryPayloadHash, deliveryClaimUpdater: options.deliveryClaimUpdater,
-		errandParentOrigin: options.errandParentOrigin, errandParentSources: options.errandParentSources,
 	}
-	if deliveryOptions.deliverySubmissionID == "" {
-		deliveryOptions.deliverySubmissionID = options.errandParentOrigin.SubmissionID
-	}
-	launchOptions.DeliverySubmissionID = deliveryOptions.deliverySubmissionID
-	var parentDispatch atomic.Pointer[errandParentDispatch]
 	var delivery atomic.Pointer[agentDeliverySubmissionRuntime]
 	outcome := options.initialPromptOutcome
 	if outcome == nil {
@@ -34,23 +28,18 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 	accepted, failed := launchOptions.OnInitialPromptAccepted, launchOptions.OnInitialPromptFailed
 	launchOptions.OnInitialPromptAccepted = func(executionID string) {
 		outcome.recordAccepted(nil)
-		if err := parentDispatch.Load().decide(context.Background(), models.ErrandAdmissionAccepted); err != nil {
-			outcome.recordAdmissionError(err)
-			s.logger.Warn("failed to persist initial errand parent acceptance", zap.Error(err))
-		}
 		if accepted != nil {
 			accepted(executionID)
 		}
 	}
 	launchOptions.OnInitialPromptFailed = func() {
 		if !outcome.snapshot().accepted() {
-			s.resolveInitialPromptAdmissionFailure(parentDispatch.Load(), delivery.Load(), outcome, options.onInitialPromptAdmissionFailed)
+			s.resolveInitialPromptAdmissionFailure(delivery.Load(), outcome, options.onInitialPromptAdmissionFailed)
 		}
 		if failed != nil {
 			failed()
 		}
 	}
-	turnID := launchOptions.TurnID
 	// Executor binds these options before starting the goroutine that admits the prompt.
 	launchOptions.BeforeAgentStart = func(admissionCtx context.Context, executionID, _ string) error {
 		var bindErr error
@@ -61,23 +50,16 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 	launchOptions.BeforeInitialPromptDispatch = func(admissionCtx context.Context, executionID, finalPrompt string, finalAttachments []v1.MessageAttachment) error {
 		if validateAdmission != nil {
 			if err := validateAdmission(admissionCtx, executionID, finalPrompt, finalAttachments); err != nil {
-				outcome.recordRejection(nil)
+				outcome.recordRejection()
 				if options.onInitialPromptAdmissionFailed != nil {
 					options.onInitialPromptAdmissionFailed(err)
 				}
 				return err
 			}
 		}
-		origin := errandPromptOrigin(admissionCtx, session, deliveryOptions)
-		d, reservationErr := s.reserveErrandParentDispatch(admissionCtx, session, origin, turnID, deliveryOptions.deliverySubmissionID, executionID)
-		if reservationErr != nil {
-			outcome.recordUnresolved(reservationErr)
-			return &agentruntime.PromptAdmissionPersistenceError{Err: reservationErr}
-		}
-		parentDispatch.Store(d)
 		prepared, admissionErr := s.prepareAgentDeliverySubmission(admissionCtx, session, executionID, finalPrompt, finalAttachments, deliveryOptions)
 		if admissionErr != nil {
-			outcome.recordRejection(d.decide(admissionCtx, models.ErrandAdmissionRefused))
+			outcome.recordRejection()
 			admissionErr = outcome.snapshot().dispatchError(admissionErr)
 			if options.onInitialPromptAdmissionFailed != nil {
 				options.onInitialPromptAdmissionFailed(admissionErr)
@@ -90,16 +72,10 @@ func (s *Service) configureInitialDeliveryAdmission(session *models.TaskSession,
 }
 
 func (s *Service) resolveInitialPromptAdmissionFailure(
-	parent *errandParentDispatch, delivery *agentDeliverySubmissionRuntime,
+	delivery *agentDeliverySubmissionRuntime,
 	outcome *promptDispatchOutcome, refused func(error),
 ) {
 	if outcome.snapshot().evidence == promptDispatchRejected {
-		ctx, cancel := (promptTaskOptions{}).failureContext(context.Background())
-		defer cancel()
-		if err := parent.decide(ctx, models.ErrandAdmissionUnknown); err != nil {
-			outcome.recordAdmissionError(err)
-			s.logger.Warn("failed to retain rejected initial errand admission state", zap.Error(err))
-		}
 		return
 	}
 	ctx, cancel := (promptTaskOptions{}).failureContext(context.Background())
@@ -109,16 +85,11 @@ func (s *Service) resolveInitialPromptAdmissionFailure(
 		s.logger.Warn("failed to read initial non-delivery receipt", zap.Error(err))
 	}
 	if proved && err == nil {
-		outcome.recordNonDelivery(parent.decide(ctx, models.ErrandAdmissionRefused))
+		outcome.recordNonDelivery()
 	} else {
-		outcome.recordUnresolved(parent.decide(ctx, models.ErrandAdmissionUnknown))
+		outcome.recordUnresolved()
 	}
-	resolved := outcome.snapshot()
-	if resolved.admissionErr != nil {
-		s.logger.Warn("failed to resolve initial errand admission", zap.Error(resolved.admissionErr))
-		return
-	}
-	if resolved.refused() && refused != nil {
+	if outcome.snapshot().refused() && refused != nil {
 		refused(errors.New("initial prompt was not sent"))
 	}
 }
@@ -130,24 +101,17 @@ func (s *Service) dispatchPreparedPrompt(
 	guard *lockedCancelInFlightGuard, outcome *promptDispatchOutcome,
 ) (*executor.PromptResult, *agentDeliverySubmissionRuntime, error) {
 	var delivery *agentDeliverySubmissionRuntime
-	var parentDispatch *errandParentDispatch
 	beforeAdmission := func(admissionCtx context.Context, finalPrompt string, finalAttachments []v1.MessageAttachment) error {
 		if validateAdmission != nil {
 			if err := validateAdmission(); err != nil {
-				outcome.recordRejection(nil)
+				outcome.recordRejection()
 				return err
 			}
 		}
-		origin := errandPromptOrigin(ctx, session, options)
 		var admissionErr error
-		parentDispatch, admissionErr = s.reserveErrandParentDispatch(admissionCtx, session, origin, options.errandAdmissionTurnID, options.deliverySubmissionID, executionID)
-		if admissionErr != nil {
-			outcome.recordRejection(nil)
-			return admissionErr
-		}
 		delivery, admissionErr = s.prepareAgentDeliverySubmission(admissionCtx, session, executionID, finalPrompt, finalAttachments, options)
 		if admissionErr != nil {
-			outcome.recordRejection(parentDispatch.decide(admissionCtx, models.ErrandAdmissionRefused))
+			outcome.recordRejection()
 			return admissionErr
 		}
 		if delivery != nil {
@@ -155,13 +119,11 @@ func (s *Service) dispatchPreparedPrompt(
 		}
 		return nil
 	}
-	origin := errandPromptOrigin(ctx, session, options)
-	if !models.IsErrandSession(session) && origin.SenderSessionID == "" && options.deliveryProtocol == messagequeue.DeliveryProtocolLegacy && validateAdmission == nil && options.deliveryClaimUpdater == nil {
+	if options.deliveryProtocol == messagequeue.DeliveryProtocolLegacy && validateAdmission == nil && options.deliveryClaimUpdater == nil {
 		beforeAdmission = nil
 	}
 	onAccepted := func() {
 		outcome.recordAccepted(nil)
-		outcome.recordAdmissionError(parentDispatch.decide(ctx, models.ErrandAdmissionAccepted))
 		if onDispatched != nil {
 			onDispatched()
 		}
@@ -171,66 +133,44 @@ func (s *Service) dispatchPreparedPrompt(
 		beforeAdmission, onAccepted, submissionID,
 		s.guardedPassthroughRunning(ctx, session.ID, guard), session,
 	)
-	execErr = s.resolvePromptDispatchOutcome(ctx, session, parentDispatch, delivery, outcome, protocol, execErr)
+	execErr = s.resolvePromptDispatchOutcome(ctx, delivery, outcome, protocol, execErr)
 	return result, delivery, outcome.snapshot().dispatchError(execErr)
 }
 
 func (s *Service) resolvePromptDispatchOutcome(
-	ctx context.Context, session *models.TaskSession, parent *errandParentDispatch,
+	ctx context.Context,
 	delivery *agentDeliverySubmissionRuntime, outcome *promptDispatchOutcome, protocol string, cause error,
 ) error {
 	observed := outcome.snapshot()
-	if observed.accepted() || observed.refused() || (cause == nil && parent == nil) {
+	if observed.accepted() || observed.refused() || cause == nil {
 		return cause
 	}
 	if observed.evidence == promptDispatchPending {
-		cause = s.resolvePendingPromptDispatch(ctx, parent, delivery, outcome, cause)
+		cause = s.resolvePendingPromptDispatch(ctx, delivery, outcome, cause)
 		if outcome.snapshot().refused() {
 			return cause
 		}
 	}
-	// Ordinary non-durable failures retain their restoration policy without
-	// claiming proof of non-delivery. Errand and durable attempts cannot use it.
-	if ordinaryPromptFailureRollbackEligible(session, parent, delivery, protocol, cause) {
+	// Non-durable failures can retain ordinary restoration without proof of non-delivery.
+	if delivery == nil && protocol == messagequeue.DeliveryProtocolLegacy && !errors.Is(cause, agentruntime.ErrUncertainPromptDelivery) {
 		outcome.allowOrdinaryFailureRollback()
 	}
-	if parent == nil {
-		return cause
-	}
-	return s.resolveUncertainPromptParentAdmission(ctx, parent, outcome, cause)
+	return cause
 }
 
 func (s *Service) resolvePendingPromptDispatch(
-	ctx context.Context, parent *errandParentDispatch, delivery *agentDeliverySubmissionRuntime,
+	ctx context.Context, delivery *agentDeliverySubmissionRuntime,
 	outcome *promptDispatchOutcome, cause error,
 ) error {
 	var notSent *agentruntime.RequestNotSentError
 	if delivery == nil || errors.Is(cause, agentruntime.ErrUncertainPromptDelivery) || !errors.As(cause, &notSent) {
-		outcome.recordUnresolved(nil)
+		outcome.recordUnresolved()
 		return cause
 	}
 	if err := delivery.failUnsent(context.WithoutCancel(ctx)); err != nil {
-		outcome.recordUnresolved(nil)
+		outcome.recordUnresolved()
 		return errors.Join(cause, err)
 	}
-	outcome.recordNonDelivery(parent.decide(ctx, models.ErrandAdmissionRefused))
+	outcome.recordNonDelivery()
 	return cause
-}
-
-func ordinaryPromptFailureRollbackEligible(
-	session *models.TaskSession, parent *errandParentDispatch, delivery *agentDeliverySubmissionRuntime,
-	protocol string, cause error,
-) bool {
-	return delivery == nil && parent == nil && !models.IsErrandSession(session) &&
-		protocol == messagequeue.DeliveryProtocolLegacy && !errors.Is(cause, agentruntime.ErrUncertainPromptDelivery)
-}
-
-func (s *Service) resolveUncertainPromptParentAdmission(
-	ctx context.Context, parent *errandParentDispatch, outcome *promptDispatchOutcome, cause error,
-) error {
-	outcome.recordAdmissionError(parent.decide(ctx, models.ErrandAdmissionUnknown))
-	if cause == nil {
-		cause = errors.New("errand parent prompt acceptance was not observed")
-	}
-	return &errandParentPromptUncertainError{err: errors.Join(cause, agentruntime.ErrUncertainPromptDelivery)}
 }
