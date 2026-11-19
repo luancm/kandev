@@ -35,6 +35,31 @@ func TestErrandAdapterRequiresOwnedRuntime(t *testing.T) {
 	require.Len(t, sessions, 1)
 }
 
+func TestErrandAdapterRequiresTheFullReservedIdentity(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	adapter := NewErrandAdapter(f.svc)
+	for name, mutate := range map[string]func(*errands.LaunchRequest){
+		"no errand":     func(r *errands.LaunchRequest) { r.ErrandID = "" },
+		"no task":       func(r *errands.LaunchRequest) { r.TaskID = "" },
+		"no turn":       func(r *errands.LaunchRequest) { r.TurnID = "" },
+		"no submission": func(r *errands.LaunchRequest) { r.SubmissionID = "" },
+		"no profile":    func(r *errands.LaunchRequest) { r.AgentProfileID = "" },
+		"no objective":  func(r *errands.LaunchRequest) { r.Objective = "  " },
+		"no parent":     func(r *errands.LaunchRequest) { r.ParentSessionID = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := f.request()
+			mutate(&request)
+			result, err := adapter.LaunchErrand(t.Context(), request)
+			require.ErrorIs(t, err, models.ErrInvalidErrand)
+			require.Equal(t, errands.LaunchBlocked, result.Disposition)
+		})
+	}
+	sessions, err := f.repo.ListTaskSessions(t.Context(), f.taskID)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+}
+
 func TestErrandAdapterAttachesDockerTaskEnvironment(t *testing.T) {
 	for _, tc := range []ownedWorkspaceLaunchCase{
 		{name: "local saved environment", provider: models.ExecutorTypeLocalDocker},
@@ -312,48 +337,55 @@ func seedOwnedLaunchReceipt(t *testing.T, f *errandLaunchFixture, req errands.La
 	bound, err := f.repo.BindErrandExecution(ctx, req.ErrandID, 1, "execution")
 	require.NoError(t, err)
 	require.True(t, bound)
+	binding := prepareBoundOwnedLaunchReceipt(t, f.repo, req, 1, "execution", state, attempt)
+	if finish {
+		completeOwnedLaunchReceipt(t, f.repo, req, binding)
+	}
+}
+
+func prepareBoundOwnedLaunchReceipt(t *testing.T, repo *sqliterepo.Repository, req errands.LaunchRequest, generation uint64, executionID string, state models.DeliverySubmissionState, attempt string) *models.ErrandHarnessBinding {
+	t.Helper()
+	ctx := t.Context()
 	binding := &models.ErrandHarnessBinding{
-		ErrandID: req.ErrandID, Generation: 1, ExecutionID: "execution", IncarnationID: "incarnation",
+		ErrandID: req.ErrandID, Generation: generation, ExecutionID: executionID, IncarnationID: "incarnation",
 		HarnessGeneration: 1, StreamID: "stream", NativeSessionID: "native",
 	}
-	require.NoError(t, f.repo.AppendErrandHarnessBinding(ctx, binding, 0))
-	require.NoError(t, prepareOwnedErrandFirstTurn(ctx, f.repo, req))
+	require.NoError(t, repo.AppendErrandHarnessBinding(ctx, binding, 0))
+	require.NoError(t, prepareOwnedErrandFirstTurn(ctx, repo, req))
 	payload := []byte(req.Objective)
 	submission := &models.AgentDeliverySubmission{
 		ID: req.SubmissionID, DispatchAttemptID: attempt, Payload: payload, PayloadHash: journal.SubmissionHash(payload), State: state,
 	}
-	admitted, err := f.repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{
-		ErrandID: req.ErrandID, Generation: 1, ExecutionID: "execution", IncarnationID: "incarnation",
-		HarnessGeneration: 1, StreamID: "stream", NativeSessionID: "native",
+	admitted, err := repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{
+		ErrandID: req.ErrandID, Generation: generation, ExecutionID: executionID, IncarnationID: binding.IncarnationID,
+		HarnessGeneration: binding.HarnessGeneration, StreamID: binding.StreamID, NativeSessionID: binding.NativeSessionID,
 		PromptGeneration: 1, TurnID: req.TurnID, Submission: submission,
 	})
 	require.NoError(t, err)
 	require.True(t, admitted)
-	if finish {
-		completeOwnedLaunchReceipt(t, f, req)
-	}
+	return binding
 }
 
-func completeOwnedLaunchReceipt(t *testing.T, f *errandLaunchFixture, req errands.LaunchRequest) {
+func completeOwnedLaunchReceipt(t *testing.T, repo *sqliterepo.Repository, req errands.LaunchRequest, binding *models.ErrandHarnessBinding) {
 	t.Helper()
 	ctx := t.Context()
 	payload, err := json.Marshal(streams.AgentEvent{
-		Type: streams.EventTypeComplete, SessionID: "native", TurnID: req.TurnID, PromptGeneration: 1,
+		Type: streams.EventTypeComplete, SessionID: binding.NativeSessionID, TurnID: req.TurnID, PromptGeneration: 1,
 	})
 	require.NoError(t, err)
 	terminal := &models.AgentDeliveryEvent{
-		SessionID: models.ErrandExecutionIdentity(req.ErrandID), ExecutionID: "execution", TaskID: req.TaskID,
-		IncarnationID: "incarnation", HarnessGeneration: 1, OwnerGeneration: 1, StreamID: "stream",
-		ExpectedStreamID: "stream", SubmissionID: req.SubmissionID, Sequence: 1, Terminal: true,
+		SessionID: models.ErrandExecutionIdentity(req.ErrandID), ExecutionID: binding.ExecutionID, TaskID: req.TaskID,
+		IncarnationID: binding.IncarnationID, HarnessGeneration: binding.HarnessGeneration, OwnerGeneration: int64(binding.Generation), StreamID: binding.StreamID,
+		ExpectedStreamID: binding.StreamID, SubmissionID: req.SubmissionID, Sequence: 1, Terminal: true,
 		EventType: streams.EventTypeComplete, Payload: payload,
 	}
-	received, err := f.repo.ReceiveAgentDeliveryEvent(ctx, terminal, 1)
+	received, err := repo.ReceiveAgentDeliveryEvent(ctx, terminal, binding.HarnessGeneration)
 	require.NoError(t, err)
 	require.True(t, received)
-	projected, err := f.repo.ProjectAgentDeliveryEvent(ctx, terminal, nil)
+	projected, err := repo.ProjectAgentDeliveryEvent(ctx, terminal, nil)
 	require.NoError(t, err)
 	require.True(t, projected)
-	settled, err := f.repo.SettleAgentDeliveryTerminal(ctx, "stream", 1, models.DeliverySubmissionCompleted, time.Now())
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, binding.StreamID, terminal.Sequence, models.DeliverySubmissionCompleted, time.Now())
 	require.NoError(t, err)
 	require.True(t, settled)
 }
@@ -381,6 +413,9 @@ func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 	rt := ownedErrandLaunchFixtureRuntime{
 		launch: func(ctx context.Context, spec runtimeapi.LaunchSpec) (runtimeapi.ExecutionRef, error) {
 			require.Equal(t, req.AgentProfileID, spec.AgentProfileID)
+			require.Contains(t, spec.Prompt, req.Objective)
+			require.Contains(t, spec.Prompt, "errand of session "+req.ParentSessionID)
+			require.NotContains(t, spec.Prompt, "step_complete_kandev")
 			require.Equal(t, req.TaskID, spec.Owner.TaskID)
 			require.Equal(t, req.ErrandID, spec.Owner.ErrandID)
 			require.Empty(t, spec.Owner.SessionID)

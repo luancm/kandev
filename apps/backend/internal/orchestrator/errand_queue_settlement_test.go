@@ -124,6 +124,19 @@ func newQueueSettlementFixture(t *testing.T, parentSource bool) *queueSettlement
 		TaskSessionID: child.ID, TurnID: "settlement-A", AuthorType: models.MessageAuthorAgent,
 		Content: "canonical result A", CreatedAt: now}))
 	seedExecutorRunning(t, f.repo, child.ID, f.taskID, "settlement-execution")
+	manager, workerDone := configureSettlementDispatch(t, f)
+	by, metadata := messagequeue.QueuedByUser, map[string]interface{}{}
+	if parentSource {
+		by, metadata[errands.ParentPromptSenderMetadataKey] = messagequeue.QueuedByAgent, f.parent
+	}
+	entry, err := f.svc.messageQueue.QueueMessageWithMetadata(t.Context(), child.ID, f.taskID, "successor B", "", by, false, nil, metadata)
+	require.NoError(t, err)
+	require.NoError(t, f.svc.messageQueue.SetAutoRun(t.Context(), child.ID, true))
+	return &queueSettlementFixture{errandLaunchFixture: f, errands: service, child: child, manager: manager, entry: entry, workerDone: workerDone}
+}
+
+func configureSettlementDispatch(t *testing.T, f *errandLaunchFixture) (*settlementDispatchManager, chan struct{}) {
+	t.Helper()
 	manager := &settlementDispatchManager{retentionPromptAgentManager: &retentionPromptAgentManager{
 		durableDeliveryTestAgentManager: &durableDeliveryTestAgentManager{
 			mockAgentManager: &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: f.repo},
@@ -138,14 +151,7 @@ func newQueueSettlementFixture(t *testing.T, parentSource bool) *queueSettlement
 	workerDone := make(chan struct{})
 	var workerOnce sync.Once
 	f.svc.onQueuedMessageExecutionComplete = func() { workerOnce.Do(func() { close(workerDone) }) }
-	by, metadata := messagequeue.QueuedByUser, map[string]interface{}{}
-	if parentSource {
-		by, metadata[errands.ParentPromptSenderMetadataKey] = messagequeue.QueuedByAgent, f.parent
-	}
-	entry, err := f.svc.messageQueue.QueueMessageWithMetadata(t.Context(), child.ID, f.taskID, "successor B", "", by, false, nil, metadata)
-	require.NoError(t, err)
-	require.NoError(t, f.svc.messageQueue.SetAutoRun(t.Context(), child.ID, true))
-	return &queueSettlementFixture{errandLaunchFixture: f, errands: service, child: child, manager: manager, entry: entry, workerDone: workerDone}
+	return manager, workerDone
 }
 
 func (f *queueSettlementFixture) ready(t *testing.T) {
@@ -270,7 +276,13 @@ func TestErrandSettlementFailureParksSuccessorUntilDurableRetry(t *testing.T) {
 
 // @covers AC-TASKS-ERRANDS-006.1 AC-TASKS-ERRANDS-006.5
 func TestParentOutstandingQueueDrainDoesNotWriteReview(t *testing.T) {
-	f := newQueueSettlementFixture(t, false)
+	f := newErrandLaunchFixture(t)
+	f.svc.SetMessageCreator(&repositoryBackedMessageCreator{mockMessageCreator: &mockMessageCreator{}, repo: f.repo})
+	f.svc.SetTransientRetryMessageService(f.svc.turnService.(TransientRetryMessageService))
+	service, _, _ := newOwnedErrandServiceOnRealStack(t, f)
+	started := startErrand(t, service, f, "outstanding")
+	require.Equal(t, models.ErrandStatusRunning, started.Status)
+	manager, workerDone := configureSettlementDispatch(t, f)
 	parent, err := f.repo.GetTaskSession(t.Context(), f.parent)
 	require.NoError(t, err)
 	parent.State = models.TaskSessionStateRunning
@@ -281,7 +293,8 @@ func TestParentOutstandingQueueDrainDoesNotWriteReview(t *testing.T) {
 	_, err = f.svc.messageQueue.QueueMessage(t.Context(), f.parent, f.taskID, "parent successor", "", messagequeue.QueuedByUser, false, nil)
 	require.NoError(t, err)
 	f.svc.handleAgentReady(t.Context(), watcher.AgentEventData{TaskID: f.taskID, SessionID: f.parent, AgentExecutionID: "parent-execution", TurnID: "parent-A"})
-	f.awaitDispatch(t)
+	fixture := queueSettlementFixture{errandLaunchFixture: f, child: parent, manager: manager, workerDone: workerDone}
+	fixture.awaitDispatch(t)
 	f.taskRepo.mu.Lock()
 	history := append([]v1.TaskState(nil), f.taskRepo.stateHistory[f.taskID]...)
 	f.taskRepo.mu.Unlock()

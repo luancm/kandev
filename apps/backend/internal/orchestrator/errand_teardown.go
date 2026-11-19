@@ -621,3 +621,12 @@ func (o *errandTeardownOwner) cancelSession(ctx context.Context, session *models
 	o.transition = &errandTeardownTransition{before: session, after: after}
 	return nil
 }
+
+// Callers must exclude missing inventory and pending authenticated recovery.
+func (s *Service) hasErrandRuntimeAbsenceWitness(sessionID string, running *models.ExecutorRunning) bool {
+	if claim, ok := s.executionTeardownClaimFor(sessionID, running.AgentExecutionID); ok && claim.cleanupCompleted {
+		return true
+	}
+	return (running.Status == models.ExecutorRunningStatusStopped && running.LocalPID == 0) ||
+		s.rowLiveness(running) == models.ProcessLivenessDead
+}

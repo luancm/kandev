@@ -6,28 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-// The errand block is the trusted errand prompt, and an errand's first turn
-// does not advertise the parent or question tools that an errand never has.
-func TestErrandLaunchPromptUsesErrandPromptAndErrandSessionContext(t *testing.T) {
-	errand := &ErrandLaunch{ErrandID: "errand-1", ParentSessionID: "parent-1", Title: "Check logs"}
-	got := (&Service{}).applyLaunchPromptContext(context.Background(), launchPromptContext{
-		prompt:         "Find the failing test",
-		taskID:         "task-1",
-		sessionID:      "errand-1",
-		configMode:     false,
-		errand:         errand,
-		includeErrands: true,
-	})
-
-	require.Contains(t, got, "errand of session parent-1")
-	assert.Contains(t, got, "Find the failing test")
-	assert.NotContains(t, got, "start_errand_kandev")
-	assert.NotContains(t, got, "ask_user_question_kandev")
-	assert.NotContains(t, got, "Optional: session_id, delivery_mode")
-}
 
 func TestParentLaunchPromptAdvertisesErrandToolsAndProfiles(t *testing.T) {
 	got := (&Service{}).applyLaunchPromptContext(context.Background(), launchPromptContext{

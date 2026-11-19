@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -273,8 +274,10 @@ func ownedErrandRuntimePrompt(ctx context.Context, req errands.LaunchRequest, la
 	if launch.ErrandPredecessor != nil && errands.ParentPromptOriginFromContext(ctx).SenderSessionID != "" {
 		return req.Objective
 	}
-	prompt, _ := applyErrandOriginContext(req.Objective, "", &ErrandLaunch{ParentSessionID: req.ParentSessionID, Title: req.Title})
-	return prompt
+	if sysprompt.StripTags(req.ParentSessionID) == "" {
+		return req.Objective
+	}
+	return sysprompt.Wrap(sysprompt.FormatErrandContext(req.ParentSessionID, req.Title)) + "\n\n" + req.Objective
 }
 
 func ownedErrandLaunchRequest(req errands.LaunchRequest, info *runtimeapi.WorkspaceInfo, attachment *ownedErrandWorkspaceAttachment) *runtimeapi.LaunchRequest {

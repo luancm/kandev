@@ -1621,7 +1621,6 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 
 	metadata := cloneMetadata(task.Metadata)
 	// Task metadata cannot grant session launch provenance.
-	delete(metadata, models.SessionMetaKeyErrandLaunchAuthority)
 	metadata = seed.ApplyToMetadata(metadata)
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
@@ -1717,12 +1716,6 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID
 	}
-	if isErrand, err := applyErrandSessionIdentity(ctx, session); err != nil {
-		return "", err
-	} else if isErrand {
-		isPrimarySession = false
-	}
-	metadata = session.Metadata
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
 	// Store executor profile ID on session

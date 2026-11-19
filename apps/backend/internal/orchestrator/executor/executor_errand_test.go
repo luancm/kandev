@@ -10,30 +10,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-TASKS-ERRANDS-001.1 AC-TASKS-ERRANDS-005.2
-func TestPrepareSessionErrandRoleParentAndNeverPrimary(t *testing.T) {
-	repo := newMockRepository()
-	seedPreflightTaskRepository(repo, "task-1", "repo-1", &models.Repository{ID: "repo-1", SourceType: sourceTypeLocal})
-	exec := newPreflightTestExecutor(t, repo)
-	identity := models.ReservedLaunchIdentity{TaskID: "task-1", SessionID: "errand-1", TurnID: "turn-1", SubmissionID: "sub-1"}
-	ctx := WithErrandSession(models.WithReservedLaunchIdentity(context.Background(), identity), "parent-1")
-
-	sessionID, err := exec.PrepareSession(ctx, &v1.Task{ID: "task-1", WorkspaceID: "workspace-1"}, "agent-profile", "", "", "")
-	if err != nil {
-		t.Fatalf("PrepareSession: %v", err)
-	}
-	if sessionID != "errand-1" || len(repo.createTaskSessionCalls) != 1 {
-		t.Fatalf("session %q created %d rows, want the reserved session once", sessionID, len(repo.createTaskSessionCalls))
-	}
-	created := repo.createTaskSessionCalls[0]
-	if created.Role != models.SessionRoleErrand || created.ParentSessionID != "parent-1" {
-		t.Fatalf("role/parent = %q/%q, want errand/parent-1", created.Role, created.ParentSessionID)
-	}
-	if created.IsPrimary || len(repo.setSessionPrimaryCalls) != 0 {
-		t.Fatalf("errand primary=%v, primary writes=%d, want never primary", created.IsPrimary, len(repo.setSessionPrimaryCalls))
-	}
-}
-
 func TestPrepareSessionWithoutErrandContextKeepsOrdinaryRole(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -43,15 +19,6 @@ func TestPrepareSessionWithoutErrandContextKeepsOrdinaryRole(t *testing.T) {
 	created := repo.createTaskSessionCalls[0]
 	if created.Role != "" || created.ParentSessionID != "" || !created.IsPrimary {
 		t.Fatalf("ordinary session = role %q parent %q primary %v", created.Role, created.ParentSessionID, created.IsPrimary)
-	}
-}
-
-func TestErrandSessionContextRequiresAParent(t *testing.T) {
-	if _, ok := errandParentFromContext(WithErrandSession(context.Background(), "")); ok {
-		t.Fatal("an errand context without a parent was accepted")
-	}
-	if parent, ok := errandParentFromContext(WithErrandSession(context.Background(), "parent-1")); !ok || parent != "parent-1" {
-		t.Fatalf("parent = %q, %v", parent, ok)
 	}
 }
 

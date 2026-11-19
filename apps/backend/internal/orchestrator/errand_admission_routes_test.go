@@ -8,58 +8,11 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
-
-type firstErrandAdmissionManager struct {
-	*errandLaunchManager
-	durable bool
-}
-
-func (m *firstErrandAdmissionManager) DurableDeliveryCapabilityForExecution(context.Context, string) (agentruntime.DurableDeliveryCapability, bool) {
-	return agentruntime.DurableDeliveryCapability{Version: journal.CurrentVersion, Durable: true}, m.durable
-}
-
-func TestErrandAdmissionNewErrandLaunchUsesReservedIdentity(t *testing.T) {
-	for _, durable := range []bool{false, true} {
-		name := map[bool]string{false: messagequeue.DeliveryProtocolLegacy, true: messagequeue.DeliveryProtocolV1}[durable]
-		t.Run(name, func(t *testing.T) {
-			f := newErrandLaunchFixture(t)
-			service, _ := newErrandServiceOnRealStack(t, f)
-			manager := &firstErrandAdmissionManager{errandLaunchManager: f.manager, durable: durable}
-			f.svc.agentManager = manager
-			f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
-			started := make(chan struct{}, 1)
-			manager.startAgentProcessFunc = func(context.Context, string) error { started <- struct{}{}; return nil }
-			result := startErrand(t, service, f, "first prompt")
-			select {
-			case <-started:
-			case <-time.After(5 * time.Second):
-				t.Fatal("first prompt worker did not start")
-			}
-			manager.mu.Lock()
-			admit, accepted := manager.initialPromptAdmissionCallback, manager.initialPromptDispatchCallback
-			manager.mu.Unlock()
-			require.NotNil(t, admit)
-			require.NotNil(t, accepted)
-			require.NoError(t, admit(t.Context(), "prepared first prompt", nil))
-			pending, err := f.repo.ListUnresolvedErrandParentAdmissions(t.Context(), result.Errand.ID)
-			require.NoError(t, err)
-			require.Len(t, pending, 1)
-			require.Equal(t, result.Errand.FirstTurnID, pending[0].TurnID)
-			require.Equal(t, normalizeDeliverySubmissionID(result.Errand.SubmissionID), pending[0].SubmissionID)
-			accepted()
-			row, err := f.repo.GetErrand(t.Context(), result.Errand.ID)
-			require.NoError(t, err)
-			require.EqualValues(t, 1, row.ParentAdmissionGeneration)
-		})
-	}
-}
 
 func awaitAdmissionRow(t *testing.T, f *admissionIntegrationFixture) {
 	t.Helper()

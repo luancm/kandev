@@ -352,24 +352,24 @@ func TestErrandIsolationDoesNotDependOnErrandsFlag(t *testing.T) {
 }
 
 type parentSettlementFaultStore struct {
-	errands.Store
+	*sqliterepo.Repository
 	mu           sync.Mutex
 	failNext     bool
 	failureCount int
 }
 
-func (s *parentSettlementFaultStore) ListErrandsByParent(
+func (s *parentSettlementFaultStore) GetParentErrandState(
 	ctx context.Context, parentSessionID string,
-) ([]*models.Errand, error) {
+) (bool, bool, error) {
 	s.mu.Lock()
 	if s.failNext {
 		s.failNext = false
 		s.failureCount++
 		s.mu.Unlock()
-		return nil, errors.New("injected parent errand read failure")
+		return false, false, errors.New("injected parent errand read failure")
 	}
 	s.mu.Unlock()
-	return s.Store.ListErrandsByParent(ctx, parentSessionID)
+	return s.Repository.GetParentErrandState(ctx, parentSessionID)
 }
 
 func (s *parentSettlementFaultStore) failNextParentRead() {
@@ -385,17 +385,18 @@ func (s *parentSettlementFaultStore) failures() int {
 }
 
 type parentSettlementFailureFixture struct {
-	repo         *sqliterepo.Repository
-	service      *Service
-	taskRepo     *mockTaskRepo
-	agentManager *mockAgentManager
-	errands      *errands.Service
-	store        *parentSettlementFaultStore
-	taskID       string
-	parentID     string
-	turnID       string
-	errandID     string
-	event        watcher.AgentEventData
+	repo          *sqliterepo.Repository
+	service       *Service
+	taskRepo      *mockTaskRepo
+	agentManager  *mockAgentManager
+	errandRuntime *errandServiceRuntime
+	errands       *errands.Service
+	store         *parentSettlementFaultStore
+	taskID        string
+	parentID      string
+	turnID        string
+	errandID      string
+	event         watcher.AgentEventData
 }
 
 func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettlementFailureFixture {
@@ -490,36 +491,32 @@ func newParentSettlementFailureFixture(t *testing.T, suffix string) *parentSettl
 		}
 	})
 	service.SetWorkflowStepGetter(steps)
-	store := &parentSettlementFaultStore{Store: repo}
+	store := &parentSettlementFaultStore{Repository: repo}
 	adapter := NewErrandAdapter(service)
+	runtime := configureOwnedErrandServiceRuntime(t, adapter)
 	errService, err := errands.New(errands.Dependencies{
-		Store: store, Launcher: legacyErrandTestLauncher{service}, Stopper: adapter, MCP: adapter,
+		Store: store, Launcher: adapter, Stopper: adapter, MCP: adapter,
 		Profiles: errandProfileStub{}, Events: &errandEventRecorder{}, Logger: testLogger(),
 	})
 	require.NoError(t, err)
 	service.SetErrandController(errService)
-	errService.SetTurnReader(settlementTranscript{repo})
-	admitted := installLaunchAdoptionProvider(t, launch)
+	errService.SetTurnReader(ownedSettlementTranscript{repo: repo})
 	service.executor.SetOnTaskRuntimeStateReconcile(service.reconcileTaskStateForRuntime)
 	started, err := errService.Start(ctx, errands.StartRequest{
 		TaskID: taskID, ParentSessionID: parentID, Title: "read failure", Objective: "stay outstanding",
 	})
 	require.NoError(t, err)
-	select {
-	case admissionErr := <-admitted:
-		require.NoError(t, admissionErr)
-	case <-time.After(5 * time.Second):
-		t.Fatal("errand initial prompt admission did not finish")
-	}
-	assertOneErrandLaunch(t, launch)
+	require.Equal(t, models.ErrandStatusRunning, started.Status)
 	errRow, err := repo.GetErrand(ctx, started.Errand.ID)
 	require.NoError(t, err)
 	require.True(t, errRow.AwaitingResult, "the production errand row must still owe its parent an outcome: %+v", errRow)
-	executionID, err := launch.manager.GetExecutionIDForSession(ctx, started.Errand.ID)
+	execution, err := repo.GetErrandExecutionDescriptor(ctx, started.Errand.ID)
 	require.NoError(t, err)
-	seedExecutorRunning(t, repo, started.Errand.ID, taskID, executionID)
+	registered, err := runtime.GetExecution(ctx, execution.ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, started.Errand.ID, registered.Owner.ErrandID)
 	return &parentSettlementFailureFixture{
-		repo: repo, service: service, taskRepo: taskRepo, agentManager: manager, errands: errService,
+		repo: repo, service: service, taskRepo: taskRepo, agentManager: manager, errandRuntime: runtime, errands: errService,
 		store: store, taskID: taskID, parentID: parentID, turnID: turnID, errandID: started.Errand.ID,
 		event: watcher.AgentEventData{
 			TaskID: taskID, SessionID: parentID, TurnID: turnID, AgentExecutionID: manager.currentPromptExecutionID,
@@ -574,14 +571,16 @@ func TestErrandParentSettlementReadFailureNeverMovesOrReviewsTask(t *testing.T) 
 			errRow, err := f.repo.GetErrand(context.Background(), f.errandID)
 			require.NoError(t, err)
 			require.True(t, errRow.AwaitingResult, "the outstanding errand must remain unchanged")
-			child, err := f.repo.GetExecutorRunningBySessionID(context.Background(), f.errandID)
+			child, err := f.repo.GetErrandExecutionDescriptor(context.Background(), f.errandID)
 			require.NoError(t, err)
-			require.NotNil(t, child, "the live child must have a runtime to exercise stop isolation")
+			_, err = f.errandRuntime.GetExecution(t.Context(), child.ExecutionID)
+			require.NoError(t, err, "the live Errand must keep its exact runtime")
+			require.Empty(t, f.errandRuntime.stopped)
 			f.agentManager.mu.Lock()
 			stops := slices.Clone(f.agentManager.stopAgentWithReasonArgs)
 			f.agentManager.mu.Unlock()
 			for _, stopped := range stops {
-				require.NotEqual(t, child.AgentExecutionID, stopped.ExecutionID, "parent settlement failure must not stop the errand")
+				require.NotEqual(t, child.ExecutionID, stopped.ExecutionID, "parent settlement failure must not stop the errand")
 			}
 			session := mustGetSession(t, f.repo, f.parentID)
 			_, hasSignal := models.LoadPendingStepSignal(session.Metadata)
@@ -601,12 +600,16 @@ func settleParentFixtureErrand(t *testing.T, f *parentSettlementFailureFixture) 
 	ctx := context.Background()
 	row, err := f.repo.GetErrand(ctx, f.errandID)
 	require.NoError(t, err)
-	require.NoError(t, f.repo.CompleteTurn(ctx, row.FirstTurnID))
-	setSessionState(t, ctx, f.repo, f.errandID, models.TaskSessionStateWaitingForInput)
-	require.NoError(t, f.errands.OnErrandTurnSettled(ctx, errands.TurnSettlement{
-		SessionID: row.ID, TurnID: row.FirstTurnID, SubmissionID: row.SubmissionID,
-		Outcome: models.ErrandOutcomeFailed, FailureSummary: "finished child outcome",
-	}))
+	descriptor, err := f.repo.GetErrandExecutionDescriptor(ctx, row.ID)
+	require.NoError(t, err)
+	request := errands.LaunchRequest{
+		ErrandID: row.ID, TaskID: row.TaskID, ParentSessionID: row.ParentSessionID,
+		Title: row.Title, Objective: row.Objective, AgentProfileID: row.AgentProfileID,
+		TurnID: row.FirstTurnID, SubmissionID: row.SubmissionID,
+	}
+	binding := prepareBoundOwnedLaunchReceipt(t, f.repo, request, descriptor.Generation, descriptor.ExecutionID, models.DeliverySubmissionAccepted, descriptor.ExecutionID)
+	completeOwnedLaunchReceipt(t, f.repo, request, binding)
+	require.NoError(t, f.errands.SweepDelivery(ctx))
 	parent, err := f.repo.GetTaskSession(ctx, f.parentID)
 	require.NoError(t, err)
 	result, err := f.errands.Await(ctx, errands.AwaitRequest{

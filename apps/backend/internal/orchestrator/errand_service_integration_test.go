@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -52,7 +53,7 @@ func newErrandServiceOnRealStack(t *testing.T, f *errandLaunchFixture) (*errands
 	adapter := NewErrandAdapter(f.svc)
 	recorder := &errandEventRecorder{}
 	service, err := errands.New(errands.Dependencies{
-		Store: f.repo, Launcher: legacyErrandTestLauncher{f.svc}, Stopper: adapter, MCP: adapter,
+		Store: f.repo, Launcher: adapter, Stopper: adapter, MCP: adapter,
 		Profiles: errandProfileStub{}, Events: recorder, Logger: testLogger(),
 	})
 	require.NoError(t, err)
@@ -76,10 +77,24 @@ func TestErrandServiceStartsAndCancelsAnOwnedErrandOnTheRealStack(t *testing.T) 
 	ctx := t.Context()
 	f := newErrandLaunchFixture(t)
 	service, runtime, recorder := newOwnedErrandServiceOnRealStack(t, f)
+	taskBefore, err := f.repo.GetTask(ctx, f.taskID)
+	require.NoError(t, err)
 
 	result := startErrand(t, service, f, "audit")
 	require.Equal(t, models.ErrandStatusRunning, result.Status)
 	require.Equal(t, []models.ErrandStatus{models.ErrandStatusQueued, models.ErrandStatusRunning}, recorder.seen())
+	taskAfter, err := f.repo.GetTask(ctx, f.taskID)
+	require.NoError(t, err)
+	require.Equal(t, taskBefore.State, taskAfter.State)
+	require.Zero(t, f.taskRepo.stateWrites[f.taskID])
+	require.Equal(t, taskBefore.WorkflowStepID, taskAfter.WorkflowStepID)
+	require.NotContains(t, taskAfter.Metadata, models.MetaKeyDeferredLaunch)
+	kept, found := models.LoadTaskLaunchError(taskAfter.Metadata)
+	require.True(t, found)
+	require.Equal(t, f.launchError.Stamp(), kept.Stamp())
+	binding, err := f.repo.GetWorkflowSessionBinding(ctx, f.taskID, workflowSessionBindingTargetKey("step-1"))
+	require.NoError(t, err)
+	require.Nil(t, binding)
 	before, _, err := f.repo.ListErrandMessages(ctx, result.Errand.ID, "", 10)
 	require.NoError(t, err)
 	require.Len(t, before, 1)
@@ -107,6 +122,7 @@ func TestErrandServiceStartsAndCancelsAnOwnedErrandOnTheRealStack(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	require.Equal(t, f.parent, sessions[0].ID)
+	require.True(t, sessions[0].IsPrimary)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, sessions[0].State)
 }
 
@@ -196,6 +212,11 @@ func (r *lifecycleDeliveryRecorder) AdmitPrepared(ctx context.Context, parent, c
 func newLifecycleService(t *testing.T, f *errandLaunchFixture, store errands.Store) (*errands.Service, *lifecycleDeliveryRecorder) {
 	t.Helper()
 	adapter := NewErrandAdapter(f.svc)
+	if f.errandsRuntime == nil {
+		f.errandsRuntime = configureOwnedErrandServiceRuntime(t, adapter)
+	} else {
+		f.errandsRuntime.attach(adapter)
+	}
 	if f.svc.errands == nil {
 		// This wrapper borrows the fixture's existing pool; the fixture owns Close.
 		pool := sqlx.NewDb(f.repo.DB(), "sqlite3")
@@ -205,7 +226,7 @@ func newLifecycleService(t *testing.T, f *errandLaunchFixture, store errands.Sto
 		require.NoError(t, f.svc.messageQueue.SetAutoRun(t.Context(), f.parent, false))
 	}
 	delivery := &lifecycleDeliveryRecorder{ParentDeliverer: NewErrandParentDeliverer(f.svc)}
-	service, err := errands.New(errands.Dependencies{Store: store, Launcher: legacyErrandTestLauncher{f.svc}, Stopper: adapter,
+	service, err := errands.New(errands.Dependencies{Store: store, Launcher: adapter, Stopper: adapter,
 		MCP: adapter, Profiles: errandProfileStub{}, Events: &errandEventRecorder{}, Deliverer: delivery, Logger: testLogger()})
 	require.NoError(t, err)
 	f.svc.SetErrandController(service)
@@ -247,8 +268,6 @@ func seedLifecycleQueued(t *testing.T, repo *sqliterepo.Repository, taskID, pare
 
 func seedLifecycleHistory(t *testing.T, f *errandLaunchFixture, id string, state models.ErrandResultState) *models.Errand {
 	t.Helper()
-	seedOrdinarySession(t, f.repo, f.taskID, id, models.TaskSessionStateWaitingForInput, -time.Minute)
-	markSessionErrand(t, f.repo, id, f.parent)
 	row := seedLifecycleQueued(t, f.repo, f.taskID, f.parent, id)
 	row.Lifecycle, row.AwaitingResult, row.LastOutcome = models.ErrandLifecycleLaunched, false, models.ErrandOutcomeDone
 	row.ResultState, row.ResultKind, row.ResultText, row.ResultTurnID = state, models.ErrandResultOutput, "saved result "+id, row.FirstTurnID
@@ -270,8 +289,6 @@ func persistLifecycleLoss(t *testing.T, f *errandLaunchFixture, loss string) {
 		_, err = f.repo.DB().ExecContext(t.Context(), `DELETE FROM task_sessions WHERE id = ?`, f.parent)
 	case "wrong task":
 		_, err = f.repo.DB().ExecContext(t.Context(), `UPDATE task_sessions SET task_id = 'task-2' WHERE id = ?`, f.parent)
-	case "errand parent":
-		markSessionErrand(t, f.repo, f.parent, "other-parent")
 	default:
 		_, err = f.repo.DB().ExecContext(t.Context(), `UPDATE task_sessions SET state = ? WHERE id = ?`, loss, f.parent)
 	}
@@ -280,7 +297,7 @@ func persistLifecycleLoss(t *testing.T, f *errandLaunchFixture, loss string) {
 
 // @covers AC-TASKS-ERRANDS-007.2 AC-TASKS-ERRANDS-007.4 AC-TASKS-ERRANDS-008.2 AC-TASKS-ERRANDS-012.3
 func TestErrandLifecycleRecoveryCancelsLostCascadeBeforeDrain(t *testing.T) {
-	for _, loss := range []string{"FAILED", "CANCELLED", "COMPLETED", "missing parent", "archived task", "wrong task", "errand parent"} {
+	for _, loss := range []string{"FAILED", "CANCELLED", "COMPLETED", "missing parent", "archived task", "wrong task"} {
 		for _, enabled := range []bool{true, false} {
 			label := "enabled"
 			if !enabled {
@@ -323,8 +340,7 @@ func TestErrandLifecycleRecoveryCancelsLostCascadeBeforeDrain(t *testing.T) {
 				}
 				_, err = f.repo.GetTaskSession(t.Context(), queued.ID)
 				require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
-				_, running := f.manager.GetExecution("execution-" + launched.ID)
-				require.False(t, running, "the exact captured runtime was stopped")
+				assertLifecycleRuntime(t, f, launched.ID, false)
 				got, err := f.repo.GetErrand(t.Context(), pending.ID)
 				require.NoError(t, err)
 				require.Equal(t, models.ErrandResultDiscarded, got.ResultState)
@@ -497,78 +513,10 @@ func TestErrandLifecycleParentTurnCancelIsNotTerminal(t *testing.T) {
 	after, err := f.repo.GetErrand(t.Context(), launched.ID)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
-	_, running := f.manager.GetExecution("execution-" + launched.ID)
-	require.True(t, running)
+	assertLifecycleRuntime(t, f, launched.ID, true)
 	after, err = f.repo.GetErrand(t.Context(), queued.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandLifecycleLaunched, after.Lifecycle)
-}
-
-func TestErrandAdmissionRechecksParentBeforeCreation(t *testing.T) {
-	f := newErrandLaunchFixture(t)
-	row := seedLifecycleQueued(t, f.repo, f.taskID, f.parent, "creation-child")
-	service, delivery := newLifecycleService(t, f, f.repo)
-	gate := &errandCreationGateRepo{Repository: f.repo, reached: make(chan struct{}), allow: make(chan struct{})}
-	f.svc.repo = gate
-	done := make(chan struct{})
-	var once sync.Once
-	release := func() { once.Do(func() { close(gate.allow) }) }
-	go func() { defer close(done); service.DrainQueued(t.Context()) }()
-	t.Cleanup(func() { release(); coordinatorStopAwaitSignal(t, done, "creation guard cleanup") })
-	coordinatorStopAwaitSignal(t, gate.reached, "before session creation")
-	persistLifecycleLoss(t, f, "FAILED")
-	release()
-	coordinatorStopAwaitSignal(t, done, "creation owner guard")
-	_, err := f.repo.GetTaskSession(t.Context(), row.ID)
-	require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
-	got, err := f.repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandLifecycleCancelled, got.Lifecycle)
-	require.Empty(t, f.manager.launchedWith)
-	require.Empty(t, delivery.parents)
-}
-
-func TestErrandAdmissionRechecksParentBeforeRegistration(t *testing.T) {
-	f := newErrandLaunchFixture(t)
-	row := seedLifecycleQueued(t, f.repo, f.taskID, f.parent, "registration-child")
-	service, delivery := newLifecycleService(t, f, f.repo)
-	gate := &errandRegistrationGateRepo{Repository: f.repo, reached: make(chan struct{}), allow: make(chan struct{})}
-	f.svc.repo = gate
-	done := make(chan struct{})
-	var once sync.Once
-	release := func() { once.Do(func() { close(gate.allow) }) }
-	go func() { defer close(done); service.DrainQueued(t.Context()) }()
-	t.Cleanup(func() { release(); coordinatorStopAwaitSignal(t, done, "registration guard cleanup") })
-	coordinatorStopAwaitSignal(t, gate.reached, "after creation before runtime allocation")
-	persistLifecycleLoss(t, f, "CANCELLED")
-	release()
-	coordinatorStopAwaitSignal(t, done, "runtime registration owner guard")
-	got, err := f.repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandLifecycleCancelled, got.Lifecycle)
-	require.Empty(t, f.manager.launchedWith)
-	require.Empty(t, delivery.parents)
-}
-
-func TestErrandAdmissionRechecksParentBeforeDispatch(t *testing.T) {
-	f := newErrandLaunchFixture(t)
-	service, delivery := newLifecycleService(t, f, f.repo)
-	row := startErrand(t, service, f, "dispatch-child").Errand
-	f.manager.mu.Lock()
-	before, accepted, failed := f.manager.initialPromptAdmissionCallback, f.manager.initialPromptDispatchCallback, f.manager.initialPromptFailureCallback
-	f.manager.mu.Unlock()
-	require.NotNil(t, before)
-	t.Cleanup(failed)
-	persistLifecycleLoss(t, f, "COMPLETED")
-	require.Error(t, before(t.Context(), "initial payload", nil), "terminal owner refuses provider dispatch")
-	accepted()
-	require.NoError(t, service.Reconcile(t.Context()))
-	got, err := f.repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandLifecycleCancelled, got.Lifecycle)
-	_, running := f.manager.GetExecution("execution-" + row.ID)
-	require.False(t, running, "an allocated runtime is compensated by exact teardown")
-	require.Empty(t, delivery.parents)
 }
 
 func TestErrandLifecycleRecoveryRetriesPartialStopFailure(t *testing.T) {
@@ -579,8 +527,7 @@ func TestErrandLifecycleRecoveryRetriesPartialStopFailure(t *testing.T) {
 	pending := seedLifecycleHistory(t, f, "partial-pending", models.ErrandResultPending)
 	persistLifecycleLoss(t, f, "FAILED")
 	fault := errors.New("provider stop unavailable")
-	stop := f.manager.stopAgentWithReasonFunc
-	f.manager.stopAgentWithReasonFunc = func(context.Context, string, string, bool) error { return fault }
+	f.errandsRuntime.stopErr = fault
 	require.ErrorIs(t, service.Reconcile(t.Context()), fault)
 	got, err := f.repo.GetErrand(t.Context(), launched.ID)
 	require.NoError(t, err)
@@ -593,14 +540,26 @@ func TestErrandLifecycleRecoveryRetriesPartialStopFailure(t *testing.T) {
 	got, err = f.repo.GetErrand(t.Context(), pending.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandResultDiscarded, got.ResultState)
-	f.manager.stopAgentWithReasonFunc = stop
+	f.errandsRuntime.stopErr = nil
 	service.SetEnabled(func() bool { return false })
 	f.svc.ceilingSweepTick(t.Context())
 	got, err = f.repo.GetErrand(t.Context(), launched.ID)
 	require.NoError(t, err)
 	require.Equal(t, intentID, got.TeardownIntent.ID)
 	require.Equal(t, models.ErrandTeardownIntentCompleted, got.TeardownIntent.State)
-	_, running := f.manager.GetExecution("execution-" + launched.ID)
-	require.False(t, running)
+	assertLifecycleRuntime(t, f, launched.ID, false)
 	require.Empty(t, delivery.parents)
+}
+
+func assertLifecycleRuntime(t *testing.T, f *errandLaunchFixture, errandID string, running bool) {
+	t.Helper()
+	descriptor, err := f.repo.GetErrandExecutionDescriptor(t.Context(), errandID)
+	require.NoError(t, err)
+	require.NotEmpty(t, descriptor.ExecutionID)
+	_, err = f.errandsRuntime.GetExecution(t.Context(), descriptor.ExecutionID)
+	if running {
+		require.NoError(t, err)
+	} else {
+		require.ErrorIs(t, err, runtimeapi.ErrNotFound)
+	}
 }

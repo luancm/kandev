@@ -871,7 +871,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitCreatedSessionLaunch(ctx, session, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, session.TaskID, session.ID, originFromAutoStart(autoStart), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -885,11 +885,7 @@ func (s *Service) startCreatedSession(
 	// session state this start owns, and a gate that claims the intent during
 	// that work launches its own session alongside it. Deferred release covers
 	// every failure path; see deferredLaunchClaim.
-	deferredClaimOptions := startTaskOptions{}
-	if isErrandSession {
-		deferredClaimOptions.Errand = &ErrandLaunch{}
-	}
-	launchClaim := s.deferredLaunchClaimForStart(ctx, taskID, deferredClaimOptions)
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
 	defer launchClaim.releaseIfHeld(ctx)
 
 	effectiveProfileID, err := s.resolveCreatedSessionProfile(ctx, taskID, session, agentProfileID)
@@ -1100,10 +1096,7 @@ func (s *Service) startCreatedSession(
 	var initialTurnID string
 	var initialTurnCreated bool
 	if !options.noInitialTurn {
-		initialTurnID, initialTurnCreated, err = s.startInitialLaunchTurn(ctx, sessionID)
-		if err != nil {
-			return nil, err
-		}
+		initialTurnID, initialTurnCreated = s.startTurnForSessionWithOwnership(ctx, sessionID)
 	}
 	ctx = bindWorkflowStartPromptAttemptTurn(ctx, initialTurnID)
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, options.ceilingEntryBinding); err != nil {
@@ -1161,12 +1154,6 @@ func (s *Service) startCreatedSession(
 			options.errandParentOrigin = errands.ParentPromptOriginFromContext(ctx)
 		}
 		s.configureInitialDeliveryAdmission(session, options, &launchOptions)
-	}
-	if _, reserved := ctx.Value(errandLaunchReservationKey{}).(errands.LaunchRequest); reserved {
-		if err := s.configureReservedErrandTurn(ctx, session, &launchOptions); err != nil {
-			return nil, err
-		}
-		s.fenceErrandInitialLaunch(session, &launchOptions)
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
 		launchOptions.OnExecutionAdmitted = func(executionID string) {
@@ -1247,8 +1234,6 @@ func (s *Service) configureInitialPromptDispatch(
 // wrapCreatedSessionPrompt adds the first-turn context for a prepared session.
 // Passthrough sessions intentionally receive only the short pending-title
 // instruction; structured sessions receive the normal task or Office block.
-// An errand session also receives its trusted errand block, rebuilt from the
-// durable errand row, so a replayed first submission matches first delivery.
 func (s *Service) wrapCreatedSessionPrompt(
 	ctx context.Context,
 	prompt, taskID, sessionID string,
@@ -1584,10 +1569,6 @@ type startTaskOptions struct {
 	// MCPServerIDs replaces the selections for the task session. Nil means the
 	// caller did not request a session-scoped change.
 	MCPServerIDs []string
-	// Errand marks the launch as an errand session. Such a start never reads or
-	// writes task-owned launch state: no deferred-launch claim or record, no
-	// task scheduling state, no workflow step binding, and no launch-error card.
-	Errand *ErrandLaunch
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1724,7 +1705,6 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
-	ctx = withErrandSessionContext(ctx, opts.Errand)
 	if opts.ceilingEntryBinding != nil {
 		ctx = withCeilingEntryBinding(ctx, opts.ceilingEntryBinding)
 	}
@@ -1795,9 +1775,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
-	seam1Res, deferred, err := s.admitStartSeam1(ctx, taskID, origin, opts, func() map[string]interface{} {
-		return seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts)
-	})
+	startPayload := seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts)
+	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin, startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -1812,7 +1791,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// this start has already created a session is a window that ends in two.
 	// The deferred release covers every failure path, including the early
 	// returns just below.
-	launchClaim := s.deferredLaunchClaimForStart(ctx, taskID, opts)
+	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
 	defer launchClaim.releaseIfHeld(ctx)
 
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
@@ -1842,7 +1821,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// bound to its current step. Resolve that canonical step before profile
 	// selection and launch-layer session configuration so a start-step rule is
 	// applied before the first prompt as well.
-	if workflowSessionConfigStepID == "" && opts.Errand == nil {
+	if workflowSessionConfigStepID == "" {
 		if dbTask, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
 			s.logger.Warn("failed to fetch task for workflow step fallback",
 				zap.String("task_id", taskID), zap.Error(taskErr))
@@ -1865,7 +1844,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if isOfficeTask {
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
-	} else if opts.Errand == nil {
+	} else {
 		schedulingClaim = s.beginTaskScheduling(ctx, taskID)
 		if schedulingClaim != nil {
 			defer func() {
@@ -2016,11 +1995,6 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
 		return nil, err
 	}
-	if opts.Errand != nil {
-		if err := s.applyErrandMCPExclusions(ctx, task.WorkspaceID, sessionID, opts.Errand.MCPExcludedServerIDs); err != nil {
-			return nil, err
-		}
-	}
 	// Session preparation can reuse an Office session that was parked after a
 	// native restore failure. Check at the shared start boundary so autonomous
 	// callers return the typed recovery error to Office instead of dispatching
@@ -2170,7 +2144,6 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
 			spawnOrigin:               opts.SpawnOrigin,
-			errand:                    opts.Errand,
 			includeErrands:            includeErrands,
 			errandProfiles:            errandProfiles,
 		})
@@ -2188,10 +2161,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, failPreparedLaunch(err)
 		}
 	}
-	initialTurnID, initialTurnCreated, err := s.startInitialLaunchTurn(ctx, sessionID)
-	if err != nil {
-		return nil, failPreparedLaunch(err)
-	}
+	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
 	if claimedCeilingBinding {
 		if err := s.validateClaimedCeilingBinding(ctx, taskID, opts.ceilingEntryBinding); err != nil {
 			if initialTurnCreated {
@@ -2234,9 +2204,6 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err := s.configureRetryInitialLaunch(ctx, sessionID, initialTurnID, &launchOptions); err != nil {
 		return nil, failPreparedLaunch(err)
 	}
-	if err := s.configureErrandInitialLaunch(ctx, opts.Errand, launchSession, &launchOptions); err != nil {
-		return nil, failPreparedLaunch(err)
-	}
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
 		if initialTurnCreated {
@@ -2251,9 +2218,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	s.markWorkspaceGroupMaterialized(ctx, taskID)
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 	execution.TurnID = initialTurnID
-	if opts.Errand == nil {
-		s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
-	}
+	s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
 
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
@@ -2308,7 +2273,6 @@ type launchPromptContext struct {
 	includeParentQuestionTool bool
 	referenceContext          string
 	spawnOrigin               *SpawnOrigin
-	errand                    *ErrandLaunch
 	includeErrands            bool
 	errandProfiles            []sysprompt.ErrandProfile
 }
@@ -2336,7 +2300,6 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// not recognize, so the block has to be generated from the same server state
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
-	prompt, spawnContext = applyErrandOriginContext(prompt, spawnContext, p.errand)
 	if p.isOfficeTask {
 		return sysprompt.InjectOfficeContextWithPackages(
 			p.taskID, p.sessionID, prompt,
@@ -2347,7 +2310,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
 		BuiltinPackages:                preparedBuiltinPackages(ctx, p.taskID, p.sessionID),
-		RequiresCompletionSignal:       p.errand == nil && s.StepRequiresCompletionSignal(ctx, p.taskID),
+		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
@@ -2355,8 +2318,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 		Autopilot:                      p.autopilot,
 		IncludeUserQuestionTool:        !p.autopilot && !p.isPassthrough,
 		IncludeParentQuestionTool:      p.autopilot && p.includeParentQuestionTool,
-		ErrandSession:                  p.errand != nil,
-		IncludeErrandTools:             p.includeErrands && p.errand == nil,
+		IncludeErrandTools:             p.includeErrands,
 		ErrandProfiles:                 p.errandProfiles,
 	}, p.referenceContext, spawnContext, pullRequestTargetContext)
 }
@@ -2789,11 +2751,6 @@ func (s *Service) createStartSessionWithWorkflowRoute(
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (string, bool, error) {
-	release, err := s.guardErrandSessionCreation(ctx)
-	if err != nil {
-		return "", false, err
-	}
-	defer release()
 	if workflowRoute != nil {
 		if err := s.workflowRouteMutationAllowed(ctx, task.ID); err != nil {
 			return "", false, err
