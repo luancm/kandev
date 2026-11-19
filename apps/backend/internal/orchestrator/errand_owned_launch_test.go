@@ -35,6 +35,21 @@ func TestErrandAdapterRequiresOwnedRuntime(t *testing.T) {
 	require.Len(t, sessions, 1)
 }
 
+func TestErrandAdapterRejectsArchivedTaskBeforeAllocation(t *testing.T) {
+	f := newErrandLaunchFixture(t)
+	req := f.request()
+	ctx := t.Context()
+	require.NoError(t, f.repo.ArchiveTask(ctx, req.TaskID))
+	adapter := NewErrandAdapter(f.svc)
+	adapter.SetOwnedLaunchRuntime(ownedErrandLaunchFixtureRuntime{}, func(context.Context, string, string) (*runtimeapi.WorkspaceInfo, error) {
+		t.Fatal("an archived task must not reach workspace admission")
+		return nil, nil
+	})
+	result, err := adapter.LaunchErrand(ctx, req)
+	require.Equal(t, errands.LaunchBlocked, result.Disposition)
+	require.ErrorContains(t, err, "errand task is no longer runnable")
+}
+
 func TestErrandAdapterRequiresTheFullReservedIdentity(t *testing.T) {
 	f := newErrandLaunchFixture(t)
 	adapter := NewErrandAdapter(f.svc)
@@ -405,6 +420,14 @@ func (r ownedErrandLaunchFixtureRuntime) StartExecution(ctx context.Context, id 
 func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 	f := newErrandLaunchFixture(t)
 	req := f.request()
+	ctx := t.Context()
+	require.NoError(t, f.repo.SetTaskMetadataKey(ctx, req.TaskID, models.MetaKeyDeferredLaunch, map[string]interface{}{
+		models.DeferredLaunchStartWhenUnblockedKey: true,
+		models.DeferredLaunchUserIDKey:             "deferred-owner",
+	}))
+	require.NoError(t, f.repo.SetTaskMetadataKey(ctx, req.TaskID, models.MetaKeyAgentTitlePending, true))
+	before, err := f.repo.GetTask(ctx, req.TaskID)
+	require.NoError(t, err)
 	req.MCPServerIDs = []string{"saved-addition"}
 	req.MCPExcludedServerIDs = []string{"saved-exclusion"}
 	workspace := t.TempDir()
@@ -487,7 +510,7 @@ func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 		}, nil
 	})
 
-	result, err := adapter.LaunchErrand(t.Context(), req)
+	result, err := adapter.LaunchErrand(ctx, req)
 	require.NoError(t, err)
 	require.Equal(t, errands.LaunchAdmitted, result.Disposition)
 	sessions, err := f.repo.ListTaskSessions(t.Context(), req.TaskID)
@@ -495,4 +518,12 @@ func TestErrandAdapterLaunchesOwnedTurnWithoutChildSession(t *testing.T) {
 	require.Len(t, sessions, 1, "the owned conversation needs no child TaskSession")
 	require.Equal(t, req.ParentSessionID, sessions[0].ID)
 	require.True(t, started, "launch must start the exact bound Errand execution")
+	after, err := f.repo.GetTask(ctx, req.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, before.State, after.State)
+	require.Equal(t, before.WorkflowStepID, after.WorkflowStepID)
+	require.Equal(t, before.Metadata, after.Metadata)
+	f.taskRepo.mu.Lock()
+	defer f.taskRepo.mu.Unlock()
+	require.Empty(t, f.taskRepo.stateHistory[req.TaskID])
 }

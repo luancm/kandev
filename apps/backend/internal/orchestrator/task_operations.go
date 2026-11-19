@@ -842,14 +842,10 @@ func (s *Service) startCreatedSession(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
-	isErrandSession := models.IsErrandSession(session)
 	// Accept CREATED (normal) or WAITING_FOR_INPUT (after on_turn_start step transition).
 	// When the user sends the first message to a prepared session, on_turn_start may fire
 	// and move the step, which sets the session to WAITING_FOR_INPUT before we get here.
 	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
-		if isErrandSession && isTerminalSessionState(session.State) {
-			return nil, &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
-		}
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
 			return nil, executor.ErrExecutionAlreadyRunning
 		}
@@ -895,7 +891,7 @@ func (s *Service) startCreatedSession(
 
 	// If the workflow step overrode the profile, update the session record in DB
 	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
-	if !isErrandSession && effectiveProfileID != session.AgentProfileID {
+	if effectiveProfileID != session.AgentProfileID {
 		observedState := session.State
 		s.logger.Info("updating session agent profile for workflow step override",
 			zap.String("session_id", sessionID),
@@ -964,9 +960,6 @@ func (s *Service) startCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload session: %w", err)
 	}
-	if isErrandSession && isTerminalSessionState(session.State) {
-		return nil, &executor.SessionStateSupersededError{SessionID: session.ID, State: session.State}
-	}
 	if session.State == models.TaskSessionStateCompleted {
 		activeSession, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 		if activeErr != nil || activeSession == nil {
@@ -977,14 +970,10 @@ func (s *Service) startCreatedSession(
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
-	if !isErrandSession {
-		s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
-	}
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
-	if !isErrandSession {
-		if effectiveProfileID, err = s.resolveDynamicLaunchExecution(ctx, session, effectiveProfileID, true); err != nil {
-			return nil, err
-		}
+	if effectiveProfileID, err = s.resolveDynamicLaunchExecution(ctx, session, effectiveProfileID, true); err != nil {
+		return nil, err
 	}
 
 	// Apply workflow step prompt wrapping and plan mode injection.
@@ -996,14 +985,9 @@ func (s *Service) startCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
-	configMode := false
-	if !isErrandSession {
-		if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-			configMode = true
-		}
-	}
+	configMode, _ := session.Metadata["config_mode"].(bool)
 	titleOwner := false
-	if !isErrandSession && !configMode {
+	if !configMode {
 		titleOwner, err = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
@@ -1016,9 +1000,6 @@ func (s *Service) startCreatedSession(
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
 		workflowStepID := dbTask.WorkflowStepID
-		if isErrandSession {
-			workflowStepID = ""
-		}
 		var generatedPromptReferenceContext string
 		if options.preserveDirectPrompt {
 			effectivePrompt, planModeActive, generatedPromptReferenceContext = s.applyWorkflowAndPlanModeWithPromptContextOptions(
@@ -1056,7 +1037,7 @@ func (s *Service) startCreatedSession(
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
 	includeCanvasGuidance := false
-	if (effectivePrompt != "" || len(attachments) > 0) && !isErrandSession && !isOfficeTask && !session.IsPassthrough && !configMode {
+	if (effectivePrompt != "" || len(attachments) > 0) && !isOfficeTask && !session.IsPassthrough && !configMode {
 		if options.canvasGuidanceResolved {
 			includeCanvasGuidance = options.includeCanvasGuidance
 		} else {
@@ -1160,12 +1141,7 @@ func (s *Service) startCreatedSession(
 			s.bindInitialCreatePromptPassthroughExecution(ctx, sessionID, initialTurnID, executionID)
 		}
 	}
-	var execution *executor.TaskExecution
-	if isErrandSession {
-		execution, err = s.launchConcretePreparedSession(ctx, task, sessionID, launchOptions)
-	} else {
-		execution, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
-	}
+	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, launchOptions)
 	if err != nil {
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
@@ -1381,12 +1357,6 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 		}
 		return fmt.Errorf("session %s is %s; cannot schedule task", session.ID, session.State)
 	}
-	isErrandSession := models.IsErrandSession(session)
-	if isErrandSession {
-		if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
-			return err
-		}
-	}
 	task, err := s.taskRepo.GetTask(ctx, taskID)
 	if err != nil {
 		return err
@@ -1404,9 +1374,6 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 	case "", v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateReview:
 	default:
 		return fmt.Errorf("task %s is %s; cannot schedule session %s", taskID, task.State, sessionID)
-	}
-	if isErrandSession {
-		return nil
 	}
 	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, taskID, v1.TaskStateScheduling, []v1.TaskState{task.State})
 	if err != nil || updated {
