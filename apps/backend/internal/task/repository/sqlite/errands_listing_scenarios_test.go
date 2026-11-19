@@ -2,12 +2,13 @@ package sqlite
 
 import (
 	"context"
-	"errors"
+	"database/sql"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
 )
 
 type liveCountRow struct {
@@ -78,47 +79,47 @@ func assertErrandList(t *testing.T, name string, list func() ([]*models.Errand, 
 	}
 }
 
-// exerciseErrandDeletion proves that an errand row leaves with its session
-// and with its task, and never with an unrelated row.
 func exerciseErrandDeletion(t *testing.T, repo *Repository) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	taskID := newErrandTask(t, repo, "delete")
-	createErrandScenarioSession(t, repo, &models.TaskSession{ID: "parent-delete", TaskID: taskID})
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: "errand-delete", TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: "parent-delete",
-	})
-	launched := sampleErrand("errand-delete", taskID, "parent-delete", errandScenarioBase)
-	launched.Lifecycle = models.ErrandLifecycleLaunched
-	mustCreateErrand(t, repo, launched)
-	mustCreateErrand(t, repo, sampleErrand("errand-queued-delete", taskID, "parent-delete", errandScenarioBase.Add(time.Minute)))
+	otherTaskID := newErrandTask(t, repo, "ordinary-delete")
+	const errandID, parentID = "errand-delete", "parent-delete"
+	createErrandScenarioSession(t, repo, &models.TaskSession{ID: parentID, TaskID: taskID})
+	ordinary := &models.TaskSession{ID: errandID, TaskID: otherTaskID}
+	createErrandScenarioSession(t, repo, ordinary)
+	row := sampleErrand(errandID, taskID, parentID, errandScenarioBase)
+	row.Lifecycle = models.ErrandLifecycleLaunched
+	mustCreateErrand(t, repo, row)
+	const queuedID = "errand-queued-delete"
+	mustCreateErrand(t, repo, sampleErrand(queuedID, taskID, parentID, errandScenarioBase.Add(time.Minute)))
+	turn := &models.Turn{ID: row.FirstTurnID}
+	require.NoError(t, repo.CreateErrandTurn(ctx, row.ID, turn))
+	message := &models.Message{ID: "owned-output", TurnID: turn.ID, AuthorType: models.MessageAuthorAgent, Content: "output"}
+	require.NoError(t, repo.CreateErrandMessage(ctx, row.ID, message))
 
-	session, err := repo.GetTaskSession(ctx, "errand-delete")
-	if err != nil {
-		t.Fatalf("GetTaskSession: %v", err)
-	}
-	if err := repo.DeleteTaskSession(ctx, session); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
-	}
-	if _, err := repo.GetErrand(ctx, "errand-delete"); !errors.Is(err, models.ErrErrandNotFound) {
-		t.Fatalf("errand row after session delete: %v, want ErrErrandNotFound", err)
-	}
-	if _, err := repo.GetErrand(ctx, "errand-queued-delete"); err != nil {
-		t.Fatalf("unrelated queued errand removed by session delete: %v", err)
-	}
+	require.NoError(t, repo.DeleteTaskSession(ctx, ordinary))
+	_, err := repo.GetTaskSession(ctx, ordinary.ID)
+	require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
+	got, err := repo.GetErrand(ctx, row.ID)
+	require.NoError(t, err, "ordinary session deletion removed its independent Errand")
+	assertErrandFields(t, got, row)
+	_, err = repo.GetErrandMessage(ctx, row.ID, message.ID)
+	require.NoError(t, err)
+	_, err = repo.GetTaskSession(ctx, parentID)
+	require.NoError(t, err)
 
-	if err := repo.DeleteErrand(ctx, "errand-queued-delete"); err != nil {
-		t.Fatalf("DeleteErrand: %v", err)
-	}
-	if _, err := repo.GetErrand(ctx, "errand-queued-delete"); !errors.Is(err, models.ErrErrandNotFound) {
-		t.Fatalf("errand row after DeleteErrand: %v, want ErrErrandNotFound", err)
-	}
+	require.NoError(t, repo.DeleteErrand(ctx, row.ID))
+	_, err = repo.GetErrand(ctx, row.ID)
+	require.ErrorIs(t, err, models.ErrErrandNotFound)
+	_, err = repo.GetErrandTurn(ctx, row.ID, turn.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = repo.GetErrandMessage(ctx, row.ID, message.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	_, err = repo.GetErrand(ctx, queuedID)
+	require.NoError(t, err)
 
-	mustCreateErrand(t, repo, sampleErrand("errand-task-delete", taskID, "parent-delete", errandScenarioBase.Add(2*time.Minute)))
-	if err := repo.DeleteTask(ctx, taskID); err != nil {
-		t.Fatalf("DeleteTask: %v", err)
-	}
-	if _, err := repo.GetErrand(ctx, "errand-task-delete"); !errors.Is(err, models.ErrErrandNotFound) {
-		t.Fatalf("errand row after task delete: %v, want ErrErrandNotFound", err)
-	}
+	require.NoError(t, repo.DeleteTask(ctx, taskID))
+	_, err = repo.GetErrand(ctx, queuedID)
+	require.ErrorIs(t, err, models.ErrErrandNotFound)
 }

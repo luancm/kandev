@@ -27,6 +27,6 @@ func TestErrandListingAndLiveCountSQLite(t *testing.T) {
 	exerciseErrandListingAndLiveCount(t, newRepoForSessionTests(t))
 }
 
-func TestErrandRowIsDeletedWithItsSessionAndTaskSQLite(t *testing.T) {
+func TestOwnedErrandDeletionDoesNotFollowOrdinarySessionIDSQLite(t *testing.T) {
 	exerciseErrandDeletion(t, newRepoForSessionTests(t))
 }

@@ -5106,9 +5106,6 @@ func (r *Repository) purgeTaskSessionStateTx(
 	if rows == 0 {
 		return nil, fmt.Errorf("agent session not found: %s", session.ID)
 	}
-	if err := deleteErrandForSessionTx(ctx, tx, session.ID); err != nil {
-		return nil, err
-	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_prompt_seq WHERE task_session_id = ?`), session.ID); err != nil {
 		if !db.IsMissingTableError(err) {
 			return nil, fmt.Errorf("purge prompt history for session %s: %w", session.ID, err)

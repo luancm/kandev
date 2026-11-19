@@ -413,15 +413,11 @@ func (r *Repository) DeleteErrand(ctx context.Context, id string) error {
 		return err
 	}
 	return r.withErrandTask(ctx, taskID, func(tx *sqlx.Tx) error {
-		return deleteErrandForSessionTx(ctx, tx, id)
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_errands WHERE id = ? AND task_id = ?`), id, taskID); err != nil {
+			return fmt.Errorf("delete errand %s: %w", id, err)
+		}
+		return nil
 	})
-}
-
-func deleteErrandForSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID string) error {
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_errands WHERE id = ?`), sessionID); err != nil {
-		return fmt.Errorf("delete errand for session %s: %w", sessionID, err)
-	}
-	return nil
 }
 
 func (r *Repository) listErrands(ctx context.Context, condition string, args ...interface{}) ([]*models.Errand, error) {

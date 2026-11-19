@@ -68,7 +68,7 @@ func TestPostgresErrandListingAndLiveCount(t *testing.T) {
 	exerciseErrandListingAndLiveCount(t, newPostgresErrandRepo(t))
 }
 
-func TestPostgresErrandRowIsDeletedWithItsSessionAndTask(t *testing.T) {
+func TestPostgresOwnedErrandDeletionDoesNotFollowOrdinarySessionID(t *testing.T) {
 	exerciseErrandDeletion(t, newPostgresErrandRepo(t))
 }
 
