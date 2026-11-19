@@ -126,6 +126,9 @@ function makeEnvStore(
               sessionIds.map((id) => ({ id })),
             ]),
           ),
+          loadedByTaskId: Object.fromEntries(
+            Object.keys(taskSessionsByTask).map((taskId) => [taskId, true]),
+          ),
         },
       }) as unknown as AppState,
   } as unknown as StoreApi<AppState>;
@@ -532,10 +535,18 @@ describe("buildSwitchToSession", () => {
     switchToSession("task-new", "sess-new", "sess-old");
 
     expect(setActiveSession).toHaveBeenCalledWith("task-new", "sess-new");
-    expect(performLayoutSwitch).toHaveBeenCalledWith("env-A", "env-B", "sess-new", [
+    expect(performLayoutSwitch).toHaveBeenCalledWith(
+      "env-A",
+      "env-B",
       "sess-new",
-      "sess-sibling",
-    ]);
+      ["sess-new", "sess-sibling"],
+      {
+        sessionListRestoreState: {
+          loaded: true,
+          knownForeignSessionIds: new Set(),
+        },
+      },
+    );
     expect(releaseLayoutToDefault).not.toHaveBeenCalled();
   });
 
@@ -665,4 +676,20 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
 
     expect(switchToSession).toHaveBeenCalledWith(TASK_ID, PRIMARY, null);
   });
+});
+
+it("offers the ordinary session with pending input before the preferred session", () => {
+  const reviewing = {
+    id: "reviewing",
+    state: "WAITING_FOR_INPUT",
+    pending_action: "permission",
+  } as TaskSession;
+  const sessions = [reviewing, { id: "normal" } as TaskSession];
+  expect(
+    resolveTaskSessionId({
+      sessions,
+      preferredSessionId: "normal",
+      taskPendingAction: "permission",
+    }),
+  ).toBe("reviewing");
 });

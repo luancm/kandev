@@ -11,7 +11,6 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -52,6 +51,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 			event.Text,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -97,6 +97,7 @@ func (m *Manager) publishStreamEvidence(execution *AgentExecution, event agentct
 		event.Text = event.ReasoningText
 	}
 	event.CanonicalProjection = false
+	event.CanonicalConversationReceipt = nil
 	event.CanonicalMessageID = ""
 	event.CanonicalMessageAppend = false
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
@@ -120,6 +121,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 			event.ReasoningText,
 			event.CanonicalMessageAppend,
 			false,
+			decodeCanonicalConversationReceipt(event.CanonicalConversationReceipt),
 		)
 		return
 	}
@@ -295,18 +297,22 @@ func (m *Manager) claimPromptCompletion(
 		}
 		return claim, true
 	}
+	if deliverySubmissionIdentityMismatch(execution, event.DeliverySubmissionID) {
+		m.logger.Debug("ignoring completion for superseded prompt submission",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_submission_id", event.DeliverySubmissionID),
+			zap.String("current_submission_id", currentDeliverySubmissionID(execution)))
+		return claim, false
+	}
 
 	execution.promptLifecycleMu.Lock()
 	claim.locked = true
 	claimed := false
 	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
-		if current != execution {
+		if current != execution || !promptCompletionOwnerMatches(current, event) {
 			return
 		}
 		if event.PromptGeneration == 0 && event.DeliverySubmissionID != "" {
-			if current.deliverySubmissionIDSnapshot() != event.DeliverySubmissionID {
-				return
-			}
 			event.PromptGeneration = current.promptGeneration
 		}
 		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
@@ -359,6 +365,15 @@ func (m *Manager) claimPromptCompletion(
 		zap.String("execution_id", execution.ID),
 		zap.Uint64("event_prompt_generation", event.PromptGeneration))
 	return promptCompletionClaim{}, false
+}
+
+// Called with promptLifecycleMu held so admission cannot replace the turn
+// between the ownership check and the completion claim.
+func promptCompletionOwnerMatches(current *AgentExecution, event *agentctl.AgentEvent) bool {
+	submissionID := current.deliverySubmissionIDSnapshot()
+	legacyUnbound := submissionID == "" && current.promptTurnID == "" && event.TurnID == "" && event.PromptGeneration != 0
+	return (event.DeliverySubmissionID == "" || submissionID == event.DeliverySubmissionID || legacyUnbound) &&
+		(event.TurnID == "" || current.promptTurnID == "" || event.TurnID == current.promptTurnID)
 }
 
 func completeEventResult(event *agentctl.AgentEvent) (bool, string) {
@@ -494,6 +509,7 @@ func completeEventStopReason(event *agentctl.AgentEvent) string {
 
 const claudeACPAgentID = "claude-acp"
 const codexACPAgentID = "codex-acp"
+const openCodeACPAgentID = "opencode-acp"
 
 func (m *Manager) retainPromptFailureRuntime(
 	execution *AgentExecution,
@@ -548,8 +564,7 @@ func retainedPromptFailureExecutionEligible(execution *AgentExecution) bool {
 	return execution.isSessionInitialized() && client.HasAgentStream() &&
 		execution.TaskScope == TaskLaunchScopeTask &&
 		!execution.IsPassthrough && execution.TaskID != "" && execution.SessionID != "" &&
-		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution) &&
-		isRetainableACPAgent(execution.AgentID)
+		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution)
 }
 
 func retainedPromptFailureExecutionMatches(
@@ -578,15 +593,6 @@ func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
 	}
 	return (execution.Owner.TaskID == "" || execution.Owner.TaskID == execution.TaskID) &&
 		(execution.Owner.SessionID == "" || execution.Owner.SessionID == execution.SessionID)
-}
-
-func isRetainableACPAgent(agentID string) bool {
-	switch agentID {
-	case claudeACPAgentID, codexACPAgentID, acpcompat.CursorAgentID, "mock-agent":
-		return true
-	default:
-		return false
-	}
 }
 
 func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {
@@ -785,6 +791,12 @@ func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.Age
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
 // Returns true because no further stream publishing is needed.
 func (m *Manager) handleContextWindowEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		if m.streamManager != nil && event.DeliverySequence > 0 {
+			m.streamManager.refreshErrandContext(execution.Owner)
+		}
+		return
+	}
 	m.logger.Debug("context window update received",
 		zap.String("execution_id", execution.ID),
 		zap.Int64("size", event.ContextWindowSize),
@@ -846,6 +858,17 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 	}
 }
 
+// isStatuslessToolUpdate reports a tool_update whose ACP wire status was
+// missing. The adapter synthesizes in_progress for an update with a title,
+// input, content, or recognized shell output, so real progress still reaches
+// the finalizer. The lifecycle boundary must use the same evidence as the
+// finalizer, which ignores ToolStatusMissing updates: an empty or missing
+// status may not start a turn the finalizer will never close.
+func isStatuslessToolUpdate(event agentctl.AgentEvent) bool {
+	return event.Type == "tool_update" &&
+		(event.ToolStatus == "" || event.ToolStatusMissing)
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -860,7 +883,9 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 //
 // The flip is gated on `turnContentEventTypes` so post-boot metadata events
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
-// accidentally re-arm a freshly-booted no-prompt session as Running.
+// accidentally re-arm a freshly-booted no-prompt session as Running. A
+// tool_update with no status carries metadata only and is treated like a
+// terminal update here: the finalizer ignores it, so it must not start a turn.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	promptLifecycleLocked := false
 	unlockPromptLifecycle := func() {
@@ -875,7 +900,8 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		execution.promptLifecycleMu.Lock()
 		promptLifecycleLocked = true
 		if execution.promptGeneration != event.PromptGeneration ||
-			execution.promptCompletionGeneration == event.PromptGeneration {
+			execution.promptCompletionGeneration == event.PromptGeneration ||
+			(execution.Owner.Kind == ExecutionOwnerErrand && event.Type == streams.EventTypePermissionRequest && execution.deliverySubmissionIDSnapshot() != event.DeliverySubmissionID) {
 			unlockPromptLifecycle()
 			return
 		}
@@ -923,7 +949,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		unlockPromptLifecycle()
 		return
 	}
-	if isTerminalToolUpdate(event) {
+	if isTerminalToolUpdate(event) || isStatuslessToolUpdate(event) {
 		unlockPromptLifecycle()
 		return
 	}
@@ -1273,7 +1299,11 @@ func (m *Manager) recordDeliveryReconciliationPhaseWithRuntimeDisposition(
 			zap.Error(err))
 		return
 	}
-	m.eventPublisher.PublishAgentctlDeliveryRecovery(context.Background(), execution, identity, phase)
+	ctx := context.Background()
+	if identity.Owner.Kind == ExecutionOwnerErrand {
+		m.streamManager.projectErrandRecovery(ctx, identity, phase)
+	}
+	m.eventPublisher.PublishAgentctlDeliveryRecovery(ctx, execution, identity, phase)
 }
 
 func applyDeliveryReconciliationPhase(
@@ -1322,7 +1352,7 @@ func matchesDeliveryReconciliationExecution(
 	identity DeliveryReconciliationIdentity,
 	submissionID string,
 ) bool {
-	return current == expected && current.SessionID == identity.SessionID && current.Owner == identity.Owner &&
+	return current == expected && deliveryTransportSessionID(current) == identity.SessionID && current.Owner == identity.Owner &&
 		current.DeliveryIncarnationID == identity.IncarnationID &&
 		current.DeliveryHarnessGeneration == identity.HarnessGeneration && current.DeliveryStreamID == identity.StreamID &&
 		submissionID == identity.SubmissionID && current.runtimeEpoch == identity.RuntimeEpoch &&
@@ -1516,6 +1546,15 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 	if m.handleMCPAttachmentEvent(execution, &event, attemptID) {
 		return
 	}
+	if execution.Owner.Kind == ExecutionOwnerErrand && event.Type == streams.EventTypePermissionRequest {
+		if execution.errandPermissionCurrent(event) {
+			m.recordActivity(execution, event)
+			if execution.errandPermissionCurrent(event) {
+				_ = m.eventPublisher.PublishPermissionRequest(execution, event)
+			}
+		}
+		return
+	}
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != toolStatusError) {
 		m.recordActivity(execution, event)
 	}
@@ -1526,6 +1565,12 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
 		zap.String("operation_id", event.OperationID),
 		zap.Int("text_length", len(event.Text)))
 
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeShellOutputUpdate) {
+		if execution.applyErrandToolActivity(event) {
+			m.eventPublisher.publishAgentStreamEventWithAttempt(execution, event, attemptID)
+		}
+		return
+	}
 	if m.handleAgentEventWithoutPublication(execution, &event) {
 		return
 	}
@@ -1554,6 +1599,7 @@ func (m *Manager) handleMCPAttachmentEvent(
 		attempt.SessionID = execution.SessionID
 		attempt.ExecutionID = execution.ID
 		attempt.AgentID = execution.AgentID
+		attempt.BuiltinPackages = execution.builtinMCPManifestSnapshot()
 		event.MCPAttachmentAttempt = &attempt
 	}
 	// Attachment diagnostics must not count as model activity or alter turn
@@ -1698,6 +1744,7 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 				zap.Uint64("startup_generation", startupGeneration))
 			return
 		}
+		m.eventPublisher.publishErrandTranscriptChange(execution, event)
 		m.handleAgentEventWithAttempt(execution, event, attemptID)
 	})
 	if !accepted {
@@ -1766,6 +1813,15 @@ func (m *Manager) handleFileChangeNotification(execution *AgentExecution, notifi
 		return
 	}
 	m.eventPublisher.PublishFileChange(execution, notification)
+}
+
+// handleWorktreeInventory publishes a linked-worktree snapshot from a live,
+// current execution. Detection never starts, resumes, or prompts an agent.
+func (m *Manager) handleWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if execution == nil || inventory == nil || !m.runtimeExecutionCurrent(execution) {
+		return
+	}
+	m.eventPublisher.PublishWorktreeInventory(execution, inventory)
 }
 
 // handleShellOutput processes shell output from the workspace stream

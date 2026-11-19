@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import type { LayoutState } from "./layout-manager";
 import { performLayoutSwitch, useDockviewStore } from "./dockview-store";
+import { releaseDockviewSessionRestore } from "./dockview-session-restore-gate";
 
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
@@ -156,21 +157,49 @@ async function keepsActiveSessionAfterMaximizeExit(): Promise<void> {
   expect(Object.keys(persistedLayout.panels ?? {})).not.toContain(staleSessionId);
 }
 
-function seedIncompleteAdoption(): {
+type IncompleteAdoptionIds = {
   activeSessionId: string;
   activePanelId: string;
   siblingPanelId: string;
   foreignSessionId: string;
   foreignPanelId: string;
-} {
+  errandPanelId: string;
+};
+
+function seedIncompleteAdoption(): IncompleteAdoptionIds {
   const activeSessionId = "session-b";
   const activePanelId = `session:${activeSessionId}`;
   const siblingSessionId = "session-sibling";
   const siblingPanelId = `session:${siblingSessionId}`;
   const foreignSessionId = "session-foreign";
   const foreignPanelId = `session:${foreignSessionId}`;
+  const errandSessionId = "errand-child";
+  const errandPanelId = `session:${errandSessionId}`;
+  const ids = {
+    activeSessionId,
+    activePanelId,
+    siblingPanelId,
+    foreignSessionId,
+    foreignPanelId,
+    errandPanelId,
+  };
+  vi.mocked(getEnvMaximizeState).mockReturnValue(incompleteAdoptionSavedState(ids));
+  return ids;
+}
+
+function incompleteAdoptionSavedState(ids: IncompleteAdoptionIds) {
+  const {
+    activeSessionId,
+    activePanelId,
+    siblingPanelId,
+    foreignSessionId,
+    foreignPanelId,
+    errandPanelId,
+  } = ids;
+  const siblingSessionId = siblingPanelId.slice("session:".length);
+  const errandSessionId = errandPanelId.slice("session:".length);
   const baseOverlay = maximizeOverlay();
-  vi.mocked(getEnvMaximizeState).mockReturnValue({
+  return {
     maximizedDockviewJson: {
       ...baseOverlay,
       grid: {
@@ -189,7 +218,7 @@ function seedIncompleteAdoption(): {
               size: 600,
               data: {
                 id: "g-max",
-                views: [activePanelId, foreignPanelId],
+                views: [activePanelId, foreignPanelId, errandPanelId],
                 activeView: activePanelId,
               },
             },
@@ -206,6 +235,11 @@ function seedIncompleteAdoption(): {
           id: foreignPanelId,
           contentComponent: "chat",
           params: { sessionId: foreignSessionId },
+        },
+        [errandPanelId]: {
+          id: errandPanelId,
+          contentComponent: "chat",
+          params: { sessionId: errandSessionId },
         },
       },
     },
@@ -235,6 +269,12 @@ function seedIncompleteAdoption(): {
                   title: "Foreign",
                   params: { sessionId: foreignSessionId },
                 },
+                {
+                  id: errandPanelId,
+                  component: "chat",
+                  title: "Errand child",
+                  params: { sessionId: errandSessionId },
+                },
               ],
               activePanel: activePanelId,
             },
@@ -242,19 +282,24 @@ function seedIncompleteAdoption(): {
         },
       ],
     },
-  });
-  return { activeSessionId, activePanelId, siblingPanelId, foreignSessionId, foreignPanelId };
+  };
 }
 
-async function preservesSiblingSessionsDuringIncompleteAdoption(): Promise<void> {
+async function preservesOnlyAllowListedSessionsAfterIncompleteAdoption(): Promise<void> {
   const api = makeMockApi();
   let appliedLayout = {} as SerializedDockview;
   vi.mocked(api.fromJSON).mockImplementation((layout) => {
     appliedLayout = layout;
   });
   vi.mocked(api.toJSON).mockImplementation(() => appliedLayout);
-  const { activeSessionId, activePanelId, siblingPanelId, foreignSessionId, foreignPanelId } =
-    seedIncompleteAdoption();
+  const {
+    activeSessionId,
+    activePanelId,
+    siblingPanelId,
+    foreignSessionId,
+    foreignPanelId,
+    errandPanelId,
+  } = seedIncompleteAdoption();
   useDockviewStore.setState({ api, currentLayoutEnvId: null });
 
   performLayoutSwitch(null, "env-b", activeSessionId, [activeSessionId], {
@@ -263,8 +308,32 @@ async function preservesSiblingSessionsDuringIncompleteAdoption(): Promise<void>
       knownForeignSessionIds: new Set([foreignSessionId]),
     },
   });
-  expect(appliedLayout.panels).not.toHaveProperty(foreignPanelId);
+  const initialRestores = vi.mocked(api.fromJSON).mock.calls.map(([layout]) => layout);
+  expect(initialRestores.length).toBeGreaterThan(0);
+  expect(
+    initialRestores.every(
+      (layout) => !Object.keys(layout.panels).some((id) => id.startsWith("session:")),
+    ),
+  ).toBe(true);
+  expect(api.addPanel).not.toHaveBeenCalled();
+  expect(setEnvLayout).not.toHaveBeenCalled();
+  expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
 
+  expect(
+    releaseDockviewSessionRestore(api, [activeSessionId, siblingPanelId.slice("session:".length)]),
+  ).toBe(true);
+  await flushRaf();
+  const restoredLayouts = vi.mocked(api.fromJSON).mock.calls.map(([layout]) => layout);
+  expect(restoredLayouts.some((layout) => Object.keys(layout.panels).includes(activePanelId))).toBe(
+    true,
+  );
+  expect(
+    restoredLayouts.every((layout) => !Object.keys(layout.panels).includes(errandPanelId)),
+  ).toBe(true);
+  expect(
+    restoredLayouts.every((layout) => !Object.keys(layout.panels).includes(foreignPanelId)),
+  ).toBe(true);
+  expect(api.addPanel).not.toHaveBeenCalled();
   const restoredPreMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
   expect(restoredPreMaximizeLayout?.columns[0]?.groups[0]?.panels).toEqual(
     expect.arrayContaining([
@@ -275,17 +344,9 @@ async function preservesSiblingSessionsDuringIncompleteAdoption(): Promise<void>
   expect(restoredPreMaximizeLayout?.columns[0]?.groups[0]?.panels).not.toContainEqual(
     expect.objectContaining({ id: foreignPanelId }),
   );
-
-  useDockviewStore.getState().exitMaximizedLayout();
-  await flushRaf();
-
-  const persistedLayout = vi
-    .mocked(setEnvLayout)
-    .mock.calls.find(([envId]) => envId === "env-b")?.[1] as {
-    panels?: Record<string, unknown>;
-  };
-  expect(Object.keys(persistedLayout.panels ?? {})).toContain(siblingPanelId);
-  expect(Object.keys(persistedLayout.panels ?? {})).not.toContain(foreignPanelId);
+  expect(restoredPreMaximizeLayout?.columns[0]?.groups[0]?.panels).not.toContainEqual(
+    expect.objectContaining({ id: errandPanelId }),
+  );
 }
 
 function persistAuthoritativeSessionCleanup(): void {
@@ -331,9 +392,8 @@ function persistAuthoritativeSessionCleanup(): void {
 
   const savedState = vi.mocked(setEnvMaximizeState).mock.calls[0]?.[1];
   expect(savedState).toBeDefined();
-  const savedPanelIds = (
-    (savedState?.preMaximizeLayout as unknown as LayoutState).columns[0]?.groups[0]?.panels ?? []
-  ).map((panel) => panel.id);
+  const savedLayout = savedState?.preMaximizeLayout as unknown as LayoutState | undefined;
+  const savedPanelIds = (savedLayout?.columns[0]?.groups[0]?.panels ?? []).map((panel) => panel.id);
   expect(savedPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
   expect(savedPanelIds).not.toContain(stalePanelId);
 }
@@ -383,9 +443,10 @@ function persistSessionReconciliationBeforeMaximizeSave(): void {
 
     const savedState = vi.mocked(setEnvMaximizeState).mock.calls[0]?.[1];
     expect(savedState).toBeDefined();
-    const savedPanelIds = (
-      (savedState?.preMaximizeLayout as unknown as LayoutState).columns[0]?.groups[0]?.panels ?? []
-    ).map((panel) => panel.id);
+    const savedLayout = savedState?.preMaximizeLayout as unknown as LayoutState | undefined;
+    const savedPanelIds = (savedLayout?.columns[0]?.groups[0]?.panels ?? []).map(
+      (panel) => panel.id,
+    );
     expect(savedPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
     expect(savedPanelIds).not.toContain(stalePanelId);
   } finally {
@@ -434,9 +495,8 @@ function persistFilteredRestoreSnapshot(): void {
 
   const savedState = vi.mocked(setEnvMaximizeState).mock.calls[0]?.[1];
   expect(savedState).toBeDefined();
-  const savedPanelIds = (
-    (savedState?.preMaximizeLayout as unknown as LayoutState).columns[0]?.groups[0]?.panels ?? []
-  ).map((panel) => panel.id);
+  const savedLayout = savedState?.preMaximizeLayout as unknown as LayoutState | undefined;
+  const savedPanelIds = (savedLayout?.columns[0]?.groups[0]?.panels ?? []).map((panel) => panel.id);
   expect(savedPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
   expect(savedPanelIds).not.toContain(stalePanelId);
 }
@@ -500,17 +560,14 @@ describe("environment-switch maximize session filtering", () => {
     });
   });
 
-  it("persists session reconciliation that occurs before maximize state is saved", () => {
-    persistSessionReconciliationBeforeMaximizeSave();
-  });
+  it(
+    "persists session reconciliation before maximize save",
+    persistSessionReconciliationBeforeMaximizeSave,
+  );
 
-  it("persists stale panels removed during authoritative maximize restore", () => {
-    persistFilteredRestoreSnapshot();
-  });
+  it("persists filtered maximize restore", persistFilteredRestoreSnapshot);
 
-  it("does not clear a newer environment restore from a deferred maximize frame", () => {
-    preserveRestoringStateAfterEnvironmentSwitch();
-  });
+  it("preserves a newer deferred restore", preserveRestoringStateAfterEnvironmentSwitch);
 
   it("filters phantom sessions from the pre-maximize snapshot before persisting after exit", async () => {
     const api = makeMockApi();
@@ -576,7 +633,7 @@ describe("environment-switch maximize session filtering", () => {
   });
 
   it("preserves sibling sessions while the first environment adopts before session hydration", async () => {
-    await preservesSiblingSessionsDuringIncompleteAdoption();
+    await preservesOnlyAllowListedSessionsAfterIncompleteAdoption();
   });
 
   it("keeps the active session in a stale-only pre-maximize group on exit", async () => {

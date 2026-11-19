@@ -72,7 +72,7 @@ type clarificationRetryRegistration struct {
 	wait           func(context.Context, *clarification.Response) (*clarification.Response, error)
 }
 
-func (h *Handlers) registerClarificationRetry(req askUserQuestionRequest, taskID string) clarificationRetryRegistration {
+func (h *Handlers) registerClarificationRetry(req askUserQuestionRequest, taskID string) (clarificationRetryRegistration, error) {
 	// Register the retry before reading its durable bundle. This ordering makes
 	// the handoff to Resolver linearizable: a concurrent durable answer either
 	// finds this waiter, or records that it already chose detached delivery.
@@ -85,13 +85,14 @@ func (h *Handlers) registerClarificationRetry(req askUserQuestionRequest, taskID
 		Context:   req.Context,
 	}
 	var retry clarificationRetryRegistration
+	var err error
 	if registrar, ok := h.clarificationSvc.(clarificationRetryRegistrar); ok && retryPendingID != "" {
-		retry.pendingID, retry.isNew, retry.deliveryMissed, retry.wait = registrar.CreateRetryRequestWithWaiter(clarificationReq)
+		retry.pendingID, retry.isNew, retry.deliveryMissed, retry.wait, err = registrar.CreateRetryRequestWithWaiter(clarificationReq)
 	} else {
-		retry.pendingID, retry.isNew = h.clarificationSvc.CreateRequest(clarificationReq)
+		retry.pendingID, retry.isNew, err = h.clarificationSvc.CreateRequest(clarificationReq)
 	}
 
-	return retry
+	return retry, err
 }
 
 func (h *Handlers) reconcileClarificationRetry(ctx context.Context, msg *ws.Message, req askUserQuestionRequest, taskID string, retry clarificationRetryRegistration) (durableClarificationState, *ws.Message, error) {
@@ -143,6 +144,15 @@ func (h *Handlers) replayClarificationRetry(ctx context.Context, msg *ws.Message
 		}
 		recorded = confirmed
 	}
+	if h.clarificationResolver != nil {
+		if err := h.clarificationResolver.MaterializeRecordedAnswerAttachments(ctx, sessionID, recorded); err != nil {
+			if retry.isNew {
+				h.clarificationSvc.CancelRequest(retry.pendingID)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to materialize clarification answer attachments", nil)
+		}
+	}
 	if retry.isNew {
 		h.clarificationSvc.CancelRequest(retry.pendingID)
 	}
@@ -168,7 +178,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 		req.TaskID = session.TaskID
 	}
 	taskID := h.clarificationTaskID(ctx, req.TaskID, req.SessionID)
-	retry := h.registerClarificationRetry(req, taskID)
+	retry, err := h.registerClarificationRetry(req, taskID)
+	if err != nil {
+		h.logger.Error("failed to register clarification waiter", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to register clarification request", nil)
+	}
 	durable, response, err := h.reconcileClarificationRetry(ctx, msg, req, taskID, retry)
 	if response != nil || err != nil {
 		return response, err

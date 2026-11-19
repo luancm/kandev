@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"net"
 	"net/http"
 	"net/url"
@@ -79,7 +80,7 @@ type PluginExecutorInventoryStore interface {
 
 type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
 type pluginAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error)
-type pluginRecoveredAgentctlInstanceReader func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.InstanceInfo, error)
+type pluginRecoveredAgentctlInstanceReader func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string, *agentctltypes.ErrandMCPOwner) (*agentctl.InstanceInfo, error)
 type pluginAgentctlReadinessCheck func(context.Context, *agentctl.Client) error
 
 type PluginRemoteExecutor struct {
@@ -142,12 +143,16 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 		log *logger.Logger,
 		executionID string,
 		token string,
+		owner *agentctltypes.ErrandMCPOwner,
 	) (*agentctl.InstanceInfo, error) {
 		control, err := agentctl.NewEndpointControlClient(ctx, resolver, log, agentctl.WithControlAuthToken(token))
 		if err != nil {
 			return nil, err
 		}
 		defer control.Close()
+		if err := requireErrandQuestionPolicy(ctx, control, owner); err != nil {
+			return nil, err
+		}
 		return control.GetInstance(ctx, executionID)
 	}
 	runtime.ready = func(ctx context.Context, client *agentctl.Client) error { return client.Health(ctx) }

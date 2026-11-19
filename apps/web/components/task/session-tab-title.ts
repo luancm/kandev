@@ -68,7 +68,6 @@ function profileSnapshotModel(session: AppState["taskSessions"]["items"][string]
 export function selectSessionTabTitle(state: AppState, sessionId: string): string | null {
   const session = state.taskSessions.items[sessionId];
   if (!session) return null;
-
   const sessionModels = state.sessionModels.bySessionId[sessionId];
 
   return resolveSessionTabTitle({

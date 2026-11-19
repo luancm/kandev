@@ -23,6 +23,58 @@ func TestCorrelateRecoveryInstancesSingleInstanceReTracksRegardlessOfIDMatch(t *
 	}
 }
 
+func TestCorrelateRecoveryInstancesRequiresExactErrandOwner(t *testing.T) {
+	owner := ExecutionOwner{Kind: ExecutionOwnerErrand, WorkspaceID: "workspace", TaskID: "task", ErrandID: "errand", Generation: 2}
+	sessionID := models.ErrandExecutionIdentity(owner.ErrandID)
+	record := &models.ExecutorRunning{
+		SessionID: sessionID, AgentExecutionID: "expected",
+		Metadata: map[string]interface{}{runExecutionOwnerMetadataKey: owner},
+	}
+	exact := &agentctl.InstanceInfo{ID: "expected", SessionID: sessionID, ErrandMCPOwner: errandMCPOwner(owner)}
+	wrongID := *exact
+	wrongID.ID = "other"
+	wrongGeneration := *exact
+	wrongGeneration.ErrandMCPOwner = errandMCPOwner(owner)
+	wrongGeneration.ErrandMCPOwner.Generation++
+	unowned := *exact
+	unowned.ErrandMCPOwner = nil
+	taskScoped := *exact
+	taskScoped.TaskID = owner.TaskID
+
+	for _, test := range []struct {
+		name      string
+		records   []*models.ExecutorRunning
+		instances []*agentctl.InstanceInfo
+		winner    *agentctl.InstanceInfo
+	}{
+		{"exact", []*models.ExecutorRunning{record}, []*agentctl.InstanceInfo{exact, &wrongGeneration, &wrongID}, exact},
+		{"wrong execution", []*models.ExecutorRunning{record}, []*agentctl.InstanceInfo{&wrongID}, nil},
+		{"wrong generation", []*models.ExecutorRunning{record}, []*agentctl.InstanceInfo{&wrongGeneration}, nil},
+		{"missing owner", []*models.ExecutorRunning{record}, []*agentctl.InstanceInfo{&unowned}, nil},
+		{"task session identity", []*models.ExecutorRunning{record}, []*agentctl.InstanceInfo{&taskScoped}, nil},
+		{"duplicate exact", []*models.ExecutorRunning{record}, []*agentctl.InstanceInfo{exact, exact}, nil},
+		{"owned orphan", nil, []*agentctl.InstanceInfo{exact}, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := CorrelateRecoveryInstances(test.records, test.instances)
+			if got := result.Winners[sessionID]; got != test.winner {
+				t.Errorf("winner = %v, want %v", got, test.winner)
+			}
+			if len(result.ToStop) != 0 {
+				t.Errorf("ordinary startup stop selected an Errand candidate: %v", result.ToStop)
+			}
+		})
+	}
+
+	result := CorrelateRecoveryInstances(
+		[]*models.ExecutorRunning{{SessionID: sessionID, TaskID: "ordinary-task"}},
+		[]*agentctl.InstanceInfo{&unowned, exact},
+	)
+	if result.Winners[sessionID] != &unowned || len(result.ToStop) != 0 {
+		t.Errorf("owned peer influenced ordinary startup correlation: %+v", result)
+	}
+}
+
 func TestCorrelateRecoveryInstancesOrphanInstanceIsStopped(t *testing.T) {
 	instance := &agentctl.InstanceInfo{ID: "instance-1", SessionID: "session-no-record"}
 

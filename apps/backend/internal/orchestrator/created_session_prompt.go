@@ -1,0 +1,40 @@
+package orchestrator
+
+import (
+	"context"
+
+	"github.com/kandev/kandev/internal/sysprompt"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// taskPromptInputs carries what the task-mode first turn of a session needs.
+type taskPromptInputs struct {
+	prompt                   string
+	taskID                   string
+	sessionID                string
+	session                  *models.TaskSession
+	dbTask                   *models.Task
+	configMode               bool
+	titleOwner               bool
+	includeCanvasGuidance    bool
+	referenceContext         string
+	promptReferenceContext   string
+	pullRequestTargetContext string
+}
+
+func (s *Service) wrapTaskSessionPrompt(ctx context.Context, in taskPromptInputs) (string, error) {
+	includeErrands, errandProfiles := s.parentErrandPromptOptions(ctx, in.taskID, in.session)
+	return sysprompt.InjectKandevContextWithOptions(in.taskID, in.sessionID, in.prompt, sysprompt.KandevContextOptions{
+		BuiltinPackages:                preparedBuiltinPackages(ctx, in.taskID, in.sessionID),
+		RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, in.dbTask.WorkflowStepID),
+		IncludeCoordinatorTaskControls: !in.configMode,
+		IncludeTaskTitleTool:           !in.configMode && in.titleOwner,
+		IncludeCanvasGuidance:          in.includeCanvasGuidance,
+		IncludeWorktreeAdoption:        s.worktreeAdoptionGuidance(ctx, in.taskID, in.sessionID),
+		Autopilot:                      in.dbTask.Autopilot,
+		IncludeUserQuestionTool:        !in.dbTask.Autopilot && !in.session.IsPassthrough,
+		IncludeParentQuestionTool:      in.dbTask.Autopilot && in.dbTask.ParentID != "",
+		IncludeErrandTools:             includeErrands,
+		ErrandProfiles:                 errandProfiles,
+	}, in.referenceContext, in.promptReferenceContext, in.pullRequestTargetContext), nil
+}

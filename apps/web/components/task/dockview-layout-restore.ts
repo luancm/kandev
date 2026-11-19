@@ -28,6 +28,7 @@ import {
   removeEnvMaximizeState,
   setEnvLayout,
 } from "@/lib/local-storage";
+import { holdDockviewSessionRestore } from "@/lib/state/dockview-session-restore-gate";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   getRightPaneToggleState,
@@ -58,14 +59,11 @@ function filterLayoutForRestore(
   phantomSessionIds?: Set<string>,
   sessionContext?: SessionRestoreContext,
 ): LayoutState {
-  const preparedState =
-    sessionContext?.activeSessionId === null || !sessionContext
-      ? state
-      : filterPreMaximizeLayout(
-          state,
-          sessionContext.activeSessionId,
-          sessionContext.currentSessionIds,
-        );
+  const preparedState = filterPreMaximizeLayout(
+    state,
+    sessionContext?.activeSessionId ?? null,
+    sessionContext?.currentSessionIds ?? null,
+  );
   if (!phantomSessionIds?.size)
     return filterLayoutStateByComponents(preparedState, validComponents);
 
@@ -113,8 +111,11 @@ function applySavedMaximize(
 ): boolean {
   const rawMaximized = savedMax.maximizedDockviewJson;
   const maximizedGroupId = maximizedGroupIdOf(rawMaximized);
+  const validSessionIds = new Set(sessionContext?.currentSessionIds ?? []);
+  for (const phantomId of phantomSessionIds ?? []) validSessionIds.delete(phantomId);
   const sanitizedMaximized = sanitizeSerializedLayout(rawMaximized, validComponents, {
     excludeSessionIds: phantomSessionIds,
+    validSessionIds,
   });
   if (!sanitizedMaximized) {
     debug("applySavedMaximize: maximized payload unusable after sanitize");
@@ -182,6 +183,7 @@ function applyFixupsWithMaximize(
         phantomSessionIds,
         sessionContext,
       ),
+      sessionContext?.currentSessionIds !== null && sessionContext !== undefined,
     );
     return;
   }
@@ -198,6 +200,7 @@ function applyPreMaximizeLayout(
   api: DockviewReadyEvent["api"],
   envId: string,
   preMaximizeLayout: LayoutState,
+  persist = true,
 ): void {
   const { width, height } = measureDockviewContainer(api);
   const manualRightWidth = getManualRightWidth(envId);
@@ -216,12 +219,14 @@ function applyPreMaximizeLayout(
     rightPaneAvailable: paneState.available,
     hiddenRightPane,
   });
-  try {
-    if (setEnvLayout(envId, withHiddenRightPaneMetadata(serialized, hiddenRightPane))) {
-      removeEnvMaximizeState(envId);
+  if (persist) {
+    try {
+      if (setEnvLayout(envId, withHiddenRightPaneMetadata(serialized, hiddenRightPane))) {
+        removeEnvMaximizeState(envId);
+      }
+    } catch {
+      // Keep the maximize snapshot until its replacement layout is durable.
     }
-  } catch {
-    // Keep the maximize snapshot until its replacement layout is durable.
   }
 }
 
@@ -255,6 +260,7 @@ function tryRestoreMaximizeOnly(
         phantomSessionIds,
         sessionContext,
       ),
+      sessionContext?.currentSessionIds !== null && sessionContext !== undefined,
     );
     return true;
   } catch {
@@ -298,6 +304,7 @@ function tryRestoreEnvLayout(
     validComponents,
     {
       excludeSessionIds: phantomSessionIds,
+      validSessionIds: new Set(sessionContext?.currentSessionIds ?? []),
     },
   );
   if (!sanitized) {
@@ -393,6 +400,23 @@ export function restoreEnvLayout(
         ? (taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id)
         : null,
   };
+  if (envId && !sessionListLoaded) {
+    useDockviewStore.setState({ isRestoringLayout: true });
+    holdDockviewSessionRestore(api, () => {
+      const currentState = appStore.getState();
+      if (useDockviewStore.getState().currentLayoutEnvId !== envId) {
+        useDockviewStore.setState({ isRestoringLayout: false });
+        return;
+      }
+      if (activeTaskId && currentState.tasks.activeTaskId !== activeTaskId) {
+        useDockviewStore.setState({ isRestoringLayout: false });
+        return;
+      }
+      useDockviewStore.setState({ isRestoringLayout: true });
+      restoreEnvLayout(api, envId, appStore, validComponents);
+      requestAnimationFrame(() => useDockviewStore.setState({ isRestoringLayout: false }));
+    });
+  }
   if (isDebug()) {
     debug("restoreEnvLayout: entry", {
       envId,

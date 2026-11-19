@@ -232,6 +232,7 @@ func (s *Service) publishSessionsCancelled(
 		if len(sess.Metadata) > 0 {
 			data["session_metadata"] = sess.Metadata
 		}
+		s.addSessionWaitingOnErrandsEventField(data, sess)
 		if sess.TaskEnvironmentID != "" {
 			data["task_environment_id"] = sess.TaskEnvironmentID
 		}
@@ -278,6 +279,7 @@ func (s *Service) publishSessionRecovered(
 	if len(session.Metadata) > 0 {
 		data["session_metadata"] = session.Metadata
 	}
+	s.addSessionWaitingOnErrandsEventField(data, session)
 	if session.TaskEnvironmentID != "" {
 		data["task_environment_id"] = session.TaskEnvironmentID
 	}
@@ -290,6 +292,20 @@ func (s *Service) publishSessionRecovered(
 		return err
 	}
 	return nil
+}
+
+func (s *Service) addSessionWaitingOnErrandsEventField(data map[string]interface{}, session *models.TaskSession) {
+	if session == nil {
+		return
+	}
+	provider, ok := s.foregroundActivity.(interface {
+		ParentErrandState(sessionID string) (hasErrands, outstanding bool)
+	})
+	if !ok {
+		return
+	}
+	_, outstanding := provider.ParentErrandState(session.ID)
+	data["waiting_on_errands"] = outstanding && session.State == models.TaskSessionStateWaitingForInput
 }
 
 // publishTaskEvent publishes task events to the event bus
@@ -835,6 +851,9 @@ func serializeTaskRepositories(repos []*models.TaskRepository) []map[string]inte
 		if r.CheckoutBranch != "" {
 			serialized["checkout_branch"] = r.CheckoutBranch
 		}
+		if r.WorkspaceRelativePath != "" {
+			serialized["workspace_relative_path"] = r.WorkspaceRelativePath
+		}
 		if r.BranchPolicyID != "" {
 			serialized["branch_policy_id"] = r.BranchPolicyID
 		}
@@ -891,7 +910,7 @@ func serializeTaskWorkspaceFolders(folders []*models.TaskWorkspaceFolder) []map[
 
 // publishTaskMovedEvent publishes a task.moved event so the orchestrator can process
 // on_exit/on_enter actions for the new workflow step.
-func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string) {
+func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID, moveID string, oldState v1.TaskState) {
 	if s.eventBus == nil {
 		return
 	}
@@ -901,6 +920,9 @@ func (s *Service) publishTaskMovedEvent(ctx context.Context, task *models.Task, 
 	}
 	data := map[string]interface{}{
 		"task_id":                   task.ID,
+		"workspace_id":              task.WorkspaceID,
+		"old_state":                 string(oldState),
+		"new_state":                 string(task.State),
 		"step_transition_id":        task.WorkflowStepTransitionID,
 		"move_id":                   moveID,
 		"from_workflow_id":          fromWorkflowID,
@@ -1405,6 +1427,9 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"secret_bindings":        bindings,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
+	}
+	if remoteURL, ok := displayableRemoteURL(repository.RemoteURL); ok {
+		data["remote_url"] = remoteURL
 	}
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {

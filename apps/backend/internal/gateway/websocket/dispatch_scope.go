@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // Per-user scoping for dispatched WS RPC actions.
@@ -64,7 +66,20 @@ func (c *Client) authorizeAction(ctx context.Context, action string, payload jso
 		taskID = refs.ID
 	}
 	policy := c.hub.authPolicy
-	if refs.SessionID != "" && policy.Subscriptions.Session != nil {
+	errandsAction := action == ws.ActionErrandCancel || action == ws.ActionErrandSendResult
+	resolvedErrand := false
+	if errandsAction && refs.SessionID != "" && policy.ResolveErrandTask != nil {
+		errandsTaskID, err := policy.ResolveErrandTask(ctx, refs.SessionID)
+		if err != nil {
+			return err
+		}
+		if taskID != "" && taskID != errandsTaskID {
+			return repoerrors.ErrTaskNotFound
+		}
+		taskID = errandsTaskID
+		resolvedErrand = true
+	}
+	if refs.SessionID != "" && !resolvedErrand && policy.Subscriptions.Session != nil {
 		if err := policy.Subscriptions.Session(ctx, refs.SessionID); err != nil {
 			return err
 		}

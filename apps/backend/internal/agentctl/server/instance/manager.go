@@ -292,7 +292,11 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		zap.String("override_protocol", string(overrides.Protocol)))
 
 	// Create instance config using the unified method
-	instanceCfg := m.config.NewInstanceConfig(port, overrides)
+	instanceCfg, err := m.config.NewInstanceConfig(port, overrides)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	instanceCfg.AgentCommandConfigured = req.AgentCommand != ""
 
 	m.logger.Info("CreateInstance: instance config created",
 		zap.String("config_protocol", string(instanceCfg.Protocol)))
@@ -301,6 +305,14 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 	procMgr := process.NewManager(instanceCfg, m.logger)
 	procMgr.SetDiskCapacitySampler(m.diskSampler)
 	bundle.setProcessManager(procMgr)
+	// A configured but unusable journal is an admission error. Reject it
+	// before publishing the instance or starting workspace trackers, so no
+	// caller can observe an instance whose delivery storage cannot work.
+	if instanceCfg.DurableJournalPath != "" {
+		if _, journalErr := procMgr.DeliveryJournal(); journalErr != nil {
+			return nil, nil, nil, fmt.Errorf("instance %s delivery journal unavailable: %w", id, journalErr)
+		}
+	}
 	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
 	// anything that could reach Start(): this manager satisfies
 	// process.TurnOutcomeRecorder via RetainTurnOutcome, and nothing can start
@@ -326,18 +338,19 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
-		ID:            id,
-		Port:          port,
-		lease:         bundle.lease,
-		Status:        "running",
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  agentCmd,
-		Env:           req.Env,
-		CreatedAt:     time.Now(),
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		manager:       procMgr,
-		listenerDone:  make(chan struct{}),
+		ID:             id,
+		Port:           port,
+		lease:          bundle.lease,
+		Status:         "running",
+		WorkspacePath:  req.WorkspacePath,
+		AgentCommand:   agentCmd,
+		Env:            req.Env,
+		CreatedAt:      time.Now(),
+		SessionID:      req.SessionID,
+		TaskID:         req.TaskID,
+		ErrandMCPOwner: instanceCfg.ErrandMCPOwner,
+		manager:        procMgr,
+		listenerDone:   make(chan struct{}),
 	}
 	inst.MarkActivity()
 
@@ -367,37 +380,44 @@ func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *p
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {
 	autoStart := req.AutoStart
 	return &config.InstanceOverrides{
-		InstanceID:                 id,
-		Protocol:                   agent.Protocol(req.Protocol),
-		AgentCommand:               agentCmd,
-		WorkDir:                    req.WorkspacePath,
-		AutoStart:                  &autoStart,
-		Env:                        agentEnv,
-		AutoApprovePermissions:     req.AutoApprovePermissions,
-		AgentType:                  req.AgentType,
-		McpServers:                 m.buildMcpServerConfigs(req.McpServers),
-		SessionID:                  req.SessionID,
-		TaskID:                     req.TaskID,
-		DisableAskQuestion:         req.DisableAskQuestion,
-		PromptSuggestions:          req.PromptSuggestions,
-		AssumeMcpSse:               req.AssumeMcpSse,
-		AssumeMcpHttp:              req.AssumeMcpHttp,
-		McpMode:                    req.McpMode,
-		McpProviders:               req.McpProviders,
-		McpProfile:                 req.McpProfile,
-		NamespacesMCPToolsByServer: req.NamespacesMCPToolsByServer,
-		RequiresProcessKill:        req.RequiresProcessKill,
-		StripEnv:                   req.StripEnv,
-		ProviderGatewayAuth:        req.ProviderGatewayAuth,
-		BaseBranches:               req.BaseBranches,
-		ComparisonTargets:          req.ComparisonTargets,
-		RemoteContributions:        req.RemoteContributions,
-		ContributionDestinations:   req.ContributionDestinations,
-		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
-		DurableJournalPath:         req.DurableJournalPath,
-		DeliveryStreamID:           req.DeliveryStreamID,
-		DeliveryIncarnationID:      req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		InstanceID:                   id,
+		Protocol:                     agent.Protocol(req.Protocol),
+		AgentCommand:                 agentCmd,
+		WorkDir:                      req.WorkspacePath,
+		AutoStart:                    &autoStart,
+		Env:                          agentEnv,
+		AutoApprovePermissions:       req.AutoApprovePermissions,
+		AgentType:                    req.AgentType,
+		McpServers:                   m.buildMcpServerConfigs(req.McpServers),
+		SessionID:                    req.SessionID,
+		TaskID:                       req.TaskID,
+		DisableAskQuestion:           req.DisableAskQuestion,
+		PromptSuggestions:            req.PromptSuggestions,
+		CopilotNativeSessionEvents:   req.CopilotNativeSessionEvents,
+		AssumeMcpSse:                 req.AssumeMcpSse,
+		AssumeMcpHttp:                req.AssumeMcpHttp,
+		McpMode:                      req.McpMode,
+		McpProviders:                 req.McpProviders,
+		McpProfile:                   req.McpProfile,
+		ErrandMCPOwner:               req.ErrandMCPOwner,
+		NamespacesMCPToolsByServer:   req.NamespacesMCPToolsByServer,
+		RequiresProcessKill:          req.RequiresProcessKill,
+		StripEnv:                     req.StripEnv,
+		ProviderGatewayAuth:          req.ProviderGatewayAuth,
+		AuthPolicy:                   req.AuthPolicy,
+		BaseBranches:                 req.BaseBranches,
+		ComparisonTargets:            req.ComparisonTargets,
+		RemoteContributions:          req.RemoteContributions,
+		ContributionDestinations:     req.ContributionDestinations,
+		WorkspaceSourceRoots:         req.WorkspaceSourceRoots,
+		TaskWorkspaceRoot:            req.TaskWorkspaceRoot,
+		WorkspaceExcludedRoots:       req.WorkspaceExcludedRoots,
+		DurableJournalPath:           req.DurableJournalPath,
+		DeliveryStreamID:             req.DeliveryStreamID,
+		DeliveryIncarnationID:        req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:    req.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:        req.OpenCodePluginRuntime,
+		ManagedRuntimeInstallContext: req.ManagedRuntimeInstallContext,
 	}
 }
 

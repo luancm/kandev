@@ -1,3 +1,5 @@
+import { isTaskDetailPath } from "@/lib/links";
+import { replaceTaskConversationUrl } from "@/lib/task-conversation-navigation";
 import type { DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
@@ -55,6 +57,14 @@ function adoptVisibleSuccessorForHiddenActiveSession(
   }
 }
 
+function hasExplicitTaskConversation(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    isTaskDetailPath(window.location.pathname, taskId) &&
+    Boolean(new URLSearchParams(window.location.search).get("sessionId"))
+  );
+}
+
 function adoptRestoredSessionTabSelection(
   api: DockviewReadyEvent["api"],
   appStore: StoreApi<AppState>,
@@ -62,7 +72,7 @@ function adoptRestoredSessionTabSelection(
   const state = appStore.getState();
   const activeTaskId = state.tasks.activeTaskId;
   const currentEnvironmentId = useDockviewStore.getState().currentLayoutEnvId;
-  if (!activeTaskId || !currentEnvironmentId) return;
+  if (!activeTaskId || !currentEnvironmentId || hasExplicitTaskConversation(activeTaskId)) return;
 
   const currentSessionIds = new Set<string>(
     (state.taskSessionsByTask.itemsByTaskId[activeTaskId] ?? []).map((session) => session.id),
@@ -153,6 +163,7 @@ export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: St
     }
     clearHiddenSessionPanel(api, target.sessionId);
     state.setActiveSession(target.taskId, target.sessionId);
+    replaceTaskConversationUrl(target.taskId, target.sessionId);
   });
   const hiddenPanelDisposable = onDidHideSessionPanel(api, () => {
     queueMicrotask(() => {

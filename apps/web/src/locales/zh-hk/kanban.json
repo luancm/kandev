@@ -77,6 +77,9 @@
   "priorityIndicatorLabel": "優先級 {{priority}}",
   "queuedCount_one": "{{count}} 個排隊任務",
   "queuedCount_other": "{{count}} 個排隊任務",
+  "errandsLive_one": "{{count}} 個委託",
+  "errandsLive_other": "{{count}} 個委託",
+  "errandsWaiting": "等待委託完成",
   "queuedForStep": "已排隊等待 {{step}}",
   "queuedSection": "排隊中",
   "reorderPositionAnnouncement": "{{title}},第 {{position}} 位,共 {{total}} 位",
@@ -133,5 +136,6 @@
   "selectTasks": "選擇任務",
   "cancelTaskSelection": "取消選擇",
   "bulkSelected_one": "已選擇 {{count}} 個",
-  "groupTasksIntoSectionsByWorkflowStep": "按工作流程步驟、工作流程、儲存庫、外掛程式提供的值分組，或不分組。"
+  "groupTasksIntoSectionsByWorkflowStep": "按工作流程步驟、工作流程、儲存庫、外掛程式提供的值分組，或不分組。",
+  "graph": "關係圖"
 }

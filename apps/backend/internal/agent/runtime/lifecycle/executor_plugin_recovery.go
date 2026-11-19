@@ -27,6 +27,13 @@ type pluginExecutorRecoveryState struct {
 }
 
 func (r *PluginRemoteExecutor) recoverPluginExecutor(ctx context.Context, record *models.ExecutorRunning) (*ExecutorInstance, error) {
+	owner, err := recordedErrandExecutionOwner(record)
+	if err != nil {
+		return nil, err
+	}
+	if owner.Kind == ExecutionOwnerErrand {
+		return r.recoverRetainedPluginErrand(ctx, record, owner)
+	}
 	state, err := r.loadPluginExecutorRecoveryState(ctx, record)
 	if err != nil || state == nil {
 		return nil, err
@@ -297,7 +304,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: info.WorkspacePath,
 		Metadata: metadata, AuthToken: record.TransientAuthToken, AgentProfileID: record.ExecutionProfileID,
 		Env: clonePluginRecoveredEnvironment(info.Env), WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
-		ProviderSessionID: info.ProviderSessionID,
+		ProviderSessionID: info.ProviderSessionID, CopilotNativeSessionEvents: info.CopilotNativeSessionEvents,
 	}, nil
 }
 
@@ -309,19 +316,24 @@ func (r *PluginRemoteExecutor) readRecoveredAgentctlInstance(
 	if record == nil || state == nil || r.recoveredAgentctlInfoReader == nil {
 		return nil, errors.New("plugin executor instance metadata reader is unavailable")
 	}
+	owner, err := recordedErrandMCPOwner(record)
+	if err != nil {
+		return nil, err
+	}
 	info, err := r.recoveredAgentctlInfoReader(
 		ctx,
 		r.connectionResolver(state.operationContext, state.inventory.Resource, pluginExecutorRuntimePort),
 		r.logger,
 		record.AgentExecutionID,
 		record.TransientAuthToken,
+		owner,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("read authenticated plugin agentctl instance metadata: %w", err)
 	}
 	if info == nil || info.ID != record.AgentExecutionID || info.TaskID != record.TaskID ||
 		info.SessionID != record.SessionID || info.Port < 1 || uint32(info.Port) != state.inventory.InstancePort ||
-		strings.TrimSpace(info.WorkspacePath) == "" {
+		strings.TrimSpace(info.WorkspacePath) == "" || !matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) {
 		return nil, errors.New("authenticated plugin agentctl instance metadata does not match persisted owner")
 	}
 	return info, nil

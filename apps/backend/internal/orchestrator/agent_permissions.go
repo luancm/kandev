@@ -27,6 +27,12 @@ var (
 	ErrPermissionOptionNotOffered      = errors.New("permission_option_not_offered")
 	ErrPermissionAuditFailed           = errors.New("permission_audit_failed")
 	ErrPermissionDeliveryFailed        = errors.New("permission_delivery_failed")
+	ErrPermissionHumanInputRequired    = errors.New("human_input_required")
+	// ErrPermissionFinalizationFailed is an internal post-delivery subtype of
+	// ErrPermissionAuditFailed. It keeps the established public audit-failure
+	// classification while letting automatic fallback distinguish uncertain
+	// delivery from a failure before dispatch.
+	ErrPermissionFinalizationFailed = fmt.Errorf("%w", ErrPermissionAuditFailed)
 )
 
 type ResolveAgentPermissionRequest struct {
@@ -36,6 +42,9 @@ type ResolveAgentPermissionRequest struct {
 	PendingID string
 	OptionID  string
 	Source    models.PermissionResolutionSource
+	// AutomaticOnly prevents an automatic resolver from claiming a request that
+	// was already promoted to a person's fallback.
+	AutomaticOnly bool
 	// ActorKind, when set, replaces the kind derived from the context.
 	ActorKind models.PermissionResolutionActorKind
 	// UnattendedTurnID is stored in the audit of an unattended-turn denial.
@@ -94,9 +103,12 @@ func (s *Service) ResolveAgentPermission(ctx context.Context, request ResolveAge
 	if err != nil {
 		return nil, err
 	}
-	_, option, lookupErr := findPermissionOption(permissions, request)
+	live, option, lookupErr := findPermissionOption(permissions, request)
 	if lookupErr != nil {
 		return nil, s.permissionLookupError(ctx, request, lookupErr)
+	}
+	if request.Source == models.PermissionSourceAutomation && live != nil && live.HumanInput {
+		return nil, ErrPermissionHumanInputRequired
 	}
 	if s.messageCreator == nil {
 		return nil, ErrPermissionAuditFailed
@@ -131,7 +143,7 @@ func (s *Service) ResolveAgentPermission(ctx context.Context, request ResolveAge
 		FinalizedAt: time.Now().UTC(),
 	})
 	if err != nil || finalized.Outcome != models.PermissionFinalized {
-		return nil, ErrPermissionAuditFailed
+		return nil, ErrPermissionFinalizationFailed
 	}
 	s.markSessionRunningAfterPermission(ctx, request.SessionID)
 	return &ResolveAgentPermissionResult{
@@ -158,8 +170,9 @@ func (s *Service) claimAgentPermission(ctx context.Context, request ResolveAgent
 	}
 	claimID := uuid.NewString()
 	claim, err := s.claimPermissionWithRetry(ctx, models.PermissionResolutionClaimRequest{
-		TaskID:    request.TaskID,
-		SessionID: request.SessionID,
+		TaskID:        request.TaskID,
+		SessionID:     request.SessionID,
+		AutomaticOnly: request.AutomaticOnly,
 		Audit: models.PermissionResolutionAudit{
 			ClaimID:     claimID,
 			ActorUserID: actorUserID,
@@ -233,16 +246,8 @@ func (s *Service) cancelAgentPermission(ctx context.Context, request ResolveAgen
 }
 
 func findPermissionForCancellation(permissions []streams.PendingAgentPermission, request ResolveAgentPermissionRequest) error {
-	for _, permission := range permissions {
-		if permission.PendingID != request.PendingID {
-			continue
-		}
-		if permission.RequestID != request.RequestID {
-			return ErrPermissionStale
-		}
-		return nil
-	}
-	return ErrPermissionNotFound
+	_, err := findPendingPermission(permissions, request.RequestID, request.PendingID)
+	return err
 }
 
 func (s *Service) authorizedPermissionSessions(ctx context.Context, taskID, sessionID string) ([]*models.TaskSession, error) {
@@ -270,22 +275,35 @@ func (s *Service) authorizedPermissionSessions(ctx context.Context, taskID, sess
 }
 
 func findPermissionOption(permissions []streams.PendingAgentPermission, request ResolveAgentPermissionRequest) (*streams.PendingAgentPermission, *streams.PermissionChoice, error) {
+	permission, err := findPendingPermission(permissions, request.RequestID, request.PendingID)
+	if err != nil {
+		return nil, nil, err
+	}
+	option, err := offeredPermissionOption(permission, request.OptionID)
+	return permission, option, err
+}
+
+func findPendingPermission(permissions []streams.PendingAgentPermission, requestID, pendingID string) (*streams.PendingAgentPermission, error) {
 	for i := range permissions {
 		permission := &permissions[i]
-		if permission.PendingID != request.PendingID {
+		if permission.PendingID != pendingID {
 			continue
 		}
-		if permission.RequestID != request.RequestID {
-			return nil, nil, ErrPermissionStale
+		if permission.RequestID != requestID {
+			return nil, ErrPermissionStale
 		}
-		for j := range permission.Options {
-			if permission.Options[j].OptionID == request.OptionID {
-				return permission, &permission.Options[j], nil
-			}
-		}
-		return permission, nil, ErrPermissionOptionNotOffered
+		return permission, nil
 	}
-	return nil, nil, ErrPermissionNotFound
+	return nil, ErrPermissionNotFound
+}
+
+func offeredPermissionOption(permission *streams.PendingAgentPermission, optionID string) (*streams.PermissionChoice, error) {
+	for i := range permission.Options {
+		if permission.Options[i].OptionID == optionID {
+			return &permission.Options[i], nil
+		}
+	}
+	return nil, ErrPermissionOptionNotOffered
 }
 
 func (s *Service) permissionLookupError(ctx context.Context, request ResolveAgentPermissionRequest, lookupErr error) error {
@@ -350,7 +368,7 @@ func (s *Service) finalizePermissionDeliveryFailure(ctx context.Context, request
 		FinalizedAt: time.Now().UTC(),
 	})
 	if finalizeErr != nil || finalized.Outcome != models.PermissionFinalized {
-		return ErrPermissionAuditFailed
+		return ErrPermissionFinalizationFailed
 	}
 	return domainErr
 }
@@ -412,6 +430,12 @@ func (s *Service) ResolveUnattendedPermission(ctx context.Context, taskID, sessi
 		}
 	}
 	if live == nil {
+		return nil
+	}
+	// A provider-native human question is never answered on the user's behalf.
+	// An unattended turn must leave it pending until a person selects an
+	// offered option through the normal permission flow.
+	if live.HumanInput {
 		return nil
 	}
 	request := ResolveAgentPermissionRequest{

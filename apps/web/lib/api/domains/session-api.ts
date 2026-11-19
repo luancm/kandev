@@ -133,6 +133,11 @@ export async function listTaskSessions(taskId: string, options?: ApiRequestOptio
   return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions`, options);
 }
 
+/** Lists ordinary task-navigation membership without Errand child sessions. */
+export async function listOrdinaryTaskSessions(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions/ordinary`, options);
+}
+
 export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
 }
@@ -273,6 +278,16 @@ export async function setSessionModel(sessionId: string, modelId: string) {
   return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-model`, {
     init: { method: "POST", body: JSON.stringify({ model_id: modelId }) },
   });
+}
+
+export async function resolveSessionModelConfig(
+  sessionId: string,
+  request: { model: string; mode?: string; config_options?: Record<string, string> },
+): Promise<import("@/lib/types/http").AgentModelConfigResponse> {
+  return fetchJson<import("@/lib/types/http").AgentModelConfigResponse>(
+    `/api/v1/task-sessions/${sessionId}/resolve-model-config`,
+    { init: { method: "POST", body: JSON.stringify(request) } },
+  );
 }
 
 export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {

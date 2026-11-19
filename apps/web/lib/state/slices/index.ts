@@ -10,7 +10,6 @@ export {
 export { createUISlice, defaultUIState } from "./ui/ui-slice";
 export { createGitHubSlice, defaultGitHubState } from "./github/github-slice";
 export { createGitLabSlice, defaultGitLabState } from "./gitlab/gitlab-slice";
-export { createAzureDevOpsSlice, defaultAzureDevOpsState } from "./azure-devops/azure-devops-slice";
 export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
 export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
@@ -33,6 +32,7 @@ export {
   createInboxHistorySlice,
   defaultInboxHistoryState,
 } from "./inbox-history/inbox-history-slice";
+export { createErrandsSlice, defaultErrandsState } from "./errands/errands-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -57,12 +57,6 @@ export type {
   GitLabSliceActions,
   TaskMRsState,
 } from "./gitlab/types";
-export type {
-  AzureDevOpsSlice,
-  AzureDevOpsSliceState,
-  AzureDevOpsSliceActions,
-  AzureDevOpsTaskPullRequestsState,
-} from "./azure-devops/types";
 export type {
   JiraSlice,
   JiraSliceState,
@@ -138,6 +132,7 @@ export type {
   InboxHistoryWorkspaceState,
   InboxHistoryReadStatus,
 } from "./inbox-history/types";
+export type { ErrandsSlice, ErrandsSliceActions, ErrandsSliceState } from "./errands/types";
 
 // Re-export commonly used types from each domain
 export type {

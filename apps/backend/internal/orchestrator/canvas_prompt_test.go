@@ -17,16 +17,18 @@ func TestWrapCreatedSessionPrompt_CanvasPromptFollowsResolvedCapability(t *testi
 	session := &models.TaskSession{ID: "session"}
 	task := &models.Task{ID: "task"}
 
-	withoutCanvas := (&Service{}).wrapCreatedSessionPrompt(
+	withoutCanvas, err := (&Service{}).wrapCreatedSessionPrompt(
 		context.Background(), "build the requested app", "task", "session", session, task,
 		false, false, false, false, nil, "",
 	)
+	require.NoError(t, err)
 	assert.NotContains(t, withoutCanvas, "create_canvas_kandev")
 
-	withCanvas := (&Service{}).wrapCreatedSessionPrompt(
+	withCanvas, err := (&Service{}).wrapCreatedSessionPrompt(
 		context.Background(), "build the requested app", "task", "session", session, task,
 		false, false, false, true, nil, "",
 	)
+	require.NoError(t, err)
 	assertCanvasPrompt(t, withCanvas)
 }
 

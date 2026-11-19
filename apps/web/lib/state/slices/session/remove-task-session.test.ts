@@ -3,12 +3,18 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
+import {
+  ERRAND_PARENT_ID,
+  makeBrowserErrandRow,
+  makeInspection,
+} from "../errands/errands.test-helpers";
+import { createAppStore } from "../../store";
 import type { SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
 
 type CombinedSlice = SessionSlice & SessionRuntimeSlice;
 
-/** Creates a zustand store combining the session and session-runtime slices. */
+/** Creates a zustand store combining the session and runtime slices. */
 function makeStore() {
   return create<CombinedSlice>()(
     immer((set) => ({
@@ -22,6 +28,7 @@ function makeStore() {
 
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
+const ERRAND_SIBLING_ID = "errand-sibling";
 const INCARNATION_ID = `incarnation-1`;
 
 describe("removeTaskSession cleanup cascade", () => {
@@ -82,6 +89,17 @@ describe("removeTaskSession cleanup cascade", () => {
     expect(after.contextWindow.bySessionId[SESSION_ID]).toBeUndefined();
     expect(after.shell.outputs["env-1"]).toBeUndefined();
     expect(after.environmentIdBySessionId[SESSION_ID]).toBeUndefined();
+  });
+
+  it("removes an ordinary session without touching the task's errands", () => {
+    const state = createAppStore();
+    const open = makeInspection(makeBrowserErrandRow({ errand_id: ERRAND_SIBLING_ID }));
+    state.getState().retainErrandInspection("host", open);
+    const before = state.getState().errands;
+    state.getState().removeTaskSession(TASK_ID, ERRAND_PARENT_ID);
+
+    expect(state.getState().errands).toBe(before);
+    expect(state.getState().errands.detailBySessionId[ERRAND_SIBLING_ID]).toEqual(open);
   });
 
   it("clears queue metadata and protects a replacement operation token", () => {

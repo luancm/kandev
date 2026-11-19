@@ -11,6 +11,14 @@ import {
 } from "./session-tab-menu";
 import { TabRenameInput } from "./tab-rename-input";
 
+vi.mock("@/components/task/handoff-profile-menu-items", () => ({
+  HandoffContextMenuSub: () => (
+    <div role="menuitem" data-testid="session-handoff-submenu">
+      Handoff
+    </div>
+  ),
+}));
+
 describe("DeleteSessionDialog", () => {
   it("states conversation deletion and workspace retention", () => {
     render(
@@ -297,6 +305,34 @@ describe("Session restart menu", () => {
       expect(handleRestart).toHaveBeenCalledOnce();
     },
   );
+});
+
+it("offers Set as Primary and Handoff for a running session", () => {
+  render(
+    <ContextMenu>
+      <ContextMenuTrigger data-testid="running-tab">Agent</ContextMenuTrigger>
+      <SessionContextMenuItems
+        sessionState="RUNNING"
+        isPrimary={false}
+        canShare={false}
+        taskId="task-1"
+        sessionId="session-1"
+        actions={{
+          handleSetPrimary: vi.fn(),
+          handleStop: vi.fn(),
+          handleResume: vi.fn(),
+          handleRestart: vi.fn(),
+        }}
+        onDelete={vi.fn()}
+        onShare={vi.fn()}
+        onHandoffProfile={vi.fn()}
+        onStartRename={vi.fn()}
+      />
+    </ContextMenu>,
+  );
+  fireEvent.contextMenu(screen.getByTestId("running-tab"));
+  expect(screen.getByRole("menuitem", { name: "Set as Primary" })).toBeTruthy();
+  expect(screen.getByTestId("session-handoff-submenu")).toBeTruthy();
 });
 
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.4

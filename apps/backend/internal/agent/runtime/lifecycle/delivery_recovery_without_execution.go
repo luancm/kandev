@@ -8,6 +8,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -25,6 +26,8 @@ type AgentDeliveryRecoveryIdentity struct {
 	PromptGeneration  uint64
 	HistoryGap        *models.AgentDeliveryHistoryGap
 	PayloadHash       string
+	TurnID            string
+	NativeSessionID   string
 }
 
 // RecoverAgentPromptStreamWithIdentity resolves a retained owner through the
@@ -39,6 +42,13 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 	if !completeAgentDeliveryRecoveryIdentity(requested) {
 		return deliveryRecoveryResult(identity, DeliveryReconciliationBlocked,
 			"recovery_identity_incomplete", ErrDeliveryRecoveryBlocked)
+	}
+
+	if _, exists := m.GetExecutionBySessionID(requested.SessionID); !exists {
+		remote, err := m.recoverSavedSSHDelivery(ctx, requested)
+		if remote && err != nil {
+			return sshDeliveryRecoveryFailure(identity, err)
+		}
 	}
 	if execution, exists := m.GetExecutionBySessionID(requested.SessionID); exists {
 		if !agentDeliveryRecoveryExecutionMatches(execution, requested) {
@@ -59,9 +69,26 @@ func (m *Manager) RecoverAgentPromptStreamWithIdentity(
 			return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable,
 				"delivery_recovery_unavailable", ErrDeliveryTransportUnavailable)
 		}
+		if execution.RuntimeName == agentruntime.RuntimeSSH {
+			if err := m.reconnectSSHDelivery(ctx, execution); err != nil {
+				return sshDeliveryRecoveryFailure(identity, err)
+			}
+			if !agentDeliveryRecoveryExecutionMatches(execution, requested) {
+				return deliveryRecoveryResult(identity, DeliveryReconciliationOwnerMismatch, "execution_identity_changed", ErrDeliveryOwnerMismatch)
+			}
+		}
 		return m.streamManager.ReconcileAgentDelivery(ctx, execution)
 	}
 	return m.recoverRetainedAgentDeliveryWithoutExecution(ctx, requested, identity)
+}
+
+// sshDeliveryRecoveryFailure keeps a proven owner conflict blocked instead of
+// reporting it as a retryable transport outage.
+func sshDeliveryRecoveryFailure(identity DeliveryReconciliationIdentity, err error) DeliveryReconciliationResult {
+	if errors.Is(err, ErrDeliveryOwnerMismatch) {
+		return deliveryRecoveryResult(identity, DeliveryReconciliationOwnerMismatch, "execution_identity_changed", err)
+	}
+	return deliveryRecoveryResult(identity, DeliveryReconciliationTransportUnavailable, "instance_unavailable", err)
 }
 
 func (m *Manager) recoverRetainedAgentDeliveryWithoutExecution(
@@ -222,7 +249,7 @@ func deliveryReconciliationIdentity(identity AgentDeliveryRecoveryIdentity) Deli
 		OriginalRuntime: identity.OriginalRuntime, SessionID: identity.SessionID, ExecutionID: identity.ExecutionID,
 		IncarnationID: identity.IncarnationID, HarnessGeneration: identity.HarnessGeneration,
 		StreamID: identity.StreamID, SubmissionID: identity.SubmissionID,
-		PromptGeneration: identity.PromptGeneration,
+		PromptGeneration: identity.PromptGeneration, TurnID: identity.TurnID, NativeSessionID: identity.NativeSessionID,
 	}
 }
 

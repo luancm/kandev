@@ -20,6 +20,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 		return nil, nil, "", 0, err
 	}
 	defer func() { _ = forward.Close() }()
+	defer control.Close()
 	unlock := r.lockInstance("control:" + req.TaskEnvironmentID)
 	defer unlock()
 	token, err := r.sharedKubernetesControlToken(ctx, req)
@@ -33,7 +34,7 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 		if returnedErr != nil && created {
 			rollbackCtx, cancel := kubernetesDurableContext(ctx)
 			defer cancel()
-			returnedErr = errors.Join(returnedErr, control.DeleteInstance(rollbackCtx, remoteID))
+			returnedErr = errors.Join(returnedErr, stopKubernetesAgentctlAttachment(rollbackCtx, control, remoteID, req.ErrandMCPOwner))
 		}
 	}()
 	if isAgentctlAuthError(err) && req.BootstrapNonce != "" {
@@ -62,6 +63,9 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 }
 
 func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetesAgentctlInstanceControl, req *ExecutorCreateRequest, remoteID string) (*agentctl.CreateInstanceResponse, bool, error) {
+	if err := requireErrandQuestionPolicy(ctx, control, req.ErrandMCPOwner); err != nil {
+		return nil, false, err
+	}
 	request := buildReconnectCreateInstanceRequest(req, remoteID)
 	applyKubernetesDurableJournalPath(request, req)
 	info, err := control.GetInstance(ctx, remoteID)
@@ -69,6 +73,9 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetes
 		response := &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
 			return nil, false, err
+		}
+		if !matchErrandMCPOwner(request.ErrandMCPOwner, info.ErrandMCPOwner) {
+			return nil, false, errors.New("retained agentctl errand owner mismatch")
 		}
 		if info.WorkspacePath != request.WorkspacePath {
 			return nil, false, fmt.Errorf("kubernetes instance workspace mismatch")
@@ -78,8 +85,8 @@ func getOrCreateSharedKubernetesInstance(ctx context.Context, control kubernetes
 	if !errors.Is(err, agentctl.ErrInstanceNotFound) {
 		return nil, false, err
 	}
-	response, createErr := createOrReconcileKubernetesAgentctlInstance(ctx, control, request)
-	return response, true, createErr
+	response, created, createErr := createOrReconcileKubernetesAgentctlInstanceWithOwnership(ctx, control, request)
+	return response, created, createErr
 }
 
 func (r *KubernetesExecutor) sharedKubernetesControlToken(ctx context.Context, req *ExecutorCreateRequest) (string, error) {

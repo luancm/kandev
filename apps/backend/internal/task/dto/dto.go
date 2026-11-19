@@ -268,7 +268,8 @@ type TaskDTO struct {
 	DependsOn []TaskDependencyRefDTO `json:"depends_on,omitempty"`
 	// Blocks lists direct dependents so the dependency chip can render both
 	// directions without a second round trip.
-	Blocks []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Blocks  []TaskDependencyRefDTO `json:"blocks,omitempty"`
+	Related []TaskDependencyRefDTO `json:"related,omitempty"`
 	// StartWhenUnblocked reports that a launch intent is waiting on dependency
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
@@ -416,26 +417,33 @@ type TaskSessionDTO struct {
 	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name               string `json:"name"`
-	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentProfileID     string `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64  `json:"route_generation,omitempty"`
-	RouteState         string `json:"route_state,omitempty"`
-	RouteReason        string `json:"route_reason,omitempty"`
-	ExecutorID         string `json:"executor_id,omitempty"`
-	ExecutorProfileID  string `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string `json:"environment_id,omitempty"`
-	RepositoryID       string `json:"repository_id,omitempty"`
-	BaseBranch         string `json:"base_branch,omitempty"`
-	BaseCommitSHA      string `json:"base_commit_sha,omitempty"`
-	WorktreeID         string `json:"worktree_id,omitempty"`
-	WorktreePath       string `json:"worktree_path,omitempty"`
-	WorktreeBranch     string `json:"worktree_branch,omitempty"`
+	Name             string `json:"name"`
+	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	ContainerID      string `json:"container_id,omitempty"`
+	// ExecutionRuntime is the observed runtime recorded for the same
+	// executors_running row as AgentExecutionID/ContainerID. Null means
+	// unknown; it is never inferred from the selected executor.
+	ExecutionRuntime   *string `json:"execution_runtime"`
+	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64   `json:"route_generation,omitempty"`
+	RouteState         string  `json:"route_state,omitempty"`
+	RouteReason        string  `json:"route_reason,omitempty"`
+	ExecutorID         string  `json:"executor_id,omitempty"`
+	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID      string  `json:"environment_id,omitempty"`
+	RepositoryID       string  `json:"repository_id,omitempty"`
+	BaseBranch         string  `json:"base_branch,omitempty"`
+	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
+	WorktreeID         string  `json:"worktree_id,omitempty"`
+	WorktreePath       string  `json:"worktree_path,omitempty"`
+	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape
@@ -457,6 +465,10 @@ type TaskSessionDTO struct {
 	ReviewStatus      models.ReviewStatus   `json:"review_status,omitempty"`
 	TaskEnvironmentID string                `json:"task_environment_id,omitempty"`
 	WorkspaceRecovery *WorkspaceRecoveryDTO `json:"workspace_recovery"`
+
+	// WaitingOnErrands is set only for a session that owns an errand row; nil
+	// omits the field for ordinary sessions.
+	WaitingOnErrands *bool `json:"waiting_on_errands,omitempty"`
 	// SessionRecoveryBlocks is always serialized so a resolved block clears a
 	// prior client projection.
 	SessionRecoveryBlocks []SessionRecoveryBlockDTO `json:"session_recovery_blocks"`
@@ -616,26 +628,33 @@ type TaskSessionSummaryDTO struct {
 	QueueIncarnationID string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name               string `json:"name"`
-	AgentExecutionID   string `json:"agent_execution_id,omitempty"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentProfileID     string `json:"agent_profile_id,omitempty"`
-	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
-	RouteGeneration    int64  `json:"route_generation,omitempty"`
-	RouteState         string `json:"route_state,omitempty"`
-	RouteReason        string `json:"route_reason,omitempty"`
-	ExecutorID         string `json:"executor_id,omitempty"`
-	ExecutorProfileID  string `json:"executor_profile_id,omitempty"`
-	EnvironmentID      string `json:"environment_id,omitempty"`
-	RepositoryID       string `json:"repository_id,omitempty"`
-	BaseBranch         string `json:"base_branch,omitempty"`
-	BaseCommitSHA      string `json:"base_commit_sha,omitempty"`
-	WorktreeID         string `json:"worktree_id,omitempty"`
-	WorktreePath       string `json:"worktree_path,omitempty"`
-	WorktreeBranch     string `json:"worktree_branch,omitempty"`
+	Name             string `json:"name"`
+	AgentExecutionID string `json:"agent_execution_id,omitempty"`
+	ContainerID      string `json:"container_id,omitempty"`
+	// ExecutionRuntime is the observed runtime recorded for the same
+	// executors_running row as AgentExecutionID/ContainerID. Null means
+	// unknown; it is never inferred from the selected executor.
+	ExecutionRuntime   *string `json:"execution_runtime"`
+	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
+	ExecutionProfileID string  `json:"execution_profile_id,omitempty"`
+	RouteGeneration    int64   `json:"route_generation,omitempty"`
+	RouteState         string  `json:"route_state,omitempty"`
+	RouteReason        string  `json:"route_reason,omitempty"`
+	ExecutorID         string  `json:"executor_id,omitempty"`
+	ExecutorProfileID  string  `json:"executor_profile_id,omitempty"`
+	EnvironmentID      string  `json:"environment_id,omitempty"`
+	RepositoryID       string  `json:"repository_id,omitempty"`
+	BaseBranch         string  `json:"base_branch,omitempty"`
+	BaseCommitSHA      string  `json:"base_commit_sha,omitempty"`
+	WorktreeID         string  `json:"worktree_id,omitempty"`
+	WorktreePath       string  `json:"worktree_path,omitempty"`
+	WorktreeBranch     string  `json:"worktree_branch,omitempty"`
 	// WorkspacePath is the effective task root used by Files and chat links;
 	// WorktreePath remains the flattened primary repository path.
 	WorkspacePath string `json:"workspace_path,omitempty"`
+	// AgentWorkspacePath is the confirmed native-session working directory used
+	// as the base for repository-relative chat links. Null means unknown.
+	AgentWorkspacePath *string `json:"agent_workspace_path"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape.
@@ -650,6 +669,9 @@ type TaskSessionSummaryDTO struct {
 	IsPassthrough     bool                     `json:"is_passthrough"`
 	ReviewStatus      models.ReviewStatus      `json:"review_status,omitempty"`
 	TaskEnvironmentID string                   `json:"task_environment_id,omitempty"`
+
+	// WaitingOnErrands mirrors TaskSessionDTO.
+	WaitingOnErrands *bool `json:"waiting_on_errands,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
@@ -1224,6 +1246,24 @@ func FromTaskWithSessionInfo(
 	}
 }
 
+// agentWorkspacePathPtr projects an empty native-workspace projection as an
+// explicit null so a full response can clear a stale client value.
+func agentWorkspacePathPtr(path string) *string {
+	if path == "" {
+		return nil
+	}
+	return &path
+}
+
+// observedExecutionRuntimePtr projects an unknown observed runtime as an
+// explicit null. It is never derived from the selected executor.
+func observedExecutionRuntimePtr(runtime string) *string {
+	if runtime == "" {
+		return nil
+	}
+	return &runtime
+}
+
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
@@ -1233,6 +1273,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		Name:               session.Name,
 		AgentExecutionID:   session.AgentExecutionID,
 		ContainerID:        session.ContainerID,
+		ExecutionRuntime:   observedExecutionRuntimePtr(session.ExecutionRuntime),
 		AgentProfileID:     session.AgentProfileID,
 		ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration:    session.RouteGeneration,
@@ -1245,6 +1286,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		BaseBranch:         session.BaseBranch,
 		BaseCommitSHA:      session.BaseCommitSHA,
 		WorkspacePath:      session.WorkspacePath,
+		AgentWorkspacePath: agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:              session.State,
 		ErrorMessage:       session.ErrorMessage,
 		Metadata:           session.Metadata,
@@ -1255,7 +1297,8 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		IsPassthrough:      session.IsPassthrough,
 		ReviewStatus:       session.ReviewStatus,
 		TaskEnvironmentID:  session.TaskEnvironmentID,
-		LastReadMessageID:  session.LastReadMessageID,
+
+		LastReadMessageID: session.LastReadMessageID,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1280,6 +1323,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
+		ExecutionRuntime:     observedExecutionRuntimePtr(session.ExecutionRuntime),
 		AgentProfileID:       session.AgentProfileID,
 		ExecutionProfileID:   session.ExecutionProfileID,
 		RouteGeneration:      session.RouteGeneration,
@@ -1292,6 +1336,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		BaseBranch:           session.BaseBranch,
 		BaseCommitSHA:        session.BaseCommitSHA,
 		WorkspacePath:        session.WorkspacePath,
+		AgentWorkspacePath:   agentWorkspacePathPtr(session.AgentWorkspacePath),
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,
@@ -1303,10 +1348,11 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
-		IsPrimary:             session.IsPrimary,
-		IsPassthrough:         session.IsPassthrough,
-		ReviewStatus:          session.ReviewStatus,
-		TaskEnvironmentID:     session.TaskEnvironmentID,
+		IsPrimary:         session.IsPrimary,
+		IsPassthrough:     session.IsPassthrough,
+		ReviewStatus:      session.ReviewStatus,
+		TaskEnvironmentID: session.TaskEnvironmentID,
+
 		SessionRecoveryBlocks: []SessionRecoveryBlockDTO{},
 		LastReadMessageID:     session.LastReadMessageID,
 		CostSubcents:          session.CostSubcents,
@@ -1367,6 +1413,7 @@ func EnrichForegroundActivity(dto *TaskSessionDTO, provider ForegroundActivityPr
 	}
 	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
 	dto.SupportsSteering = steerEligible(dto.ID, dto.State, provider)
+	dto.WaitingOnErrands = errandWaitingValue(dto.ID, dto.State, provider)
 }
 
 // EnrichForegroundActivitySummary is EnrichForegroundActivity for the lightweight
@@ -1380,6 +1427,7 @@ func EnrichForegroundActivitySummary(dto *TaskSessionSummaryDTO, provider Foregr
 	}
 	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
 	dto.SupportsSteering = steerEligible(dto.ID, dto.State, provider)
+	dto.WaitingOnErrands = errandWaitingValue(dto.ID, dto.State, provider)
 }
 
 func activeSubagentCount(sessionID string, provider ForegroundActivityProvider) int {

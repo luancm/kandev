@@ -84,18 +84,18 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if execution.SessionID != "" {
-		if existingID, exists := s.bySession[execution.SessionID]; exists && existingID != execution.ID {
+	if sessionID := executionStoreSessionID(execution); sessionID != "" {
+		if existingID, exists := s.bySession[sessionID]; exists && existingID != execution.ID {
 			return fmt.Errorf("%w: session=%s existing=%s new=%s",
 				ErrExecutionAlreadyExistsForSession,
-				execution.SessionID, existingID, execution.ID)
+				sessionID, existingID, execution.ID)
 		}
 	}
 
 	s.executions[execution.ID] = execution
 
-	if execution.SessionID != "" {
-		s.bySession[execution.SessionID] = execution.ID
+	if sessionID := executionStoreSessionID(execution); sessionID != "" {
+		s.bySession[sessionID] = execution.ID
 	}
 
 	if execution.ContainerID != "" {
@@ -116,8 +116,8 @@ func (s *ExecutionStore) Remove(executionID string) {
 	}
 
 	// Remove from secondary indexes
-	if execution.SessionID != "" {
-		delete(s.bySession, execution.SessionID)
+	if sessionID := executionStoreSessionID(execution); sessionID != "" {
+		delete(s.bySession, sessionID)
 	}
 	if execution.ContainerID != "" {
 		delete(s.byContainer, execution.ContainerID)
@@ -387,6 +387,12 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).
 	execution.recoveredPromptGenerationPending.Store(false)
 	execution.cancelEscalatedPromptGeneration.Store(0)
+	execution.TerminalCausingRunID = execution.CausingRunID
+	if execution.TerminalCausingRunID == "" {
+		execution.deleteMetadataValues(MetadataKeyTerminalCausingRunID)
+	} else {
+		execution.setMetadataValue(MetadataKeyTerminalCausingRunID, execution.TerminalCausingRunID)
+	}
 	execution.promptGeneration++
 	if execution.promptTurnID != "" {
 		if execution.promptTurnIDs == nil {
@@ -499,4 +505,12 @@ func (s *ExecutionStore) WithRLock(executionID string, fn func(execution *AgentE
 	}
 	fn(execution)
 	return nil
+}
+
+// executionStoreSessionID keeps task and run indexing unchanged while giving Errands their own key.
+func executionStoreSessionID(execution *AgentExecution) string {
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		return executionInventorySessionID(execution)
+	}
+	return execution.SessionID
 }

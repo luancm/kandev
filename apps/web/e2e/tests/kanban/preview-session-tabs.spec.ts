@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { waitForSessionDone } from "../../helpers/session";
 import { watchWs } from "../../helpers/causal-waits";
+import { startErrands } from "../../helpers/errands";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -566,4 +567,78 @@ test.describe("Preview Plan tab", () => {
     await planTab.tap();
     await expect(previewPanel.getByText("Step one")).toBeVisible({ timeout: 10_000 });
   });
+});
+
+// @covers AC-TASKS-ERRANDS-010.2 AC-TASKS-ERRANDS-010.3
+test("preview opens an Errand and keeps its ordinary parent tab", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  const baseline = (await api.getUserSettings()).settings as { enable_preview_on_click?: boolean };
+  try {
+    const { taskId, parentId, errands } = await startErrands(api, seed, backend, { count: 1 });
+    const primaryBefore = (await api.listTaskSessions(taskId)).sessions.find(
+      (row) => row.is_primary,
+    )?.id;
+    await api.saveUserSettings({ enable_preview_on_click: true });
+    const kanban = new KanbanPage(page);
+    await kanban.goto(seed.workflowId);
+    await kanban.taskCardByTitle("Errands daily-use proof").click();
+    const preview = page.getByTestId("preview-session-tabs");
+    await expect(preview).toHaveCount(1);
+    await expect(
+      preview.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
+    ).toBeVisible();
+    const parentTab = preview.getByTestId(`preview-session-tab-${parentId}`);
+    const planTab = preview.getByTestId("preview-plan-tab");
+    await planTab.click();
+    await expect(planTab).toHaveAttribute("data-state", "active");
+    await parentTab.click();
+    await expect(parentTab).toHaveAttribute("data-state", "active");
+    await expect(
+      preview.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
+    ).toBeVisible();
+    await preview
+      .locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`)
+      .evaluate((node) => node.setAttribute("data-retained-parent", ""));
+    await preview.getByTestId("errands-chip").click();
+    await page
+      .getByTestId("errands-popover")
+      .getByTestId(`errand-open-${errands[0].errand_id}`)
+      .click();
+    const conversation = preview.locator(
+      `[data-testid="errand-conversation"][data-errand-id="${errands[0].errand_id}"]`,
+    );
+    await expect(conversation).toHaveCount(1);
+    const childHeader = conversation.getByTestId("errand-header");
+    await expect(childHeader).toBeVisible();
+    await expect(childHeader.getByTestId("errand-stop-button")).toBeVisible();
+    await expect(childHeader.getByRole("button", { name: "Set as Primary" })).toHaveCount(0);
+    await expect(childHeader.getByRole("menuitem", { name: /Handoff/ })).toHaveCount(0);
+    await expect(
+      preview.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
+    ).toHaveAttribute("data-retained-parent", "");
+    await expect(parentTab).toHaveAttribute("data-state", "active");
+    await expect(preview.getByTestId(`preview-session-tab-${errands[0].errand_id}`)).toHaveCount(0);
+    await conversation.getByTestId("errand-back-to-parent").click();
+    await expect(
+      preview.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
+    ).toBeVisible();
+    const start = preview.getByTestId("errand-start-card");
+    await start.getByRole("button", { expanded: false }).click();
+    await start.getByTestId(`errand-open-${errands[0].errand_id}`).click();
+    await expect(conversation).toBeVisible();
+    expect((await api.listTaskSessions(taskId)).sessions.find((row) => row.is_primary)?.id).toBe(
+      primaryBefore,
+    );
+  } finally {
+    await api.saveUserSettings({
+      enable_preview_on_click: baseline.enable_preview_on_click ?? false,
+    });
+    await restore();
+  }
 });

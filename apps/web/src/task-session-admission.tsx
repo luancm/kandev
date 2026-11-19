@@ -1,6 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import { requestedOwnedErrand } from "@/lib/ssr/task-session-route-identity";
+import {
+  InvalidErrandInspectionError,
+  readErrandInspection,
+} from "@/lib/state/slices/errands/errand-browser-read-coordinator";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
 
 export class TaskSessionAdmissionError extends Error {
   constructor(readonly reason: "unavailable" | "read_failed") {
@@ -8,19 +15,38 @@ export class TaskSessionAdmissionError extends Error {
   }
 }
 
-export function assertRequestedSession(
+export async function assertRequestedSession(
+  store: StoreApi<AppState>,
   identity: TaskNavigationIdentity,
   taskId: string,
   sessionId?: string,
 ) {
-  if (!sessionId) return;
-  if (identity.sessionListUnavailable) throw new TaskSessionAdmissionError("read_failed");
+  if (!sessionId) return undefined;
   if (
-    !identity.allSessionsResponse.sessions.some(
+    identity.allSessionsResponse.sessions.some(
       (session) => session.id === sessionId && session.task_id === taskId,
     )
   ) {
-    throw new TaskSessionAdmissionError("unavailable");
+    return undefined;
+  }
+  const read = readErrandInspection(store, taskId, sessionId);
+  try {
+    const inspection = requestedOwnedErrand(taskId, sessionId, await read.promise);
+    if (!inspection) throw new InvalidErrandInspectionError();
+    return {
+      inspection,
+      retain: (ownerId: string) => read.retain(ownerId, inspection),
+      isCurrent: read.isCurrent,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw error;
+    throw new TaskSessionAdmissionError(
+      identity.sessionListUnavailable && !(error instanceof InvalidErrandInspectionError)
+        ? "read_failed"
+        : "unavailable",
+    );
+  } finally {
+    read.release();
   }
 }
 

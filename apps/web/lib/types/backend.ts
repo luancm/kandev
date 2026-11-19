@@ -332,7 +332,7 @@ export type StepPayload = {
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   created_at?: string;
   updated_at?: string;
 };
@@ -473,7 +473,8 @@ export type CanvasLifecyclePayload = {
 export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
-  import("@/lib/types/review").ReviewBackendMessageMap & {
+  import("@/lib/types/review").ReviewBackendMessageMap &
+  import("@/lib/types/errands").ErrandBackendMessageMap & {
     "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;

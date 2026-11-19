@@ -2,7 +2,13 @@ import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  parseContextWindowEntry,
+  readContextWindowMetadata,
+  reconcileContextWindowMetadata,
+  sameContextWindowEntry,
+  patchContextWindowCompaction,
+} from "@/lib/state/slices/session-runtime/context-window";
 
 export function useSessionContextWindow(
   sessionId: string | null,
@@ -24,11 +30,17 @@ export function useSessionContextWindow(
   const compactionCount = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.compactionCount : undefined,
   );
+  const compactionReporting = useAppStore((state) =>
+    sessionId ? state.contextWindow.bySessionId[sessionId]?.compactionReporting : undefined,
+  );
   const source = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.source : undefined,
   );
   const timestamp = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.timestamp : undefined,
+  );
+  const contextWindowEpoch = useAppStore((state) =>
+    sessionId ? (state.taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0) : 0,
   );
 
   // Memoize the combined object
@@ -40,35 +52,45 @@ export function useSessionContextWindow(
       remaining: remaining ?? 0,
       efficiency: efficiency ?? 0,
       compactionCount: compactionCount ?? 0,
+      compactionReporting,
       source,
       timestamp,
     };
-  }, [size, used, remaining, efficiency, compactionCount, source, timestamp]);
+  }, [size, used, remaining, efficiency, compactionCount, compactionReporting, source, timestamp]);
 
-  const session = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId] : undefined,
+  const sessionMetadata = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.metadata : undefined,
   );
-  const setContextWindow = useAppStore((state) => state.setContextWindow);
   const connectionStatus = useAppStore((state) => state.connection.status);
 
-  // Populate context window from session metadata if not already in store
+  const metadataContextWindow = useMemo(() => {
+    return parseMetadataContextWindow(sessionMetadata);
+  }, [sessionMetadata]);
+
+  const setContextWindow = useAppStore((state) => state.setContextWindow);
   useEffect(() => {
-    if (!sessionId || contextWindow) return;
-
-    // Try to extract context_window from session metadata
-    const metadata = session?.metadata;
-    if (!metadata || typeof metadata !== "object") return;
-
-    const storedContextWindow = (metadata as Record<string, unknown>).context_window;
-    const entry = parseContextWindowEntry(
-      storedContextWindow,
-      undefined,
-      (metadata as Record<string, unknown>).context_compaction_count,
-    );
-    if (!entry) return;
-
-    setContextWindow(sessionId, entry);
-  }, [sessionId, contextWindow, session?.metadata, setContextWindow]);
+    if (!detailActive || !sessionId || (!contextWindow && contextWindowEpoch > 0)) return;
+    if (!sessionMetadata || typeof sessionMetadata !== "object") return;
+    const record = sessionMetadata as Record<string, unknown>;
+    const next = reconcileContextWindowMetadata({
+      current: contextWindow,
+      gauge: record.context_window,
+      hasGauge: Object.prototype.hasOwnProperty.call(record, "context_window"),
+      count: record.context_compaction_count,
+      reporting: record.context_compaction_reporting,
+      timestamp: undefined,
+      allowExplicitClear: false,
+    });
+    if (!next || sameContextWindowEntry(next, contextWindow)) return;
+    setContextWindow(sessionId, next);
+  }, [
+    detailActive,
+    sessionId,
+    sessionMetadata,
+    contextWindow,
+    contextWindowEpoch,
+    setContextWindow,
+  ]);
 
   // Subscribe to session updates via WebSocket
   useEffect(() => {
@@ -85,5 +107,28 @@ export function useSessionContextWindow(
     }
   }, [detailActive, sessionId, connectionStatus]);
 
-  return contextWindow;
+  if (contextWindow) {
+    const record = sessionMetadata as Record<string, unknown> | undefined;
+    return (
+      patchContextWindowCompaction(
+        contextWindow,
+        record?.context_compaction_count,
+        record?.context_compaction_reporting,
+      ) ?? contextWindow
+    );
+  }
+  return contextWindowEpoch === 0 ? metadataContextWindow : undefined;
+}
+
+function parseMetadataContextWindow(sessionMetadata: unknown): ContextWindowEntry | undefined {
+  const metadata = readContextWindowMetadata(sessionMetadata);
+  if (!metadata.present) return undefined;
+  return (
+    parseContextWindowEntry(
+      metadata.contextWindow,
+      undefined,
+      metadata.compactionCount,
+      (sessionMetadata as Record<string, unknown>).context_compaction_reporting,
+    ) ?? undefined
+  );
 }

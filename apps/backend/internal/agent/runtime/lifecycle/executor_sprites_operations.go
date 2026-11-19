@@ -20,6 +20,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
@@ -452,6 +453,10 @@ func (r *SpritesExecutor) createAgentInstance(
 	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	if err := r.requireSpriteMCPHelper(stepCtx, sprite, req); err != nil {
+		return 0, err
+	}
+
 	cmd := sprite.CommandContext(stepCtx, "sh", "-c",
 		fmt.Sprintf("curl -sf -X POST http://localhost:%d/api/v1/instances -H 'Content-Type: application/json' -d @-",
 			r.agentctlPort))
@@ -489,8 +494,10 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
 		PromptSuggestions:          req.PromptSuggestions,
+		CopilotNativeSessionEvents: req.CopilotNativeSessionEvents,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
+		ErrandMCPOwner:             req.ErrandMCPOwner,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		RequiresProcessKill:        requiresProcessKillFromReq(req),
 		StripEnv:                   stripEnvFromReq(req),
@@ -503,6 +510,7 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		Env:                        selectedCheckoutAgentEnv(req.Env, req.Metadata),
+		OpenCodePluginRuntime:      req.OpenCodePluginRuntime,
 	}
 }
 
@@ -571,6 +579,15 @@ func (r *SpritesExecutor) getExistingInstanceInfo(
 	sprite *sprites.Sprite,
 	instanceID string,
 ) (*agentctl.InstanceInfo, error) {
+	return r.lookupSpriteInstanceInfo(ctx, sprite, instanceID, nil)
+}
+
+func (r *SpritesExecutor) lookupSpriteInstanceInfo(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instanceID string,
+	owner *agentctltypes.ErrandMCPOwner,
+) (*agentctl.InstanceInfo, error) {
 	if instanceID == "" {
 		return nil, fmt.Errorf("no instance ID")
 	}
@@ -586,6 +603,9 @@ func (r *SpritesExecutor) getExistingInstanceInfo(
 	if proxy.LocalAddr() == nil {
 		return nil, fmt.Errorf("sprite agentctl proxy for instance %s has no local address", instanceID)
 	}
+	if err := r.requireSpriteErrandPolicy(stepCtx, proxy.LocalAddr(), owner); err != nil {
+		return nil, err
+	}
 
 	requestURL := fmt.Sprintf("http://%s/api/v1/instances/%s", proxy.LocalAddr(), url.PathEscape(instanceID))
 	request, err := http.NewRequestWithContext(stepCtx, http.MethodGet, requestURL, nil)
@@ -599,6 +619,9 @@ func (r *SpritesExecutor) getExistingInstanceInfo(
 		return nil, fmt.Errorf("instance %s not found: %w", instanceID, err)
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("instance %s: %w", instanceID, agentctl.ErrInstanceNotFound)
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("instance %s lookup returned HTTP %d", instanceID, response.StatusCode)
 	}
@@ -716,4 +739,10 @@ func (r *SpritesExecutor) waitForHealth(ctx context.Context, sprite *sprites.Spr
 		time.Sleep(spriteHealthRetryWait)
 	}
 	return fmt.Errorf("agentctl did not become healthy within %v", spriteHealthTimeout)
+}
+
+func (r *SpritesExecutor) requireSpriteMCPHelper(ctx context.Context, sprite *sprites.Sprite, req *ExecutorCreateRequest) error {
+	return requireBuiltinRemoteHelper(ctx, req, func(ctx context.Context) ([]byte, error) {
+		return sprite.CommandContext(ctx, "curl", "-sf", fmt.Sprintf("http://localhost:%d/identity", r.agentctlPort)).Output()
+	})
 }

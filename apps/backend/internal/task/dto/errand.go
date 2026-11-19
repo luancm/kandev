@@ -1,0 +1,92 @@
+package dto
+
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// ErrandResultPreviewLength is the number of characters of result text that
+// leave the backend outside the parent's MCP surface.
+const ErrandResultPreviewLength = 280
+
+// ErrandDTO is the browser projection of one errand. Full result text and
+// delivery identity are deliberately absent.
+type ErrandDTO struct {
+	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
+	ErrandID        string                       `json:"errand_id"`
+	TaskID          string                       `json:"task_id"`
+	ParentSessionID string                       `json:"parent_session_id"`
+	Title           string                       `json:"title"`
+	Objective       string                       `json:"objective"`
+	AgentProfileID  string                       `json:"agent_profile_id"`
+	Status          models.ErrandStatus          `json:"status"`
+	ResultState     models.ErrandResultState     `json:"result_state"`
+	DeliveryState   models.ErrandDeliveryState   `json:"delivery_state,omitempty"`
+	ResultPreview   string                       `json:"result_preview"`
+	ResultTruncated bool                         `json:"result_truncated"`
+	CreatedAt       time.Time                    `json:"created_at"`
+	UpdatedAt       time.Time                    `json:"updated_at"`
+	SettledAt       *time.Time                   `json:"settled_at"`
+	// CanSendResult is computed by the server so every client applies the
+	// same eligibility rule for Send result to parent.
+	CanSendResult bool `json:"can_send_result"`
+}
+
+// FromErrand projects an errand row with its already projected status.
+func FromErrand(errand *models.Errand, status models.ErrandStatus, reasons ...models.ErrandAttentionReason) ErrandDTO {
+	return ErrandDTO{
+		AttentionReason: models.ProjectErrandAttentionReason(status, reasons...),
+		ErrandID:        errand.ID,
+		TaskID:          errand.TaskID,
+		ParentSessionID: errand.ParentSessionID,
+		Title:           errand.Title,
+		Objective:       errand.Objective,
+		AgentProfileID:  errand.AgentProfileID,
+		Status:          status,
+		ResultState:     errand.ResultState,
+		DeliveryState:   publicErrandDeliveryState(errand),
+		ResultPreview:   errandResultPreview(errand.ResultText),
+		ResultTruncated: errand.ResultTruncated,
+		CreatedAt:       errand.CreatedAt,
+		UpdatedAt:       errand.UpdatedAt,
+		SettledAt:       errand.SettledAt,
+		CanSendResult:   errand.CanSendResult(status),
+	}
+}
+
+func publicErrandDeliveryState(errand *models.Errand) models.ErrandDeliveryState {
+	if errand.ResultState != models.ErrandResultDelivered || errand.DeliveredRoute != models.ErrandDeliveryAwait {
+		return ""
+	}
+	switch errand.DeliveryState {
+	case models.ErrandDeliveryReceived, models.ErrandDeliveryUncertain:
+		return errand.DeliveryState
+	default:
+		return ""
+	}
+}
+
+func errandResultPreview(text string) string {
+	characters := 0
+	for index := range text {
+		if characters == ErrandResultPreviewLength {
+			return text[:index]
+		}
+		characters++
+	}
+	return text
+}
+
+// ErrandUpdatedEvent is the errand.updated payload: the errand DTO plus the
+// workspace that routes it to the right clients.
+type ErrandUpdatedEvent struct {
+	ErrandDTO
+	WorkspaceID string         `json:"workspace_id"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	ContextOnly bool           `json:"context_only,omitempty"`
+}
+
+// GetWorkspaceID lets the WebSocket gateway route an in-process payload, which
+// is a struct rather than the decoded map a remote bus delivers.
+func (e ErrandUpdatedEvent) GetWorkspaceID() string { return e.WorkspaceID }

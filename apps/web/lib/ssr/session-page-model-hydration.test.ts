@@ -46,7 +46,15 @@ vi.mock("@/lib/api/domains/user-shell-api", () => ({
   fetchTerminals: vi.fn(),
 }));
 
-import { fetchSessionDataForTask } from "./session-page-state";
+import { fetchTaskNavigationEnrichment } from "./session-page-state";
+
+async function readEnrichment(taskId: string) {
+  const [task, allSessionsResponse] = await Promise.all([
+    mocks.fetchTask(taskId),
+    mocks.listTaskSessions(taskId),
+  ]);
+  return fetchTaskNavigationEnrichment({ task, allSessionsResponse });
+}
 
 const NOW = "2026-07-16T12:00:00Z";
 const TASK_ID = "task-1";
@@ -111,7 +119,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("fetchSessionDataForTask model hydration", () => {
+describe("readEnrichment model hydration", () => {
   it("hydrates the persisted model selector before the first render", async () => {
     const session = {
       ...makeSession(),
@@ -146,7 +154,7 @@ describe("fetchSessionDataForTask model hydration", () => {
     mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as unknown as Partial<AppState>;
 
     expect(initialState.sessionModels?.bySessionId[session.id]).toMatchObject({
@@ -175,7 +183,7 @@ describe("fetchSessionDataForTask model hydration", () => {
     mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as unknown as Partial<AppState>;
 
     expect(initialState.sessionModels?.bySessionId[session.id]).toMatchObject({
@@ -206,7 +214,7 @@ describe("fetchSessionDataForTask model hydration", () => {
     mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
     mocks.fetchTaskSession.mockResolvedValue({ session });
 
-    const result = await fetchSessionDataForTask(TASK_ID);
+    const result = await readEnrichment(TASK_ID);
     const initialState = result.initialState as unknown as Partial<AppState>;
 
     expect(initialState.sessionModels?.bySessionId[session.id]).toMatchObject({

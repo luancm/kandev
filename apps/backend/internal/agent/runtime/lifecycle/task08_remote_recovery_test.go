@@ -57,6 +57,16 @@ func (p *task08RemoteSnapshotProvider) GetRemoteRecoverySnapshot(_ context.Conte
 	return &copySnapshot, nil
 }
 
+func (p *task08RemoteSnapshotProvider) GetRemoteRecoveryAbsenceSnapshot(
+	ctx context.Context,
+	record *models.ExecutorRunning,
+) (*RemoteRecoverySnapshot, error) {
+	if record == nil {
+		return nil, errors.New("remote recovery absence record is unavailable")
+	}
+	return p.GetRemoteRecoverySnapshot(ctx, record.SessionID)
+}
+
 func (p *task08BlockingSnapshotProvider) GetRemoteRecoverySnapshot(ctx context.Context, sessionID string) (*RemoteRecoverySnapshot, error) {
 	p.mu.Lock()
 	p.calls++
@@ -588,6 +598,90 @@ func TestRunOwnedRemoteInventoryStaysOnRunOwnerRecoveryPath(t *testing.T) {
 	require.NoError(t, mgr.StopRunOwnerForRecovery(context.Background(), owner),
 		"the existing run-owner recovery path should still stop its persisted predecessor")
 	require.Len(t, backend.stopInstanceCalls, 1)
+}
+
+func TestDeferredStartupRetriesRemoteDockerErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeRemoteDocker)
+}
+
+func TestDeferredStartupRetriesKubernetesErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeKubernetes)
+}
+
+func TestDeferredStartupRetriesSSHErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeSSH)
+}
+
+func TestDeferredStartupRetriesSpritesErrandWithoutTaskSession(t *testing.T) {
+	exerciseDeferredOwnedRemoteRetry(t, agentruntime.RuntimeSprites)
+}
+
+func TestDeferredStartupQueuesRetainedPluginErrandWithoutTaskSession(t *testing.T) {
+	row := pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, nil)
+	owner := ExecutionOwner{Kind: ExecutionOwnerErrand, TaskID: row.TaskID, ErrandID: "child",
+		WorkspaceID: "workspace", Generation: 2, AgentProfileID: row.ExecutionProfileID}
+	row.SessionID, row.TaskID = models.ErrandExecutionIdentity(owner.ErrandID), ""
+	row.Metadata[runExecutionOwnerMetadataKey] = owner
+	backend := &task08DetailedRecoveryBackend{
+		MockExecutor:   &MockExecutor{name: agentruntime.RuntimePluginRemote},
+		recoveryResult: task08UnknownOutcomes(agentruntime.RuntimePluginRemote),
+	}
+	manager, _ := task08ManagerWithBackend(t, backend)
+	writer := &task08ExecutorInventoryWriter{invariantWriter: invariantWriter{prior: row}, rows: []*models.ExecutorRunning{row}}
+	manager.SetExecutorRunningWriter(writer)
+
+	require.NoError(t, manager.PrepareStartupRecovery(t.Context()))
+	entry := manager.pendingRemoteRecoveryForSession(row.SessionID)
+	require.NotNil(t, entry, "the retained plugin runtime should be queued on the Errand recovery route")
+	manager.retryRemoteRecovery(t.Context(), entry)
+	require.Len(t, backend.callsSnapshot(), 1)
+	require.Same(t, entry, manager.pendingRemoteRecoveryForSession(row.SessionID))
+	require.Empty(t, backend.stopInstanceCalls)
+	records := manager.initialRemoteRecoveryRecords(t.Context(), []*models.ExecutorRunning{row}, nil)
+	require.Len(t, records, 1, "eager startup also keeps the retained owned inventory")
+
+	stopped := *row
+	stopped.Status = models.ExecutorRunningStatusStopped
+	writer.prior = &stopped
+	current, _, err := manager.currentOwnedRemoteRecoveryRecord(t.Context(), entry)
+	require.NoError(t, err)
+	require.Equal(t, stopped.Status, current.Status, "a saved stop must win over the pinned live snapshot")
+}
+
+func exerciseDeferredOwnedRemoteRetry(t *testing.T, runtime agentruntime.Runtime) {
+	t.Helper()
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, WorkspaceID: "workspace", TaskID: "task", ErrandID: "errand", Generation: 2,
+	}
+	row := &models.ExecutorRunning{
+		SessionID: models.ErrandExecutionIdentity(owner.ErrandID), AgentExecutionID: "errand-execution",
+		Runtime: runtime, Status: models.ExecutorRunningStatusRunning,
+		Metadata: map[string]interface{}{runExecutionOwnerMetadataKey: owner},
+	}
+	writer := &task08ExecutorInventoryWriter{invariantWriter: invariantWriter{prior: row}, rows: []*models.ExecutorRunning{row}}
+	backend := &task08DetailedRecoveryBackend{
+		MockExecutor:   &MockExecutor{name: runtime},
+		recoveryResult: task08UnknownOutcomes(runtime),
+	}
+	mgr, _ := task08ManagerWithBackend(t, backend)
+	mgr.SetExecutorRunningWriter(writer)
+	ctx := t.Context()
+
+	require.NoError(t, mgr.PrepareStartupRecovery(ctx))
+	entry := mgr.pendingRemoteRecoveryForSession(row.SessionID)
+	require.NotNil(t, entry)
+	require.Empty(t, backend.callsSnapshot(), "startup preparation defers provider I/O")
+
+	mgr.retryRemoteRecovery(ctx, entry)
+
+	calls := backend.callsSnapshot()
+	require.Len(t, calls, 1)
+	require.Len(t, calls[0], 1)
+	require.Equal(t, row.AgentExecutionID, calls[0][0].AgentExecutionID)
+	require.Empty(t, calls[0][0].TaskID)
+	require.Same(t, entry, mgr.pendingRemoteRecoveryForSession(row.SessionID))
+	require.ErrorIs(t, mgr.recoveryGuard.CheckLaunchAllowed(row.SessionID), ErrSessionRecoveryGuarded)
+	require.Empty(t, backend.stopInstanceCalls)
 }
 
 func TestStopAllAgentsAndManagerStopDetachRemoteExecutionsRegardlessOfLocalFlag(t *testing.T) {

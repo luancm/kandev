@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
-import type { PermissionActionType } from "@/lib/types/permission";
+import type { PermissionActionType, PermissionPresentation } from "@/lib/types/permission";
+import {
+  isUnavailablePermissionPresentation,
+  permissionPresentationFromMetadata,
+  permissionRequestsInput,
+} from "@/lib/permissions/presentation";
 import {
   allowAlwaysDecision,
   approveDecision,
@@ -17,7 +22,9 @@ import {
   type PermissionActionChoice,
   type PermissionDecision,
   type PermissionOption,
+  type PermissionRequestIdentity,
 } from "@/lib/permissions/respond";
+import { OwnedErrandContext } from "../errands/owned-errand-context";
 
 export type { PermissionActionChoice, PermissionOption };
 
@@ -45,17 +52,21 @@ export type PermissionRequestMetadata = {
   action_type: PermissionActionType;
   action_details: PermissionActionDetails;
   status?: "pending" | "approved" | "rejected" | "expired";
+  permission_presentation?: PermissionPresentation;
+  permission_human_input?: boolean;
 };
 
 export type ParsedPermission = {
   permissionMetadata: PermissionRequestMetadata | undefined;
   permissionStatus: PermissionRequestMetadata["status"];
   isPermissionPending: boolean;
+  permissionPresentation: PermissionPresentation;
 };
 
 export function parsePermission(permissionMessage: Message | undefined): ParsedPermission {
   const permissionMetadata = permissionMessage?.metadata as PermissionRequestMetadata | undefined;
   const storedStatus = permissionMetadata?.status;
+  const permissionPresentation = permissionPresentationFromMetadata(permissionMetadata);
   const missingRequestIdentity =
     !!permissionMessage &&
     (!storedStatus || storedStatus === "pending") &&
@@ -64,17 +75,46 @@ export function parsePermission(permissionMessage: Message | undefined): ParsedP
   const isPermissionPending =
     !!permissionMessage &&
     !!permissionMetadata?.request_id &&
-    (!storedStatus || storedStatus === "pending");
-  return { permissionMetadata, permissionStatus, isPermissionPending };
+    (!storedStatus || storedStatus === "pending") &&
+    permissionRequestsInput(permissionPresentation);
+  return { permissionMetadata, permissionStatus, isPermissionPending, permissionPresentation };
 }
 
 export function resolvePermissionAvailability(
   permissionStatus: PermissionRequestMetadata["status"],
   isPermissionPending: boolean,
   isUnavailable: boolean,
+  permissionPresentation: PermissionPresentation = "interactive",
 ): Pick<ParsedPermission, "permissionStatus" | "isPermissionPending"> {
-  if (!isUnavailable) return { permissionStatus, isPermissionPending };
+  if (!isUnavailable && !isUnavailablePermissionPresentation(permissionPresentation)) {
+    return { permissionStatus, isPermissionPending };
+  }
   return { permissionStatus: "expired", isPermissionPending: false };
+}
+
+/**
+ * Parses one permission message, installs its response handlers, and resolves
+ * the effective availability. Tool renderers share it so automatic and
+ * unavailable rows never mount input controls.
+ */
+export function useResolvedPermission(permissionMessage: Message | undefined) {
+  const parsed = parsePermission(permissionMessage);
+  const handlers = usePermissionResponseHandlers({
+    permissionMetadata: parsed.permissionMetadata,
+    permissionMessage,
+  });
+  const availability = resolvePermissionAvailability(
+    parsed.permissionStatus,
+    parsed.isPermissionPending,
+    handlers.isUnavailable,
+    parsed.permissionPresentation,
+  );
+  return {
+    ...handlers,
+    ...availability,
+    permissionMetadata: parsed.permissionMetadata,
+    permissionPresentation: parsed.permissionPresentation,
+  };
 }
 
 type UsePermissionHandlersParams = {
@@ -82,12 +122,39 @@ type UsePermissionHandlersParams = {
   permissionMessage: Message | undefined;
 };
 
+function sendPermissionResponse(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  identity: PermissionRequestIdentity,
+  decision: PermissionDecision,
+  errandId?: string,
+) {
+  if (errandId) {
+    return client.request("errand.permission.respond", {
+      task_id: identity.task_id,
+      errand_id: errandId,
+      request_id: identity.request_id,
+      pending_id: identity.pending_id,
+      option_id: decision.cancelled ? undefined : decision.optionId,
+      cancelled: decision.cancelled,
+    });
+  }
+  return client.request("permission.respond", buildPermissionRespondRequest(identity, decision));
+}
+
 export function usePermissionResponseHandlers({
   permissionMetadata,
   permissionMessage,
 }: UsePermissionHandlersParams) {
   const [isResponding, setIsResponding] = useState(false);
   const [isUnavailable, setIsUnavailable] = useState(false);
+  const owner = useContext(OwnedErrandContext);
+  const unavailableInErrand =
+    owner !== null &&
+    permissionMessage !== undefined &&
+    (permissionMessage.session_id !== "" ||
+      permissionMessage.task_id !== owner.taskId ||
+      permissionMetadata?.permission_human_input === true);
+  const errandId = owner?.errandId;
   const requestId = permissionMetadata?.request_id;
   const currentRequestIdRef = useRef(requestId);
 
@@ -99,7 +166,7 @@ export function usePermissionResponseHandlers({
 
   const handleRespond = useCallback(
     async (decision: PermissionDecision) => {
-      if (!permissionMessage) return;
+      if (!permissionMessage || unavailableInErrand) return;
       if (!requestId) {
         setIsUnavailable(true);
         toast.warning(t("task:permissionRequestNoLongerAvailable"));
@@ -112,17 +179,16 @@ export function usePermissionResponseHandlers({
       }
       setIsResponding(true);
       try {
-        await client.request(
-          "permission.respond",
-          buildPermissionRespondRequest(
-            {
-              task_id: permissionMessage.task_id,
-              session_id: permissionMessage.session_id,
-              request_id: requestId,
-              pending_id: permissionMetadata.pending_id,
-            },
-            decision,
-          ),
+        await sendPermissionResponse(
+          client,
+          {
+            task_id: permissionMessage.task_id,
+            session_id: permissionMessage.session_id,
+            request_id: requestId,
+            pending_id: permissionMetadata.pending_id,
+          },
+          decision,
+          errandId,
         );
       } catch (error) {
         console.error("Failed to respond to permission request:", error);
@@ -139,7 +205,7 @@ export function usePermissionResponseHandlers({
         }
       }
     },
-    [permissionMessage, permissionMetadata, requestId],
+    [errandId, permissionMessage, permissionMetadata, requestId, unavailableInErrand],
   );
 
   const handleApprove = useCallback(() => {
@@ -168,7 +234,7 @@ export function usePermissionResponseHandlers({
 
   return {
     isResponding,
-    isUnavailable,
+    isUnavailable: isUnavailable || unavailableInErrand,
     handleApprove,
     handleAllowAlways,
     hasAllowAlways,

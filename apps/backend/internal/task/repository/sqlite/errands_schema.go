@@ -1,0 +1,64 @@
+package sqlite
+
+import (
+	"fmt"
+)
+
+// Errands have their own rows and reference the ordinary parent for delivery.
+var errandsSchemaStatements = []struct{ name, sql string }{
+	{"task_session_errands.table", `
+		CREATE TABLE IF NOT EXISTS task_session_errands (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			parent_session_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			objective TEXT NOT NULL DEFAULT '',
+			agent_profile_id TEXT NOT NULL DEFAULT '',
+			mcp_server_ids TEXT NOT NULL DEFAULT '{}',
+			first_turn_id TEXT NOT NULL DEFAULT '',
+			submission_id TEXT NOT NULL DEFAULT '',
+			lifecycle TEXT NOT NULL DEFAULT 'queued',
+			cancel_source TEXT NOT NULL DEFAULT '',
+			last_outcome TEXT NOT NULL DEFAULT '',
+			awaiting_result BOOLEAN NOT NULL DEFAULT FALSE,
+			result_text TEXT NOT NULL DEFAULT '',
+			result_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+			result_turn_id TEXT NOT NULL DEFAULT '',
+			result_kind TEXT NOT NULL DEFAULT '',
+			result_state TEXT NOT NULL DEFAULT 'none',
+			result_revision TEXT NOT NULL DEFAULT '',
+			parent_admission_generation BIGINT NOT NULL DEFAULT 0,
+			teardown_intent TEXT NOT NULL DEFAULT '',
+			delivered_route TEXT NOT NULL DEFAULT '',
+			delivery_token TEXT NOT NULL DEFAULT '',
+			delivered_at TIMESTAMP,
+			latest_settled_turn_id TEXT NOT NULL DEFAULT '',
+			last_read_message_id TEXT NOT NULL DEFAULT '',
+			version BIGINT NOT NULL DEFAULT 1,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			settled_at TIMESTAMP,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`},
+	{"task_session_errands.task_lifecycle", `
+		CREATE INDEX IF NOT EXISTS idx_task_session_errands_task_lifecycle
+			ON task_session_errands(task_id, lifecycle)`},
+	{"task_session_errands.parent", `
+		CREATE INDEX IF NOT EXISTS idx_task_session_errands_parent
+			ON task_session_errands(parent_session_id)`},
+}
+
+func (r *Repository) initErrandsSchema() error {
+	for _, statement := range errandsSchemaStatements {
+		if err := r.migrate.Apply(statement.name, statement.sql); err != nil {
+			return fmt.Errorf("initialize errands schema: %w", err)
+		}
+	}
+	if err := r.migrate.Apply("task_session_errands.browser_history_normalized_v3", errandBrowserHistoryIndexDDL(r.db.DriverName())); err != nil {
+		return fmt.Errorf("initialize errands schema: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("initialize errands schema: %w", err)
+	}
+	return r.initErrandDeliverySchema()
+}

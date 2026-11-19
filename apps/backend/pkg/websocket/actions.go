@@ -21,11 +21,12 @@ const (
 	ActionWorkspaceDelete = "workspace.delete"
 
 	// Repository actions
-	ActionRepositoryList   = "repository.list"
-	ActionRepositoryCreate = "repository.create"
-	ActionRepositoryGet    = "repository.get"
-	ActionRepositoryUpdate = "repository.update"
-	ActionRepositoryDelete = "repository.delete"
+	ActionRepositoryList              = "repository.list"
+	ActionRepositoryCreate            = "repository.create"
+	ActionRepositoryGet               = "repository.get"
+	ActionRepositoryUpdate            = "repository.update"
+	ActionRepositoryDelete            = "repository.delete"
+	ActionRepositoryValidateRemoteURL = "repository.remote_url.validate"
 
 	// Repository Set actions
 	ActionRepositorySetList   = "repository_set.list"
@@ -77,6 +78,7 @@ const (
 	ActionTaskGet                   = "task.get"
 	ActionTaskUpdate                = "task.update"
 	ActionTaskRepoUpdate            = "task.repository.update"
+	ActionTaskRepoDetach            = "task.repository.detach"
 	ActionTaskDelete                = "task.delete"
 	ActionTaskMove                  = "task.move"
 	ActionTaskState                 = "task.state"
@@ -116,9 +118,10 @@ const (
 	// coordinator's workspace subscribers.
 	ActionCoordinatorUpdated = "coordinator.updated"
 
-	ActionTaskSessionList   = "task.session.list"
-	ActionTaskSessionStatus = "task.session.status"
-	ActionTaskLaunchRecover = "task.launch.recover"
+	ActionTaskSessionList         = "task.session.list"
+	ActionTaskSessionListOrdinary = "task.session.list_ordinary"
+	ActionTaskSessionStatus       = "task.session.status"
+	ActionTaskLaunchRecover       = "task.launch.recover"
 
 	// Unified session launch
 	ActionSessionLaunch                   = "session.launch"
@@ -405,6 +408,20 @@ const (
 	ActionSessionBackgroundWorkUsage   = "session.background_work.usage"
 	ActionSessionBackgroundWorkUpdated = "session.background_work.updated"
 	ActionSessionBackgroundWorkOutput  = "session.background_work.output"
+	// Errand actions
+	ActionErrandList              = "errand.list"
+	ActionErrandCancel            = "errand.cancel"
+	ActionErrandCancelAll         = "errand.cancel_all"
+	ActionErrandSendResult        = "errand.send_result"
+	ActionErrandUpdated           = "errand.updated"
+	ActionErrandBrowserSummary    = "errand.browser_summary"
+	ActionErrandHistoryPage       = "errand.history_page"
+	ActionErrandInspect           = "errand.inspect"
+	ActionErrandMessages          = "errand.messages"
+	ActionErrandMarkRead          = "errand.mark_read"
+	ActionErrandContinue          = "errand.continue"
+	ActionErrandPermissionRespond = "errand.permission.respond"
+	ActionErrandTranscriptChanged = "errand.transcript_changed"
 	// Git worktree actions
 	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
 	ActionWorktreePush                           = "worktree.push"                             // Push to remote
@@ -584,6 +601,10 @@ const (
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
+	ActionMCPStartErrand                 = "mcp.start_errand"
+	ActionMCPAwaitErrands                = "mcp.await_errands"
+	ActionMCPAwaitErrandsRelease         = "mcp.await_errands_release"
+	ActionMCPCancelErrand                = "mcp.cancel_errand"
 )
 
 const (
@@ -722,6 +743,7 @@ const (
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"
 	ActionAutomationTriggerTypes        = "automation.trigger_types"
+	ActionAutomationPluginToolOptions   = "automation.plugin_tool_options"
 	ActionAutomationWebhookRevealSecret = "automation.webhook.reveal_secret"
 	ActionAutomationRunDelete           = "automation.run.delete"
 	ActionAutomationRunStop             = "automation.run.stop"

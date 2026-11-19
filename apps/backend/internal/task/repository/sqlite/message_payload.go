@@ -13,6 +13,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -44,6 +45,10 @@ const maxMessagePayloadRehydrateBytes = 64 * 1024 * 1024
 // reference; content-addressing makes writing it more than once (a
 // duplicate output from a different message) an idempotent no-op.
 func (r *Repository) externalizeMessagePayload(ctx context.Context, message *models.Message) (string, error) {
+	return externalizeMessagePayloadWith(ctx, message, r.putMessagePayload)
+}
+
+func externalizeMessagePayloadWith(ctx context.Context, message *models.Message, put func(context.Context, string, []byte) error) (string, error) {
 	existingDigest := message.PayloadDigest
 	existingSize := message.PayloadSize
 	message.PayloadDigest = ""
@@ -70,7 +75,7 @@ func (r *Repository) externalizeMessagePayload(ctx context.Context, message *mod
 		return "", fmt.Errorf("failed to serialize shell output payload: %w", err)
 	}
 	digest := sha256Hex(payloadBytes)
-	if err := r.putMessagePayload(ctx, digest, payloadBytes); err != nil {
+	if err := put(ctx, digest, payloadBytes); err != nil {
 		return "", fmt.Errorf("failed to store externalized message payload: %w", err)
 	}
 
@@ -138,13 +143,22 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	if message != nil && message.Metadata[shellOutputStorageKey] != nil {
 		return r.rehydrateShellOutputChunks(ctx, message)
 	}
+	return rehydrateMessagePayload(ctx, r.ro, message)
+}
+
+type messagePayloadReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	Rebind(string) string
+}
+
+func rehydrateMessagePayload(ctx context.Context, reader messagePayloadReader, message *models.Message) (err error) {
 	if message == nil || message.PayloadDigest == "" {
 		return nil
 	}
 	startedAt := time.Now()
 	defer func() { recordMessagePayloadHydration(time.Since(startedAt), err) }()
 	var uncompressedSize, compressedSize, actualCompressedSize int64
-	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	err = reader.QueryRowContext(ctx, reader.Rebind(`
 		SELECT uncompressed_size, compressed_size, length(compressed_content) FROM task_message_payloads WHERE digest = ?
 	`), message.PayloadDigest).Scan(&uncompressedSize, &compressedSize, &actualCompressedSize)
 	if err != nil {
@@ -172,7 +186,7 @@ func (r *Repository) RehydrateMessagePayload(ctx context.Context, message *model
 	}
 
 	var compressed []byte
-	err = r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+	err = reader.QueryRowContext(ctx, reader.Rebind(`
 		SELECT compressed_content FROM task_message_payloads WHERE digest = ?
 	`), message.PayloadDigest).Scan(&compressed)
 	if err != nil {
@@ -215,13 +229,23 @@ type OrphanedMessagePayloadCandidate struct {
 // (Task 06) to act on, mirroring ListDuplicateGitSnapshotCandidates and
 // ListObsoletePlanRevisionCandidates.
 func (r *Repository) ListOrphanedMessagePayloadCandidates(ctx context.Context, limit int) ([]OrphanedMessagePayloadCandidate, error) {
+	hasErrandMessages, err := db.TableExistsContext(ctx, r.ro, "errand_messages")
+	if err != nil {
+		return nil, err
+	}
 	query := `
 		SELECT p.digest, p.compressed_size, p.uncompressed_size
 		FROM task_message_payloads p
 		WHERE NOT EXISTS (
 			SELECT 1 FROM task_session_messages m WHERE m.payload_digest = p.digest
 		)
-		ORDER BY p.digest ASC`
+		`
+	if hasErrandMessages {
+		query += `AND NOT EXISTS (
+			SELECT 1 FROM errand_messages m WHERE m.payload_digest = p.digest
+		)`
+	}
+	query += ` ORDER BY p.digest ASC`
 	return listLimitedCandidates(ctx, r.ro, query, limit, "orphaned message payload candidates",
 		func(rows *sql.Rows) (OrphanedMessagePayloadCandidate, error) {
 			var c OrphanedMessagePayloadCandidate

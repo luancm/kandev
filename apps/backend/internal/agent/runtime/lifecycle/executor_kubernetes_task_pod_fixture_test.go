@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -21,13 +22,14 @@ import (
 )
 
 type taskPodControl struct {
-	mu           sync.Mutex
-	active       map[string]agentctl.CreateInstanceRequest
-	created      []agentctl.CreateInstanceRequest
-	handshakes   int
-	token        string
-	failID       string
-	beforeDelete func()
+	mu            sync.Mutex
+	active        map[string]agentctl.CreateInstanceRequest
+	created       []agentctl.CreateInstanceRequest
+	handshakes    int
+	token         string
+	failID        string
+	beforeDelete  func()
+	recoveryProbe bool
 }
 
 func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +40,10 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer c.mu.Unlock()
 	if r.URL.Path == "/health" {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/identity" {
+		_ = json.NewEncoder(w).Encode(agentctl.IdentityInfo{Capabilities: []string{agentctltypes.ErrandMCPOwnerCapability}})
 		return
 	}
 	if r.URL.Path == "/auth/handshake" {
@@ -52,6 +58,14 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Authorization") != "Bearer "+c.token {
 		w.WriteHeader(http.StatusUnauthorized)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+		return
+	}
+	if c.recoveryProbe && r.Method == http.MethodGet && r.URL.Path == "/api/v1/status" {
+		if _, active := c.active[r.Header.Get("X-Instance-ID")]; !active {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"agent_status": "running"})
 		return
 	}
 	if r.URL.Path == "/api/v1/instances" {
@@ -72,6 +86,10 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/v1/instances/")
+	if id, exact := strings.CutSuffix(id, "/stop-errand"); exact && r.Method == http.MethodPost {
+		c.stopErrandInstance(w, r, id)
+		return
+	}
 	request, exists := c.active[id]
 	if !exists {
 		http.NotFound(w, r)
@@ -82,7 +100,27 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath})
+	info := agentctl.InstanceInfo{ID: id, Port: 41001, WorkspacePath: request.WorkspacePath, ErrandMCPOwner: request.ErrandMCPOwner}
+	if c.recoveryProbe {
+		info.SessionID, info.TaskID = request.SessionID, request.TaskID
+		info.ProviderSessionID = "retained-native-conversation"
+	}
+	_ = json.NewEncoder(w).Encode(info)
+}
+
+func (c *taskPodControl) stopErrandInstance(w http.ResponseWriter, r *http.Request, id string) {
+	var owner agentctltypes.ErrandMCPOwner
+	if json.NewDecoder(r.Body).Decode(&owner) != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	request, exists := c.active[id]
+	if exists && (request.ErrandMCPOwner == nil || *request.ErrandMCPOwner != owner) {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	delete(c.active, id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (c *taskPodControl) snapshot() ([]agentctl.CreateInstanceRequest, map[string]agentctl.CreateInstanceRequest, int) {

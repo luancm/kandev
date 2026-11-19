@@ -139,6 +139,17 @@ describe("task.deleted session eviction", () => {
     expect(removeTaskSession).toHaveBeenCalledWith("t1", SESS_PINNED);
     expect(removeTaskSession).not.toHaveBeenCalledWith(expect.anything(), "sess-t2");
   });
+
+  it("drops the deleted task's errands", () => {
+    const removeTaskErrands = vi.fn();
+    const store = makeStore({ removeTaskErrands } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
+    );
+
+    expect(removeTaskErrands).toHaveBeenCalledExactlyOnceWith("t1");
+  });
 });
 
 describe("task.deleted live notification + redirect", () => {

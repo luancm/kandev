@@ -1,5 +1,6 @@
 /* eslint-disable max-lines -- session WebSocket handlers share one event registry. */
 import type { StoreApi } from "zustand";
+import { retireSessionReads } from "@/lib/state/session-read-coordinator";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { QueueMeta } from "@/lib/state/slices/session/types";
@@ -18,7 +19,12 @@ import type {
   TaskSessionAgentctlPayload,
 } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
-import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
+import {
+  mergeCompactionCountValue,
+  mergeCompactionReportingValue,
+  reconcileContextWindowMetadata,
+  sameContextWindowEntry,
+} from "@/lib/state/slices/session-runtime/context-window";
 import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fields";
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
@@ -28,6 +34,7 @@ import {
   sessionStateConfirmsAgentctlExecutionReady,
 } from "@/lib/session-state";
 import { isSessionRestartPending } from "@/lib/session/session-restart-state";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -120,6 +127,13 @@ export function clearPinnedSessionIfOverridden(store: StoreApi<AppState>, sessio
   if (!pinnedSessionId || pinnedSessionId === sessionId) return;
   store.setState((state) => ({
     ...state,
+    tasks: { ...state.tasks, pinnedSessionId: null },
+  }));
+}
+
+function clearRemovedSessionPin(store: StoreApi<AppState>, removedSessionId: string): void {
+  if (store.getState().tasks.pinnedSessionId !== removedSessionId) return;
+  store.setState((state) => ({
     tasks: { ...state.tasks, pinnedSessionId: null },
   }));
 }
@@ -224,6 +238,52 @@ export function pickPrimarySessionReplacement(
   return primary && primary !== retiredSessionId ? primary : null;
 }
 
+function findTaskForRemovedSession(state: AppState, sessionId: string): string | null {
+  const sessionTaskId = state.taskSessions?.items?.[sessionId]?.task_id;
+  if (sessionTaskId) return sessionTaskId;
+
+  const taskIds = Object.entries(state.taskSessionsByTask?.itemsByTaskId ?? {})
+    .filter(([, sessions]) => sessions.some((session) => session.id === sessionId))
+    .map(([taskId]) => taskId);
+  return taskIds.length === 1 ? (taskIds[0] ?? null) : null;
+}
+
+function handleSessionRemoved(
+  store: StoreApi<AppState>,
+  payload: { session_id?: string; task_id?: string },
+): void {
+  const sessionId = payload.session_id;
+  if (!sessionId) return;
+
+  const before = store.getState();
+  const knownTaskId = findTaskForRemovedSession(before, sessionId);
+  if (payload.task_id && knownTaskId && payload.task_id !== knownTaskId) return;
+  const taskId = payload.task_id || knownTaskId;
+  if (!taskId) return;
+
+  const wasActive =
+    before.tasks.activeTaskId === taskId && before.tasks.activeSessionId === sessionId;
+  const wasPinned = before.tasks.pinnedSessionId === sessionId;
+  retireSessionReads(store, sessionId);
+  before.removeTaskSession(taskId, sessionId);
+
+  const after = store.getState();
+  if (wasActive) {
+    const replacement =
+      pickReplacementSessionId(after, taskId) ??
+      pickPrimarySessionReplacement(after, taskId, sessionId);
+    if (replacement && replacement !== sessionId) {
+      inheritAgentctlStatus(after, sessionId, replacement);
+      clearPinnedSessionIfOverridden(store, replacement);
+      after.setActiveSessionAuto(taskId, replacement);
+    } else {
+      after.clearActiveSession();
+    }
+  } else if (wasPinned) {
+    clearRemovedSessionPin(store, sessionId);
+  }
+}
+
 // Fields carried onto the update object verbatim whenever the payload defines
 // them (undefined = key omitted so it never clobbers live client state).
 // `name` is present here so a rename event's cleared label ("") still applies;
@@ -236,6 +296,7 @@ const CARRIED_WHEN_DEFINED = [
   "review_status",
   "error_message",
   "is_passthrough",
+  "waiting_on_errands",
   "name",
   "foreground_activity",
   "active_subagent_count",
@@ -243,6 +304,7 @@ const CARRIED_WHEN_DEFINED = [
   "cancellation_pending",
   "cancellation_revision",
   "runtime_storage_health",
+  "agent_workspace_path",
   "execution_profile_id",
   "route_generation",
   "route_state",
@@ -264,17 +326,22 @@ function carryDefinedFields(
 
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildSessionUpdate(payload: any): Record<string, unknown> {
+function buildSessionUpdate(payload: any): {
+  sessionUpdate: Record<string, unknown>;
+} {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
-  if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
+  const metadataSources = [payload.session_metadata, payload.metadata].filter(
+    (candidate) => candidate && typeof candidate === "object",
+  ) as Array<Record<string, unknown>>;
+  if (metadataSources.length > 0) update.metadata = Object.assign({}, ...metadataSources);
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   carryDefinedFields(update, payload);
-  return update;
+  return { sessionUpdate: update };
 }
 
 /** Upsert the session in the per-task sessions list from a WS event.
@@ -288,10 +355,10 @@ function upsertTaskSessionList(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
   sessionUpdate: Record<string, unknown>,
-): void {
+): boolean {
   const newState = payload.new_state as TaskSessionState | undefined;
   const existing = store.getState().taskSessions.items[sessionId];
-  if (!existing && !newState) return;
+  if (!existing && !newState) return false;
 
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
@@ -304,6 +371,7 @@ function upsertTaskSessionList(
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
+  return true;
 }
 
 // Fan out the office refetch trigger only when the session's state
@@ -331,17 +399,41 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
     (candidate) =>
       candidate &&
       typeof candidate === "object" &&
-      Object.prototype.hasOwnProperty.call(candidate, "context_window"),
+      (Object.prototype.hasOwnProperty.call(candidate, "context_window") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_count") ||
+        Object.prototype.hasOwnProperty.call(candidate, "context_compaction_reporting")),
   ) as Record<string, unknown> | undefined;
   if (!metadata) return;
-  const contextWindow = metadata.context_window;
-  const entry = parseContextWindowEntry(
-    contextWindow,
-    new Date().toISOString(),
+  const existing = store.getState().contextWindow?.bySessionId?.[sessionId];
+  const sessionMetadata = store.getState().taskSessions?.items?.[sessionId]?.metadata as
+    | Record<string, unknown>
+    | undefined;
+  const count = mergeCompactionCountValue(
     metadata.context_compaction_count,
+    sessionMetadata?.context_compaction_count,
   );
-  if (entry) store.getState().setContextWindow(sessionId, entry);
-  else store.getState().clearContextWindow(sessionId);
+  const reporting = mergeCompactionReportingValue(
+    metadata.context_compaction_reporting,
+    sessionMetadata?.context_compaction_reporting,
+  );
+  const hasGauge = Object.prototype.hasOwnProperty.call(metadata, "context_window");
+  const next = reconcileContextWindowMetadata({
+    current: existing,
+    gauge: metadata.context_window,
+    hasGauge,
+    count,
+    reporting,
+    timestamp: new Date().toISOString(),
+    allowExplicitClear: true,
+  });
+  if (next === undefined) return;
+  if (next === null) {
+    store.getState().clearContextWindow(sessionId);
+    return;
+  }
+  if (!sameContextWindowEntry(next, existing)) {
+    store.getState().setContextWindow(sessionId, next);
+  }
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */
@@ -465,6 +557,9 @@ function syncEnvFromAgentctlPayload(
     task_environment_id: envId,
     ...getAgentctlWorktreeFields(payload, isSibling),
     workspace_path: payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path,
+    ...(payload.agent_workspace_path !== undefined
+      ? { agent_workspace_path: payload.agent_workspace_path }
+      : {}),
   });
   store.getState().reconcileWorkflowSessionFocus?.(taskId);
 }
@@ -479,6 +574,11 @@ function buildAgentctlReadySessionUpdate(
   isSibling: boolean,
 ): Record<string, unknown> {
   const update: Record<string, unknown> = {};
+  if (payload.agent_workspace_path !== undefined) {
+    // The launched execution keeps running in its original checkout even when
+    // the ready event promotes the Files root to the task root.
+    update.agent_workspace_path = payload.agent_workspace_path;
+  }
   if (isSibling) {
     const workspacePath = payload.workspace_path ?? payload.task_workspace_path;
     if (workspacePath) update.workspace_path = workspacePath;
@@ -504,7 +604,10 @@ function recordAgentctlReadyWorktree(
   store.getState().setWorktree({
     id: payload.worktree_id,
     sessionId: payload.session_id,
-    repositoryId: existingSession.repository_id ?? undefined,
+    // The sibling's repository identity comes from the materializer. Falling
+    // back to the session's primary repository would attach both worktrees to
+    // one repository and erase the source-qualified link prefixes.
+    repositoryId: payload.worktree_repository_id ?? existingSession.repository_id ?? undefined,
     path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
     branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
   });
@@ -530,11 +633,21 @@ function recordAgentctlReadyWorktree(
  *       (each commit then carries its repo/branch slug for grouping).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
+function handleAgentctlReady(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  sessionBeforeSync?: TaskSession,
+): void {
   const existingSession = store.getState().taskSessions.items[payload.session_id];
   if (!existingSession) return;
 
   const isSibling = isSiblingWorktree(existingSession, payload);
+  const previousWorkspacePath = getSessionWorkspacePath(sessionBeforeSync);
+  const rootPromoted = !!(
+    payload.task_workspace_path &&
+    (!previousWorkspacePath || previousWorkspacePath !== payload.task_workspace_path)
+  );
 
   const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
   if (Object.keys(sessionUpdate).length > 0) {
@@ -544,12 +657,13 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   recordAgentctlReadyWorktree(store, payload, existingSession);
 
   if (isSibling) {
-    // Drop the pre-multi-repo git-status snapshot — the backend just
-    // transitioned this session from single-repo to multi-repo and the legacy
-    // (empty-repo-name) tracker is gone. Without this the Changes panel keeps
-    // surfacing the frozen snapshot until the user reloads the tab, masking
-    // the per-repo updates streaming in for both the primary and the sibling.
-    store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    // A promoted root retires the old empty-name Git scope, so drop its frozen
+    // snapshot instead of masking the per-repo updates. A root-preserving
+    // attachment keeps a valid unnamed root and only rebuilds the inventory.
+    if (rootPromoted) {
+      store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    }
+    store.getState().invalidateGitStatusInventory(payload.session_id);
     store.getState().bumpSessionGitCheckoutGeneration(payload.session_id);
     store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
@@ -681,6 +795,11 @@ function handleWorkspaceSourcesUpdated(
     adopted_session_ids: adoptedSessionIds,
   } = payload;
   const existing = store.getState().taskSessions.items[sessionId];
+  const previousWorkspacePath = getSessionWorkspacePath(existing);
+  const rootPromoted = !!(
+    workspacePath &&
+    (!previousWorkspacePath || previousWorkspacePath !== workspacePath)
+  );
   if (existing && workspacePath) {
     store.getState().setTaskSession({ ...existing, workspace_path: workspacePath });
   }
@@ -692,7 +811,10 @@ function handleWorkspaceSourcesUpdated(
     .getState()
     .reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId], boundaryTimestamp);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
-  store.getState().clearLegacyGitStatusEntry(sessionId);
+  if (rootPromoted) {
+    store.getState().clearLegacyGitStatusEntry(sessionId);
+  }
+  store.getState().invalidateGitStatusInventory(sessionId);
   store.getState().bumpSessionGitCheckoutGeneration(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
 }
@@ -876,12 +998,28 @@ function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: stri
   state.clearLaunchWarning?.(sessionId);
 }
 
+function invalidateStartingConfig(store: StoreApi<AppState>, sessionId: SessionId): void {
+  const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
+  store
+    .getState()
+    .invalidateConfirmedConfigOptions(
+      sessionId,
+      agentctl?.startingExecutionId ??
+        (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
+    );
+  if (agentctl?.startingExecutionId) {
+    const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
+    store.getState().setSessionAgentctlStatus(sessionId, status);
+  }
+}
+
 /** Registers the task-session WebSocket handlers (state, messages, workspace sources, queue). */
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
+    "session.removed": (message) => handleSessionRemoved(store, message.payload),
     // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together
     "session.state_changed": (message) => {
       const payload = message.payload;
@@ -893,7 +1031,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const taskId = toTaskId(rawTaskId);
       const sessionId = toSessionId(rawSessionId);
 
-      const sessionUpdate = buildSessionUpdate(payload);
+      const { sessionUpdate } = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
       if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
@@ -924,24 +1062,17 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
         newState,
         updatedAt: payload.updated_at,
       });
+      const contextEpoch =
+        store.getState().taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0;
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      const acceptedContextEpoch =
+        store.getState().taskSessions.contextWindowEpochBySession?.[sessionId] ?? 0;
+      if (acceptedContextEpoch === contextEpoch) extractContextWindow(store, sessionId, payload);
       store.getState().reconcileWorkflowSessionFocus?.(taskId);
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
-      extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
       if (newState === "STARTING") {
-        const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
-        store
-          .getState()
-          .invalidateConfirmedConfigOptions(
-            sessionId,
-            agentctl?.startingExecutionId ??
-              (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
-          );
-        if (agentctl?.startingExecutionId) {
-          const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
-          store.getState().setSessionAgentctlStatus(sessionId, status);
-        }
+        invalidateStartingConfig(store, sessionId);
       }
 
       // A confirmed RUNNING transition clears the resume-skipped marker
@@ -991,6 +1122,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_ready": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
+      const sessionBeforeSync = store.getState().taskSessions.items[payload.session_id];
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "ready",
         agentExecutionId: payload.agent_execution_id,
@@ -998,7 +1130,7 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
       syncEnvFromAgentctlPayload(store, payload);
       settleWorkspaceRestorationFromAgentctl(store, payload, "ready");
-      handleAgentctlReady(store, payload);
+      handleAgentctlReady(store, payload, sessionBeforeSync);
     },
     "session.agentctl_error": (message) => {
       const payload = message.payload;

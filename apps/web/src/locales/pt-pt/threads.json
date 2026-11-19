@@ -13,6 +13,7 @@
   "allThreads": "Todas as conversas",
   "backToViewEditor": "Voltar ao editor da vista",
   "chooseTasks": "Escolher tarefas",
+  "selectionPosition": "{{title}}, posição {{position}}",
   "selectedTaskCount_one": "{{count}} tarefa selecionada",
   "selectedTaskCount_other": "{{count}} tarefas selecionadas",
   "taskSelectionLimitReached_one": "Pode selecionar até {{count}} tarefa",
@@ -110,6 +111,8 @@
   "sortPriorityDescription": "Prioridade da tarefa, desde crítica até baixa.",
   "sortPrimaryAgent": "Agente principal",
   "sortPrimaryAgentDescription": "Nome do agente principal por ordem alfabética.",
+  "sortSelection": "Ordem de seleção",
+  "sortSelectionDescription": "Ordem pela qual selecionou as tarefas em Escolher tarefas.",
   "viewPickerLabel": "Vista {{name}}",
   "viewSettingsFor": "Definições de {{name}}",
   "columnsSummary": "{{admitted}} de {{matching}} conversas",
@@ -142,12 +145,13 @@
   "statusNotStarted": "Não iniciada",
   "statusPermissionNeeded": "Permissão necessária",
   "statusQuestionFromAgent": "Pergunta do agente",
-  "statusReadyForReview": "Pronta para revisão",
   "statusStarting": "A iniciar",
   "statusTurnFinished": "Turno concluído",
-  "statusWaiting": "Em espera",
   "statusWorking": "A trabalhar",
   "subagentCount_one": "{{count}} subagente",
   "subagentCount_other": "{{count}} subagentes",
-  "title": "Tópicos"
+  "title": "Tópicos",
+  "errandsLive_one": "{{count}} incumbência",
+  "errandsLive_other": "{{count}} incumbências",
+  "errandsWaiting": "À espera de incumbências"
 }

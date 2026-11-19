@@ -480,7 +480,7 @@ func TestResolverDetachedResumeFailureRestoresRetryableBundle(t *testing.T) {
 	if creator.restoreCalls != 1 || len(creator.published) != 1 {
 		t.Fatalf("restore calls=%d published=%d, want 1/1", creator.restoreCalls, len(creator.published))
 	}
-	if _, created, missed := store.CreateRetryRequest(&Request{
+	if _, created, missed, _ := store.CreateRetryRequest(&Request{
 		PendingID: pendingID,
 		SessionID: "session-1",
 		TaskID:    "task-1",

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"testing"
 
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -73,7 +74,7 @@ func TestHandleCreateTask_UsesVerifiedCreatorSessionProfileAndRuntime(t *testing
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	principalResolver := mcpscope.NewResolver(repo, nil, func() bool { return false }, testLogger(t))
-	principalCtx, err := principalResolver.ScopePrincipal(ctx, sourceResult.Task.ID, "creator-session")
+	principalCtx, err := principalResolver.ScopePrincipal(ctx, streams.MCPExecutionContext{TaskID: sourceResult.Task.ID, SessionID: "creator-session"})
 	require.NoError(t, err)
 	resp, err := h.handleCreateTask(principalCtx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,

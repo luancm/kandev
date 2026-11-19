@@ -30,12 +30,16 @@ type Request struct {
 // Answer is the wire type used by clarification responses.
 type Answer = protocol.Answer
 
+// AnswerAttachment is the wire type for one file attached to an answer.
+type AnswerAttachment = protocol.AnswerAttachment
+
 // Response is the wire type used by clarification responses.
 type Response = protocol.Response
 
 // PendingClarification represents a clarification request waiting for a response.
 type PendingClarification struct {
 	Request   *Request
+	sessionID string
 	done      chan struct{} // Closed when a response is submitted (broadcast to all waiters)
 	resp      *Response
 	mu        sync.Mutex

@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -197,8 +198,11 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		AttemptID:              execution.currentStartupAttemptID(),
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
+		ErrandID:               execution.Owner.ErrandID,
+		ErrandGeneration:       execution.Owner.Generation,
 		RunID:                  execution.RunID,
 		CausingRunID:           execution.CausingRunID,
+		TerminalCausingRunID:   execution.TerminalCausingRunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
 		TaskID:                 execution.TaskID,
@@ -208,6 +212,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		AgentID:                execution.AgentID,
 		AgentProfileID:         execution.officeProfileID(),
 		ExecutionProfileID:     execution.AgentProfileID,
+		ResourceCircuitKey:     execution.resourceCircuitKey(),
 		ContainerID:            execution.ContainerID,
 		Status:                 string(execution.Status),
 		StartedAt:              execution.StartedAt,
@@ -257,7 +262,13 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	if p.eventBus == nil {
 		return
 	}
-	p.publishAgentctlEventPayload(ctx, eventType, p.agentctlEventPayload(ctx, execution, errMsg))
+	payload := p.agentctlEventPayload(ctx, execution, errMsg)
+	// Only a ready event confirms the launched execution workspace. A starting
+	// event can carry a prepared path that has not been validated yet.
+	if eventType == events.AgentctlReady {
+		payload.AgentWorkspacePath = execution.WorkspacePath
+	}
+	p.publishAgentctlEventPayload(ctx, eventType, payload)
 }
 
 // PublishAgentctlDeliveryRecovery publishes an immutable reconciliation state
@@ -310,6 +321,8 @@ func (p *EventPublisher) agentctlEventPayload(
 	payload := AgentctlEventPayload{
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
+		ErrandID:               execution.Owner.ErrandID,
+		ErrandGeneration:       execution.Owner.Generation,
 		RunID:                  execution.RunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
@@ -425,20 +438,29 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		SessionSettingsSourceGeneration: event.SessionSettingsSourceGeneration,
 		OwnerKind:                       executionOwnerKind(execution),
 		WorkspaceID:                     execution.WorkspaceID,
+		ErrandID:                        execution.Owner.ErrandID,
+		ErrandGeneration:                execution.Owner.Generation,
 		RunID:                           execution.RunID,
 		RunSessionID:                    execution.RunSessionID,
 		RunAttempt:                      execution.RunAttempt,
 		AgentProfileID:                  execution.officeProfileID(),
 		ExecutionProfileID:              execution.AgentProfileID,
+		ResourceCircuitKey:              execution.resourceCircuitKey(),
 		AgentType:                       execution.AgentID,
 		TaskID:                          execution.TaskID,
 		SessionID:                       execution.SessionID,
 		Data:                            eventData,
 	}
 
+	if execution.Owner.Kind == ExecutionOwnerErrand && (event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeToolUpdate || event.Type == streams.EventTypeShellOutputUpdate) {
+		payload.TaskID = execution.Owner.TaskID
+		payload.DeliverySubmissionID = event.DeliverySubmissionID
+		payload.PromptGeneration = event.PromptGeneration
+		payload.TurnID = event.TurnID
+	}
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
 	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
-		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID,
+		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID, execution.Owner.ErrandID,
 	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
@@ -511,6 +533,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		PlanContent:                      event.PlanContent,
 		MCPAttachment:                    event.MCPAttachment,
 		MCPAttachmentAttempt:             event.MCPAttachmentAttempt,
+		ContextCompaction:                event.ContextCompaction,
 		BackgroundWork:                   event.BackgroundWork,
 		BackgroundWorkOutput:             event.BackgroundWorkOutput,
 	}
@@ -525,7 +548,7 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", *payload)
 	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
-		payload.OwnerKind, payload.SessionID, payload.RunSessionID,
+		payload.OwnerKind, payload.SessionID, payload.RunSessionID, payload.ErrandID,
 	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
@@ -536,11 +559,52 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 	}
 }
 
-func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string) string {
+func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string, errandIDs ...string) string {
+	if ownerKind == ExecutionOwnerErrand && len(errandIDs) > 0 {
+		return models.ErrandExecutionIdentity(errandIDs[0])
+	}
 	if ownerKind == ExecutionOwnerRun && runSessionID != "" {
 		return runSessionID
 	}
 	return sessionID
+}
+
+// PublishWorktreeInventory publishes one filtered linked-worktree snapshot.
+// Identity comes from the execution, never from the agentctl payload.
+func (p *EventPublisher) PublishWorktreeInventory(execution *AgentExecution, inventory *agentctl.WorktreeInventory) {
+	if p.eventBus == nil || execution == nil || inventory == nil {
+		return
+	}
+	entries := make([]WorktreeInventoryEntryData, 0, len(inventory.Entries))
+	for _, entry := range inventory.Entries {
+		entries = append(entries, WorktreeInventoryEntryData{
+			Path:    entry.Path,
+			Branch:  entry.Branch,
+			HeadSHA: entry.HeadSHA,
+		})
+	}
+	observedAt := inventory.ObservedAt
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	payload := &WorktreeInventoryData{
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		ExecutorType:      execution.ExecutorType,
+		RepositoryName:    inventory.RepositoryName,
+		CommonDir:         inventory.CommonDir,
+		Entries:           entries,
+		ObservedAt:        observedAt.Format(time.RFC3339Nano),
+	}
+	event := bus.NewEvent(events.WorkspaceWorktreesObserved, "lifecycle", payload)
+	subject := events.BuildWorkspaceWorktreesSubject(execution.SessionID)
+	if err := p.eventBus.Publish(context.Background(), subject, event); err != nil {
+		p.logger.Error("failed to publish worktree inventory",
+			zap.String("task_id", execution.TaskID),
+			zap.String("session_id", execution.SessionID),
+			zap.Error(err))
+	}
 }
 
 // PublishGitEvent publishes a unified git event to the event bus.
@@ -727,17 +791,36 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		ToolCallID:    event.ToolCallID,
 		Title:         event.PermissionTitle,
 		Options:       options,
+		HumanInput:    event.PermissionHumanInput,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
+
+		AgentExecutionID: execution.ID,
+		OwnerKind:        executionOwnerKind(execution),
+		WorkspaceID:      execution.WorkspaceID,
+		ErrandID:         execution.Owner.ErrandID,
+		ErrandGeneration: execution.Owner.Generation,
+		RunID:            execution.RunID,
+		RunSessionID:     execution.RunSessionID,
+		RunAttempt:       execution.RunAttempt,
+		AgentProfileID:   execution.officeProfileID(),
 
 		AutoApprovedOptionID:   event.AutoApprovedOptionID,
 		AutoApprovalPending:    event.AutoApprovalPending,
 		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
 		AutoApprovalSource:     event.AutoApprovalSource,
 	}
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		payload.TaskID = execution.Owner.TaskID
+		payload.DeliverySubmissionID = event.DeliverySubmissionID
+		payload.PromptGeneration = event.PromptGeneration
+		payload.TurnID = event.TurnID
+	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
-	subject := events.BuildPermissionRequestSubject(execution.SessionID)
+	subject := events.BuildPermissionRequestSubject(agentStreamSubjectID(
+		payload.OwnerKind, execution.SessionID, execution.RunSessionID, execution.Owner.ErrandID,
+	))
 
 	const maxAttempts = 3
 	var publishErr error
@@ -905,14 +988,16 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 	sessionID := execution.SessionID
 
 	payload := ContextWindowEventPayload{
-		TaskID:                 execution.TaskID,
-		SessionID:              sessionID,
-		AgentID:                execution.ID,
-		ContextWindowSize:      size,
-		ContextWindowUsed:      used,
-		ContextWindowRemaining: remaining,
-		ContextEfficiency:      efficiency,
-		Timestamp:              time.Now().UTC().Format(time.RFC3339Nano),
+		TaskID:                      execution.TaskID,
+		SessionID:                   sessionID,
+		AgentID:                     execution.ID,
+		ContextWindowSize:           size,
+		ContextWindowUsed:           used,
+		ContextWindowRemaining:      remaining,
+		ContextEfficiency:           efficiency,
+		CompactionInferenceDisabled: compactionInferenceDisabledForProvider(execution.AgentID),
+		CopilotNativeSessionEvents:  execution.CopilotNativeSessionEvents,
+		Timestamp:                   time.Now().UTC().Format(time.RFC3339Nano),
 	}
 
 	event := bus.NewEvent(events.ContextWindowUpdated, "agent-manager", payload)
@@ -925,6 +1010,13 @@ func (p *EventPublisher) PublishContextWindow(execution *AgentExecution, size, u
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+}
+
+// compactionInferenceDisabledForProvider reports whether usage drops from this
+// provider cannot distinguish a compaction from a switch between mixed agent
+// contexts.
+func compactionInferenceDisabledForProvider(agentID string) bool {
+	return agentID == agents.CopilotACPAgentID
 }
 
 // PublishAvailableCommands publishes an available commands update event to the event bus.

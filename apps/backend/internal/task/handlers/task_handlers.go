@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
@@ -55,6 +56,10 @@ type TaskHandlers struct {
 	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	backgroundWorkEnabled         bool
+	errands                       ErrandService
+	errandsEnabled                bool
+	respondToErrandPermission     func(context.Context, errands.PermissionResponseRequest) error
+	continueErrand                func(context.Context, errands.ContinuationRequest) (string, error)
 	logger                        *logger.Logger
 }
 
@@ -268,8 +273,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.PUT("/tasks/:id/completion-gate/criteria/:criterion_id/evidence", h.httpVerifyTaskCompletionCriterion)
 	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
+	api.GET("/tasks/:id/errands/:errand_id/messages/:message_id/shell-output", h.httpErrandShellOutput)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
+	api.POST("/tasks/:id/turn-error/dismiss", h.httpDismissTaskTurnError)
 	api.POST("/task-sessions/:id/mark-read", h.httpMarkSessionRead)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
@@ -285,11 +292,17 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
+	// Explicit discard of a pending deferred launch. Task-scoped and
+	// synchronous; the response distinguishes already-clear, discarded, and
+	// retained (the queued launch is still owned).
+	api.POST("/tasks/:id/deferred-launch/discard", h.httpDiscardDeferredLaunch)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
+	api.GET("/tasks/:id/sessions/ordinary", h.httpListOrdinaryTaskSessions)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
+	api.DELETE("/tasks/:id/repositories/:repo_id", h.httpDetachTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
@@ -310,6 +323,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/dependencies", h.httpAddTaskDependency)
 	api.PUT("/tasks/:id/dependencies", h.httpReplaceTaskDependencies)
 	api.DELETE("/tasks/:id/dependencies/:depId", h.httpRemoveTaskDependency)
+	api.GET("/tasks/:id/graph", h.httpGetTaskGraph)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
@@ -346,12 +360,15 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskGet, h.wsGetTask)
 	dispatcher.RegisterFunc(ws.ActionTaskUpdate, h.wsUpdateTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRepoUpdate, h.wsUpdateTaskRepository)
+	dispatcher.RegisterFunc(ws.ActionTaskRepoDetach, h.wsDetachTaskRepository)
 	dispatcher.RegisterFunc(ws.ActionTaskDelete, h.wsDeleteTask)
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	dispatcher.RegisterFunc(ws.ActionTaskSessionListOrdinary, h.wsListOrdinaryTaskSessions)
+	h.registerErrandWS(dispatcher)
 	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkList, h.wsListBackgroundWorkloads)
 	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkGet, h.wsGetBackgroundWorkload)
 	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkAction, h.wsExecuteBackgroundAction)

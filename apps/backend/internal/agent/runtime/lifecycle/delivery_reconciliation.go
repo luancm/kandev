@@ -46,6 +46,8 @@ const (
 // accepted the prompt. RuntimeEpoch is local-runtime fencing only; remote
 // executor identity is independent of that local generation.
 type DeliveryReconciliationIdentity struct {
+	TurnID            string
+	NativeSessionID   string
 	OriginalRuntime   processidentity.Identity
 	SessionID         string
 	ExecutionID       string
@@ -182,15 +184,17 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 		return DeliveryReconciliationIdentity{}, ErrExecutionNotFound
 	}
 	submissionID := currentDeliverySubmissionID(execution)
-	if execution.ID == "" || execution.SessionID == "" || execution.DeliveryMode != DurableDeliveryV1 ||
+	sessionID := deliveryTransportSessionID(execution)
+	if execution.ID == "" || sessionID == "" || execution.DeliveryMode != DurableDeliveryV1 ||
 		execution.DeliveryIncarnationID == "" || execution.DeliveryHarnessGeneration == 0 ||
 		execution.DeliveryStreamID == "" || submissionID == "" {
 		return DeliveryReconciliationIdentity{}, fmt.Errorf("durable delivery reconciliation identity is incomplete")
 	}
-	originalRuntime := client.RuntimeProcessIdentity()
+	originalRuntime := boundAgentProcessGroup(execution, client.RuntimeProcessIdentity(), submissionID)
 	return DeliveryReconciliationIdentity{
 		OriginalRuntime: originalRuntime,
-		SessionID:       execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
+		TurnID:          execution.promptTurnIDSnapshot(), NativeSessionID: execution.ACPSessionID,
+		SessionID: sessionID, ExecutionID: execution.ID, Owner: execution.Owner,
 		IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: execution.DeliveryHarnessGeneration,
 		StreamID: execution.DeliveryStreamID, SubmissionID: submissionID, RuntimeEpoch: execution.runtimeEpoch,
 		StartupGeneration: execution.startupAttemptSnapshot(), PromptGeneration: execution.promptGenerationSnapshot(),
@@ -344,6 +348,14 @@ func (sm *StreamManager) cancelDeliveryReconciliation(executionID string) {
 	if cycle != nil {
 		cycle.cancel()
 	}
+	sm.reconciliationMu.Unlock()
+}
+
+// restoreDeliveryReconciliation re-enables recovery when stop admission fails
+// and the execution remains attached to this stream manager.
+func (sm *StreamManager) restoreDeliveryReconciliation(executionID string) {
+	sm.reconciliationMu.Lock()
+	delete(sm.stoppedReconciliations, executionID)
 	sm.reconciliationMu.Unlock()
 }
 
@@ -534,7 +546,7 @@ func (sm *StreamManager) deliveryReconciliationCurrent(
 	execution *AgentExecution,
 	identity DeliveryReconciliationIdentity,
 ) bool {
-	if execution == nil || execution.ID != identity.ExecutionID || execution.SessionID != identity.SessionID ||
+	if execution == nil || execution.ID != identity.ExecutionID || deliveryTransportSessionID(execution) != identity.SessionID ||
 		execution.Owner != identity.Owner || execution.DeliveryIncarnationID != identity.IncarnationID ||
 		execution.DeliveryHarnessGeneration != identity.HarnessGeneration || execution.DeliveryStreamID != identity.StreamID ||
 		execution.runtimeEpoch != identity.RuntimeEpoch || execution.startupAttemptSnapshot() != identity.StartupGeneration ||

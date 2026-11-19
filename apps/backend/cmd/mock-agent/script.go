@@ -56,6 +56,9 @@ func executeCommand(e *emitter, fullPrompt, line string, planVersion *string) {
 	case strings.HasPrefix(line, "e2e:await_file("):
 		executeAwaitFile(e, line)
 
+	case strings.HasPrefix(line, "e2e:context_window("):
+		executeContextWindow(e, line)
+
 	case strings.HasPrefix(line, "e2e:mcp:"):
 		executeMCPCommand(e, fullPrompt, line, planVersion)
 
@@ -83,6 +86,22 @@ func executeCommand(e *emitter, fullPrompt, line string, planVersion *string) {
 	case strings.HasPrefix(line, "e2e:shell_stream("):
 		executeShellStream(e, line)
 	}
+}
+
+func executeContextWindow(e *emitter, line string) {
+	sizeArg, usedArg, found := strings.Cut(extractParenContent(line, "e2e:context_window("), ",")
+	size, sizeErr := strconv.Atoi(strings.TrimSpace(sizeArg))
+	used, usedErr := strconv.Atoi(strings.TrimSpace(usedArg))
+	if !found || sizeErr != nil || usedErr != nil || size <= 0 || used < 0 {
+		return
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{UsageUpdate: &acp.SessionUsageUpdate{
+			Size: size,
+			Used: used,
+		}},
+	})
 }
 
 // executeMonitorStart emits a Monitor registration sequence reproducing the

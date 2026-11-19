@@ -28,7 +28,7 @@ func TestCreateRequest_GeneratesID(t *testing.T) {
 	s := NewStore(time.Minute)
 	req := &Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}}
 
-	id, _ := s.CreateRequest(req)
+	id, _, _ := s.CreateRequest(req)
 
 	if id == "" {
 		t.Fatal("expected non-empty pending ID")
@@ -42,7 +42,7 @@ func TestCreateRequest_PreservesExistingID(t *testing.T) {
 	s := NewStore(time.Minute)
 	req := &Request{PendingID: "custom-id", SessionID: "s1"}
 
-	id, _ := s.CreateRequest(req)
+	id, _, _ := s.CreateRequest(req)
 
 	if id != "custom-id" {
 		t.Errorf("expected preserved ID %q, got %q", "custom-id", id)
@@ -51,7 +51,7 @@ func TestCreateRequest_PreservesExistingID(t *testing.T) {
 
 func TestGetRequest_Found(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?"}}})
 
 	req, ok := s.GetRequest(id)
 
@@ -75,7 +75,7 @@ func TestGetRequest_NotFound(t *testing.T) {
 
 func TestWaitForResponse_Success(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	// Respond in a goroutine
 	go func() {
@@ -109,7 +109,7 @@ func TestWaitForResponse_NotFound(t *testing.T) {
 
 func TestWaitForResponse_ContextCancelled(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -125,7 +125,7 @@ func TestWaitForResponse_ContextCancelled(t *testing.T) {
 
 func TestWaitForResponse_CancelCh(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	// Cancel via CancelSession in a goroutine
 	go func() {
@@ -144,7 +144,7 @@ func TestWaitForResponse_CancelCh(t *testing.T) {
 
 func TestWaitForResponse_StoreTimeout(t *testing.T) {
 	s := NewStore(50 * time.Millisecond)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	_, err := s.WaitForResponse(context.Background(), id)
 	if err == nil {
@@ -157,7 +157,7 @@ func TestWaitForResponse_StoreTimeout(t *testing.T) {
 
 func TestRespond_Success(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	err := s.Respond(id, &Response{Answers: []Answer{{CustomText: "yes"}}})
 	if err != nil {
@@ -176,7 +176,7 @@ func TestRespond_NotFound(t *testing.T) {
 
 func TestRespond_Duplicate(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	// First respond succeeds
 	if err := s.Respond(id, &Response{}); err != nil {
@@ -190,9 +190,9 @@ func TestRespond_Duplicate(t *testing.T) {
 
 func TestCancelSession_CancelsMatchingRequests(t *testing.T) {
 	s := NewStore(time.Minute)
-	id1, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "q1?", Options: []Option{{ID: "o1", Label: "A"}}}}})
-	id2, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "q2?", Options: []Option{{ID: "o1", Label: "B"}}}}})
-	id3, _ := s.CreateRequest(&Request{SessionID: "s2", Questions: []Question{{Prompt: "q3?", Options: []Option{{ID: "o1", Label: "C"}}}}})
+	id1, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "q1?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+	id2, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "q2?", Options: []Option{{ID: "o1", Label: "B"}}}}})
+	id3, _, _ := s.CreateRequest(&Request{SessionID: "s2", Questions: []Question{{Prompt: "q3?", Options: []Option{{ID: "o1", Label: "C"}}}}})
 
 	cancelled := s.CancelSession("s1")
 
@@ -224,7 +224,7 @@ func TestCancelSession_CancelsMatchingRequests(t *testing.T) {
 // paths return an error from WaitForResponse — that's the contract under test.
 func TestCancelRequest(t *testing.T) {
 	s := NewStore(time.Minute)
-	id, _ := s.CreateRequest(&Request{SessionID: "s1"})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1"})
 
 	started := make(chan struct{})
 	done := make(chan error, 1)
@@ -253,7 +253,7 @@ func TestCancelRequest(t *testing.T) {
 
 func TestCancelSession_NoMatch(t *testing.T) {
 	s := NewStore(time.Minute)
-	_, _ = s.CreateRequest(&Request{SessionID: "s1"})
+	_, _, _ = s.CreateRequest(&Request{SessionID: "s1"})
 
 	cancelled := s.CancelSession("other")
 
@@ -276,13 +276,13 @@ func TestListPendingPermissions_Empty(t *testing.T) {
 func TestListPendingPermissions_ReturnsPendingRequests(t *testing.T) {
 	s := NewStore(time.Minute)
 
-	_, _ = s.CreateRequest(&Request{
+	_, _, _ = s.CreateRequest(&Request{
 		SessionID: "session-1",
 		TaskID:    "task-1",
 		Questions: []Question{{Prompt: "Allow bash execution?"}},
 		Context:   "tool permission",
 	})
-	_, _ = s.CreateRequest(&Request{
+	_, _, _ = s.CreateRequest(&Request{
 		SessionID: "session-2",
 		TaskID:    "task-2",
 		Questions: []Question{{Prompt: "Write to /tmp?"}},
@@ -323,8 +323,8 @@ func TestListPendingPermissions_ReturnsPendingRequests(t *testing.T) {
 func TestListPendingPermissions_ExcludesCancelled(t *testing.T) {
 	s := NewStore(time.Minute)
 
-	_, _ = s.CreateRequest(&Request{SessionID: "s1"})
-	_, _ = s.CreateRequest(&Request{SessionID: "s2"})
+	_, _, _ = s.CreateRequest(&Request{SessionID: "s1"})
+	_, _, _ = s.CreateRequest(&Request{SessionID: "s2"})
 
 	// Cancel session s1
 	s.CancelSession("s1")
@@ -351,8 +351,8 @@ func TestCreateRequest_Dedup_SameSessionAndQuestions(t *testing.T) {
 	s := NewStore(time.Minute)
 	q := []Question{{Prompt: "What colour?", Options: []Option{{ID: "o1", Label: "Red"}, {ID: "o2", Label: "Blue"}}}}
 
-	id1, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: q})
-	id2, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: q})
+	id1, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: q})
+	id2, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: q})
 
 	if id1 != id2 {
 		t.Fatalf("expected duplicate request to reuse pending ID %q, got %q", id1, id2)
@@ -366,8 +366,8 @@ func TestCreateRequest_Dedup_SameSessionAndQuestions(t *testing.T) {
 
 func TestCreateRequest_NoDedup_DifferentQuestions(t *testing.T) {
 	s := NewStore(time.Minute)
-	id1, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "Q1?", Options: []Option{{ID: "o1", Label: "A"}}}}})
-	id2, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "Q2?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+	id1, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "Q1?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+	id2, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "Q2?", Options: []Option{{ID: "o1", Label: "A"}}}}})
 
 	if id1 == id2 {
 		t.Fatal("expected different pending IDs for different questions")
@@ -382,7 +382,7 @@ func TestCreateRequest_NoDedup_DifferentQuestions(t *testing.T) {
 func TestCreateRequest_PresetID_NeverReplacesLiveEntry(t *testing.T) {
 	s := NewStore(time.Minute)
 	first := &Request{PendingID: "preset-1", SessionID: "s1", Questions: []Question{{Prompt: "Q1?", Options: []Option{{ID: "o1", Label: "A"}, {ID: "o2", Label: "B"}}}}}
-	id1, isNew1 := s.CreateRequest(first)
+	id1, isNew1, _ := s.CreateRequest(first)
 	if id1 != "preset-1" || !isNew1 {
 		t.Fatalf("first create = (%q, %v), want (preset-1, true)", id1, isNew1)
 	}
@@ -396,7 +396,7 @@ func TestCreateRequest_PresetID_NeverReplacesLiveEntry(t *testing.T) {
 	<-entered
 
 	second := &Request{PendingID: "preset-1", SessionID: "s1", Questions: []Question{{Prompt: "Different?", Options: []Option{{ID: "o1", Label: "A"}, {ID: "o2", Label: "B"}}}}}
-	id2, isNew2 := s.CreateRequest(second)
+	id2, isNew2, _ := s.CreateRequest(second)
 	if id2 != "preset-1" || isNew2 {
 		t.Fatalf("second create = (%q, %v), want (preset-1, false): a live entry must be joined, not replaced", id2, isNew2)
 	}
@@ -432,7 +432,7 @@ func TestCreateRetryRequest_DistinctPresetIDsDoNotDeduplicate(t *testing.T) {
 		},
 	}}
 
-	firstID, firstCreated, firstMissed := s.CreateRetryRequest(&Request{
+	firstID, firstCreated, firstMissed, _ := s.CreateRetryRequest(&Request{
 		PendingID: "retry-original",
 		SessionID: "session-1",
 		Questions: questions,
@@ -451,7 +451,7 @@ func TestCreateRetryRequest_DistinctPresetIDsDoNotDeduplicate(t *testing.T) {
 			{ID: "no", Label: "No", Description: "Stop"},
 		},
 	}}
-	secondID, secondCreated, secondMissed := s.CreateRetryRequest(&Request{
+	secondID, secondCreated, secondMissed, _ := s.CreateRetryRequest(&Request{
 		PendingID: "retry-reused",
 		SessionID: "session-1",
 		Questions: reusedQuestions,
@@ -475,7 +475,7 @@ func TestRespondWithDeliveryConfirmation_CancelsRetryRegisteredAfterOriginalCanc
 			Options: []Option{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}},
 		}},
 	}
-	pendingID, created := s.CreateRequest(request)
+	pendingID, created, _ := s.CreateRequest(request)
 	if !created {
 		t.Fatal("original request was not created")
 	}
@@ -497,7 +497,7 @@ func TestRespondWithDeliveryConfirmation_CancelsRetryRegisteredAfterOriginalCanc
 	if !s.CancelRequest(pendingID) {
 		t.Fatal("original request was not cancelled")
 	}
-	_, retryCreated, deliveryMissed := s.CreateRetryRequest(&Request{
+	_, retryCreated, deliveryMissed, _ := s.CreateRetryRequest(&Request{
 		PendingID: pendingID,
 		SessionID: "session-1",
 		Questions: request.Questions,
@@ -527,7 +527,7 @@ func TestRespondWithDeliveryConfirmation_CancelsRetryRegisteredAfterOriginalCanc
 	case <-time.After(time.Second):
 		t.Fatal("replacement retry waiter was stranded after detached delivery won")
 	}
-	if _, created, missed := s.CreateRetryRequest(&Request{
+	if _, created, missed, _ := s.CreateRetryRequest(&Request{
 		PendingID: pendingID,
 		SessionID: "session-1",
 		Questions: request.Questions,
@@ -547,7 +547,7 @@ func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 	s := NewStore(time.Minute)
 	entered := make(chan string, 2)
 	s.onWaitEntered = func(id string) { entered <- id }
-	id, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?", Options: []Option{{ID: "o1", Label: "A"}}}}})
+	id, _, _ := s.CreateRequest(&Request{SessionID: "s1", Questions: []Question{{Prompt: "test?", Options: []Option{{ID: "o1", Label: "A"}}}}})
 
 	done := make(chan *Response, 2)
 	for i := 0; i < 2; i++ {
@@ -612,7 +612,7 @@ func TestWaitForResponse_Broadcast_MultipleWaiters(t *testing.T) {
 // guarantees at most one of done/CancelCh is ever closed per entry.
 func TestCancelRequest_AfterRespond_DoesNotCloseCancelCh(t *testing.T) {
 	s := NewStore(time.Second)
-	id, _ := s.CreateRequest(&Request{
+	id, _, _ := s.CreateRequest(&Request{
 		SessionID: "s1",
 		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
 	})
@@ -668,7 +668,7 @@ func TestCancelRequest_AfterRespond_DoesNotCloseCancelCh(t *testing.T) {
 // scheduler luck.
 func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
 	s := NewStore(time.Second)
-	id, _ := s.CreateRequest(&Request{
+	id, _, _ := s.CreateRequest(&Request{
 		SessionID: "s1",
 		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
 	})
@@ -730,7 +730,7 @@ func TestRespond_AfterCancelRequest_ReturnsError(t *testing.T) {
 // section to observe an already-resolved entry.
 func TestCancelSession_ConcurrentWithRespond_DoesNotCloseCancelChOnceDelivered(t *testing.T) {
 	s := NewStore(time.Second)
-	id, _ := s.CreateRequest(&Request{
+	id, _, _ := s.CreateRequest(&Request{
 		SessionID: "s1",
 		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
 	})
@@ -804,7 +804,7 @@ func TestCancelSession_ConcurrentWithRespond_DoesNotCloseCancelChOnceDelivered(t
 // cancelled-guard this test exists to cover.
 func TestCancelRequest_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t *testing.T) {
 	s := NewStore(time.Second)
-	id, _ := s.CreateRequest(&Request{
+	id, _, _ := s.CreateRequest(&Request{
 		SessionID: "s1",
 		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
 	})
@@ -867,7 +867,7 @@ func TestCancelRequest_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t 
 // can observe resolved=false, cancelled=false and both close(pending.CancelCh).
 func TestCancelSession_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t *testing.T) {
 	s := NewStore(time.Second)
-	id, _ := s.CreateRequest(&Request{
+	id, _, _ := s.CreateRequest(&Request{
 		SessionID: "s1",
 		Questions: []Question{{ID: "q1", Prompt: "p?", Options: []Option{{ID: "o1", Label: "A"}}}},
 	})

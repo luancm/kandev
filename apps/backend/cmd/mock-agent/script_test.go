@@ -33,6 +33,25 @@ func TestIsScriptMode(t *testing.T) {
 	}
 }
 
+func TestContextWindowScriptEmitsACPUsage(t *testing.T) {
+	emitter, updates := newTestEmitter()
+	executeScript(emitter, "", `e2e:context_window(100000,68000)
+e2e:context_window(100000,0)
+e2e:context_window(100000,100001)
+e2e:context_window(unparseable,99)`)
+	got := updates.getUpdates()
+	wantUsed := []int{68_000, 0, 100_001}
+	if len(got) != len(wantUsed) {
+		t.Fatalf("usage updates = %d, want %d", len(got), len(wantUsed))
+	}
+	for i, update := range got {
+		usage := update.notification.Update.UsageUpdate
+		if update.notification.SessionId != emitter.sid || usage == nil || usage.Size != 100_000 || usage.Used != wantUsed[i] {
+			t.Fatalf("usage update %d = %+v, want size 100000 and used %d for %s", i, usage, wantUsed[i], emitter.sid)
+		}
+	}
+}
+
 func TestExtractStringArg(t *testing.T) {
 	tests := []struct {
 		name   string

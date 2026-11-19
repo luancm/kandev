@@ -14,6 +14,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/sshlaunch"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -41,13 +42,30 @@ func (r *SSHExecutor) RecoverInstancesDetailed(
 	return instances, outcomes, nil
 }
 
-func (r *SSHExecutor) recoverSSHRecord(
+func (r *SSHExecutor) recoverSSHRecord(ctx context.Context, record *models.ExecutorRunning) (*ExecutorInstance, RecoveryCandidateOutcome) {
+	instance, state, outcome := r.prepareSSHRecovery(ctx, record)
+	if instance == nil {
+		return nil, outcome
+	}
+	r.mu.Lock()
+	if r.sessions[instance.InstanceID] != nil {
+		r.mu.Unlock()
+		r.discardRecoveredSSHState(instance.InstanceID, state)
+		return nil, RecoveryOutcomeUnknown
+	}
+	r.sessions[instance.InstanceID] = state
+	r.startWatchdogLocked(instance.InstanceID, state)
+	r.mu.Unlock()
+	return instance, ""
+}
+
+func (r *SSHExecutor) prepareSSHRecovery(
 	ctx context.Context,
 	record *models.ExecutorRunning,
-) (*ExecutorInstance, RecoveryCandidateOutcome) {
+) (*ExecutorInstance, *sshSessionState, RecoveryCandidateOutcome) {
 	identity, ok := sshRecoveryIdentity(record)
 	if !ok {
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 
 	recoveryCtx, cancel := context.WithTimeout(ctx, sshAgentctlHealthTimeout)
@@ -55,12 +73,12 @@ func (r *SSHExecutor) recoverSSHRecord(
 	target, err := r.targetFromMetadata(record.Metadata)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot resolve saved target", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 	client, err := dialSSH(recoveryCtx, target)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot connect to saved target", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 
 	var forwarder *SSHPortForwarder
@@ -77,32 +95,51 @@ func (r *SSHExecutor) recoverSSHRecord(
 		_ = r.closeSSHClient(client)
 	}()
 
+	if identity.launchReceipt != nil {
+		// The legacy verifier checks the command and pidfile only. A recycled
+		// PID with the same task command and a recreated pidfile must not be
+		// adopted, so re-prove the live birth identity and generation first.
+		result := r.reconcileRecordedController(recoveryCtx, client, sshReconcileVerifyRequest(*identity.launchReceipt))
+		if err := result.Validate(); err != nil {
+			r.logger.Debug("ssh recovery rejected controller launch proof",
+				zap.String("session_id", record.SessionID), zap.Error(err))
+			return nil, nil, RecoveryOutcomeUnknown
+		}
+		switch result.Outcome {
+		case sshlaunch.OutcomeVerified:
+		case sshlaunch.OutcomeAbsent:
+			// The recorded controller and its session children are gone; a
+			// resumable session may start a fresh controller.
+			return nil, nil, RecoveryOutcomeNoMatchingInstance
+		default:
+			r.logger.Debug("ssh recovery could not verify controller launch proof",
+				zap.String("session_id", record.SessionID), zap.String("reason", string(result.Reason)))
+			return nil, nil, RecoveryOutcomeUnknown
+		}
+	}
 	instanceInfo, controlPort, outcome := r.inspectSSHRecoveryInstance(recoveryCtx, client, record, identity)
 	if outcome != "" {
-		return nil, outcome
+		return nil, nil, outcome
 	}
 
 	req := sshRecoveryRequest(record, identity)
 	runtimeTunnel, _, err = openSSHRuntimeAPITunnelForRequest(client, req)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot attach saved runtime API tunnel", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 	forwarder, err = StartPortForward(client, identity.port, r.logger)
 	if err != nil {
 		r.logger.Debug("ssh recovery cannot open local agentctl forward", zap.String("session_id", record.SessionID), zap.Error(err))
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 	if err := recoveryCtx.Err(); err != nil {
-		return nil, RecoveryOutcomeUnknown
+		return nil, nil, RecoveryOutcomeUnknown
 	}
 
-	instance, registered := r.registerRecoveredSSHState(record, identity, target, client, forwarder, runtimeTunnel, req, instanceInfo, controlPort)
-	if instance == nil {
-		return nil, RecoveryOutcomeUnknown
-	}
-	transferred = registered
-	return instance, ""
+	instance, state := r.preparedSSHRecoveryState(record, identity, target, client, forwarder, runtimeTunnel, req, instanceInfo, controlPort)
+	transferred = true
+	return instance, state, ""
 }
 
 func (r *SSHExecutor) inspectSSHRecoveryInstance(
@@ -132,25 +169,38 @@ func (r *SSHExecutor) inspectSSHRecoveryInstance(
 }
 
 type sshRecoveryProcessIdentity struct {
-	pid         int
-	port        int
-	controlPort int
-	sessionDir  string
-	taskDir     string
-	nativeID    string
-	backendID   string
-	authToken   string
+	pid           int
+	port          int
+	controlPort   int
+	sessionDir    string
+	taskDir       string
+	nativeID      string
+	backendID     string
+	taskID        string
+	authToken     string
+	launchReceipt *sshlaunch.Receipt
+	errandOwner   ExecutionOwner
 }
 
 func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIdentity, bool) {
-	if !hasCanonicalSSHRecoveryRecordIdentity(record) {
+	if record == nil {
+		return sshRecoveryProcessIdentity{}, false
+	}
+	owner, err := recordedErrandExecutionOwner(record)
+	taskID := record.TaskID
+	if owner.Kind == ExecutionOwnerErrand {
+		taskID = owner.TaskID
+	}
+	if err != nil || !hasCanonicalSSHRecoveryRecordIdentity(record, taskID) {
 		return sshRecoveryProcessIdentity{}, false
 	}
 	identity := sshRecoveryProcessIdentity{
-		backendID: strings.TrimSpace(record.AgentExecutionID),
-		authToken: strings.TrimSpace(record.TransientAuthToken),
-		taskDir:   strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHRemoteTaskDir)),
-		nativeID:  strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHAgentctlInstanceID)),
+		backendID:   strings.TrimSpace(record.AgentExecutionID),
+		taskID:      taskID,
+		errandOwner: owner,
+		authToken:   strings.TrimSpace(record.TransientAuthToken),
+		taskDir:     strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHRemoteTaskDir)),
+		nativeID:    strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySSHAgentctlInstanceID)),
 	}
 	controlPort, ok := sshRecoveryControlPort(record.Metadata)
 	if !ok {
@@ -167,15 +217,28 @@ func sshRecoveryIdentity(record *models.ExecutorRunning) (sshRecoveryProcessIden
 	if !hasCompleteSSHRecoveryCredentials(identity) {
 		return sshRecoveryProcessIdentity{}, false
 	}
+	// Recovery may only reattach to a record whose own launch proof still
+	// describes it. A present but foreign or malformed receipt fails closed;
+	// a legacy record without one keeps the existing guarded path.
+	receipt, ok := sshLaunchReceiptForRecord(record.Metadata, identity.taskID, record.SessionID)
+	if !ok {
+		return sshRecoveryProcessIdentity{}, false
+	}
+	if owner.Kind == ExecutionOwnerErrand && (receipt == nil || receipt.Owner.ControllerInstanceID != identity.backendID) {
+		return sshRecoveryProcessIdentity{}, false
+	}
+	if receipt != nil && receipt.Process.PID != identity.pid {
+		// Durable proof names a different process than the record. Recovery
+		// must not adopt either one on this contradiction.
+		return sshRecoveryProcessIdentity{}, false
+	}
+	identity.launchReceipt = receipt
 	return identity, true
 }
 
-func hasCanonicalSSHRecoveryRecordIdentity(record *models.ExecutorRunning) bool {
-	if record == nil {
-		return false
-	}
+func hasCanonicalSSHRecoveryRecordIdentity(record *models.ExecutorRunning, taskID string) bool {
 	return strings.TrimSpace(record.SessionID) != "" && record.SessionID == strings.TrimSpace(record.SessionID) &&
-		strings.TrimSpace(record.TaskID) != "" && record.TaskID == strings.TrimSpace(record.TaskID) &&
+		strings.TrimSpace(taskID) != "" && taskID == strings.TrimSpace(taskID) &&
 		record.AgentExecutionID == strings.TrimSpace(record.AgentExecutionID)
 }
 
@@ -241,8 +304,12 @@ func (r *SSHExecutor) readSSHRecoveryInstanceInfo(
 		return nil, 0, fmt.Errorf("read exact agentctl instance: %w", err)
 	}
 	if info == nil || info.ID != identity.nativeID || info.SessionID != record.SessionID ||
-		info.TaskID != record.TaskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir {
+		info.TaskID != identity.taskID || info.Port != identity.port || info.WorkspacePath != identity.taskDir ||
+		!matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) {
 		return nil, 0, errors.New("live agentctl metadata does not match the persisted SSH instance")
+	}
+	if err := requireErrandQuestionPolicy(ctx, control, errandMCPOwner(identity.errandOwner)); err != nil {
+		return nil, 0, err
 	}
 	return info, controlPort, nil
 }
@@ -301,16 +368,17 @@ func sshAgentctlBoundAddress(line string) (string, error) {
 
 func sshRecoveryRequest(record *models.ExecutorRunning, identity sshRecoveryProcessIdentity) *ExecutorCreateRequest {
 	return &ExecutorCreateRequest{
-		InstanceID: identity.backendID,
-		TaskID:     record.TaskID,
-		SessionID:  record.SessionID,
-		AuthToken:  identity.authToken,
-		Metadata:   cloneSSHMetadata(record.Metadata),
-		Env:        make(map[string]string),
+		InstanceID:     identity.backendID,
+		TaskID:         identity.taskID,
+		SessionID:      record.SessionID,
+		AuthToken:      identity.authToken,
+		Metadata:       cloneSSHMetadata(record.Metadata),
+		Env:            make(map[string]string),
+		ErrandMCPOwner: errandMCPOwner(identity.errandOwner),
 	}
 }
 
-func (r *SSHExecutor) registerRecoveredSSHState(
+func (r *SSHExecutor) preparedSSHRecoveryState(
 	record *models.ExecutorRunning,
 	identity sshRecoveryProcessIdentity,
 	target *SSHTarget,
@@ -320,7 +388,7 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 	req *ExecutorCreateRequest,
 	instanceInfo *agentctl.InstanceInfo,
 	controlPort int,
-) (*ExecutorInstance, bool) {
+) (*ExecutorInstance, *sshSessionState) {
 	metadata := cloneSSHMetadata(req.Metadata)
 	metadata[MetadataKeySSHLocalForwardPort] = strconv.Itoa(forwarder.LocalPort())
 	metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
@@ -339,6 +407,7 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 		remoteTaskDir:    identity.taskDir,
 		authToken:        identity.authToken,
 		reusingProcess:   true,
+		launchReceipt:    identity.launchReceipt,
 		metadata:         metadata,
 		prepareEnv:       make(map[string]string),
 		runtimeAPITunnel: runtimeTunnel,
@@ -346,15 +415,6 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 		controlPort:      controlPort,
 		workdirRoot:      r.workdirRoot(metadata),
 	}
-
-	r.mu.Lock()
-	if r.sessions[identity.backendID] != nil {
-		r.mu.Unlock()
-		return nil, false
-	}
-	r.sessions[identity.backendID] = state
-	r.startWatchdogLocked(identity.backendID, state)
-	r.mu.Unlock()
 
 	instance := &ExecutorInstance{
 		InstanceID:           identity.backendID,
@@ -368,10 +428,17 @@ func (r *SSHExecutor) registerRecoveredSSHState(
 		WorkspaceSourceRoots: append([]string(nil), instanceInfo.WorkspaceSourceRoots...),
 		Metadata:             metadata,
 	}
+	if identity.errandOwner.Kind == ExecutionOwnerErrand {
+		instance.recoveredErrandOwner = identity.errandOwner
+		instance.AgentProfileID = record.ExecutionProfileID
+		instance.ProviderSessionID = instanceInfo.ProviderSessionID
+		instance.CopilotNativeSessionEvents = instanceInfo.CopilotNativeSessionEvents
+		instance.ReusedWorkspace = true
+	}
 	instance.DiscardRecovery = func() {
 		r.discardRecoveredSSHState(identity.backendID, state)
 	}
-	return instance, true
+	return instance, state
 }
 
 func (r *SSHExecutor) discardRecoveredSSHState(instanceID string, state *sshSessionState) {

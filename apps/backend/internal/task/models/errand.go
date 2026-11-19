@@ -1,0 +1,205 @@
+package models
+
+import (
+	"errors"
+	"fmt"
+	"slices"
+	"time"
+)
+
+// ErrandLifecycle is the errand-owned launch state, independent of the
+// errand session's runtime state.
+type ErrandLifecycle string
+
+const (
+	ErrandLifecycleQueued    ErrandLifecycle = "queued"
+	ErrandLifecycleLaunched  ErrandLifecycle = "launched"
+	ErrandLifecycleCancelled ErrandLifecycle = "cancelled"
+)
+
+// ErrandCancelSource records who cancelled an errand; empty while not cancelled.
+type ErrandCancelSource string
+
+const (
+	ErrandCancelSourceParent  ErrandCancelSource = "parent"
+	ErrandCancelSourceUser    ErrandCancelSource = "user"
+	ErrandCancelSourceCascade ErrandCancelSource = "cascade"
+)
+
+// ErrandOutcome is the outcome of the latest parent-initiated errand turn;
+// empty until one settles.
+type ErrandOutcome string
+
+const (
+	ErrandOutcomeDone   ErrandOutcome = "done"
+	ErrandOutcomeFailed ErrandOutcome = "failed"
+)
+
+// ErrandResultKind classifies the current result; empty when there is none.
+type ErrandResultKind string
+
+const (
+	ErrandResultOutput      ErrandResultKind = "output"
+	ErrandResultFailure     ErrandResultKind = "failure"
+	ErrandResultInterrupted ErrandResultKind = "interrupted"
+	ErrandResultCancelled   ErrandResultKind = "cancelled"
+)
+
+// ErrandResultState tracks delivery of the current result to the parent.
+type ErrandResultState string
+
+const (
+	ErrandResultNone       ErrandResultState = "none"
+	ErrandResultPending    ErrandResultState = "pending"
+	ErrandResultDelivered  ErrandResultState = "delivered"
+	ErrandResultSuperseded ErrandResultState = "superseded"
+	ErrandResultDiscarded  ErrandResultState = "discarded"
+)
+
+// ErrandDeliveryRoute names how a delivered result reached the parent; empty
+// until delivery.
+type ErrandDeliveryRoute string
+
+const (
+	ErrandDeliveryAwait        ErrandDeliveryRoute = "await"
+	ErrandDeliveryTurnContext  ErrandDeliveryRoute = "turn_context"
+	ErrandDeliveryNotification ErrandDeliveryRoute = "notification"
+)
+
+// ErrandDeliveryState is current-revision reception evidence. Empty means
+// unavailable or still in progress, never received.
+type ErrandDeliveryState string
+
+const (
+	ErrandDeliveryReceived  ErrandDeliveryState = "received"
+	ErrandDeliveryUncertain ErrandDeliveryState = "uncertain"
+)
+
+// ErrandStatus is the single projected status reported for an errand.
+type ErrandStatus string
+
+const (
+	ErrandStatusQueued         ErrandStatus = "queued"
+	ErrandStatusRunning        ErrandStatus = "running"
+	ErrandStatusNeedsAttention ErrandStatus = "needs_attention"
+	ErrandStatusDone           ErrandStatus = "done"
+	ErrandStatusFailed         ErrandStatus = "failed"
+	ErrandStatusCancelled      ErrandStatus = "cancelled"
+)
+
+var (
+	ErrErrandNotFound        = errors.New("errand not found")
+	ErrErrandVersionConflict = errors.New("errand version changed")
+	ErrInvalidErrand         = errors.New("invalid errand")
+)
+
+// Errand is the bookkeeping row for one errand. ID equals the errand's
+// reserved session ID; a queued errand has no session row yet. ID, TaskID,
+// ParentSessionID, Title, Objective, AgentProfileID, MCPServerIDs, MCPExcludedServerIDs,
+// FirstTurnID, SubmissionID, and CreatedAt are fixed at insert. ResultRevision
+// and ParentAdmissionGeneration are repository-owned. Other changes use Version
+// compare-and-set; admission and claim transactions also advance Version.
+type Errand struct {
+	ID                        string
+	TaskID                    string
+	ParentSessionID           string
+	Title                     string
+	Objective                 string
+	AgentProfileID            string
+	MCPServerIDs              []string
+	MCPExcludedServerIDs      []string
+	FirstTurnID               string
+	SubmissionID              string
+	Lifecycle                 ErrandLifecycle
+	CancelSource              ErrandCancelSource
+	LastOutcome               ErrandOutcome
+	AwaitingResult            bool
+	ParentAdmissionGeneration int64
+	ResultRevision            string
+	ResultText                string
+	ResultTruncated           bool
+	ResultTurnID              string
+	ResultKind                ErrandResultKind
+	ResultState               ErrandResultState
+	DeliveredRoute            ErrandDeliveryRoute
+	DeliveryToken             string
+	// DeliveryState is read-derived from the exact current await claim. It is
+	// never written as part of an errand snapshot or lifecycle transition.
+	DeliveryState       ErrandDeliveryState `json:"-"`
+	DeliveredAt         *time.Time
+	LatestSettledTurnID string
+	TeardownIntent      *ErrandTeardownIntent `json:"-"`
+	Version             int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	SettledAt           *time.Time
+}
+
+// Validate rejects an errand without its identity or with a value outside
+// the closed state sets.
+func (e *Errand) Validate() error {
+	switch {
+	case e.ID == "" || e.TaskID == "" || e.ParentSessionID == "":
+		return fmt.Errorf("%w: id, task, and parent session are required", ErrInvalidErrand)
+	case e.ParentSessionID == e.ID:
+		return fmt.Errorf("%w: an errand cannot be its own parent", ErrInvalidErrand)
+	case !slices.Contains([]ErrandLifecycle{ErrandLifecycleQueued, ErrandLifecycleLaunched, ErrandLifecycleCancelled}, e.Lifecycle):
+		return fmt.Errorf("%w: lifecycle %q", ErrInvalidErrand, e.Lifecycle)
+	case !slices.Contains([]ErrandCancelSource{"", ErrandCancelSourceParent, ErrandCancelSourceUser, ErrandCancelSourceCascade}, e.CancelSource):
+		return fmt.Errorf("%w: cancel source %q", ErrInvalidErrand, e.CancelSource)
+	case !slices.Contains([]ErrandOutcome{"", ErrandOutcomeDone, ErrandOutcomeFailed}, e.LastOutcome):
+		return fmt.Errorf("%w: outcome %q", ErrInvalidErrand, e.LastOutcome)
+	case !slices.Contains([]ErrandResultKind{"", ErrandResultOutput, ErrandResultFailure, ErrandResultInterrupted, ErrandResultCancelled}, e.ResultKind):
+		return fmt.Errorf("%w: result kind %q", ErrInvalidErrand, e.ResultKind)
+	case !slices.Contains([]ErrandResultState{ErrandResultNone, ErrandResultPending, ErrandResultDelivered, ErrandResultSuperseded, ErrandResultDiscarded}, e.ResultState):
+		return fmt.Errorf("%w: result state %q", ErrInvalidErrand, e.ResultState)
+	case !slices.Contains([]ErrandDeliveryRoute{"", ErrandDeliveryAwait, ErrandDeliveryTurnContext, ErrandDeliveryNotification}, e.DeliveredRoute):
+		return fmt.Errorf("%w: delivery route %q", ErrInvalidErrand, e.DeliveredRoute)
+	}
+	if err := e.TeardownIntent.validateFor(e); err != nil {
+		return err
+	}
+	return nil
+}
+
+// CanSendResult reports whether the user may record the latest settled turn
+// as the errand's result: the projected status is done or failed, a settled
+// turn exists, and that turn is not already the pending or delivered result.
+func (e *Errand) CanSendResult(status ErrandStatus) bool {
+	if status != ErrandStatusDone && status != ErrandStatusFailed {
+		return false
+	}
+	if e.LatestSettledTurnID == "" {
+		return false
+	}
+	if e.LatestSettledTurnID != e.ResultTurnID {
+		return true
+	}
+	return e.ResultState != ErrandResultPending && e.ResultState != ErrandResultDelivered
+}
+
+// ErrandClaimCandidate identifies the version observed while preparing a claim.
+type ErrandClaimCandidate struct {
+	ID      string
+	Version int64
+}
+
+// ErrandAttentionReason distinguishes permission from unresolved recovered work.
+type ErrandAttentionReason string
+
+const (
+	ErrandAttentionPermission         ErrandAttentionReason = "permission"
+	ErrandAttentionRecoveryUnresolved ErrandAttentionReason = "recovery_unresolved"
+)
+
+// ProjectErrandAttentionReason limits the wire field to the closed attention set.
+// An omitted reason preserves the older permission-only producer contract.
+func ProjectErrandAttentionReason(status ErrandStatus, reasons ...ErrandAttentionReason) ErrandAttentionReason {
+	if status != ErrandStatusNeedsAttention {
+		return ""
+	}
+	if len(reasons) > 0 && reasons[0] == ErrandAttentionRecoveryUnresolved {
+		return ErrandAttentionRecoveryUnresolved
+	}
+	return ErrandAttentionPermission
+}

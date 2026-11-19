@@ -10,6 +10,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -99,6 +100,60 @@ func TestDeliveryRetentionRetryPromptAdmission(t *testing.T) {
 			t.Run(engine+"/"+scenario, func(t *testing.T) { assertRetentionRetryPromptAdmission(t, engine, scenario) })
 		}
 	}
+}
+
+func TestErrandComposedPromptSurvivesRetained529Retry(t *testing.T) {
+	ctx := t.Context()
+	const taskID, sessionID, executionID = "errand-retry-task", "errand-retry-session", "errand-retry-execution"
+	const block = "Completed errand result."
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-1"
+	session.AgentProfileSnapshot = map[string]any{"model": "mock-fast"}
+	session.DownstreamACPSessionID = "errand-retry-native"
+	session.TaskEnvironmentID = "errand-retry-workspace"
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: session.TaskEnvironmentID, TaskID: taskID, ExecutorType: "local", Status: models.TaskEnvironmentStatusReady,
+	}))
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: sessionID, IncarnationID: session.QueueIncarnationID, Generation: 1,
+		NativeSessionID: session.DownstreamACPSessionID, CreationReason: "native_started",
+	}))
+
+	manager := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		isAgentRunning:           true,
+		currentPromptExecutionID: executionID,
+		isAgentReadyFn:           func(context.Context, string) bool { return true },
+	}
+	manager.currentPromptGeneration.Store(7)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
+	service := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, manager)
+	t.Cleanup(service.cancelAllTransientRetries)
+	composer := &fakeErrandComposer{composition: errands.Composition{Token: "errand-retry-token", Block: block}}
+	service.SetErrandController(composer)
+	composedPrompt := "Inspect the source.\n\n" + block
+	service.rememberComposedTurnPrompt(sessionID, composedPrompt, "", false, nil, nil)
+	service.beginPromptAttempt(sessionID, executionID, 7, false)
+	current, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	entry := &transientRetryEntry{attempt: 1, retryCtx: ctx, cancel: func() {}, retainedRuntime: &retainedRuntimeRetry{
+		executionID: executionID, generation: 7, profileID: session.AgentProfileID,
+		nativeID: continuationNativeID(current), identity: continuationSessionIdentity(current),
+	}}
+	service.transientRetries.Store(sessionID, entry)
+	require.Equal(t, retainedRuntimeRetryUsable, service.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry))
+
+	service.retryTransientPrompt(ctx, taskID, sessionID, executionID)
+
+	require.Equal(t, []string{composedPrompt}, manager.capturedPrompts,
+		"retained 529 retry must send the already-composed block exactly once")
+	require.Empty(t, composer.routes, "retry must not recompose the errand snapshot")
 }
 
 func assertRetentionRetryPromptAdmission(t *testing.T, engine, scenario string) {

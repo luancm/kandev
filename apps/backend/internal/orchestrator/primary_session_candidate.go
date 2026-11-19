@@ -63,7 +63,7 @@ func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *mod
 // bestPrimarySessionCandidate returns the session an automatic promotion
 // should take, or "" when no session is eligible.
 //
-// Terminal sessions are never candidates. activeOnly keeps each caller's
+// Terminal sessions and errands are never candidates. activeOnly keeps each caller's
 // eligibility: maybePromotePrimary passes true, so only an active session can
 // inherit the role after a stop; promoteNextPrimaryAfterRemoval passes false,
 // so any nonterminal session can inherit it after a deletion.

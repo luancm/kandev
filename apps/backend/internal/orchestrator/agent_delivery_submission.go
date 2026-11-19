@@ -30,6 +30,7 @@ type durableDeliveryCapabilityReader = agentruntime.DurableDeliveryCapabilityRea
 type deliveryClaimUpdater func(context.Context, string, string, string) error
 
 type agentDeliverySubmissionRuntime struct {
+	expected     *models.AgentDeliverySubmission
 	store        repository.AgentDeliveryRepository
 	id           string
 	sessionID    string
@@ -210,6 +211,10 @@ func (s *Service) prepareAgentDeliverySubmission(
 		return nil, nil
 	}
 
+	if err := s.checkUnknownPromptAdmission(ctx, session.ID); err != nil {
+		return nil, err
+	}
+
 	protocol, err := s.resolveDeliveryProtocol(
 		ctx, session.ID, executionID, options.deliveryProtocol,
 	)
@@ -220,6 +225,9 @@ func (s *Service) prepareAgentDeliverySubmission(
 		zap.String("session_id", session.ID), zap.String("execution_id", executionID),
 		zap.String("submission_id", options.deliverySubmissionID), zap.String("protocol", protocol))
 
+	if options.deliveryClaimUpdater != nil {
+		ctx = context.WithValue(ctx, sendNowDeliveryPromptKey{}, agentDeliveryPromptPayload{Text: prompt, Attachments: attachments})
+	}
 	if protocol == messagequeue.DeliveryProtocolLegacy {
 		if err := persistDeliveryClaim(
 			ctx, options.deliveryClaimUpdater, protocol, options.deliverySubmissionID, "",
@@ -368,7 +376,7 @@ func (s *Service) prepareBackendDeliverySubmission(
 		zap.String("session_id", session.ID), zap.String("submission_id", submissionID),
 		zap.Int64("harness_generation", generation))
 	return &agentDeliverySubmissionRuntime{
-		store: store, id: submissionID, sessionID: session.ID,
+		store: store, id: submissionID, sessionID: session.ID, expected: submission,
 		dispatchOnly: false,
 	}, nil
 }

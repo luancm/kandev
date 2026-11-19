@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -153,7 +154,7 @@ func TestExecutorOwnershipMCPDoesNotBorrowWorkspaceOwner(t *testing.T) {
 	require.NoError(t, repo.CreateExecutorProfile(t.Context(), profile))
 	resolver := mcpscope.NewResolver(repo, nil, func() bool { return true }, svc.logger)
 	workspaceOwner := authn.WithIdentity(t.Context(), authn.Identity{UserID: "alice", Role: authn.RoleAdmin})
-	scoped, err := resolver.ScopePrincipal(workspaceOwner, "task-mcp-actor", "bob-stream")
+	scoped, err := resolver.ScopePrincipal(workspaceOwner, streams.MCPExecutionContext{TaskID: "task-mcp-actor", SessionID: "bob-stream"})
 	require.NoError(t, err)
 	_, err = svc.GetExecutorProfile(scoped, profile.ID)
 	require.Error(t, err, "stream actor cannot inherit the workspace administrator's private compute")

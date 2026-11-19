@@ -35,9 +35,34 @@ const (
 // shared with another namespace.
 var usageEventIDNamespace = uuid.MustParse("2f6a6f8c-6c1b-4b8a-9e3e-7a6d2c5b9f10")
 
+// continuationActivityEventFrom copies the bounded stream fields the
+// continuation-activity observer needs without leaking runtime payload types
+// into the orchestrator's neutral activity record.
+func continuationActivityEventFrom(data *lifecycle.AgentStreamEventData) continuationActivityEvent {
+	if data == nil {
+		return continuationActivityEvent{}
+	}
+	return continuationActivityEvent{
+		Type:                        data.Type,
+		PromptGeneration:            data.PromptGeneration,
+		Text:                        data.Text,
+		Role:                        data.Role,
+		ProviderDiagnosticCandidate: data.ProviderDiagnosticCandidate,
+		ToolCallID:                  data.ToolCallID,
+		ParentToolCallID:            data.ParentToolCallID,
+		Normalized:                  data.Normalized,
+	}
+}
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
+		return
+	}
+	if payload.OwnerKind == lifecycle.ExecutionOwnerErrand {
+		if payload.Data.Type == agentEventComplete {
+			s.signalCeilingSweep()
+		}
 		return
 	}
 	var streamGuard *lockedCancelInFlightGuard
@@ -158,6 +183,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
+	if eventType != agentEventToolCall {
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
+	}
 	if observedOutput || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
@@ -211,6 +239,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case agentEventToolCall:
 		s.saveAgentTextIfPresent(ctx, payload)
 		s.handleToolCallEvent(ctx, payload)
+		// Observe after the handler records the finalized tool ownership. This
+		// prevents an unclassified or background call from confirming recovery.
+		s.observeContinuationActivity(ctx, taskID, sessionID, eventExecutionID, continuationActivityEventFrom(payload.Data))
 
 	case agentEventToolUpdate:
 		s.handleToolUpdateEvent(ctx, payload)
@@ -273,6 +304,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case streams.EventTypeUsageObservation:
 		s.publishNativeUsageObservation(ctx, payload)
 
+	case streams.EventTypeContextCompactionObservation:
+		if payload != nil && payload.Data != nil {
+			s.publishCommittedContextCompaction(
+				ctx, payload.TaskID, payload.SessionID,
+				payload.Data.CanonicalProjection, payload.Data.Data,
+			)
+		}
+
 	case "plan":
 		s.handleSessionTodosEvent(ctx, payload)
 
@@ -308,6 +347,15 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
 		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if streamGuard != nil && streamGuard.locked {
+			settlementCtx = withSettledDeliverySessionStateGuardHeld(settlementCtx)
+		}
+		if eventType == agentEventComplete {
+			// The streaming completion path defers the running->waiting
+			// decision to agent.ready. Changing it here would make that ready
+			// event look stale and skip its workflow and queue work.
+			settlementCtx = withSettledDeliverySessionStateConvergenceSkipped(settlementCtx)
+		}
 		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
 			s.logger.Warn("failed to finish durable delivery terminal settlement",
 				zap.String("task_id", taskID),
@@ -477,11 +525,14 @@ func (s *Service) completeTurnForStreamEvent(
 			s.completeTurnForTaskSessionWithSuccessorPolicy(ctx, payload.TaskID, payload.SessionID, true)
 			return
 		}
+		fixedResourceKey := s.fixedResourceForCleanStreamCompletion(ctx, payload, capturedTurnID)
 		if err := s.completeTurnForTaskSessionCheckedOwned(ctx, payload.TaskID, payload.SessionID, capturedTurnID); err != nil {
 			s.logger.Warn("failed to complete stream event's captured turn",
 				zap.String("session_id", payload.SessionID),
 				zap.String("turn_id", capturedTurnID),
 				zap.Error(err))
+		} else {
+			s.profileExecutionResolver.ResetFixedProfileCircuitFailures(ctx, fixedResourceKey)
 		}
 		if successorTurnID == capturedTurnID {
 			s.clearAcceptedQueuedDispatch(payload.SessionID)
@@ -505,14 +556,20 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
+		// Opt-in diagnostics use the transport type; OFF retains legacy attribution.
+		agentType := payload.AgentID
+		if s.config.ProviderKeywordContext && payload.AgentType != "" {
+			agentType = payload.AgentType
+		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,
 			OwnerKind:          string(payload.OwnerKind),
 			AgentExecutionID:   executionID,
-			AgentID:            payload.AgentID,
+			AgentID:            agentType,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
+			ResourceCircuitKey: payload.ResourceCircuitKey,
 			PromptGeneration:   payload.Data.PromptGeneration,
 			ErrorMessage:       payload.Data.Error,
 			ProviderError:      payload.Data.ProviderError,
@@ -522,7 +579,7 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		}
 		failure = s.withPromptAttemptEvidence(failure)
 		result := s.routeDynamicAgentFailureWithEvidence(
-			ctx, failure, classifyKanbanFailure(failure), nil, true,
+			ctx, failure, s.classifyKanbanFailure(failure), nil, true,
 		)
 		if result.handled && !result.manualRecovery {
 			return
@@ -560,7 +617,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	if sessionID != "" && payload.Data.ACPSessionID != "" {
-		s.storeResumeToken(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
+		s.storeResumeTokenFromAgentEvent(ctx, taskID, sessionID, payload.ExecutionID, payload.Data.ACPSessionID, "", payload.AttemptID)
 	}
 	if sessionID == "" || s.messageCreator == nil {
 		return
@@ -845,7 +902,7 @@ func (s *Service) handleStreamingEventKind(
 }
 
 type canonicalMessageEventPublisher interface {
-	PublishMessageEvent(context.Context, string, *models.Message) error
+	PublishMessageEvent(context.Context, string, *models.Message, ...*models.ConversationMutationReceipt) error
 }
 
 type canonicalMessageReader interface {
@@ -874,7 +931,7 @@ func (s *Service) publishCanonicalMessageEvent(
 			zap.String("message_id", payload.Data.MessageID))
 		return
 	}
-	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	message, receipt, err := canonicalMessageNotification(ctx, reader, payload)
 	if err != nil || message == nil {
 		s.logger.Warn("failed to load canonical message for notification",
 			zap.String("session_id", payload.SessionID),
@@ -886,7 +943,7 @@ func (s *Service) publishCanonicalMessageEvent(
 	if !payload.Data.IsAppend {
 		eventType = events.MessageAdded
 	}
-	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+	if err := publisher.PublishMessageEvent(ctx, eventType, message, receipt); err != nil {
 		s.logger.Warn("failed to publish canonical message notification",
 			zap.String("session_id", payload.SessionID),
 			zap.String("message_id", payload.Data.MessageID),
@@ -1057,6 +1114,11 @@ func (s *Service) trackBackgroundToolUpdate(
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
+			// Only the original async-launch result attests a new child.
+			// Settlement and resume updates describe its card, not liveness.
+			if isSubagentPresentationUpdate(payload) {
+				return
+			}
 			kind := backgroundWorkKind(payload.Data.Normalized)
 			// Only attest the parked projection for a workload whose provider
 			// can confirm later liveness on this connection. An identified but
@@ -1153,7 +1215,30 @@ func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEvent
 		)
 		return toolOwnershipBackground
 	}
+	if terminalBackgroundWorkToolUpdate(payload) {
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
+		return toolOwnershipBackground
+	}
 	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
+}
+
+// terminalBackgroundWorkToolUpdate reports whether a tool update carries a
+// typed terminal workload observation for its own call. The launch tool's
+// earlier terminal result clears ownership, so the later job-end frame needs
+// this explicit evidence to reach the registration that still holds the turn
+// open. The source-call check keeps a mismatched observation from retiring a
+// different job.
+func terminalBackgroundWorkToolUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	observation := payload.Data.BackgroundWork
+	if observation == nil || !observation.State.IsTerminal() || payload.Data.ToolCallID == "" {
+		return false
+	}
+	return observation.SourceCallID == "" || observation.SourceCallID == payload.Data.ToolCallID
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {
@@ -1177,6 +1262,25 @@ func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWo
 		return ""
 	}
 	return payload.BackgroundWork().Kind
+}
+
+// subagentStatusAsyncLaunched is the subagent status carried only by the
+// original launch result of a detached Claude subagent.
+const subagentStatusAsyncLaunched = "async_launched"
+
+// isSubagentPresentationUpdate reports whether a terminal tool update only
+// re-presents a detached subagent card (settlement or resume) rather than
+// attesting its launch. Such updates must not record or publish background
+// work, because they carry no tool title and describe an existing child.
+func isSubagentPresentationUpdate(payload *lifecycle.AgentStreamEventPayload) bool {
+	if !isTerminalToolStatus(payload.Data.ToolStatus) || !normalizedIsDetachedLaunch(payload.Data.Normalized) {
+		return false
+	}
+	if backgroundWorkKind(payload.Data.Normalized) != streams.BackgroundWorkKindSubagent {
+		return false
+	}
+	subagent := payload.Data.Normalized.SubagentTask()
+	return subagent == nil || subagent.Status != subagentStatusAsyncLaunched
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -1379,6 +1483,7 @@ func (s *Service) updateTaskSessionStateWithHook(
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	s.onSessionTerminalForErrands(sessionID, nextState)
 	return session, true
 }
 
@@ -1807,6 +1912,7 @@ func (s *Service) publishAcceptedTaskSessionState(
 	)
 	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
+	s.onSessionTerminalForErrands(sessionID, nextState)
 }
 
 // persistStrictTaskSessionState is transitionTaskSessionState's persistence
@@ -2057,6 +2163,7 @@ func (s *Service) publishTaskSessionStateChanged(
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
 	}
+	s.addWaitingOnErrandsField(eventData, session)
 	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
 		projection := dto.TaskSessionDTO{}
 		if err := dto.EnrichSessionRecoveryBlocks(ctx, &projection, session, reader); err == nil {
@@ -2631,6 +2738,16 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	s.setSessionWaitingForInputWithHook(ctx, taskID, sessionID, nil, preloadedSession...)
 }
 
+// setSessionWaitingForInputWithoutTaskState settles a session that does not
+// own task runtime state, such as an errand: the session becomes promptable
+// and the task state is left exactly as it was.
+func (s *Service) setSessionWaitingForInputWithoutTaskState(ctx context.Context, taskID, sessionID string, preloadedSession ...*models.TaskSession) {
+	updated := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false, preloadedSession...)
+	if updated != nil && len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updated {
+		*preloadedSession[0] = *updated
+	}
+}
+
 // setSessionWaitingForInputWithHook is the state transition path used by a
 // stream completion that owns the RUNNING-to-WAITING decision. The callback
 // runs after the CAS succeeds and before publication, so the caller can
@@ -2801,14 +2918,8 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
-	if completedSessionID != "" {
-		if session, err := s.repo.GetTaskSession(ctx, completedSessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
-			s.logger.Debug("skipping task REVIEW state because completed session is active again",
-				zap.String("task_id", taskID),
-				zap.String("session_id", completedSessionID),
-				zap.String("session_state", string(session.State)))
-			return
-		}
+	if s.settledSessionKeepsTaskState(ctx, taskID, completedSessionID) {
+		return
 	}
 
 	blockingSessionID, sessionsReadable := s.otherWorkingSessionID(ctx, taskID, completedSessionID)
@@ -2942,6 +3053,8 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 		return "", false
 	}
 	for _, session := range sessions {
+		// An errand never owns task runtime state, so its work cannot hold
+		// the task out of REVIEW either.
 		if session == nil {
 			continue
 		}
@@ -2953,6 +3066,26 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 		}
 	}
 	return "", true
+}
+
+// settledSessionKeepsTaskState reports whether a REVIEW reconcile for the
+// settled session is already working again.
+func (s *Service) settledSessionKeepsTaskState(ctx context.Context, taskID, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	if isWorkingSessionState(session.State) {
+		s.logger.Debug("skipping task REVIEW state because settled session is active again",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("session_state", string(session.State)))
+		return true
+	}
+	return false
 }
 
 // writeTaskReviewStateOnCancel clears the kanban "actively working" task
@@ -2984,14 +3117,8 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 	s.taskRuntimeStateMu.Lock()
 	defer s.taskRuntimeStateMu.Unlock()
 
-	if sessionID != "" {
-		if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil && isWorkingSessionState(session.State) {
-			s.logger.Debug("skipping task REVIEW state after cancel because session is active again",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("session_state", string(session.State)))
-			return
-		}
+	if s.settledSessionKeepsTaskState(ctx, taskID, sessionID) {
+		return
 	}
 
 	if blockingSessionID, ok := s.otherWorkingSessionID(ctx, taskID, sessionID); !ok {
@@ -3199,7 +3326,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if err != nil {
 		return err
 	}
-	if state == v1.TaskStateInProgress && models.IsCompletionFollowUpSession(session.Metadata) {
+	if state == v1.TaskStateInProgress && models.IsWorkflowDetachedSession(session) {
 		return nil
 	}
 	if !runtimeSessionOwnsTaskState(session, state) {
@@ -3378,7 +3505,7 @@ func (s *Service) storeCompleteEventResumeToken(ctx context.Context, payload *li
 			lastMsgUUID = uuid
 		}
 	}
-	s.storeResumeToken(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
+	s.storeResumeTokenFromAgentEvent(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID, payload.Data.ACPSessionID, lastMsgUUID, payload.AttemptID)
 }
 
 func (s *Service) resolveCompleteEventTurnID(
@@ -4185,6 +4312,7 @@ func (s *Service) handleSessionModeEvent(ctx context.Context, payload *lifecycle
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4297,6 +4425,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	defer settingsLock.Unlock()
 	identity := sessionSettingsEventIdentity{
 		AttemptID: payload.AttemptID, ExecutionID: payload.ExecutionID,
+		ExecutionProfileID: payload.ExecutionProfileID,
 		SourceGeneration:   payload.SessionSettingsSourceGeneration,
 		SettingsGeneration: payload.Data.SessionSettingsGeneration,
 	}
@@ -4397,6 +4526,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 type sessionSettingsEventIdentity struct {
 	AttemptID          string
 	ExecutionID        string
+	ExecutionProfileID string
 	SourceGeneration   uint64
 	SettingsGeneration uint64
 }
@@ -4455,6 +4585,12 @@ func sessionSettingsEventIsStale(
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {
@@ -4702,15 +4838,13 @@ func (s *Service) persistModelSelectionWarningMessage(
 	if s.messageCreator == nil {
 		return nil
 	}
-	if err := s.messageCreator.CreateSessionMessage(
+	if err := s.messageCreator.CreateLifecycleSessionMessage(
 		ctx,
 		taskID,
 		"The executor could not use the saved model selection.",
 		sessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(sessionID),
 		modelSelectionWarningMetadata(warning),
-		false,
 	); err != nil {
 		s.logger.Warn("failed to persist model selection warning",
 			zap.String("task_id", taskID),

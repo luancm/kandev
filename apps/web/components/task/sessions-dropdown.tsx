@@ -139,7 +139,14 @@ function useSessionSelectionHandlers(taskId: string | null) {
         (session) => session.id,
       );
       setActiveSession(taskId, sessionId);
-      if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds);
+      if (newEnvId) {
+        performLayoutSwitch(oldEnvId, newEnvId, sessionId, sessionIds, {
+          sessionListRestoreState: {
+            loaded: state.taskSessionsByTask.loadedByTaskId[taskId] ?? false,
+            knownForeignSessionIds: new Set(),
+          },
+        });
+      }
       close();
     },
     [appStore, setActiveSession, taskId],

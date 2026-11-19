@@ -14,8 +14,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const executorMCPPolicyMetadataKey = "executor_mcp_policy"
 
 // ResolveAgentProfile resolves an agent profile ID to profile information.
 // This is exposed for external callers (like the orchestrator executor) to get profile info.
@@ -36,7 +39,8 @@ func (m *Manager) getAgentConfigForExecution(execution *AgentExecution) (agents.
 
 func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, execution *AgentExecution) (agents.Agent, *AgentProfileInfo, error) {
 	if execution.AgentProfileID == "" {
-		return nil, nil, fmt.Errorf("execution %s has no agent profile ID", execution.ID)
+		return nil, nil, fmt.Errorf("%w: execution %s has no agent profile ID",
+			errRecoveredAgentIdentityAbsent, execution.ID)
 	}
 
 	if m.profileResolver == nil {
@@ -48,7 +52,8 @@ func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, exec
 		return nil, nil, fmt.Errorf("failed to resolve profile: %w", err)
 	}
 	if profileInfo == nil {
-		return nil, nil, errors.New("failed to resolve profile: empty profile")
+		return nil, nil, fmt.Errorf("%w: failed to resolve profile: empty profile",
+			errRecoveredAgentIdentityAbsent)
 	}
 
 	agentTypeName := profileInfo.AgentName
@@ -68,10 +73,12 @@ func (m *Manager) getAgentConfigAndProfileForExecution(ctx context.Context, exec
 func (m *Manager) resolveLaunchableAgent(agentTypeName string) (agents.Agent, error) {
 	agentConfig, ok := m.registry.Get(agentTypeName)
 	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+		return nil, fmt.Errorf("%w: agent type %q not found in registry",
+			errRecoveredAgentIdentityAbsent, agentTypeName)
 	}
 	if agents.IsVirtualAgent(agentConfig) {
-		return nil, fmt.Errorf("agent type %q: %w", agentTypeName, ErrVirtualProfile)
+		return nil, fmt.Errorf("%w: agent type %q: %w",
+			errRecoveredAgentIdentityAbsent, agentTypeName, ErrVirtualProfile)
 	}
 	return agentConfig, nil
 }
@@ -92,14 +99,57 @@ func (m *Manager) resolveMcpServersForLaunch(ctx context.Context, req *LaunchReq
 	if req == nil {
 		return nil, nil
 	}
+	if req.Owner.Kind == ExecutionOwnerErrand && (m.mcpResolver == nil || req.WorkspaceID == "") {
+		return nil, errors.New("errand MCP selection resolver is unavailable")
+	}
 	if m.mcpResolver != nil && req.WorkspaceID != "" {
 		profileID := executionProfileID(req)
-		return m.resolveEffectiveMcpServers(ctx, mcpconfig.ResolutionContext{
+		resolution := mcpconfig.ResolutionContext{
 			WorkspaceID: req.WorkspaceID, RepositoryIDs: repositoryIDsFromLaunch(req),
 			ProfileID: profileID, TaskID: req.TaskID, SessionID: req.SessionID,
-		}, profileID, req.Metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
+		}
+		metadata := req.Metadata
+		if req.Owner.Kind == ExecutionOwnerErrand {
+			var err error
+			metadata, err = m.errandMCPPolicyMetadata(ctx, req.Metadata)
+			if err != nil {
+				return nil, err
+			}
+			resolution.TaskID = req.Owner.TaskID
+			resolution.Errand = &mcpconfig.ErrandMCPContribution{
+				ErrandID: req.Owner.ErrandID, WorkspaceID: req.Owner.WorkspaceID, TaskID: req.Owner.TaskID,
+			}
+			if req.ErrandMCPSelection != nil {
+				resolution.Errand.Snapshot = *req.ErrandMCPSelection
+			}
+		}
+		return m.resolveEffectiveMcpServers(ctx, resolution, profileID, metadata, agentConfig, models.ExecutorType(req.ExecutorType).Runtime())
 	}
 	return m.resolveMcpServersWithParams(ctx, executionProfileID(req), req.Metadata, agentConfig)
+}
+
+func (m *Manager) errandMCPPolicyMetadata(ctx context.Context, source map[string]interface{}) (map[string]interface{}, error) {
+	metadata := maps.Clone(source)
+	delete(metadata, executorMCPPolicyMetadataKey)
+	profileID := getMetadataString(source, MetadataKeyExecutorProfileID)
+	if profileID == "" {
+		return metadata, nil
+	}
+	if m.executorProfileReader == nil {
+		return nil, errors.New("errand executor profile reader is unavailable")
+	}
+	profile, err := m.executorProfileReader.GetExecutorProfile(ctx, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("read errand executor MCP policy: %w", err)
+	}
+	executorID := getMetadataString(source, "executor_id")
+	if profile == nil || profile.ID != profileID || (executorID != "" && profile.ExecutorID != executorID) {
+		return nil, errors.New("errand executor MCP policy owner mismatch")
+	}
+	if profile.McpPolicy != "" {
+		metadata[executorMCPPolicyMetadataKey] = profile.McpPolicy
+	}
+	return metadata, nil
 }
 
 func (m *Manager) resolveEffectiveMcpServers(
@@ -112,6 +162,8 @@ func (m *Manager) resolveEffectiveMcpServers(
 	return mcpconfig.ToACPServers(result.Servers), nil
 }
 
+// resolveEffectiveMCPResolution applies executor policy to the process-bound automation selection.
+// Unavailable template definitions remain visible as resolution decisions.
 func (m *Manager) resolveEffectiveMCPResolution(
 	ctx context.Context,
 	resolutionContext mcpconfig.ResolutionContext,
@@ -131,10 +183,21 @@ func (m *Manager) resolveEffectiveMCPResolution(
 	if err != nil {
 		return nil, err
 	}
+	if raw, ok := metadata[mcpprofile.BuiltinBindingMetadataKey]; ok {
+		binding, err := mcpprofile.ParseBuiltinBindingMetadata(raw)
+		if err != nil {
+			return nil, err
+		}
+		manifest := binding.BuiltinPackages
+		if manifest.AutomationID != "" {
+			resolutionContext.Automation = &mcpconfig.AutomationMCPContribution{AutomationID: manifest.AutomationID, WorkspaceID: manifest.WorkspaceID, TaskID: manifest.TaskID, Revision: manifest.AutomationRevision, DefinitionIDs: append([]string(nil), manifest.AutomationDefinitionIDs...)}
+		}
+	}
 	result, err := m.mcpResolver.Resolve(ctx, resolutionContext, policy)
 	if err != nil {
 		return nil, err
 	}
+	mcpconfig.AddTemplateUnavailableDecisions(result, metadata)
 	for _, decision := range result.Decisions {
 		m.logger.Warn("MCP server was not attached",
 			zap.String("profile_id", profileID), zap.String("executor_id", executorID),
@@ -152,7 +215,7 @@ func (m *Manager) applyExecutorMcpPolicy(profileID string, executorID string, me
 	if value, ok := metadata["executor_id"].(string); ok {
 		executorID = value
 	}
-	value, ok := metadata["executor_mcp_policy"]
+	value, ok := metadata[executorMCPPolicyMetadataKey]
 	if !ok {
 		return policy, executorID, nil
 	}

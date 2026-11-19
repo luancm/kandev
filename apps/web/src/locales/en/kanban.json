@@ -82,6 +82,9 @@
   "priorityIndicatorLabel": "Priority {{priority}}",
   "queuedCount_one": "{{count}} queued",
   "queuedCount_other": "{{count}} queued",
+  "errandsLive_one": "{{count}} errand",
+  "errandsLive_other": "{{count}} errands",
+  "errandsWaiting": "Waiting on errands",
   "queuedForStep": "Queued for {{step}}",
   "queuedSection": "Queued",
   "reorderPositionAnnouncement": "{{title}}, position {{position}} of {{total}}",
@@ -133,5 +136,6 @@
   "bulkActions": "Actions",
   "selectTasks": "Select tasks",
   "cancelTaskSelection": "Cancel selection",
-  "groupTasksIntoSectionsByWorkflowStep": "Group tasks into sections by workflow step, workflow, repository, plugin-provided values, or none."
+  "groupTasksIntoSectionsByWorkflowStep": "Group tasks into sections by workflow step, workflow, repository, plugin-provided values, or none.",
+  "graph": "Graph"
 }

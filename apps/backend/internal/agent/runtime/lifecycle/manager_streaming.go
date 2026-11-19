@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"errors"
+	"github.com/kandev/kandev/internal/task/models"
 	"strings"
 	"time"
 
@@ -103,6 +104,7 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 					true,
 					chunk.diagnostic,
 					chunk.promptGeneration,
+					chunk.conversationReceipt,
 				)
 				return
 			}
@@ -399,7 +401,7 @@ func (m *Manager) publishStreamingContentNow(
 		attemptID = execution.currentStartupAttemptID()
 	}
 	m.publishStreamingContentNowWithProjection(
-		execution, eventType, messageID, content, isAppend, attemptID, false, false, promptGeneration,
+		execution, eventType, messageID, content, isAppend, attemptID, false, false, promptGeneration, nil,
 	)
 }
 
@@ -410,6 +412,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 	content string,
 	isAppend bool,
 	diagnostic bool,
+	receipt *models.ConversationMutationReceipt,
 ) {
 	if content == "" {
 		return
@@ -421,6 +424,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 		isAppend:            isAppend,
 		attemptID:           execution.currentStartupAttemptID(),
 		canonicalProjection: true,
+		conversationReceipt: receipt,
 		diagnostic:          diagnostic,
 		promptGeneration:    execution.promptGenerationSnapshot(),
 	})
@@ -436,6 +440,7 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 	canonicalProjection bool,
 	diagnostic bool,
 	promptGeneration uint64,
+	receipt *models.ConversationMutationReceipt,
 ) {
 	if attemptID == "" {
 		attemptID = execution.currentStartupAttemptID()
@@ -448,27 +453,30 @@ func (m *Manager) publishStreamingContentNowWithProjection(
 		ProviderDiagnosticCandidate: diagnostic,
 		PromptGeneration:            promptGeneration,
 		CanonicalProjection:         canonicalProjection,
+		ConversationReceipt:         receipt,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"
 	}
 
 	payload := &AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AttemptID:      attemptID,
-		OwnerKind:      executionOwnerKind(execution),
-		WorkspaceID:    execution.WorkspaceID,
-		RunID:          execution.RunID,
-		RunSessionID:   execution.RunSessionID,
-		RunAttempt:     execution.RunAttempt,
-		AgentProfileID: execution.officeProfileID(),
-		AgentType:      execution.AgentID,
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           &event,
+		Type:             "agent/event",
+		Timestamp:        time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:          execution.ID,
+		ExecutionID:      execution.ID,
+		AttemptID:        attemptID,
+		OwnerKind:        executionOwnerKind(execution),
+		WorkspaceID:      execution.WorkspaceID,
+		ErrandID:         execution.Owner.ErrandID,
+		ErrandGeneration: execution.Owner.Generation,
+		RunID:            execution.RunID,
+		RunSessionID:     execution.RunSessionID,
+		RunAttempt:       execution.RunAttempt,
+		AgentProfileID:   execution.officeProfileID(),
+		AgentType:        execution.AgentID,
+		TaskID:           execution.TaskID,
+		SessionID:        execution.SessionID,
+		Data:             &event,
 	}
 	m.eventPublisher.PublishAgentStreamEventPayload(payload)
 }

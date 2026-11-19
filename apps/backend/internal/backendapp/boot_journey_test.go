@@ -9,7 +9,7 @@ import (
 	usermodels "github.com/kandev/kandev/internal/user/models"
 )
 
-func TestBootTaskDetailSessionSelectionRequiresTaskMembership(t *testing.T) {
+func TestBootTaskDetailSessionSelectionKeepsExplicitIdentity(t *testing.T) {
 	task := &models.Task{ID: "task-1"}
 	sessions := []*models.TaskSession{
 		{ID: "session-primary", TaskID: "task-1", IsPrimary: true},
@@ -20,8 +20,8 @@ func TestBootTaskDetailSessionSelectionRequiresTaskMembership(t *testing.T) {
 	if got := resolveTaskDetailSessionID(task, sessions, "session-sibling"); got != "session-sibling" {
 		t.Fatalf("requested session = %q, want authorized sibling", got)
 	}
-	if got := resolveTaskDetailSessionID(task, sessions, "foreign-primary"); got != "session-primary" {
-		t.Fatalf("foreign requested session = %q, want task primary fallback", got)
+	if got := resolveTaskDetailSessionID(task, sessions, "foreign-primary"); got != "" {
+		t.Fatalf("foreign requested session = %q, want unresolved", got)
 	}
 	if got := resolveTaskDetailSessionID(task, sessions, ""); got != "session-primary" {
 		t.Fatalf("default session = %q, want task primary", got)

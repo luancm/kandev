@@ -85,6 +85,7 @@ import {
 } from "./dockview-panel-actions";
 import { buildExtraPanelActions } from "./dockview-extra-panel-actions";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
+import { holdDockviewSessionRestore } from "./dockview-session-restore-gate";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -221,6 +222,7 @@ export type ApplyCustomLayoutOptions = {
   activeSessionId?: string | null;
   sessionIds?: string[];
   envId?: string | null;
+  sessionListRestoreState?: SessionListRestoreState;
 };
 export type TranscriptScrollTarget = {
   sessionId: string;
@@ -281,6 +283,8 @@ type DockviewStore = {
   /** Close every currently-open panel contributed by pluginId (disable/uninstall — AC4). */
   closePluginPanels: (pluginId: string) => void;
   addTodosPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
+  /** Open (or focus) the Task graph tab beside Chat. */
+  addTaskGraphPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   addBackgroundWorkPanel: (opts?: {
     groupId?: string;
     quiet?: boolean;
@@ -842,47 +846,69 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         }
       });
     },
-    applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) => {
-      const { api } = get();
-      if (!api) return;
-      captureLiveWidths(api, set);
-      preserveChatScrollDuringLayout();
-      const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
-      set({
-        isRestoringLayout: true,
-        hiddenRightPane: null,
-        activeLayoutProfile: profileForCustomLayout(layout),
-      });
-      const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
-        api,
-        layout,
-        opts,
-        safeWidth,
-        safeHeight,
-        set,
-      });
-      const hasSidebar = !!api.getPanel("sidebar");
-      const restoredLayout = fromDockviewApi(api);
-      const effectiveLayout = restoredLayout.columns.length > 0 ? restoredLayout : appliedState;
-      set({
-        sidebarVisible: hasSidebar,
-        ...visibilityForLayout(effectiveLayout, null),
-      });
-      const targetEnvId = get().currentLayoutEnvId;
-      requestAnimationFrame(() => {
-        api.layout(safeWidth, safeHeight);
-        enforceFromStore(api, get);
-        syncPinnedWidthsFromApi(api, set);
-        set({ isRestoringLayout: false });
-        const { currentLayoutEnvId, preMaximizeLayout } = get();
-        // Don't persist when the legacy fromJSON restore threw: the API may be in a partial state and snapshotting it would propagate corruption to the next load.
-        if (currentLayoutEnvId === targetEnvId && !oldFormatRestoreFailed) {
-          persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
-        }
-      });
-    },
+    applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) =>
+      applyCustomLayoutAction(layout, opts, set, get),
     captureCurrentLayout: () => captureReusableLayout(get),
   };
+}
+
+function applyCustomLayoutAction(
+  layout: SavedLayoutConfig,
+  opts: ApplyCustomLayoutOptions | undefined,
+  set: StoreSet,
+  get: StoreGet,
+): void {
+  const { api } = get();
+  if (!api) return;
+  const identityUnresolved = opts?.sessionListRestoreState?.loaded === false;
+  const targetEnvId = get().currentLayoutEnvId;
+  if (identityUnresolved) {
+    holdDockviewSessionRestore(api, (ordinarySessionIds) => {
+      if (get().api !== api || get().currentLayoutEnvId !== targetEnvId) return;
+      get().applyCustomLayout(layout, {
+        ...opts,
+        sessionIds: [...ordinarySessionIds],
+        sessionListRestoreState: {
+          loaded: true,
+          knownForeignSessionIds:
+            opts?.sessionListRestoreState?.knownForeignSessionIds ?? new Set(),
+        },
+      });
+    });
+  }
+  captureLiveWidths(api, set);
+  preserveChatScrollDuringLayout();
+  const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
+  set({
+    isRestoringLayout: true,
+    hiddenRightPane: null,
+    activeLayoutProfile: profileForCustomLayout(layout),
+  });
+  const { appliedState, oldFormatRestoreFailed } = restoreCustomLayout({
+    api,
+    layout,
+    opts,
+    safeWidth,
+    safeHeight,
+    set,
+  });
+  const restoredLayout = fromDockviewApi(api);
+  const effectiveLayout = restoredLayout.columns.length > 0 ? restoredLayout : appliedState;
+  set({
+    sidebarVisible: !!api.getPanel("sidebar"),
+    ...visibilityForLayout(effectiveLayout, null),
+  });
+  requestAnimationFrame(() => {
+    api.layout(safeWidth, safeHeight);
+    enforceFromStore(api, get);
+    syncPinnedWidthsFromApi(api, set);
+    if (identityUnresolved) return;
+    set({ isRestoringLayout: false });
+    const { currentLayoutEnvId, preMaximizeLayout } = get();
+    if (currentLayoutEnvId === targetEnvId && !oldFormatRestoreFailed) {
+      persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
+    }
+  });
 }
 
 type RestoreCustomLayoutParams = {
@@ -899,14 +925,15 @@ function visibleCustomLayoutSessions(opts: ApplyCustomLayoutOptions | undefined)
   sessionIds: string[];
 } {
   const hiddenSessionIds = new Set(opts?.envId ? getEnvHiddenSessions(opts.envId) : []);
-  const activeSessionId = opts?.activeSessionId ?? null;
+  const sessionIds =
+    opts?.sessionListRestoreState?.loaded === false ? [] : (opts?.sessionIds ?? []);
+  const activeSessionId =
+    opts?.activeSessionId && sessionIds.includes(opts.activeSessionId)
+      ? opts.activeSessionId
+      : null;
   return {
-    activeSessionId: resolveVisibleSessionId(
-      activeSessionId,
-      opts?.sessionIds ?? [],
-      hiddenSessionIds,
-    ),
-    sessionIds: (opts?.sessionIds ?? []).filter((sessionId) => !hiddenSessionIds.has(sessionId)),
+    activeSessionId: resolveVisibleSessionId(activeSessionId, sessionIds, hiddenSessionIds),
+    sessionIds: sessionIds.filter((sessionId) => !hiddenSessionIds.has(sessionId)),
   };
 }
 
@@ -949,7 +976,9 @@ function restoreCustomLayout({
 
   try {
     const visibleSessions = visibleCustomLayoutSessions(opts);
-    const sanitized = sanitizeSerializedLayout(layout.layout);
+    const sanitized = sanitizeSerializedLayout(layout.layout, undefined, {
+      validSessionIds: new Set(visibleSessions.sessionIds),
+    });
     if (!sanitized) return { appliedState: state, oldFormatRestoreFailed: true };
     restoreSerializedDockview(api, sanitized as SerializedDockview);
     replaceStaleSessionPanels(
@@ -1081,17 +1110,16 @@ export function filterPreMaximizeLayout(
   sessionListRestoreState?: SessionListRestoreState,
 ): LayoutState {
   const sessionListLoaded = sessionListRestoreState?.loaded ?? currentSessionIds !== null;
-  const validSessionIds = sessionListLoaded
-    ? new Set(currentSessionIds ?? [])
-    : collectSessionIdsFromLayout(savedLayout);
+  const validSessionIds = sessionListLoaded ? new Set(currentSessionIds ?? []) : new Set<string>();
   for (const foreignSessionId of sessionListRestoreState?.knownForeignSessionIds ?? []) {
-    if (foreignSessionId !== activeSessionId) validSessionIds.delete(foreignSessionId);
+    validSessionIds.delete(foreignSessionId);
   }
-  if (activeSessionId) validSessionIds.add(activeSessionId);
+  const validActiveSessionId =
+    activeSessionId && validSessionIds.has(activeSessionId) ? activeSessionId : null;
   const layout =
-    activeSessionId === null
+    validActiveSessionId === null
       ? savedLayout
-      : replaceStaleSessionPanelWithActive(savedLayout, activeSessionId, validSessionIds);
+      : replaceStaleSessionPanelWithActive(savedLayout, validActiveSessionId, validSessionIds);
   return filterLayoutStateByComponents(layout, undefined, validSessionIds);
 }
 
@@ -1140,14 +1168,17 @@ function restorePreMaximizeFallback({
     maximizedGroupId: null,
     ...visibilityForLayout(preMaximizeLayout, hiddenRightPane),
   });
-  try {
-    if (setEnvLayout(envId, withHiddenRightPaneMetadata(api.toJSON(), hiddenRightPane))) {
-      removeEnvMaximizeState(envId);
+  const identityUnresolved = sessionListRestoreState?.loaded === false;
+  if (!identityUnresolved) {
+    try {
+      if (setEnvLayout(envId, withHiddenRightPaneMetadata(api.toJSON(), hiddenRightPane))) {
+        removeEnvMaximizeState(envId);
+      }
+    } catch {
+      // Keep the maximize snapshot until its replacement layout is durable.
     }
-  } catch {
-    // Keep the maximize snapshot until its replacement layout is durable.
   }
-  requestAnimationFrame(() => set({ isRestoringLayout: false }));
+  if (!identityUnresolved) requestAnimationFrame(() => set({ isRestoringLayout: false }));
 }
 
 /** Restore a saved maximize state from sessionStorage onto the dockview API. */
@@ -1169,10 +1200,10 @@ function restoreMaximizeFromStorage(
   if (!saved) return false;
   try {
     const rawMaximized = saved.maximizedDockviewJson;
-    const sanitizeOptions = sessionListRestoreState?.knownForeignSessionIds.size
-      ? { excludeSessionIds: sessionListRestoreState.knownForeignSessionIds }
-      : {};
-    const sanitizedMaximized = sanitizeSerializedLayout(rawMaximized, undefined, sanitizeOptions);
+    const validSessionIds = ordinarySessionAllowlist(currentSessionIds, sessionListRestoreState);
+    const sanitizedMaximized = sanitizeSerializedLayout(rawMaximized, undefined, {
+      validSessionIds,
+    });
     const maximizedGroupId = maximizedGroupIdOf(rawMaximized);
     if (
       !sanitizedMaximized ||
@@ -1228,10 +1259,21 @@ function restoreMaximizeFromStorage(
     removeEnvMaximizeState(envId);
     return false;
   }
-  requestAnimationFrame(() => {
-    set({ isRestoringLayout: false });
-  });
+  if (sessionListRestoreState?.loaded !== false) {
+    requestAnimationFrame(() => {
+      set({ isRestoringLayout: false });
+    });
+  }
   return true;
+}
+
+function ordinarySessionAllowlist(
+  currentSessionIds: readonly string[],
+  restoreState?: SessionListRestoreState,
+): Set<string> {
+  const allowlist = new Set(restoreState?.loaded === false ? [] : currentSessionIds);
+  for (const foreignId of restoreState?.knownForeignSessionIds ?? []) allowlist.delete(foreignId);
+  return allowlist;
 }
 
 function restoreIncomingMaximize(args: {
@@ -1370,6 +1412,129 @@ function saveOutgoingEnv(
  * maximized state), falling back to the default layout. Same-env switches
  * are a no-op.
  */
+type EnvSwitchRestoreContext = {
+  api: DockviewApi;
+  set: StoreSet;
+  get: StoreGet;
+  oldEnvId: string | null;
+  newEnvId: string;
+  effectiveOld: string | null;
+  activeSessionId: string | null;
+  currentSessionIds: string[];
+  initialLayout?: string | null;
+  sessionListRestoreState?: SessionListRestoreState;
+  hasFirstAdoptionRouteLayout: boolean;
+  savedEnvLayout: object | null;
+  savedLayoutProfile: LayoutProfileIdentity | null;
+};
+
+function restoreIncomingEnvironment(context: EnvSwitchRestoreContext): boolean {
+  const {
+    api,
+    set,
+    get,
+    effectiveOld,
+    newEnvId,
+    activeSessionId,
+    currentSessionIds,
+    initialLayout,
+    sessionListRestoreState,
+    hasFirstAdoptionRouteLayout,
+    savedEnvLayout,
+    savedLayoutProfile,
+  } = context;
+  if (
+    restoreIncomingMaximize({
+      api,
+      envId: newEnvId,
+      set,
+      activeSessionId,
+      currentSessionIds,
+      sessionListRestoreState,
+      hasFirstAdoptionRouteLayout,
+      savedLayoutProfile,
+    })
+  ) {
+    return true;
+  }
+  const measured = measureDockviewContainer(api);
+  const ids = performEnvSwitch({
+    api,
+    oldEnvId: effectiveOld,
+    newEnvId,
+    activeSessionId,
+    currentSessionIds,
+    sessionListRestoreState,
+    safeWidth: measured.width,
+    safeHeight: measured.height,
+    buildDefault: (dockview, intentName) => get().buildDefaultLayout(dockview, intentName),
+    getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
+    getDefaultPinnedWidths: (width) => resolveEnvDefaultPinnedWidths(get, width),
+    initialLayout,
+  });
+  const restoredLayout = fromDockviewApi(api);
+  set({
+    ...ids,
+    ...visibilityForLayout(restoredLayout, get().hiddenRightPane),
+    activeLayoutProfile: resolveEnvSwitchProfile({
+      hasFirstAdoptionRouteLayout,
+      savedEnvLayout,
+      savedLayoutProfile,
+      currentLayoutProfile: get().activeLayoutProfile,
+      api,
+    }),
+  });
+  enforceFromStore(api, get);
+  panelPortalManager.reconcile(new Set(api.panels.map((panel) => panel.id)));
+  return false;
+}
+
+function finishEnvSwitchRestore(
+  context: EnvSwitchRestoreContext,
+  identityUnresolved: boolean,
+  deferred: boolean,
+): void {
+  const { api, set, effectiveOld, newEnvId } = context;
+  try {
+    const maximized = restoreIncomingEnvironment(context);
+    if (maximized) return;
+    if (deferred) requestAnimationFrame(() => set({ isRestoringLayout: false }));
+    else if (!identityUnresolved) set({ isRestoringLayout: false });
+    if (!deferred && isDebug()) {
+      debugWidths(
+        `env-switch-done old=${effectiveOld ?? "-"} new=${newEnvId} ` +
+          `${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
+      );
+    }
+  } catch {
+    if (deferred || !identityUnresolved) set({ isRestoringLayout: false });
+  }
+}
+
+function resumeDeferredEnvSwitch(
+  context: EnvSwitchRestoreContext,
+  ordinarySessionIds: string[],
+): void {
+  const { api, get, set, newEnvId, sessionListRestoreState } = context;
+  if (get().api !== api || get().currentLayoutEnvId !== newEnvId) {
+    set({ isRestoringLayout: false });
+    return;
+  }
+  set({ isRestoringLayout: true, preMaximizeLayout: null, maximizedGroupId: null });
+  finishEnvSwitchRestore(
+    {
+      ...context,
+      currentSessionIds: [...ordinarySessionIds],
+      sessionListRestoreState: {
+        loaded: true,
+        knownForeignSessionIds: sessionListRestoreState?.knownForeignSessionIds ?? new Set(),
+      },
+    },
+    false,
+    true,
+  );
+}
+
 function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
   return (
     oldEnvId: string | null,
@@ -1378,46 +1543,17 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     currentSessionIds: string[] = [],
     options?: EnvSwitchOptions,
   ) => {
-    const initialLayout = options?.initialLayout;
     const sessionListRestoreState = options?.sessionListRestoreState;
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
     if (!api) {
       debugSwitch("envSwitch: skip (no api)", { oldEnvId, newEnvId, activeSessionId });
       return;
     }
-    if (isDebug()) {
-      debugSwitch("envSwitch: entry", {
-        oldEnvId,
-        newEnvId,
-        activeSessionId,
-        currentLayoutEnvId,
-        maximized: !!preMaximizeLayout,
-        livePanelIds: api.panels.map((p) => p.id),
-      });
-    }
-    // Same-env switch (e.g. between sessions of the same task) is a no-op.
-    // The layout, terminals, and env-scoped portals already belong to this env.
     if (currentLayoutEnvId === newEnvId) {
       debugSwitch("envSwitch: skip (same env)", { newEnvId });
       return;
     }
     set({ pendingChatInitialPlacement: createChatInitialPlacement(activeSessionId) });
-    // First adoption (oldEnvId and currentLayoutEnvId both null) falls through
-    // to the general path below. We deliberately do NOT "just adopt" whatever
-    // onReady rendered: this branch only fires when onReady ran with a null
-    // env (otherwise currentLayoutEnvId would equal newEnvId and we'd have
-    // skipped above as same-env), so onReady built the cross-env GLOBAL
-    // FALLBACK layout — not this env's saved/default layout. Adopting it gave a
-    // fresh task the previous env's stale proportions instead of the defaults,
-    // and `setEnvLayout(newEnvId, api.toJSON())` even overwrote the env's real
-    // saved layout with that stale one. `performEnvSwitch` instead restores the
-    // env's saved layout (or builds defaults for a brand-new task), and
-    // `saveOutgoingEnv(null)` below is a no-op so there is nothing to lose.
-    //
-    // When oldEnvId is null but there IS a live layout env (the
-    // useEnvSwitchCleanup hook firing after passing through a null state),
-    // fall back to currentLayoutEnvId so we correctly save and release the
-    // outgoing env rather than silently skipping it.
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
     saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
@@ -1425,67 +1561,33 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     const savedEnvLayout = getEnvLayout(newEnvId);
     const hiddenRightPane = readHiddenRightPane(savedEnvLayout);
     const savedLayoutProfile = getEnvLayoutProfile(newEnvId);
+    const identityUnresolved = sessionListRestoreState?.loaded === false;
+    const context: EnvSwitchRestoreContext = {
+      api,
+      set,
+      get,
+      oldEnvId,
+      newEnvId,
+      effectiveOld,
+      activeSessionId,
+      currentSessionIds,
+      initialLayout: options?.initialLayout,
+      sessionListRestoreState,
+      hasFirstAdoptionRouteLayout:
+        oldEnvId === null && currentLayoutEnvId === null && Boolean(options?.initialLayout),
+      savedEnvLayout,
+      savedLayoutProfile,
+    };
     set({
       isRestoringLayout: true,
       currentLayoutEnvId: newEnvId,
       hiddenRightPane,
       pinnedWidths: manualRightWidth === null ? new Map() : new Map([["right", manualRightWidth]]),
     });
-    try {
-      const hasFirstAdoptionRouteLayout =
-        oldEnvId === null && currentLayoutEnvId === null && Boolean(initialLayout);
-      if (
-        restoreIncomingMaximize({
-          api,
-          envId: newEnvId,
-          set,
-          activeSessionId,
-          currentSessionIds,
-          sessionListRestoreState,
-          hasFirstAdoptionRouteLayout,
-          savedLayoutProfile,
-        })
-      )
-        return;
-      const measured = measureDockviewContainer(api);
-      const ids = performEnvSwitch({
-        api,
-        oldEnvId: effectiveOld,
-        newEnvId,
-        activeSessionId,
-        currentSessionIds,
-        sessionListRestoreState,
-        safeWidth: measured.width,
-        safeHeight: measured.height,
-        buildDefault: (a, intentName) => get().buildDefaultLayout(a, intentName),
-        getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
-        getDefaultPinnedWidths: (width) => resolveEnvDefaultPinnedWidths(get, width),
-        initialLayout,
-      });
-      const restoredLayout = fromDockviewApi(api);
-      set({
-        ...ids,
-        ...visibilityForLayout(restoredLayout, get().hiddenRightPane),
-        activeLayoutProfile: resolveEnvSwitchProfile({
-          hasFirstAdoptionRouteLayout,
-          savedEnvLayout,
-          savedLayoutProfile,
-          currentLayoutProfile: get().activeLayoutProfile,
-          api,
-        }),
-      });
-      enforceFromStore(api, get);
-      set({ isRestoringLayout: false });
-      if (isDebug()) {
-        debugWidths(
-          `env-switch-done old=${effectiveOld ?? "-"} new=${newEnvId} ` +
-            `${formatWidthsSnapshot(snapshotColumnWidths(api))}`,
-        );
-      }
-      panelPortalManager.reconcile(new Set(api.panels.map((p) => p.id)));
-    } catch {
-      set({ isRestoringLayout: false });
+    if (identityUnresolved) {
+      holdDockviewSessionRestore(api, (ids) => resumeDeferredEnvSwitch(context, [...ids]));
     }
+    finishEnvSwitchRestore(context, identityUnresolved, false);
   };
 }
 

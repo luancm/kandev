@@ -85,6 +85,46 @@ func TestResolvePermissionRejectsStaleAndUnknownOptions(t *testing.T) {
 	}
 }
 
+func TestPermissionPendingIDReuseRejectsOldLiveRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m := &Manager{cfg: &config.InstanceConfig{}, logger: newTestLogger(t), updatesCh: make(chan adapter.AgentEvent, 4), pendingPermissions: make(map[string]*PendingPermission)}
+	request := func() *adapter.PermissionRequest {
+		return &adapter.PermissionRequest{SessionID: "session", ToolCallID: "tool", PendingID: "reused", Title: "Run", Options: []adapter.PermissionOption{{OptionID: "allow", Kind: streams.PermissionOptionKindAllowOnce}}}
+	}
+	firstDone := make(chan *adapter.PermissionResponse, 1)
+	go func() { response, _ := m.handlePermissionRequest(ctx, request()); firstDone <- response }()
+	first := <-m.updatesCh
+	secondDone := make(chan *adapter.PermissionResponse, 1)
+	go func() { response, _ := m.handlePermissionRequest(ctx, request()); secondDone <- response }()
+	second := <-m.updatesCh
+	for second.Type != adapter.EventTypePermissionRequest {
+		second = <-m.updatesCh
+	}
+	if first.RequestID == "" || first.RequestID == second.RequestID {
+		t.Fatalf("request generations must differ: %q / %q", first.RequestID, second.RequestID)
+	}
+	if response := <-firstDone; response == nil || !response.Cancelled {
+		t.Fatalf("replaced request response = %+v, want cancelled", response)
+	}
+	_, err := m.ResolvePermission(first.RequestID, "reused", "allow")
+	assertPermissionErrorCode(t, err, streams.PermissionErrorStale)
+	_, err = m.ResolvePermission(second.RequestID, "reused", "unoffered")
+	assertPermissionErrorCode(t, err, streams.PermissionErrorOptionNotOffered)
+	select {
+	case response := <-secondDone:
+		t.Fatalf("stale or unoffered response reached successor: %+v", response)
+	default:
+	}
+	_, err = m.ResolvePermission(second.RequestID, "reused", "allow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := <-secondDone; response == nil || response.Cancelled || response.OptionID != "allow" {
+		t.Fatalf("successor response = %+v, want accepted allow", response)
+	}
+}
+
 func TestResolvePermissionConcurrentCallsDeliverOnce(t *testing.T) {
 	responseCh := make(chan *adapter.PermissionResponse, 1)
 	m := permissionTestManager(t, responseCh)

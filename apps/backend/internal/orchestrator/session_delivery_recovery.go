@@ -23,6 +23,10 @@ const (
 	silentRestartRestoredCreationReason = "silent_restart_restored"
 )
 
+type contextContinuationRecoveryVerifier interface {
+	HasResolvedContextContinuationRecovery(context.Context, models.AgentDeliveryRecovery) (bool, error)
+}
+
 func (s *Service) RetrySessionDelivery(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -38,6 +42,9 @@ func (s *Service) RetrySessionDelivery(
 	}
 	session, err := s.loadDeliveryRetrySession(ctx, taskID, sessionID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.convergeSettledDeliverySessionState(ctx, sessionID, nil); err != nil {
 		return nil, err
 	}
 	incarnationID := session.QueueIncarnationID
@@ -127,6 +134,14 @@ func (s *Service) retryRecoverySuccessor(
 		generation.Generation == recovery.HarnessGeneration && generation.NativeSessionID != "" {
 		if verifier, ok := s.repo.(nativeResumeRecoveryVerifier); ok {
 			matches, err = verifier.HasResolvedNativeResumeRecovery(ctx, recovery)
+			if err != nil {
+				return nil, true, err
+			}
+		}
+	}
+	if !matches && recovery.Phase == models.AgentDeliveryRecoveryContinued {
+		if verifier, ok := s.repo.(contextContinuationRecoveryVerifier); ok {
+			matches, err = verifier.HasResolvedContextContinuationRecovery(ctx, recovery)
 			if err != nil {
 				return nil, true, err
 			}
@@ -275,10 +290,15 @@ func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *mod
 	response := sessionDeliveryRecoveryResponse(session.TaskID, session.ID, attempt.outcome,
 		attempt.reason, recovery.Revision, identity)
 	if attempt.outcome == SessionDeliveryRecoverySettled {
-		if err := s.reconcileAgentDeliverySettlements(retryCtx, session.ID); err != nil {
+		if err := s.reconcileAgentDeliverySubmissionSettlements(retryCtx, session.ID, recovery.SubmissionID); err != nil {
 			response.Outcome = SessionDeliveryRecoveryBlocked
 			response.Reason = "terminal_settlement_pending"
 		}
+	}
+	readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelRead()
+	if settled, err := s.retryConcurrentlySettledDelivery(readCtx, session, recovery); settled != nil || err != nil {
+		return settled, err
 	}
 	return response, nil
 }
@@ -441,7 +461,7 @@ func (s *Service) retryTerminalSessionDelivery(ctx context.Context, session *mod
 	currentGeneration := recovery.HarnessGeneration
 	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if err := s.reconcileAgentDeliverySettlements(retryCtx, session.ID); err != nil {
+	if err := s.reconcileAgentDeliverySubmissionSettlements(retryCtx, session.ID, recovery.SubmissionID); err != nil {
 		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
 			"terminal_settlement_pending", recovery.Revision, identity), nil
 	}

@@ -129,3 +129,34 @@ describe("selectTaskFromSheet session URL", () => {
     expect(navigate).toHaveBeenCalledWith(taskId, sessionId);
   });
 });
+
+describe("normal conversation fallback", () => {
+  it("ignores a foreign session when the task has no primary projection", async () => {
+    const taskId = "task-with-session";
+    const sessionId = "existing-session";
+    const navigate = vi.fn();
+
+    selectTaskFromSheet({
+      selectionController: createTaskSheetSelectionController(),
+      taskId,
+      task: {},
+      state: {
+        lastSessionByTaskId: {},
+        environmentIdBySessionId: {},
+        taskSessionsById: {},
+      },
+      loadTaskSessionsForTask: vi.fn(async () => [
+        { id: "foreign", task_id: "other-task", state: "RUNNING" } as TaskSession,
+        { id: sessionId, task_id: taskId, state: "COMPLETED" } as TaskSession,
+      ]),
+      setActiveSession: vi.fn(),
+      setActiveTask: vi.fn(),
+      navigate,
+      onOpenChange: vi.fn(),
+    });
+
+    await flushSelection();
+
+    expect(navigate).toHaveBeenCalledWith(taskId, sessionId);
+  });
+});

@@ -4,7 +4,9 @@ import {
   pickFreshestStatusSummary,
   selectTaskStatusSummary,
   statusSummaryActiveErrorPreview,
+  statusSummaryRowErrorPreview,
   statusSummaryTaskError,
+  statusSummaryTurnError,
 } from "./task-status-summary";
 import type { TaskStatusSummary } from "./types/task-status-summary";
 
@@ -70,6 +72,18 @@ describe("selectTaskStatusSummary", () => {
     expect(selectTaskStatusSummary(detail, [summary(3), live])).toBe(live);
   });
 
+  it("takes live and waiting errands together from the newest revision", () => {
+    const detail = summary(4);
+    detail.errands = { live: 3, waiting: true };
+    const live = summary(5);
+    live.errands = { live: 1, waiting: false };
+
+    expect(selectTaskStatusSummary(detail, [live])?.errands).toEqual({
+      live: 1,
+      waiting: false,
+    });
+  });
+
   it("lets a newer live reading clear an older detail error", () => {
     const detail = summary(5);
     detail.active_error = {
@@ -108,5 +122,54 @@ describe("selectTaskStatusSummary", () => {
       preview: "The session failed",
     };
     expect(statusSummaryTaskError(taskOwned)).toBe(taskOwned.task_error);
+  });
+});
+
+describe("statusSummaryTurnError", () => {
+  it("returns the current failed-turn attention", () => {
+    const value = summary(2);
+    value.turn_error = {
+      session_id: "session-1",
+      message_id: "failure-2",
+      stamp: "failure-2",
+      occurred_at: "2026-10-29T20:32:55Z",
+      preview: "Failed to execute statement",
+    };
+    expect(statusSummaryTurnError(value)).toEqual(value.turn_error);
+  });
+
+  it("ignores absent, acknowledged, and incomplete attention", () => {
+    expect(statusSummaryTurnError(summary(2))).toBeNull();
+    expect(statusSummaryTurnError(undefined)).toBeNull();
+    const acknowledged = summary(3);
+    acknowledged.turn_error = null;
+    expect(statusSummaryTurnError(acknowledged)).toBeNull();
+    const incomplete = summary(4);
+    incomplete.turn_error = {
+      stamp: "",
+      occurred_at: "2026-10-29T20:32:55Z",
+      preview: "Failed",
+    };
+    expect(statusSummaryTurnError(incomplete)).toBeNull();
+  });
+
+  it("prefers a blocking runtime error over turn attention for the row badge", () => {
+    const value = summary(5);
+    value.active_error = {
+      session_id: "session-1",
+      stamp: "runtime-1",
+      occurred_at: "2026-10-29T20:00:00Z",
+      preview: "Runtime recovery needed",
+    };
+    value.turn_error = {
+      session_id: "session-1",
+      message_id: "failure-5",
+      stamp: "failure-5",
+      occurred_at: "2026-10-29T20:32:55Z",
+      preview: "Failed to execute statement",
+    };
+    expect(statusSummaryRowErrorPreview(value, {}, {})).toBe("Runtime recovery needed");
+    value.active_error = null;
+    expect(statusSummaryRowErrorPreview(value, {}, {})).toBe("Failed to execute statement");
   });
 });

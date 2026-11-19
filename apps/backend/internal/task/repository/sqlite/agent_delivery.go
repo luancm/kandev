@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -227,17 +228,10 @@ func (r *Repository) TransitionAgentDeliverySubmission(ctx context.Context, id s
 }
 
 func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error) {
-	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
-		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
-		return false, fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
+	contentHash, err := r.prepareAgentDeliveryEventReceipt(event)
+	if err != nil {
+		return false, err
 	}
-	if event.ReceivedAt.IsZero() {
-		event.ReceivedAt = r.nowUTC()
-	}
-	contentHash := agentDeliveryEventHash(event)
-	event.ContentHash = contentHash
-	event.HashVersion = agentDeliveryPayloadHashVersion
-	event.PayloadBytes = int64(len(event.Payload))
 	if err := r.prepareAgentDeliveryOwnerStatement(ctx, event); err != nil {
 		return false, err
 	}
@@ -249,6 +243,11 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if observation := readAwaitObservation(event); observation != nil && event.TaskID != "" {
+		if err := db.LockErrandDelivery(ctx, tx, r.db.DriverName(), event.TaskID); err != nil {
+			return false, err
+		}
+	}
 	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), []string{event.SessionID}, []string{event.StreamID}, !event.Terminal); err != nil {
 		return false, err
 	}
@@ -263,7 +262,29 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 	return inserted == 1, nil
 }
 
+// prepareAgentDeliveryEventReceipt validates the transport identity and stamps
+// the content hash and byte budget that the inbox stores. Preparation happens
+// before writer entry so the writer only holds admission and the insert.
+func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliveryEvent) (string, error) {
+	if event == nil || event.StreamID == "" || event.Sequence <= 0 || event.EventType == "" ||
+		event.SessionID == "" || event.IncarnationID == "" || event.HarnessGeneration <= 0 {
+		return "", fmt.Errorf("stream, positive sequence, event type, and owner identity are required")
+	}
+	if event.ReceivedAt.IsZero() {
+		event.ReceivedAt = r.nowUTC()
+	}
+	contentHash := agentDeliveryEventHash(event)
+	event.ContentHash = contentHash
+	event.HashVersion = agentDeliveryPayloadHashVersion
+	event.PayloadBytes = int64(len(event.Payload))
+	return contentHash, nil
+}
+
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
+	turn, err := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
+	if err != nil {
+		return 0, err
+	}
 	if err := r.validateAgentDeliveryEventAdmissionTx(ctx, tx, event); err != nil {
 		return 0, err
 	}
@@ -286,6 +307,14 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 		if err != nil {
 			return 0, err
 		}
+	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && event.EventType == streams.EventTypeToolCall {
+		if err := r.retainErrandAdmittedToolSourceTx(ctx, tx, errandID, event, turn); err != nil {
+			return 0, err
+		}
+	}
+	if err := r.receiveErrandAwaitReceiptTx(ctx, tx, event); err != nil {
+		return 0, err
 	}
 	if !cursorExists {
 		cursor = models.AgentDeliveryCursor{
@@ -541,11 +570,25 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if !matches {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
+	admittedTurn, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &stored)
+	if err != nil {
+		return false, err
+	}
 	terminalEffect, err := deliveryTerminalSettlementEffect(&stored)
 	if err != nil {
 		return false, err
 	}
+	if admittedTurn != "" && terminalEffect != nil {
+		terminalEffect.TurnID = admittedTurn
+	}
 	if projectedAt.Valid {
+		if terminalEffect != nil {
+			if _, err := r.repairAgentDeliveryTerminalIdentityTx(
+				ctx, tx, terminalEffect.StreamID, terminalEffect.Sequence, terminalEffect, true,
+			); err != nil {
+				return false, err
+			}
+		}
 		return false, commitProjectedTerminalEffect(ctx, tx, r.db.Rebind, terminalEffect)
 	}
 	var projectedSequence int64
@@ -566,6 +609,38 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 			return false, fmt.Errorf("decode agent tool boundary event: %w", err)
 		}
 		topLevelToolStart = agentEvent.Type == streams.EventTypeToolCall && agentEvent.ParentToolCallID == ""
+	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && (stored.EventType == streams.EventTypeToolCall || stored.EventType == streams.EventTypeToolUpdate) {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("errand tool event sequence gap")
+		}
+		if err := r.persistErrandToolEventTx(ctx, tx, errandID, &stored); err != nil {
+			return false, err
+		}
+	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && stored.EventType == streams.EventTypeShellOutputUpdate {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("errand shell event sequence gap")
+		}
+		if err := r.persistErrandShellOutputTx(ctx, tx, errandID, &stored); err != nil {
+			return false, err
+		}
+	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && stored.EventType == streams.EventTypePermissionRequest {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("errand permission event sequence gap")
+		}
+		if err := r.persistErrandPermissionEventTx(ctx, tx, errandID, &stored); err != nil {
+			return false, err
+		}
+	}
+	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok && stored.EventType == streams.EventTypeContextWindow {
+		if stored.Sequence != projectedSequence+1 {
+			return false, fmt.Errorf("errand context window event sequence gap")
+		}
+		if err := persistErrandContextWindowTx(ctx, tx, errandID, &stored); err != nil {
+			return false, err
+		}
 	}
 	if topLevelToolStart {
 		if stored.Sequence != projectedSequence+1 {

@@ -5,6 +5,7 @@ import type { Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { MessageListHandle } from "./chat/message-list-shared";
 import type { LoadMessageWindowResult } from "@/hooks/domains/session/load-message-window";
+import { defaultErrandsState } from "@/lib/state/slices/errands/errands-slice";
 
 const { aroundRequest, scrollToMessage } = vi.hoisted(() => ({
   aroundRequest: vi.fn(),
@@ -38,6 +39,7 @@ const panelState = {
   historyRefreshPending: false,
   isInitialMessagesLoading: false,
   groupedItems: [{ type: "message", message: agent }] as RenderItem[],
+  messages: [agent] as Message[],
   allMessages: [agent] as Message[],
   footerActionMessages: [] as Message[],
   permissionsByToolCallId: new Map(),
@@ -47,11 +49,14 @@ const panelState = {
   pendingClarificationGroup: null,
 };
 const state = {
+  features: { errands: false },
   connection: { status: "disconnected" },
   kanbanMulti: { snapshots: {} },
   kanban: { workflowId: null, tasks: [], steps: [] },
   workflows: { items: [] },
   taskSessions: { items: { [SESSION]: { name: null, agent_profile_id: null } } },
+  taskSessionsByTask: { itemsByTaskId: {} },
+  errands: { ...defaultErrandsState.errands, byTaskId: {} },
   agentProfiles: { items: [] },
   userSettings: {
     showAnchoredPromptBar: true,
@@ -94,6 +99,7 @@ vi.mock("@/components/state-provider", () => ({
   useOptionalAppStore: (selector: (value: typeof state) => unknown, fallback: unknown) =>
     selector(state) ?? fallback,
   useAppStoreApi: () => storeApi,
+  useOptionalAppStoreApi: () => null,
 }));
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => undefined }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -127,11 +133,13 @@ vi.mock("@/components/task/chat/message-list", () => ({
     lastPromptMessageId,
     anchoredBarHeight,
     stickyPromptBar,
+    transcriptTail,
   }: {
     ref?: Ref<MessageListHandle>;
     lastPromptMessageId?: string | null;
     anchoredBarHeight?: number;
     stickyPromptBar?: ReactNode;
+    transcriptTail?: ReactNode;
   }) => {
     useImperativeHandle(ref, () => ({ scrollToMessage, scrollToLatest: vi.fn(() => true) }), []);
     return (
@@ -140,7 +148,10 @@ vi.mock("@/components/task/chat/message-list", () => ({
         data-prompt-id={lastPromptMessageId ?? ""}
         data-bar-height={anchoredBarHeight ?? 0}
         data-sticky-prompt-bar={stickyPromptBar ? "present" : "absent"}
-      />
+        data-transcript-tail={transcriptTail ? "present" : "absent"}
+      >
+        {transcriptTail}
+      </div>
     );
   },
 }));
@@ -295,4 +306,11 @@ describe("unloaded last prompt (AC-UI-PINNED-PROMPT-AVAILABILITY-001.1/.2/.6/.9)
     expect(screen.queryByTestId(CONTROL_ID)).toBeNull();
     expect(aroundRequest).not.toHaveBeenCalled();
   });
+});
+
+// @covers AC-TASKS-ERRANDS-010.11
+it("keeps the current errand inventory out of the transcript", () => {
+  render(<TaskChatPanel sessionId={SESSION} taskId="task" />);
+  expect(screen.getByTestId(MESSAGE_LIST_ID)).toBeTruthy();
+  expect(screen.getByTestId(MESSAGE_LIST_ID).getAttribute("data-transcript-tail")).toBe("absent");
 });

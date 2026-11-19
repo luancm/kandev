@@ -149,3 +149,45 @@ func userInputRequest() protocol.ServerRequest {
 		Params: json.RawMessage(userInputRequestParams),
 	}
 }
+
+func TestToolUserInputAppendsAnswerAttachmentPaths(t *testing.T) {
+	adapter := newUserInputTestAdapter(t)
+	adapter.SetUserInputRequestHandler(func(context.Context, *agenttypes.UserInputRequest) (*agenttypes.UserInputResponse, error) {
+		return &agenttypes.UserInputResponse{Answers: map[string]agenttypes.UserInputAnswer{
+			"q1": {
+				OptionIDs: []string{"codex-option-0"},
+				Attachments: []agenttypes.UserInputAttachment{{
+					AttachmentID: "att-1",
+					Name:         "screen.png",
+					Path:         "/workspace/.kandev/attachments/session/screen.png",
+				}},
+			},
+		}}, nil
+	})
+
+	got, err := adapter.handleServerRequest(context.Background(), userInputRequest())
+	if err != nil {
+		t.Fatalf("handleServerRequest: %v", err)
+	}
+	response := got.(protocol.ToolRequestUserInputResponse)
+	values := response.Answers["q1"].Answers
+	if len(values) != 2 || values[0] != "Fast" {
+		t.Fatalf("provider answers = %#v, want option label then file reference", values)
+	}
+	if !strings.Contains(values[1], "Attached file: screen.png") ||
+		!strings.Contains(values[1], "/workspace/.kandev/attachments/session/screen.png") {
+		t.Fatalf("attachment reference = %q", values[1])
+	}
+}
+
+func TestToolUserInputErrandRefusalReportsParentBlocker(t *testing.T) {
+	adapter := newUserInputTestAdapter(t)
+	adapter.SetUserInputRequestHandler(func(context.Context, *agenttypes.UserInputRequest) (*agenttypes.UserInputResponse, error) {
+		return nil, agenttypes.ErrErrandQuestion
+	})
+	response, err := adapter.handleServerRequest(context.Background(), userInputRequest())
+	var rpcErr *protocol.RPCError
+	if response != nil || !errors.As(err, &rpcErr) || !strings.Contains(rpcErr.Message, "parent") {
+		t.Fatalf("response=%v error=%v", response, err)
+	}
+}

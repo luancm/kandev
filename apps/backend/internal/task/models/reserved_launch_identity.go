@@ -2,6 +2,8 @@ package models
 
 import (
 	"context"
+	"errors"
+	"strings"
 )
 
 // ReservedLaunchIdentity pins a server-owned launch before provider admission.
@@ -33,4 +35,27 @@ func WithExplicitManualCreation(ctx context.Context, taskID string) context.Cont
 func ExplicitManualCreation(ctx context.Context, taskID string) bool {
 	manualTaskID, _ := ctx.Value(explicitManualCreationKey{}).(string)
 	return taskID != "" && manualTaskID == taskID
+}
+
+// ReadReservedLaunchIdentity distinguishes an absent context from a malformed
+// reservation. The compatibility getter intentionally omits that distinction.
+func ReadReservedLaunchIdentity(ctx context.Context) (ReservedLaunchIdentity, bool, error) {
+	raw := ctx.Value(reservedLaunchIdentityKey{})
+	if raw == nil {
+		return ReservedLaunchIdentity{}, false, nil
+	}
+	identity, ok := raw.(ReservedLaunchIdentity)
+	if !ok || !completeReservedLaunchIdentity(identity.TaskID, identity.SessionID, identity.TurnID, identity.SubmissionID) {
+		return identity, true, errors.New("reserved launch context is incomplete")
+	}
+	return identity, true, nil
+}
+
+func completeReservedLaunchIdentity(values ...string) bool {
+	for _, value := range values {
+		if value == "" || strings.TrimSpace(value) != value {
+			return false
+		}
+	}
+	return true
 }

@@ -57,7 +57,11 @@ func (r *SpritesExecutor) recoverSpriteRecord(
 	ctx context.Context,
 	record *models.ExecutorRunning,
 ) (*ExecutorInstance, RecoveryCandidateOutcome) {
-	instanceID, spriteName, ok := spritesRecoveryIdentity(record)
+	owner, err := recordedErrandExecutionOwner(record)
+	if err != nil {
+		return nil, RecoveryOutcomeUnknown
+	}
+	instanceID, spriteName, ok := spritesRecoveryIdentity(record, owner)
 	if !ok {
 		return nil, RecoveryOutcomeUnknown
 	}
@@ -67,23 +71,38 @@ func (r *SpritesExecutor) recoverSpriteRecord(
 
 	probeCtx, cancel := context.WithTimeout(ctx, spriteHealthTimeout)
 	defer cancel()
-	sprite, instanceInfo, outcome := r.inspectSavedSprite(probeCtx, record, instanceID, spriteName)
+	var token string
+	if owner.Kind == ExecutionOwnerErrand {
+		token, err = r.errandSpriteCredential(probeCtx, record)
+		if err != nil || token == "" {
+			return nil, RecoveryOutcomeUnknown
+		}
+	}
+	sprite, instanceInfo, outcome := r.inspectSavedSprite(probeCtx, record, instanceID, spriteName, owner, token)
 	if outcome != "" {
 		return nil, outcome
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, RecoveryOutcomeUnknown
 	}
-	return r.attachRecoveredSprite(ctx, record, spriteName, sprite, instanceInfo)
+	instance, outcome := r.attachRecoveredSprite(ctx, record, spriteName, sprite, instanceInfo, token)
+	if instance != nil && owner.Kind == ExecutionOwnerErrand {
+		instance.recoveredErrandOwner = owner
+		instance.AgentProfileID = record.ExecutionProfileID
+		instance.ProviderSessionID = instanceInfo.ProviderSessionID
+		instance.CopilotNativeSessionEvents = instanceInfo.CopilotNativeSessionEvents
+		instance.ReusedWorkspace = true
+	}
+	return instance, outcome
 }
 
-func spritesRecoveryIdentity(record *models.ExecutorRunning) (string, string, bool) {
+func spritesRecoveryIdentity(record *models.ExecutorRunning, owner ExecutionOwner) (string, string, bool) {
 	if record == nil {
 		return "", "", false
 	}
 	instanceID := strings.TrimSpace(record.AgentExecutionID)
 	spriteName := strings.TrimSpace(getMetadataString(record.Metadata, MetadataKeySpriteName))
-	if instanceID == "" || instanceID != record.AgentExecutionID || record.TaskID == "" ||
+	if instanceID == "" || instanceID != record.AgentExecutionID || (record.TaskID == "" && owner.Kind != ExecutionOwnerErrand) ||
 		strings.TrimSpace(record.SessionID) != record.SessionID || strings.TrimSpace(record.TaskID) != record.TaskID || spriteName == "" {
 		return "", "", false
 	}
@@ -95,9 +114,13 @@ func (r *SpritesExecutor) inspectSavedSprite(
 	record *models.ExecutorRunning,
 	instanceID string,
 	spriteName string,
+	owner ExecutionOwner,
+	token string,
 ) (*spritesapi.Sprite, *agentctl.InstanceInfo, RecoveryCandidateOutcome) {
-	stored := &ExecutorInstance{InstanceID: instanceID, Metadata: record.Metadata}
-	token := r.resolveTokenFromMetadata(ctx, stored)
+	if token == "" {
+		stored := &ExecutorInstance{InstanceID: instanceID, Metadata: record.Metadata}
+		token = r.resolveTokenFromMetadata(ctx, stored)
+	}
 	if token == "" {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
@@ -109,17 +132,25 @@ func (r *SpritesExecutor) inspectSavedSprite(
 		}
 		return nil, nil, RecoveryOutcomeUnknown
 	}
-	if sprite == nil || spritesutil.NormalizeSpriteStatus(sprite.Status) != "running" {
+	if sprite == nil || spritesutil.NormalizeSpriteStatus(sprite.Status) != spriteStateRunning {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
-	instanceInfo, err := r.getExistingInstanceInfo(ctx, sprite, instanceID)
-	if err != nil || instanceInfo == nil || instanceInfo.Port < 1 || instanceInfo.Port > 65535 {
+	birth := recordedErrandSpriteBirth(record.Metadata[MetadataKeySpriteCreatedAt])
+	if owner.Kind == ExecutionOwnerErrand && !matchesRecordedErrandSprite(sprite, spriteName, birth) {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
-	if instanceInfo.SessionID != record.SessionID || instanceInfo.TaskID != record.TaskID {
+	instanceInfo, err := r.lookupSpriteInstanceInfo(ctx, sprite, instanceID, errandMCPOwner(owner))
+	if err != nil || !matchesRecoveredSpriteInstance(instanceInfo, record, owner) {
 		return nil, nil, RecoveryOutcomeUnknown
 	}
 	return sprite, instanceInfo, ""
+}
+
+func matchesRecoveredSpriteInstance(info *agentctl.InstanceInfo, record *models.ExecutorRunning, owner ExecutionOwner) bool {
+	return info != nil && info.Port >= 1 && info.Port <= 65535 &&
+		info.SessionID == record.SessionID && info.TaskID == record.TaskID &&
+		matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner) &&
+		(owner.Kind != ExecutionOwnerErrand || info.WorkspacePath == spritesWorkspacePath)
 }
 
 func (r *SpritesExecutor) hasSpritesProxy(instanceID string) bool {
@@ -135,6 +166,7 @@ func (r *SpritesExecutor) attachRecoveredSprite(
 	spriteName string,
 	sprite *spritesapi.Sprite,
 	instanceInfo *agentctl.InstanceInfo,
+	token string,
 ) (*ExecutorInstance, RecoveryCandidateOutcome) {
 	proxy, err := r.createPortForwardingSession(sprite, spriteName, instanceInfo.Port)
 	if err != nil {
@@ -147,12 +179,18 @@ func (r *SpritesExecutor) attachRecoveredSprite(
 		return nil, RecoveryOutcomeUnknown
 	}
 	r.proxies[record.AgentExecutionID] = proxy
+	if token != "" {
+		r.tokens[record.AgentExecutionID] = token
+	}
 	r.mu.Unlock()
 	instance := r.buildRecoveredSpriteInstance(record, spriteName, proxy.localPort, sprite.Status, sprite.CreatedAt, instanceInfo)
 	instance.DiscardRecovery = func() {
 		r.mu.Lock()
 		if r.proxies[record.AgentExecutionID] == proxy {
 			delete(r.proxies, record.AgentExecutionID)
+			if token != "" {
+				delete(r.tokens, record.AgentExecutionID)
+			}
 		}
 		r.mu.Unlock()
 		r.closeProxySession(proxy)

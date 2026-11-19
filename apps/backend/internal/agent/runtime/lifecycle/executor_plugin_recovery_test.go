@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"slices"
 	"strings"
 	"testing"
@@ -211,6 +212,9 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 		t.Fatalf("recovered instances = %#v", instances)
 	}
 	defer instances[0].Client.Close()
+	if !instances[0].CopilotNativeSessionEvents {
+		t.Fatal("recovered plugin instance lost the adopted native subscription state")
+	}
 	if instances[0].WorkspacePath != pluginExecutorWorkspacePath ||
 		!slices.Equal(instances[0].WorkspaceSourceRoots, []string{"/workspace", "/workspace/src"}) ||
 		instances[0].Env["KANDEV_RUN_ID"] != "run-plugin-recovery" {
@@ -449,7 +453,7 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 
 func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteExecutor) {
 	t.Helper()
-	runtime.recoveredAgentctlInfoReader = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string) (*agentctl.InstanceInfo, error) {
+	runtime.recoveredAgentctlInfoReader = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string, _ *agentctltypes.ErrandMCPOwner) (*agentctl.InstanceInfo, error) {
 		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 			t.Fatalf("instance metadata read identity = %q token=%q", executionID, token)
 		}
@@ -458,6 +462,7 @@ func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteEx
 			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
 			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
 			WorkspaceSourceRoots: []string{"/workspace", "/workspace/src"}, ProviderSessionID: "native-plugin-session",
+			CopilotNativeSessionEvents: true,
 		}, nil
 	}
 }
@@ -478,6 +483,7 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 		_ *logger.Logger,
 		executionID string,
 		token string,
+		_ *agentctltypes.ErrandMCPOwner,
 	) (*agentctl.InstanceInfo, error) {
 		gotExecutionID = executionID
 		gotAuthToken = token
@@ -490,6 +496,7 @@ func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testin
 			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
 			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
 			WorkspaceSourceRoots: []string{"/workspace/src"}, ProviderSessionID: "native-plugin-session",
+			CopilotNativeSessionEvents: true,
 		}, nil
 	}
 	record := pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-recovery"})

@@ -7,7 +7,6 @@ import type {
   AuthSliceActions,
   GitHubSliceActions,
   GitLabSliceActions,
-  AzureDevOpsSliceActions,
   JiraSliceActions,
   LinearSliceActions,
   OfficeSliceActions,
@@ -17,6 +16,7 @@ import type {
   FailedInboxSliceActions,
   PreviewFeedbackSliceActions,
   InboxHistorySliceActions,
+  ErrandsSliceActions,
 } from "./slices";
 
 // Split out of app-state-types.ts to stay under the file line limit. These
@@ -28,7 +28,6 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   LinearSliceActions &
   OfficeSliceActions &
   import("./store-reexports").WorkspaceSourceStoreState &
-  AzureDevOpsSliceActions &
   SystemSliceActions &
   FeaturesSliceActions &
   AuthSliceActions &
@@ -39,4 +38,5 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   NeedsYouInboxSliceActions &
   FailedInboxSliceActions &
   InboxHistorySliceActions &
-  PreviewFeedbackSliceActions;
+  PreviewFeedbackSliceActions &
+  ErrandsSliceActions;

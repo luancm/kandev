@@ -23,6 +23,7 @@ import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-sessi
 import { hiddenSessionIdsFor, pruneHiddenSessionIds } from "./dockview-hidden-session-panels";
 import { t } from "@/lib/i18n";
 import { resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
+import { releaseDockviewSessionRestore } from "@/lib/state/dockview-session-restore-gate";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -546,6 +547,8 @@ export function runAutoSessionTabEffect(
 
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
+  if (sessionListLoaded) releaseDockviewSessionRestore(api, currentSessionIds);
+
   if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
     logPendingSessionReset(api, effectiveSessionId, currentSessionIds);
     releaseLayoutToDefault(useDockviewStore.getState().currentLayoutEnvId);
@@ -680,7 +683,7 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!tid) return EMPTY_SESSION_IDS_KEY;
     const list = s.taskSessionsByTask.itemsByTaskId[tid];
     if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
-    return list.map((ss) => ss.id).join(",");
+    return list.map((session) => session.id).join(",");
   });
   const sessionListLoaded = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;

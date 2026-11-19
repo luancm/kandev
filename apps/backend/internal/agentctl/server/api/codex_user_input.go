@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	clarificationprotocol "github.com/kandev/kandev/internal/clarification/protocol"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcp "github.com/kandev/kandev/internal/mcp/server"
@@ -22,6 +23,9 @@ func newCodexUserInputRequestHandler(
 	log *logger.Logger,
 ) adapter.UserInputRequestHandler {
 	return func(ctx context.Context, request *adapter.UserInputRequest) (*adapter.UserInputResponse, error) {
+		if cfg.ErrandMCPOwner != nil {
+			return nil, agentctltypes.ErrErrandQuestion
+		}
 		questions, err := clarificationQuestions(request.Questions)
 		if err != nil {
 			return nil, err
@@ -129,9 +133,29 @@ func normalizeClarificationAnswer(
 		return adapter.UserInputAnswer{}, fmt.Errorf("clarification response selected an unoffered option for Codex question %q", answer.QuestionID)
 	}
 	return adapter.UserInputAnswer{
-		OptionIDs:  append([]string(nil), answer.SelectedOptions...),
-		CustomText: answer.CustomText,
+		OptionIDs:   append([]string(nil), answer.SelectedOptions...),
+		CustomText:  answer.CustomText,
+		Attachments: codexUserInputAttachments(answer.Attachments),
 	}, nil
+}
+
+func codexUserInputAttachments(attachments []clarificationprotocol.AnswerAttachment) []adapter.UserInputAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	out := make([]adapter.UserInputAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		out = append(out, adapter.UserInputAttachment{
+			AttachmentID: attachment.AttachmentID,
+			Type:         attachment.Type,
+			Name:         attachment.Name,
+			MimeType:     attachment.MimeType,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+			Path:         attachment.Path,
+		})
+	}
+	return out
 }
 
 func userInputOfferedOption(question adapter.UserInputQuestion, selectedID string) bool {

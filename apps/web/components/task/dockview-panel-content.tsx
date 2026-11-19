@@ -1,5 +1,6 @@
 "use client";
 
+import { TaskGraphPanel } from "@/components/task-graph/task-graph-panel";
 import React, { useCallback, useEffect } from "react";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
@@ -85,8 +86,8 @@ function ChatContent({
 }) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const sessionId = paramSessionId ?? storeSessionId;
   const isVisible = usePanelActive(panelId);
   const { openFile } = useFileEditors(isVisible);
   const addDiffViewerPanel = useDockviewStore((state) => state.addDiffViewerPanel);
@@ -323,6 +324,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
     />
   ),
   "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
+  "task-graph": () => <TaskGraphPanel />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

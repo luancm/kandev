@@ -18,7 +18,8 @@ const wire = vi.hoisted(() => ({
   request: vi.fn(),
   on: vi.fn(),
   subscribeSession: vi.fn(() => () => {}),
-  subscribeUser: vi.fn(() => () => {}),
+  subscribeUser: vi.fn(),
+  unsubscribeUser: vi.fn(),
   sessionRead: vi.fn(),
 }));
 vi.mock("@/lib/ws/connection", () => ({
@@ -255,7 +256,7 @@ function renderScenario(session: ScenarioSession) {
       initialState={{
         editors: { items: [], loaded: true, loading: false, folderOpeningAvailable: false },
         userSettings: { ...defaultState.userSettings, loaded: true },
-        connection: { status: "connected", error: null, issueSeverity: "none" },
+        connection: { generation: 0, status: "connected", error: null, issueSeverity: "none" },
         tasks: { ...defaultState.tasks, activeSessionId: id },
         taskSessions: { items: { [id]: session } },
         environmentIdBySessionId: { [id]: session.environment_id },

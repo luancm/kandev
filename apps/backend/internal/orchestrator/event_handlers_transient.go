@@ -52,6 +52,10 @@ const (
 // yellow (non-alarming) styling, as opposed to the red "error" variant.
 const metaVariantWarning = "warning"
 
+// metaVariantDefault cancels the warning styling once a continuation has
+// resumed; the marker is explicit so older frontends keep their presentation.
+const metaVariantDefault = "default"
+
 // metaVariantCeiling is the status-message variant AC-49 requires for every
 // session-ceiling card note, including AC-17c's drop note.
 const metaVariantCeiling = "ceiling"
@@ -93,11 +97,13 @@ func transientRetryDelayFor(classified *routingerr.Error, attempt int, now time.
 
 // capturedPrompt is the minimal context needed to re-drive a failed turn.
 type capturedPrompt struct {
-	text        string
-	model       string
-	planMode    bool
-	attachments []v1.MessageAttachment
-	onAccepted  func(turnID string)
+	text                  string
+	model                 string
+	planMode              bool
+	attachments           []v1.MessageAttachment
+	onAccepted            func(turnID string)
+	promptAlreadyComposed bool
+	skipErrandComposition bool
 }
 
 // transientRetryEntry tracks one session's in-progress retry loop: the current
@@ -110,6 +116,8 @@ type transientRetryEntry struct {
 	mode               string
 	continuationPolicy continuationPolicy
 	continuation       *continuationBinding
+	taskID             string
+	failureCode        routingerr.Code
 	providerID         string
 	modelID            string
 	cancel             func()
@@ -123,6 +131,7 @@ type transientRetryEntry struct {
 	acceptedGeneration uint64
 	restoredExecution  string
 	retainedRuntime    *retainedRuntimeRetry
+	activity           continuationActivity
 }
 
 type retainedRuntimeRetry struct {
@@ -184,6 +193,23 @@ func (s *Service) rememberTurnPromptWithAccepted(
 	})
 }
 
+func (s *Service) rememberComposedTurnPrompt(
+	sessionID, text, model string, planMode bool, attachments []v1.MessageAttachment, onAccepted func(turnID string),
+) {
+	if sessionID == "" {
+		return
+	}
+	s.lastTurnPrompt.Store(sessionID, capturedPrompt{
+		text:                  text,
+		model:                 model,
+		planMode:              planMode,
+		attachments:           attachments,
+		onAccepted:            onAccepted,
+		promptAlreadyComposed: true,
+		skipErrandComposition: true,
+	})
+}
+
 // handleTransientFailure routes a high-confidence short provider error
 // into a paced, visible retry-with-backoff instead of the red recovery banner.
 // Returns true when it takes ownership (caller must NOT fall through to
@@ -240,7 +266,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			zap.Uint64("prompt_generation", data.PromptGeneration))
 		return false
 	}
-	classified := classifyKanbanFailure(data)
+	classified := s.classifyKanbanFailure(data)
 	if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		noticeState.mu.Unlock()
 		releaseNoticeState()
@@ -303,6 +329,8 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			}
 			entry.modelID = data.ProviderError.ModelID
 		}
+		entry.taskID = data.TaskID
+		entry.failureCode = classified.Code
 		entry.retainedRuntime = retainedRuntime
 	})
 	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
@@ -425,6 +453,7 @@ func (s *Service) reserveTransientRetryWithMetadataLocked(
 			entry.started = previous.started
 			entry.mode, entry.continuationPolicy, entry.continuation = previous.mode, previous.continuationPolicy, previous.continuation
 			entry.providerID, entry.modelID = previous.providerID, previous.modelID
+			entry.taskID, entry.failureCode = previous.taskID, previous.failureCode
 			previous.mu.Unlock()
 		}
 	}
@@ -570,8 +599,11 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	}
 
 	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, launchOriginAutomatic, promptTaskOptions{
+		capacityIntent:                 turnCapacityOverride,
 		onAccepted:                     cp.onAccepted,
 		initialCreatePromptPassthrough: initialCreatePromptPassthrough,
+		promptAlreadyComposed:          cp.promptAlreadyComposed,
+		skipErrandComposition:          cp.skipErrandComposition,
 	}); err != nil {
 		if ctx.Err() != nil {
 			return

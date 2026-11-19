@@ -44,12 +44,15 @@ func (r *KubernetesExecutor) recoverKubernetesRecord(
 	parent context.Context,
 	record *models.ExecutorRunning,
 ) (*ExecutorInstance, RecoveryCandidateOutcome) {
-	req, ok := kubernetesRecoveryRequest(record)
+	req, owner, ok := kubernetesRecoveryRequest(record)
 	if !ok || r.clientFactory == nil {
 		return nil, RecoveryOutcomeUnknown
 	}
 	attemptCtx, cancel := context.WithTimeout(parent, remoteRecoveryAttemptTimeout)
 	defer cancel()
+	if req.ErrandMCPOwner != nil && !r.matchesErrandRecoveryWorkspace(attemptCtx, req) {
+		return nil, RecoveryOutcomeUnknown
+	}
 
 	target, outcome := r.prepareKubernetesRecoveryTarget(attemptCtx, req)
 	if outcome != "" {
@@ -89,6 +92,10 @@ func (r *KubernetesExecutor) recoverKubernetesRecord(
 	instance := buildRecoveredKubernetesInstance(
 		record, req, target.recorded, instanceInfo, target.pod, client, token,
 	)
+	if owner.Kind == ExecutionOwnerErrand {
+		instance.recoveredErrandOwner = owner
+		instance.AgentProfileID = record.ExecutionProfileID
+	}
 	req.AuthToken = token
 	session := &kubernetesSession{
 		runtime: target.runtime, forward: instanceForward, client: client,
@@ -283,19 +290,49 @@ func (r *KubernetesExecutor) refreshKubernetesRecoveredClient(
 	return client, token, true
 }
 
-func kubernetesRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreateRequest, bool) {
+func kubernetesRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreateRequest, ExecutionOwner, bool) {
 	if record == nil || strings.TrimSpace(record.AgentExecutionID) == "" ||
-		strings.TrimSpace(record.SessionID) == "" || strings.TrimSpace(record.TaskID) == "" {
-		return nil, false
+		strings.TrimSpace(record.SessionID) == "" {
+		return nil, ExecutionOwner{}, false
+	}
+	owner, err := recordedErrandExecutionOwner(record)
+	if err != nil || (owner.Kind != ExecutionOwnerErrand && strings.TrimSpace(record.TaskID) == "") {
+		return nil, ExecutionOwner{}, false
 	}
 	metadata := cloneKubernetesMetadata(record.Metadata)
 	metadata[models.MetaKeyExecutorID] = record.ExecutorID
+	taskID := record.TaskID
+	var workspaceGeneration int64
+	if owner.Kind == ExecutionOwnerErrand {
+		taskID = getMetadataString(metadata, MetadataKeyKubernetesResourceTaskID)
+		workspaceGeneration, err = strconv.ParseInt(getMetadataString(metadata, metadataKubernetesErrandWorkspaceGeneration), 10, 64)
+		if taskID == "" || err != nil || workspaceGeneration <= 0 || !getMetadataBool(metadata, metadataKubernetesTaskOwned) {
+			return nil, ExecutionOwner{}, false
+		}
+	}
 	return &ExecutorCreateRequest{
-		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
-		TaskEnvironmentID: getMetadataString(metadata, MetadataKeyKubernetesResourceEnvironmentID),
-		AuthToken:         record.TransientAuthToken, BootstrapNonce: record.TransientBootstrapNonce,
-		Metadata: metadata, Env: make(map[string]string),
-	}, true
+		InstanceID: record.AgentExecutionID, TaskID: taskID, SessionID: record.SessionID,
+		TaskEnvironmentID:              getMetadataString(metadata, MetadataKeyKubernetesResourceEnvironmentID),
+		EnvironmentOwnershipGeneration: workspaceGeneration,
+		AuthToken:                      record.TransientAuthToken, BootstrapNonce: record.TransientBootstrapNonce,
+		Metadata: metadata, Env: make(map[string]string), ErrandMCPOwner: errandMCPOwner(owner),
+	}, owner, true
+}
+
+func (r *KubernetesExecutor) matchesErrandRecoveryWorkspace(ctx context.Context, req *ExecutorCreateRequest) bool {
+	if r.environmentStore == nil {
+		return false
+	}
+	env, err := r.environmentStore.GetTaskEnvironment(ctx, req.TaskEnvironmentID)
+	if err != nil || env == nil || env.TaskID != req.TaskID || env.Status != models.TaskEnvironmentStatusReady ||
+		env.OwnershipGeneration != req.EnvironmentOwnershipGeneration || env.ExecutorType != string(models.ExecutorTypeKubernetes) ||
+		env.ExecutorID != getMetadataString(req.Metadata, models.MetaKeyExecutorID) {
+		return false
+	}
+	current, err := r.environmentStore.GetKubernetesEnvironment(ctx, req.TaskEnvironmentID)
+	return err == nil && current != nil && current.TaskID == req.TaskID &&
+		current.OwnershipGeneration == req.EnvironmentOwnershipGeneration &&
+		kubernetesLegacyInventoriesAgree(current.Metadata, req.Metadata)
 }
 
 func recoverKubernetesControlInstance(
@@ -322,6 +359,11 @@ func recoverKubernetesControlInstance(
 	if err != nil && isAgentctlAuthError(err) && req.BootstrapNonce != "" && token == req.AuthToken {
 		if info, err = refreshKubernetesRecoveryToken(ctx, control, req, record, recorded); err == nil {
 			token = control.AuthToken()
+		}
+	}
+	if err == nil || errors.Is(err, agentctl.ErrInstanceNotFound) {
+		if capabilityErr := requireErrandQuestionPolicy(ctx, control, req.ErrandMCPOwner); capabilityErr != nil {
+			return nil, "", RecoveryOutcomeUnknown
 		}
 	}
 	if errors.Is(err, agentctl.ErrInstanceNotFound) {
@@ -363,9 +405,17 @@ func validKubernetesRecoveredInstance(
 	record *models.ExecutorRunning,
 	recorded kubernetesRecordedState,
 ) bool {
-	return info != nil && info.ID == recorded.agentctlInstanceID &&
-		info.SessionID == record.SessionID && info.TaskID == record.TaskID &&
-		info.WorkspacePath == kubernetesWorkspacePath && info.Port == recorded.remotePort
+	if info == nil || record == nil {
+		return false
+	}
+	expectedTaskID := record.TaskID
+	if IsErrandRuntimeInventory(record) {
+		expectedTaskID = getMetadataString(record.Metadata, MetadataKeyKubernetesResourceTaskID)
+	}
+	return info.ID == recorded.agentctlInstanceID &&
+		info.SessionID == record.SessionID && info.TaskID == expectedTaskID &&
+		info.WorkspacePath == kubernetesWorkspacePath && info.Port == recorded.remotePort &&
+		matchesRecordedErrandMCPOwner(record, info.ErrandMCPOwner)
 }
 
 func buildRecoveredKubernetesInstance(
@@ -388,9 +438,11 @@ func buildRecoveredKubernetesInstance(
 	return &ExecutorInstance{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
 		RuntimeName: agentruntime.RuntimeKubernetes, Client: client, WorkspacePath: info.WorkspacePath,
-		Metadata: metadata, Env: cloneStringMap(info.Env),
+		ReusedWorkspace: true,
+		Metadata:        metadata, Env: cloneStringMap(info.Env),
 		WorkspaceSourceRoots: append([]string(nil), info.WorkspaceSourceRoots...),
 		ProviderSessionID:    info.ProviderSessionID, AuthToken: token, BootstrapNonce: req.BootstrapNonce,
+		CopilotNativeSessionEvents: info.CopilotNativeSessionEvents,
 	}
 }
 

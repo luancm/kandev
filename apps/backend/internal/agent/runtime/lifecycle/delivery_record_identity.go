@@ -9,13 +9,27 @@ import (
 // Control identity comes from the exact admitted prompt or its persisted
 // binding. The current replacement process is never historical owner proof.
 func (m *Manager) deliveryRecordControlIdentity(ctx context.Context, request DeliveryRecordEvidenceRequest, descriptor journal.RecoveryDescriptor) *AgentDeliveryRecoveryIdentity {
-	if descriptor.SubmissionsTruncated || descriptor.SubmissionCount != 1 || len(descriptor.Submissions) != 1 {
+	if descriptor.SubmissionsTruncated || descriptor.SubmissionCount != len(descriptor.Submissions) || len(descriptor.Submissions) == 0 {
 		return nil
 	}
-	if live := m.liveDeliveryRecordControlIdentity(request, descriptor); live != nil {
-		return live
+	if len(descriptor.Submissions) == 1 {
+		if live := m.liveDeliveryRecordControlIdentity(request, descriptor); live != nil {
+			return live
+		}
+		return m.persistedDeliveryRecordControlIdentity(ctx, request, descriptor.Submissions[0])
 	}
-	return m.persistedDeliveryRecordControlIdentity(ctx, request, descriptor.Submissions[0])
+	var identity *AgentDeliveryRecoveryIdentity
+	for _, selected := range descriptor.Submissions {
+		candidate := m.persistedDeliveryRecordControlIdentity(ctx, request, selected)
+		if candidate == nil {
+			continue
+		}
+		if identity != nil {
+			return nil
+		}
+		identity = candidate
+	}
+	return identity
 }
 
 func (m *Manager) liveDeliveryRecordControlIdentity(request DeliveryRecordEvidenceRequest, descriptor journal.RecoveryDescriptor) *AgentDeliveryRecoveryIdentity {
@@ -39,7 +53,7 @@ func (m *Manager) liveDeliveryRecordControlIdentity(request DeliveryRecordEviden
 		SessionID: captured.SessionID, ExecutionID: captured.ExecutionID,
 		SubmissionID: captured.SubmissionID, StreamID: captured.StreamID,
 		IncarnationID: captured.IncarnationID, HarnessGeneration: captured.HarnessGeneration,
-		PromptGeneration: captured.PromptGeneration,
+		PromptGeneration: captured.PromptGeneration, TurnID: captured.TurnID, NativeSessionID: captured.NativeSessionID,
 	}
 }
 
@@ -67,7 +81,7 @@ func (m *Manager) persistedDeliveryRecordControlIdentity(ctx context.Context, re
 	return &AgentDeliveryRecoveryIdentity{OriginalRuntime: binding.OriginalRuntime, TaskID: binding.TaskID,
 		SessionID: binding.SessionID, ExecutionID: binding.ExecutionID, IncarnationID: binding.IncarnationID,
 		HarnessGeneration: binding.HarnessGeneration, StreamID: binding.StreamID, SubmissionID: binding.SubmissionID,
-		PromptGeneration: binding.PromptGeneration}
+		PromptGeneration: binding.PromptGeneration, TurnID: binding.TurnID, NativeSessionID: binding.NativeSessionID}
 }
 
 func persistedPromptBindingMatches(binding deliveryPromptTurnBinding, request DeliveryRecordEvidenceRequest, selected journal.SubmissionSummary) bool {

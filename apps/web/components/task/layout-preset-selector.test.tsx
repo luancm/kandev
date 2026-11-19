@@ -3,10 +3,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getBuiltInLayoutProfile } from "@/lib/layout/layout-profiles";
 
+type LayoutAppState = {
+  tasks: { activeTaskId: string | null; activeSessionId: string | null };
+  taskSessionsByTask: {
+    itemsByTaskId: Record<string, Array<{ id: string }>>;
+    loadedByTaskId: Record<string, boolean>;
+  };
+};
+type LayoutAppListener = (state: LayoutAppState, previousState: LayoutAppState) => void;
+type LayoutDockState = { currentLayoutEnvId: string | null; api: { id: string } | null };
+type LayoutDockListener = (state: LayoutDockState, previousState: LayoutDockState) => void;
+
 const mocks = vi.hoisted(() => ({
   finePointer: true,
   isMobile: false,
   savedLayouts: [] as Array<Record<string, unknown>>,
+  sessionsLoaded: true,
+  loadSessions: vi.fn(),
+  appListeners: new Set<LayoutAppListener>(),
+  dockListeners: new Set<LayoutDockListener>(),
+  taskAId: "task-1",
+  taskBId: "task-2",
+  sessionAId: "session-1",
+  sessionBId: "session-b",
+  savedSessionId: "session-a",
+  environmentAId: "environment-a",
+  environmentBId: "environment-b",
+  appState: {
+    tasks: { activeTaskId: null, activeSessionId: null },
+    taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {} },
+  } as LayoutAppState,
+  dockState: { currentLayoutEnvId: null, api: null } as LayoutDockState,
+  appliedLayoutsByEnvironment: {} as Record<string, unknown>,
   updateUserSettings: vi.fn(),
   setUserSettings: vi.fn(),
   toastError: vi.fn(),
@@ -50,34 +78,55 @@ vi.mock("@/lib/ssr/user-settings", () => ({
   }),
 }));
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      userSettings: { savedLayouts: mocks.savedLayouts },
-      tasks: { activeTaskId: "task-1", activeSessionId: "session-1" },
-      setUserSettings: mocks.setUserSettings,
-    }),
-  useAppStoreApi: () => ({
+vi.mock("@/components/state-provider", () => {
+  const appStore = {
     getState: () => ({
+      ...mocks.appState,
       userSettings: { savedLayouts: mocks.savedLayouts },
       setUserSettings: mocks.setUserSettings,
-      taskSessionsByTask: { itemsByTaskId: { "task-1": [] } },
     }),
-  }),
-}));
+    subscribe: (listener: LayoutAppListener) => {
+      mocks.appListeners.add(listener);
+      return () => mocks.appListeners.delete(listener);
+    },
+  };
+  return {
+    useAppStore: (selector: (state: unknown) => unknown) =>
+      selector({
+        userSettings: { savedLayouts: mocks.savedLayouts },
+        ...mocks.appState,
+        setUserSettings: mocks.setUserSettings,
+      }),
+    useAppStoreApi: () => appStore,
+  };
+});
 
-vi.mock("@/lib/state/dockview-store", () => ({
-  useDockviewStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      applyCustomLayout: mocks.applyCustomLayout,
-      applyBuiltInPreset: mocks.applyBuiltInPreset,
-      resetLayout: mocks.resetLayout,
-      captureCurrentLayout: vi.fn(() => getBuiltInLayoutProfile("default").layout),
-    }),
-}));
+vi.mock("@/lib/state/dockview-store", () => {
+  const getState = () => ({
+    ...mocks.dockState,
+    applyCustomLayout: mocks.applyCustomLayout,
+    applyBuiltInPreset: mocks.applyBuiltInPreset,
+    resetLayout: mocks.resetLayout,
+    captureCurrentLayout: vi.fn(() => getBuiltInLayoutProfile("default").layout),
+  });
+  const useDockviewStore = Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        ...getState(),
+      }),
+    {
+      getState,
+      subscribe: (listener: LayoutDockListener) => {
+        mocks.dockListeners.add(listener);
+        return () => mocks.dockListeners.delete(listener);
+      },
+    },
+  );
+  return { useDockviewStore };
+});
 
 vi.mock("@/hooks/use-task-sessions", () => ({
-  useTaskSessions: () => ({ isLoaded: true, loadSessions: vi.fn() }),
+  useTaskSessions: () => ({ isLoaded: mocks.sessionsLoaded, loadSessions: mocks.loadSessions }),
 }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -103,6 +152,7 @@ import { LayoutPresetSelector } from "./layout-preset-selector";
 const SAVED_DELETE_TEST_ID = "layout-saved-delete";
 const SAVED_DELETE_POPOVER_TEST_ID = "layout-saved-delete-confirm-popover";
 const SAVED_DELETE_CONFIRM_TEST_ID = "layout-saved-delete-confirm";
+const SECOND_LAYOUT_ID = "second-layout";
 
 function savedLayout(overrides: Record<string, unknown> = {}) {
   return {
@@ -143,14 +193,51 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function setAppTaskSelection(taskId: string, sessionId: string) {
+  const previous = mocks.appState;
+  mocks.appState = {
+    ...mocks.appState,
+    tasks: { activeTaskId: taskId, activeSessionId: sessionId },
+  };
+  mocks.appListeners.forEach((listener) => listener(mocks.appState, previous));
+}
+
+function setLayoutIdentity(environmentId: string, api: { id: string }) {
+  const previous = mocks.dockState;
+  mocks.dockState = { currentLayoutEnvId: environmentId, api };
+  mocks.dockListeners.forEach((listener) => listener(mocks.dockState, previous));
+}
+
+async function selectSavedLayout() {
+  await openSavedLayouts();
+  fireEvent.click(screen.getByText("Saved layout"));
+}
+
 beforeEach(() => {
   mocks.finePointer = true;
   mocks.isMobile = false;
   mocks.savedLayouts = [savedLayout()];
+  mocks.sessionsLoaded = true;
+  mocks.loadSessions.mockReset();
+  mocks.appListeners.clear();
+  mocks.dockListeners.clear();
+  mocks.appState = {
+    tasks: { activeTaskId: mocks.taskAId, activeSessionId: mocks.sessionAId },
+    taskSessionsByTask: {
+      itemsByTaskId: { [mocks.taskAId]: [{ id: mocks.savedSessionId }] },
+      loadedByTaskId: { [mocks.taskAId]: true },
+    },
+  };
+  mocks.dockState = { currentLayoutEnvId: mocks.environmentAId, api: { id: "api-a" } };
+  mocks.appliedLayoutsByEnvironment = {};
   mocks.updateUserSettings.mockReset();
   mocks.setUserSettings.mockReset();
   mocks.toastError.mockReset();
   mocks.applyCustomLayout.mockReset();
+  mocks.applyCustomLayout.mockImplementation((layout: unknown) => {
+    const environmentId = mocks.dockState.currentLayoutEnvId;
+    if (environmentId) mocks.appliedLayoutsByEnvironment[environmentId] = layout;
+  });
   mocks.applyBuiltInPreset.mockReset();
   mocks.resetLayout.mockReset();
   mocks.tooltipOpen = false;
@@ -228,10 +315,202 @@ describe("LayoutPresetSelector saved-layout deletion", () => {
   });
 });
 
+describe("LayoutPresetSelector delayed layout navigation ownership", () => {
+  it("does not materialize a delayed task A layout in task B environment", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    setAppTaskSelection(mocks.taskBId, mocks.sessionBId);
+    setLayoutIdentity(mocks.environmentBId, { id: "api-b" });
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.appliedLayoutsByEnvironment).toEqual({});
+  });
+
+  it("rejects a delayed task A layout after navigation returns from B to A", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    setAppTaskSelection(mocks.taskBId, mocks.sessionBId);
+    setAppTaskSelection(mocks.taskAId, mocks.sessionAId);
+    setLayoutIdentity(mocks.environmentBId, { id: "api-b" });
+    setLayoutIdentity(mocks.environmentAId, { id: "api-a" });
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.appliedLayoutsByEnvironment).toEqual({});
+  });
+
+  it("does not apply through a replaced Dockview API even when the environment ID is unchanged", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    setLayoutIdentity(mocks.environmentAId, { id: "replacement-api-a" });
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.appliedLayoutsByEnvironment).toEqual({});
+  });
+});
+
+describe("LayoutPresetSelector delayed layout completion ownership", () => {
+  it("applies the layout when the captured task, environment, and API still own the request", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = true;
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: "saved-layout" }),
+      expect.objectContaining({ envId: mocks.environmentAId, sessionIds: [mocks.savedSessionId] }),
+    );
+    expect(mocks.appliedLayoutsByEnvironment).toHaveProperty(mocks.environmentAId);
+  });
+
+  it("does not apply a pending layout after the selector unmounts", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    const { unmount } = render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    unmount();
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.appliedLayoutsByEnvironment).toEqual({});
+  });
+
+  it("lets only the latest saved-layout application finish", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const first = savedLayout({ id: "first-layout", name: "First layout" });
+    const second = savedLayout({ id: SECOND_LAYOUT_ID, name: "Second layout" });
+    mocks.savedLayouts = [first, second];
+    const firstRead = deferred<void>();
+    const secondRead = deferred<void>();
+    mocks.loadSessions
+      .mockReturnValueOnce(firstRead.promise)
+      .mockReturnValueOnce(secondRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await openSavedLayouts();
+    fireEvent.click(screen.getByText("First layout"));
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledTimes(1));
+    await openSavedLayouts();
+    fireEvent.click(screen.getByText("Second layout"));
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      firstRead.resolve();
+      await firstRead.promise;
+    });
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = true;
+    await act(async () => {
+      secondRead.resolve();
+      await secondRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: SECOND_LAYOUT_ID }),
+      expect.objectContaining({ envId: mocks.environmentAId, sessionIds: [mocks.savedSessionId] }),
+    );
+  });
+});
+
+describe("LayoutPresetSelector layout selection invalidation", () => {
+  it("lets a built-in preset selection supersede a pending saved layout", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    await openSavedLayouts();
+    const builtInPlan = screen
+      .getAllByTestId("layout-preset-item")
+      .find((item) => item.getAttribute("data-preset-id") === "plan");
+    expect(builtInPlan).toBeTruthy();
+    fireEvent.click(builtInPlan!);
+
+    expect(mocks.applyBuiltInPreset).toHaveBeenCalledExactlyOnceWith("plan", true);
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.appliedLayoutsByEnvironment).toEqual({});
+  });
+
+  it("lets reset supersede a pending saved layout", async () => {
+    mocks.sessionsLoaded = false;
+    mocks.appState.taskSessionsByTask.loadedByTaskId[mocks.taskAId] = false;
+    const sessionRead = deferred<void>();
+    mocks.loadSessions.mockReturnValue(sessionRead.promise);
+    render(<LayoutPresetSelector />);
+
+    await selectSavedLayout();
+    await waitFor(() => expect(mocks.loadSessions).toHaveBeenCalledWith(true));
+    await openSavedLayouts();
+    fireEvent.click(screen.getByTestId("layout-reset-item"));
+
+    expect(mocks.resetLayout).toHaveBeenCalledOnce();
+    await act(async () => {
+      sessionRead.resolve();
+      await sessionRead.promise;
+    });
+
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.appliedLayoutsByEnvironment).toEqual({});
+  });
+});
+
 describe("LayoutPresetSelector saved-layout persistence", () => {
   it("serializes deletions and derives each payload from the latest saved layouts", async () => {
     const first = savedLayout({ id: "first-layout", name: "First layout" });
-    const second = savedLayout({ id: "second-layout", name: "Second layout" });
+    const second = savedLayout({ id: SECOND_LAYOUT_ID, name: "Second layout" });
     const retained = savedLayout({ id: "retained-layout", name: "Retained layout" });
     mocks.savedLayouts = [first, second, retained];
     const firstResponse = deferred<{
@@ -251,7 +530,7 @@ describe("LayoutPresetSelector saved-layout persistence", () => {
     await waitFor(() => expect(mocks.updateUserSettings).toHaveBeenCalledTimes(1));
 
     await openSavedLayouts();
-    fireEvent.click(deleteAction("second-layout"));
+    fireEvent.click(deleteAction(SECOND_LAYOUT_ID));
     fireEvent.click(screen.getByTestId(SAVED_DELETE_CONFIRM_TEST_ID));
     expect(mocks.updateUserSettings).toHaveBeenCalledTimes(1);
 

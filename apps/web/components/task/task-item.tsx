@@ -24,7 +24,12 @@ import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { useTranslation } from "react-i18next";
 import { TaskItemComparisonUnavailable } from "./task-item-comparison-unavailable";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryErrands,
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
+import type { TaskWaitReason } from "@/lib/ui/waiting-reason";
 import { TaskItemLeadingBadges } from "./task-item-leading-badges";
 import {
   resolveTaskRowPresentation,
@@ -118,12 +123,17 @@ type TaskItemProps = {
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
   queuedCount?: number;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   /** Destination-resident WIP queue status, separate from queued prompts. */
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
+  waitReason?: TaskWaitReason | null;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  /** Show the unread dot; the shared row resolves setting and selection. */
+  hasUnreadMessages?: boolean;
   automaticColor?: TaskMarkerPresentation;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
@@ -233,10 +243,12 @@ type TaskItemContentProps = {
   repositoryPath?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
   queuedCount?: number;
+  errandsSummary?: TaskStatusSummaryErrands | null;
   wipQueue?: WipQueueStatus;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
+  hasUnreadMessages?: boolean;
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
@@ -258,10 +270,12 @@ function TaskItemContent({
   repositoryPath,
   prInfo,
   queuedCount,
+  errandsSummary,
   wipQueue,
   launchQueue,
   issueInfo,
   agentErrorMessage,
+  hasUnreadMessages,
   comparisonUnavailable,
   resolvedTaskRow,
   relativeTime,
@@ -283,6 +297,7 @@ function TaskItemContent({
           }
           issueInfo={issueInfo}
           agentErrorMessage={agentErrorMessage}
+          hasUnreadMessages={hasUnreadMessages}
         />
         <TaskItemComparisonUnavailable unavailable={comparisonUnavailable} />
         {isRemoteExecutor && (
@@ -315,6 +330,7 @@ function TaskItemContent({
           prInfo={resolvedTaskRow.showPullRequestNumber ? prInfo : undefined}
           primarySessionId={primarySessionId}
           queuedCount={queuedCount}
+          errandsSummary={errandsSummary}
           wipQueue={wipQueue}
           launchQueue={launchQueue}
           detailOrder={resolvedTaskRow.detailOrder}
@@ -406,12 +422,16 @@ export const TaskItem = memo(function TaskItem({
   showRepository = true,
   prInfo,
   queuedCount,
+  errandsSummary,
   wipQueue,
   launchQueue,
   issueInfo,
   isPinned,
   agentErrorMessage,
+  hasUnreadMessages,
   automaticColor,
+  quotaWait,
+  waitReason,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
 }: TaskItemProps) {
@@ -455,6 +475,9 @@ export const TaskItem = memo(function TaskItem({
         state={state}
         foregroundActivity={foregroundActivity}
         parkedOnBackgroundWork={parkedOnBackgroundWork}
+        waitReason={waitReason}
+        launchQueue={launchQueue}
+        quotaWait={quotaWait}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         isPendingRemoval={isPendingRemoval}
@@ -478,10 +501,12 @@ export const TaskItem = memo(function TaskItem({
         repositoryPath={repositoryPath}
         prInfo={prInfo}
         queuedCount={queuedCount}
+        errandsSummary={errandsSummary}
         wipQueue={wipQueue}
         launchQueue={launchQueue}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
+        hasUnreadMessages={hasUnreadMessages}
         comparisonUnavailable={comparisonUnavailable}
         resolvedTaskRow={resolvedTaskRow}
         relativeTime={relativeTime}

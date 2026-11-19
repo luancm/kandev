@@ -31,6 +31,10 @@ func hasIncrementalShellHistory(raw []byte) bool {
 
 // Ordinary replacements retire chunks in the same transaction as their new body.
 func reconcileShellOutputStorageTx(ctx context.Context, tx *sqlx.Tx, messageID, payloadDigest string, stored, incoming []byte) ([]byte, map[string]any, error) {
+	return reconcileOwnedShellOutputStorageTx(ctx, tx, taskShellOutputQueries, messageID, payloadDigest, stored, incoming)
+}
+
+func reconcileOwnedShellOutputStorageTx(ctx context.Context, tx *sqlx.Tx, queries shellOutputQueries, messageID, payloadDigest string, stored, incoming []byte) ([]byte, map[string]any, error) {
 	var current struct {
 		Storage int `json:"shell_output_storage"`
 	}
@@ -53,7 +57,7 @@ func reconcileShellOutputStorageTx(ctx context.Context, tx *sqlx.Tx, messageID, 
 		return encoded, metadata, err
 	}
 	delete(metadata, shellOutputStorageKey)
-	if err := RemoveMessageShellOutputTx(ctx, tx, messageID); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(queries.deleteHead), messageID); err != nil {
 		return nil, nil, err
 	}
 	encoded, err := json.Marshal(metadata)

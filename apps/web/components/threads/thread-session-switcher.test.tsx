@@ -5,6 +5,7 @@ import type { TaskSession } from "@/lib/types/http";
 import { agentProfileId, sessionId, taskId } from "@/lib/types/ids";
 import type { ResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
+const PICKER_TRIGGER = "thread-session-picker-trigger";
 const responsiveMocks = vi.hoisted(() => ({
   useResponsiveBreakpoint: vi.fn(),
 }));
@@ -63,7 +64,7 @@ beforeEach(() => {
   responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktop());
   storeMocks.useAppStore.mockImplementation(
     (selector: (state: { agentProfiles: { items: AgentProfileOption[] } }) => unknown) =>
-      selector({ agentProfiles: { items: AGENT_PROFILES } }),
+      selector({ agentProfiles: { items: AGENT_PROFILES }, features: { errands: false } } as never),
   );
 });
 
@@ -216,7 +217,7 @@ describe("ThreadSessionSwitcher — phone picker", () => {
     );
 
     expect(screen.queryByRole("tab")).toBeNull();
-    fireEvent.click(screen.getByTestId("thread-session-picker-trigger"));
+    fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
 
     const row = screen.getByTestId(`thread-session-row-${SESSION_B}`);
     expect(row.className).toContain("min-h-11");
@@ -244,7 +245,7 @@ describe("ThreadSessionSwitcher — phone picker", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("thread-session-picker-trigger"));
+    fireEvent.click(screen.getByTestId(PICKER_TRIGGER));
 
     const runningRow = screen.getByTestId(`thread-session-row-${SESSION_A}`);
     const settledRow = screen.getByTestId(`thread-session-row-${SESSION_B}`);

@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fetchErrandShellCommandOutput } from "@/lib/api/domains/errand-api";
 import {
   fetchShellCommandOutput,
   type ShellCommandOutputSnapshot,
@@ -10,7 +11,12 @@ vi.mock("@/lib/api/domains/session-api", () => ({
   fetchShellCommandOutput: vi.fn(),
 }));
 
+vi.mock("@/lib/api/domains/errand-api", () => ({
+  fetchErrandShellCommandOutput: vi.fn(),
+}));
+
 const fetchOutputMock = vi.mocked(fetchShellCommandOutput);
+const fetchErrandOutputMock = vi.mocked(fetchErrandShellCommandOutput);
 let messageSequence = 0;
 let messageId = "";
 
@@ -47,12 +53,48 @@ async function flushPromises() {
 beforeEach(() => {
   vi.useFakeTimers();
   fetchOutputMock.mockReset();
+  fetchErrandOutputMock.mockReset();
   messageSequence += 1;
   messageId = `message-${messageSequence}`;
 });
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("useShellCommandOutput owned Errands", () => {
+  it("loads owned output on disclosure and isolates cached output by read scope", async () => {
+    fetchErrandOutputMock
+      .mockResolvedValueOnce(snapshot("complete", "owned first"))
+      .mockResolvedValueOnce(snapshot("complete", "owned second"));
+    const { result, rerender } = renderHook(
+      ({ isOpen, readScope }) => {
+        const options = {
+          sessionId: "",
+          errandOwner: { taskId: "task", errandId: "errand", readScope },
+          messageId,
+          isOpen,
+          messageStatus: "complete",
+        };
+        return useShellCommandOutput(options);
+      },
+      { initialProps: { isOpen: false, readScope: "first" } },
+    );
+    expect(fetchErrandOutputMock).not.toHaveBeenCalled();
+    rerender({ isOpen: true, readScope: "first" });
+    await flushPromises();
+    expect(result.current.snapshot?.output.stdout).toBe("owned first");
+    expect(fetchErrandOutputMock).toHaveBeenCalledExactlyOnceWith("task", "errand", messageId, {
+      init: { signal: expect.any(AbortSignal) },
+    });
+    expect(fetchOutputMock).not.toHaveBeenCalled();
+
+    rerender({ isOpen: true, readScope: "second" });
+    expect(result.current.snapshot).toBeNull();
+    await flushPromises();
+    expect(result.current.snapshot?.output.stdout).toBe("owned second");
+    expect(fetchErrandOutputMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("useShellCommandOutput fetching", () => {

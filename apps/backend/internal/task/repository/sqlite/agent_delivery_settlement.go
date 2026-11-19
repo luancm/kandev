@@ -48,13 +48,19 @@ func deliveryTerminalSettlementEffect(event *models.AgentDeliveryEvent) (*models
 	}, nil
 }
 
+const (
+	deliveryCompleteEventType = "complete"
+	deliveryErrorEventType    = "error"
+	deliveryCanceledEventType = "canceled"
+)
+
 func deliveryTerminalOutcome(eventType string) models.DeliverySubmissionState {
 	switch eventType {
 	case streams.EventTypeComplete:
 		return models.DeliverySubmissionCompleted
 	case streams.EventTypeError:
 		return models.DeliverySubmissionFailed
-	case string(models.DeliverySubmissionCancelled), "canceled":
+	case string(models.DeliverySubmissionCancelled), deliveryCanceledEventType:
 		return models.DeliverySubmissionCancelled
 	default:
 		return ""
@@ -93,10 +99,16 @@ func (r *Repository) SettleAgentDeliveryTerminal(
 	if err != nil {
 		return false, err
 	}
+	if errandID, ok := errandDeliveryIdentity(sessionID); ok {
+		return r.settleErrandDeliveryTerminal(ctx, tx, errandID, streamID, sequence, outcome, settledAt)
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, err
 	}
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{streamID}); err != nil {
+		return false, err
+	}
+	if _, err := r.repairAgentDeliveryTerminalIdentityTx(ctx, tx, streamID, sequence, nil, false); err != nil {
 		return false, err
 	}
 	return r.settleAgentDeliveryTerminalTx(ctx, tx, streamID, sequence, outcome, settledAt)
@@ -367,8 +379,12 @@ func (r *Repository) ListPendingAgentDeliverySettlements(
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
 		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
-		FROM agent_delivery_effects
+		FROM agent_delivery_effects terminal
 		WHERE effect_type = ? AND state != ? AND (? = '' OR session_id = ?)
+		  AND (SUBSTR(terminal.session_id, 1, 7) <> 'errand:' OR EXISTS (
+			SELECT 1 FROM task_session_errands owner
+			WHERE owner.id = SUBSTR(terminal.session_id, 8)
+		  ))
 		ORDER BY created_at, stream_id, sequence`),
 		models.DeliveryTerminalEffectType, models.DeliveryEffectCompleted, sessionID, sessionID)
 	if err != nil {
@@ -447,7 +463,14 @@ func (r *Repository) completeAgentDeliveryTerminalSettlementTx(
 	completedAt time.Time,
 ) (bool, error) {
 	if effect.State == models.DeliveryEffectCompleted {
-		return r.agentDeliveryTerminalFullySettledTx(ctx, tx, effect)
+		settled, err := r.agentDeliveryTerminalFullySettledTx(ctx, tx, effect)
+		if err != nil || !settled {
+			return settled, err
+		}
+		if err := r.retirePreparedTerminalAttemptsTx(ctx, tx, effect, completedAt); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	if effect.State != models.DeliveryEffectBlockResolved {
 		return false, nil
@@ -481,7 +504,13 @@ func (r *Repository) completeAgentDeliveryTerminalSettlementTx(
 		return false, err
 	}
 	rows, err = result.RowsAffected()
-	return rows == 1, err
+	if err != nil || rows != 1 {
+		return false, err
+	}
+	if err := r.retirePreparedTerminalAttemptsTx(ctx, tx, effect, completedAt); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repository) hasExactAgentDeliveryWorkflowOutcomeTx(
@@ -507,7 +536,7 @@ func (r *Repository) hasExactAgentDeliveryWorkflowOutcomeTx(
 		return false
 	}
 	switch effect.Outcome {
-	case "applied", "no_automatic_transition", "not_required":
+	case "applied", "no_automatic_transition", "not_required", "errands_outstanding":
 		return true
 	default:
 		return false

@@ -30,6 +30,8 @@ type RetainedRecoveryRequest struct {
 	Acknowledge       uint64                   `json:"acknowledge,omitempty"`
 	PrunedThrough     uint64                   `json:"pruned_through,omitempty"`
 	ExpectedHash      string                   `json:"expected_hash,omitempty"`
+	StorageOwnerID    string                   `json:"storage_owner_id,omitempty"`
+	RetireInterrupted bool                     `json:"retire_interrupted,omitempty"`
 }
 
 type RetainedRecoveryResponse struct {
@@ -112,7 +114,7 @@ func ReadRetainedReconstructionEvidence(
 	}
 	if request.OriginalRuntime != nil {
 		if err := request.OriginalRuntime.Validate(); err == nil {
-			if terminated, err := processidentity.OwnedSessionTerminated(*request.OriginalRuntime); err == nil {
+			if terminated, err := processidentity.OriginalOwnerTerminated(*request.OriginalRuntime); err == nil {
 				result.ProcessTerminated = &terminated
 			}
 		}
@@ -276,7 +278,7 @@ func validReconstructionAttachments(attachments []v1.MessageAttachment) bool {
 }
 
 func ReadRetainedRecovery(ctx context.Context, request RetainedRecoveryRequest) (*RetainedRecoveryResponse, error) {
-	if request.Limit < 1 || request.Limit > 4 || request.Acknowledge > request.After {
+	if !validRetainedRecoveryRequest(request) {
 		return nil, ErrSequenceConflict
 	}
 	j, err := openRetainedRecoveryJournal(request)
@@ -307,9 +309,46 @@ func ReadRetainedRecovery(ctx context.Context, request RetainedRecoveryRequest) 
 			return nil, err
 		}
 	}
-	terminated, _ := processidentity.OwnedSessionTerminated(request.OriginalRuntime)
+	terminated, _ := processidentity.OriginalOwnerTerminated(request.OriginalRuntime)
+	if request.RetireInterrupted {
+		submission, err = retireRetainedErrand(ctx, j, request, descriptor.Stream, submission, terminated)
+		if err != nil {
+			return nil, err
+		}
+	}
 	submission.Payload = nil
 	return &RetainedRecoveryResponse{Descriptor: descriptor, Submission: submission, Events: events, ProcessTerminated: terminated}, nil
+}
+
+func validRetainedRecoveryRequest(request RetainedRecoveryRequest) bool {
+	return request.Limit >= 1 && request.Limit <= 4 && request.Acknowledge <= request.After &&
+		(!request.RetireInterrupted || (request.Acknowledge == 0 && request.PrunedThrough == 0))
+}
+
+func retireRetainedErrand(ctx context.Context, j *Journal, request RetainedRecoveryRequest, stream *Stream, submission Submission, terminated bool) (Submission, error) {
+	if !terminated || !canRetireRetainedErrand(request, stream, submission) {
+		return Submission{}, ErrOwnerMismatch
+	}
+	if submission.Retired {
+		return submission, nil
+	}
+	return j.RetireSubmission(ctx, request.SubmissionID, request.HarnessGeneration+1)
+}
+
+func canRetireRetainedErrand(request RetainedRecoveryRequest, stream *Stream, submission Submission) bool {
+	if request.StorageOwnerID == "" || request.ExpectedHash == "" || request.ExpectedHash != submission.Hash ||
+		request.HarnessGeneration == ^uint64(0) || submission.TerminalSequence != 0 {
+		return false
+	}
+	if (stream == nil && request.After != 0) || (stream != nil && stream.HighWater != request.After) {
+		return false
+	}
+	switch submission.State {
+	case SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
+		return true
+	default:
+		return false
+	}
 }
 
 func openRetainedRecoveryJournal(request RetainedRecoveryRequest) (*Journal, error) {
@@ -321,7 +360,15 @@ func openRetainedInspectionJournal(request RetainedRecoveryRequest) (*Journal, e
 }
 
 func openRetainedJournal(request RetainedRecoveryRequest, readOnly bool) (*Journal, error) {
-	location, err := ResolveLocation(request.Root, request.SessionID)
+	ownerID := request.SessionID
+	if request.StorageOwnerID != "" {
+		errandID, owned := strings.CutPrefix(request.SessionID, "errand:")
+		if !owned || errandID == "" || request.StorageOwnerID != ErrandStorageOwnerID(errandID) {
+			return nil, ErrOwnerMismatch
+		}
+		ownerID = request.StorageOwnerID
+	}
+	location, err := ResolveLocation(request.Root, ownerID)
 	if err != nil {
 		return nil, ErrOwnerMismatch
 	}
@@ -329,7 +376,7 @@ func openRetainedJournal(request RetainedRecoveryRequest, readOnly bool) (*Journ
 		return nil, ErrJournalCorrupt
 	}
 	owner, err := os.ReadFile(filepath.Join(filepath.Dir(location.Path), ownerMarkerName))
-	if err != nil || strings.TrimSpace(string(owner)) != request.SessionID {
+	if err != nil || strings.TrimSpace(string(owner)) != ownerID {
 		return nil, ErrOwnerMismatch
 	}
 	before, err := os.Lstat(location.Path)

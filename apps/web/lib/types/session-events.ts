@@ -72,6 +72,8 @@ export type TaskSessionStateChangedPayload = {
   session_metadata?: Record<string, unknown>;
   session_recovery_blocks?: import("./http").SessionRecoveryBlockProjection[];
   is_passthrough?: boolean;
+  /** Omitted for ordinary sessions; see TaskSession in http.ts. */
+  waiting_on_errands?: boolean;
   error_message?: string;
   /** User-supplied session tab label; present (possibly "") on rename broadcasts. */
   name?: string;
@@ -144,10 +146,14 @@ export type TaskSessionAgentctlPayload = {
   agent_execution_id?: string;
   error_message?: string;
   worktree_id?: string;
+  /** Repository that owns the materialized worktree, when the event carries it. */
+  worktree_repository_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
   /** Effective task workspace root when the agentctl payload carries it. */
   workspace_path?: string;
+  /** Launched execution's confirmed working directory for relative chat links. */
+  agent_workspace_path?: string;
   /** Task root that contains every per-repo worktree as a sibling subdir.
    *  Set only when the event signals a sibling worktree addition (multi-branch
    *  add_branch flow) — the frontend repoints the file browser to it instead of
@@ -313,6 +319,11 @@ export type SessionBackendMessageMap = {
     "session.clarification_requested",
     TaskSessionNotificationPayload
   >;
+  "session.permission_requested": BackendMessage<
+    "session.permission_requested",
+    TaskSessionNotificationPayload
+  >;
+  "session.failed": BackendMessage<"session.failed", TaskSessionNotificationPayload>;
   "session.agentctl_starting": BackendMessage<
     "session.agentctl_starting",
     TaskSessionAgentctlPayload

@@ -72,7 +72,8 @@ function useSessionTabState(sessionId: string | undefined) {
   const sessionNumber = useAppStore((state) => {
     if (!sessionId) return null;
     const activeTaskId = state.tasks.activeTaskId;
-    const sessions = activeTaskId ? state.taskSessionsByTask.itemsByTaskId[activeTaskId] : null;
+    if (!activeTaskId) return null;
+    const sessions = state.taskSessionsByTask.itemsByTaskId[activeTaskId];
     if (!sessions) return null;
     // Sort chronologically (oldest first) so indexes are stable regardless of
     // which session is primary or the backend's default DESC ordering.
@@ -418,16 +419,9 @@ function SessionTabDialogHost({
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
-  const {
-    isPrimary,
-    sessionState,
-    taskId,
-    tabTitle,
-    sessionName,
-    agentName,
-    sessionNumber,
-    sessionCount,
-  } = useSessionTabState(sessionId);
+  const tabState = useSessionTabState(sessionId);
+  const { isPrimary, sessionState, taskId, tabTitle, sessionName } = tabState;
+  const { agentName, sessionNumber, sessionCount } = tabState;
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
   const dialogs = useSessionTabDialogState(sessionId);

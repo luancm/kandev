@@ -41,7 +41,10 @@ func TestStopSession_ExecutionLessSettlementYieldsToInverseOrderLaunch(t *testin
 	stopFinished, launchFinished := make(chan struct{}), make(chan struct{})
 	stopResult, launchResult := make(chan error, 1), make(chan error, 1)
 	boundaryErr := errors.New("launch reached repository under lifecycle ownership")
-	svc.repo = &coordinatorStopRepoHooks{repoStore: repo, getSessionFunc: func(context.Context, string) (*models.TaskSession, error) {
+	svc.repo = &coordinatorStopRepoHooks{repoStore: repo, getSessionFunc: func(ctx context.Context, id string) (*models.TaskSession, error) {
+		if ctx == stopCtx {
+			return repo.GetTaskSession(ctx, id)
+		}
 		close(launchRead)
 		return nil, boundaryErr
 	}}

@@ -27,6 +27,9 @@ import (
 // success.
 var ErrCeilingLaunchDeferred = errors.New("orchestrator: launch deferred by session ceiling")
 
+// ceilingSeamStartTask names startTask's admission seam in ceiling decisions.
+const ceilingSeamStartTask = "startTask"
+
 // originFromAutoStart derives the launch origin from the existing autoStart
 // signal, the widening AC-13a describes for a seam that has no dedicated origin
 // parameter of its own. It is not trusted at the two call sites AC-13d names,
@@ -135,6 +138,32 @@ func (s *Service) SetLaunchCredentialReminter(r LaunchCredentialReminter) {
 	s.launchCredentialReminter = r
 }
 
+// CeilingDeferredLaunchSettler observes the terminal outcome of a deferred
+// launch the ceiling owned. The caller that queued the launch settles its own
+// durable record from the recorded Office run identity; it must not launch,
+// retry, or otherwise replace the ceiling's single launch.
+type CeilingDeferredLaunchSettler interface {
+	// CeilingDeferredLaunchReplayed reports that the ceiling replay admitted
+	// the launch. sessionID and turnID are empty when the replayed kind does
+	// not create them.
+	CeilingDeferredLaunchReplayed(ctx context.Context, taskID, causingRunID, sessionID, turnID string) error
+	// CeilingDeferredLaunchDropped reports that the ceiling terminally
+	// dropped the launch, so no session will ever be created for it.
+	CeilingDeferredLaunchDropped(ctx context.Context, taskID, causingRunID, reasonCode, detail string) error
+}
+
+// SetCeilingDeferredLaunchSettler wires the caller-owned settlement observer.
+// See CeilingDeferredLaunchSettler.
+func (s *Service) SetCeilingDeferredLaunchSettler(v CeilingDeferredLaunchSettler) {
+	s.ceilingDeferredLaunchSettler = v
+}
+
+// ceilingPayloadCausingRunIDKey holds the caller's trusted run identity in a
+// ceiling "start" replay payload. startTaskOptions is rebuilt from the payload
+// on replay, so the identity has to round-trip or the replayed launch loses
+// its caller attribution.
+const ceilingPayloadCausingRunIDKey = "causing_run_id"
+
 // seam1StartPayload builds the AC-42 "start" replay row from startTask's own
 // frame, at the point the gate is consulted — before any workflow-step profile
 // resolution, so the recorded profile is the one the caller actually chose.
@@ -161,6 +190,9 @@ func seam1StartPayload(
 		"entry_options":          opts.EntryOptions,
 		"workflow_entry_id":      opts.WorkflowEntryID,
 		"origin":                 string(opts.Origin),
+		// Retain the spawn-only binding policy so a deferred replay creates the
+		// helper without rebinding the source step it was spawned from.
+		"preserve_workflow_source_binding": opts.PreserveWorkflowSourceBinding,
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{
@@ -174,6 +206,9 @@ func seam1StartPayload(
 	}
 	if opts.AutomationRun != nil {
 		payload[ceilingPayloadAutomationRunKey] = automationRunForCeilingPayload(opts.AutomationRun)
+	}
+	if opts.CausingRunID != "" {
+		payload[ceilingPayloadCausingRunIDKey] = opts.CausingRunID
 	}
 	return payload
 }
@@ -191,17 +226,9 @@ func seam1StartPayload(
 func (s *Service) admitOrDeferSeam1(
 	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
 ) (reservation *seam1Reservation, deferred bool, err error) {
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID,
-		origin: origin,
-		seam:   "startTask",
-	})
+	decision := s.admitSeam1Decision(ctx, taskID, origin)
 	if decision.admitted {
-		return &seam1Reservation{
-			controller: s.sessionCeiling, key: decision.reservationKey,
-			manualOverride: decision.manualOverride, population: decision.population,
-			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
-		}, false, nil
+		return s.seam1ReservationFor(decision), false, nil
 	}
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, "", startPayload)
 
@@ -212,4 +239,20 @@ func (s *Service) admitOrDeferSeam1(
 		return nil, false, err
 	}
 	return nil, true, nil
+}
+
+func (s *Service) admitSeam1Decision(ctx context.Context, taskID string, origin launchOrigin) admissionDecision {
+	return s.sessionCeiling.admit(ctx, admissionRequest{
+		taskID: taskID,
+		origin: origin,
+		seam:   ceilingSeamStartTask,
+	})
+}
+
+func (s *Service) seam1ReservationFor(decision admissionDecision) *seam1Reservation {
+	return &seam1Reservation{
+		controller: s.sessionCeiling, key: decision.reservationKey,
+		manualOverride: decision.manualOverride, population: decision.population,
+		populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+	}
 }

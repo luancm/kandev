@@ -46,10 +46,14 @@ selection invokes that action:
 - `copy_prompt` inserts the existing initial prompt.
 - `summarize:<sessionId>` invokes `useSummarizeSession` for that selected session.
 
-The summary hook reads the selected transcript and calls the existing
-`builtin-summarize-session` utility. Opening the form may load session options,
-but must not request a transcript for automatic summary generation or execute
-the summary utility. There is no stored context preference or migration.
+The summary hook reads the selected transcript and calls the existing `builtin-
+summarize-session` utility. The shared `useContextSessionOptions` hook offers
+only normal conversations in both New Agent and New Subtask, applying the
+[errand selection boundary](../../tasks/system-design/errand-conversation-
+navigation.md#normal-conversation-selection) before numbering. Opening the form
+may load session options, but must not request a transcript for automatic
+summary generation or execute the summary utility. There is no stored context
+preference or migration.
 
 ## Composer, launch, and failure behavior
 

@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { performLayoutSwitch, useDockviewStore } from "./dockview-store";
+import { releaseDockviewSessionRestore } from "./dockview-session-restore-gate";
 
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
@@ -335,7 +336,7 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(setEnvLayout).not.toHaveBeenCalledWith("env-first", expect.anything());
   });
 
-  it("prioritizes an explicit route layout over saved maximize state on first adoption", () => {
+  it("replays an explicit route layout after first-adoption session identity loads", async () => {
     const api = makeMockApi();
     const buildDefaultLayout = vi.fn();
     vi.mocked(getEnvMaximizeState).mockReturnValue({
@@ -344,10 +345,19 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     });
     useDockviewStore.setState({ api, currentLayoutEnvId: null, buildDefaultLayout });
 
-    performLayoutSwitch(null, "env-first", "session-Y", [], { initialLayout: "plan" });
+    performLayoutSwitch(null, "env-first", "session-Y", [], {
+      initialLayout: "plan",
+      sessionListRestoreState: { loaded: false, knownForeignSessionIds: new Set() },
+    });
 
     expect(api.fromJSON).not.toHaveBeenCalled();
-    expect(buildDefaultLayout).toHaveBeenCalledWith(api, "plan");
+    expect(buildDefaultLayout).toHaveBeenCalledExactlyOnceWith(api, "plan");
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(true);
+    expect(releaseDockviewSessionRestore(api, ["session-Y"])).toBe(true);
+    await flushRaf();
+    expect(buildDefaultLayout).toHaveBeenCalledTimes(2);
+    expect(buildDefaultLayout).toHaveBeenLastCalledWith(api, "plan");
+    expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
   });
 
   it("does nothing when api is unset", () => {

@@ -28,8 +28,8 @@ func TestDeliveryRetentionStorageOwnerStatementReuse(t *testing.T) {
 				event.SubmissionID = ""
 			}
 			var preparations atomic.Int64
-			setRetentionReceiptAuthorizer(t, repo, func(operation int, table, _, _ string) int {
-				if operation == sqlite3.SQLITE_READ && table == "task_sessions" {
+			setRetentionReceiptAuthorizer(t, repo, func(operation int, table, column, _ string) int {
+				if operation == sqlite3.SQLITE_READ && table == "task_sessions" && column == "queue_incarnation_id" {
 					preparations.Add(1)
 				}
 				return sqlite3.SQLITE_OK

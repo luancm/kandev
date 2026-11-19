@@ -58,8 +58,7 @@ export function pickActiveSessionId(
   if (preferredSessionId && sessions.some((s) => s.id === preferredSessionId)) {
     return preferredSessionId;
   }
-  const primary = sessions.find((s) => s.is_primary);
-  return (primary ?? sessions[0]).id;
+  return (sessions.find((session) => session.is_primary) ?? sessions[0]).id;
 }
 
 export function isSessionActive(state: TaskSessionState | null | undefined): boolean {

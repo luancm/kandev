@@ -116,6 +116,9 @@ func (r *KubernetesExecutor) Name() executor.Name { return executor.NameKubernet
 func (r *KubernetesExecutor) HealthCheck(context.Context) error { return nil }
 
 func (r *KubernetesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	if req != nil && req.ErrandMCPOwner != nil && (r.environmentStore == nil || req.TaskEnvironmentID == "" || !req.WorkspaceReuseRequired) {
+		return nil, fmt.Errorf("%w: Kubernetes errand requires a shared task environment", models.ErrWorkspaceReuseUnsafe)
+	}
 	if req != nil && r.environmentStore != nil && req.TaskEnvironmentID != "" {
 		return r.createTaskInstance(ctx, req)
 	}
@@ -134,6 +137,9 @@ func (r *KubernetesExecutor) createSessionInstance(ctx context.Context, req *Exe
 		return nil, err
 	}
 	reconnect := getMetadataString(req.Metadata, MetadataKeyKubernetesPodName) != ""
+	if req.ErrandMCPOwner != nil && !reconnect {
+		return nil, fmt.Errorf("%w: Kubernetes errand requires a recorded Pod", models.ErrWorkspaceReuseUnsafe)
+	}
 	var profile kubeexecutor.ProfileConfig
 	if !reconnect {
 		profile, err = kubernetesProfileConfigFromMetadata(req.Metadata)
@@ -465,37 +471,50 @@ type kubernetesAgentctlInstanceControl interface {
 	GetInstance(context.Context, string) (*agentctl.InstanceInfo, error)
 }
 
-func createOrReconcileKubernetesAgentctlInstance(
+func createOrReconcileKubernetesAgentctlInstance(ctx context.Context, control kubernetesAgentctlInstanceControl, request *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error) {
+	response, _, err := createOrReconcileKubernetesAgentctlInstanceWithOwnership(ctx, control, request)
+	return response, err
+}
+
+func createOrReconcileKubernetesAgentctlInstanceWithOwnership(
 	ctx context.Context,
 	control kubernetesAgentctlInstanceControl,
 	request *agentctl.CreateInstanceRequest,
-) (*agentctl.CreateInstanceResponse, error) {
+) (*agentctl.CreateInstanceResponse, bool, error) {
+	if request != nil {
+		if err := requireErrandQuestionPolicy(ctx, control, request.ErrandMCPOwner); err != nil {
+			return nil, false, err
+		}
+	}
 	response, createErr := control.CreateInstance(ctx, request)
 	if createErr == nil {
 		if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return response, nil
+		return response, true, nil
 	}
 	if !kubeexecutor.IsAmbiguousCreateError(createErr) {
-		return nil, createErr
+		return nil, false, createErr
 	}
 	reconcileCtx, cancel := kubernetesAmbiguousCreateContext(ctx)
 	defer cancel()
 	info, reconcileErr := control.GetInstance(reconcileCtx, request.ID)
 	if reconcileErr != nil {
-		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
+		return nil, false, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", reconcileErr))
 	}
 	response = &agentctl.CreateInstanceResponse{ID: info.ID, Port: info.Port}
 	if err := validateKubernetesAgentctlInstanceResponse(response, request); err != nil {
-		return nil, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
+		return nil, false, errors.Join(createErr, fmt.Errorf("reconcile ambiguous agentctl create: %w", err))
+	}
+	if !matchErrandMCPOwner(request.ErrandMCPOwner, info.ErrandMCPOwner) {
+		return nil, false, errors.New("retained agentctl errand owner mismatch")
 	}
 	if info.WorkspacePath != request.WorkspacePath {
-		return nil, errors.Join(createErr, errors.New(
+		return nil, false, errors.Join(createErr, errors.New(
 			"reconcile ambiguous agentctl create: existing instance workspace does not match request",
 		))
 	}
-	return response, nil
+	return response, false, nil
 }
 
 func validateKubernetesAgentctlInstanceResponse(

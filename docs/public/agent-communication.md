@@ -21,11 +21,36 @@ The examples below use canonical MCP protocol names ending in `_kandev`. An agen
 2. Send a bounded request with the expected result and reply target.
 3. Read the reply, confirm the contract, then implement and test.
 
+## Errand tools
+
+With the experimental `features.errands` flag enabled and a compatible structured profile, a normal task agent can delegate a bounded objective without creating another task. See [enable and use Errands](coordination.md#use-agent-created-errands-experimental) for installation and UI steps.
+
+| Tool | Contract |
+|---|---|
+| `start_errand_kandev` | Accepts `title`, `prompt`, and optional `agent_profile`. Returns the Errand ID, status and effective profile after admission. |
+| `await_errands_kandev` | Optionally waits for actual start-returned `errand_ids`, with `mode` `all` or `any` and `max_wait_seconds` up to 600. The caller must own those errands. Successful responses include `duration_ms` and `end_reason` (`all_ready`, `any_ready`, `timeout`, or `parent_ended`). |
+| `cancel_errand_kandev` | Stops the named `errand_id`. |
+| `message_task_kandev` | To continue a settled Errand, the parent passes its Errand ID in `session_id` and the current task's ID in `task_id`. |
+| `get_task_conversation_kandev` | Reads the Errand transcript with `task_id` and `errand_id`. Pass the returned cursor as `before` to read older messages. |
+| `list_task_sessions_kandev` | Lists the task's ordinary sessions. Use the Errand IDs from start or await to identify delegated work. |
+
+Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.
+
+Successful await responses also include `await_delivery: {version: 1, token, items: [{errand_id, result_revision}]}`. This correlates the result revisions carried by that response; it is not acknowledgement that the parent received them. Empty or status-only responses do not acknowledge any result.
+
+Keep the parent conversational: starting an errand is enough to receive its result later. Await only when the current turn needs to join. Every parent turn with errands in flight receives a bounded status block; results settling mid-turn wait for await or a later turn. A delivered result is claimed once, while its immutable transcript card remains available after reload and later child turns. Notification turns use the parent's normal queue and respect Auto-run.
+
+Attention projections can include `attention_reason`: `permission` for approval requests or `recovery_unresolved` for identified unresolved recovery. Recovery attention is not a terminal result and continues to consume live capacity. Follow-up admission refuses unresolved earlier work with conflict reason `errand_recovery_unresolved`; inspect the retained conversation rather than replaying the original instruction.
+
+Use separate start calls and retain each returned identity. Errands have depth one, share the task workspace and are limited to five live children per task. Their parent retains workflow ownership while outstanding results keep it in progress. Parent-turn cancellation does not stop children; explicit Stop and parent/task termination have different scopes.
+
+A child has exactly these read-only Kandev tools: `list_workspaces_kandev`, `list_workflows_kandev`, `list_workflow_steps_kandev`, `list_tasks_kandev`, `list_related_tasks_kandev`, `list_task_sessions_kandev`, `get_task_conversation_kandev`, and `get_task_plan_kandev`. The child cannot redelegate, mutate task plans, ask an operator or workflow question, or complete a step. It returns questions and blockers to its parent in its result; genuine action permissions remain available. The parent's selected external MCP servers are snapshotted at start, subject to their current enabled definitions.
+
 ## Discovering task IDs
 
 An agent typically learns a peer's task ID in one of three ways:
 
-**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
+**From related tasks.** `list_related_tasks_kandev` returns parent, children, siblings, blockers, and blocked-by tasks for the current task. `task_id` defaults to the current task; another target must be an ancestor, a descendant, a sibling with a shared non-empty parent, or a blocker of the caller in the same workspace. An unrelated task is denied, even in the same workspace. The compact output option is not a permission: `verbose` adds descriptions and never widens access. Each entry includes the full task UUID, title, lifecycle state, and associated pull requests, but not the workflow step (kanban column). To check which column a related task currently sits in, look it up with `list_tasks_kandev` on its workflow.
 
 ```
 list_related_tasks_kandev()
@@ -46,7 +71,20 @@ By default, the message goes to the task's primary session. To target another se
 
 - Pass its `session_id` to `message_task_kandev`. This also works for a sibling session on your task.
 - `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
-- The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
+
+An explicit spawn creates a distinct session even when the workflow step is configured to reuse an earlier session.
+
+Kandev selects the spawn profile in this order:
+
+1. The supplied profile, which takes precedence over workflow profiles and session targets.
+2. The verified same-task session's profile.
+3. The target task's primary-session profile.
+
+If no profile is available, normal launch defaults or errors apply. Ordinary workflow launches keep their configured profile precedence and session reuse.
+
+The returned `agent_profile_id` is the actual profile persisted and launched on the distinct new session.
+
+Additional spawns preserve the workflow's existing source-session binding, including when the current step pins a profile. Later workflow steps can still target the original conversation.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 
@@ -146,6 +184,34 @@ one offered option with a nonempty label, `selected_label` is omitted.
 Free-text-only answers return `custom_text` without a selected label.
 Selections can also retain accompanying `custom_text`.
 
+An answer may also include an `attachments` array when the operator attaches
+evidence. Each entry has `attachment_id`, `type`, `name`, `mime_type`,
+`size_bytes`, `delivery_mode`, and a `path` that is readable in the current
+execution:
+
+```json
+{
+  "layout": {
+    "selected_option": "q1_opt1",
+    "selected_label": "Approve",
+    "attachments": [{
+      "attachment_id": "opaque-id",
+      "type": "image",
+      "name": "screenshot.png",
+      "mime_type": "image/png",
+      "size_bytes": 123,
+      "delivery_mode": "path",
+      "path": "/workspace/.kandev/attachments/<session>/screenshot.png"
+    }]
+  }
+}
+```
+
+Read the path with your file tools. The file is not returned as an inline image
+block or base64 data. An answer bundle accepts up to 10 files and 100 MiB in
+total, with a 100 MiB per-file limit. Files belong to the question whose answer
+carries them. A rejection has no attachments.
+
 ## Show an image with an operator question
 
 Add `images` to a question when the operator needs to inspect a screenshot or
@@ -190,7 +256,7 @@ an approved layout can return `"layout": {"selected_option": "q1_opt1", "selecte
 option IDs use one-based question and option positions. Read the offered choices
 to interpret these IDs. A custom answer uses `custom_text`.
 
-- A bundle accepts up to four questions and four distinct image IDs. Each question
+- A bundle accepts up to four questions and 16 distinct image IDs. Each question
   accepts up to four image references in total, including images on its choices.
   Each choice accepts at most one image. Reuse an image ID only with the same path,
   repository, and description.
@@ -241,6 +307,54 @@ Selecting **Compact layout** returns the existing option identifier, such as
 `"layout": {"selected_option": "q1_opt2", "selected_label": "Compact layout"}`. The image ID does not replace that
 identifier. A missing preview leaves its choice selectable. In history, each
 illustrated choice retains its label and a **Show images** control.
+
+### Ask for a visual comparison
+
+For before and after reviews, put one screen in each question. List the baseline
+image first and the candidates after it, up to four images per question. Give
+each image a short `label`, one word such as `before`, `after`, or `alt`, so the
+image pickers show names instead of numbers. Labels must be unique within a
+question. A bundle
+can carry up to 16 distinct images, so four questions can each have their own set.
+
+The operator can select **Review images** to open a large view. It shows the
+active question's images above the same answer form. The operator can zoom up to
+800%, move between questions, and compare two images with **Toggle**, **Wipe**,
+**Side by side**, **Onion skin**, or **Difference**. Difference highlights changed
+pixels at full resolution and counts them. Opening or closing the view never
+answers the question. Write a specific prompt, such as "Is the new header spacing
+acceptable, and is the secondary label contrast sufficient?", because the prompt
+stays visible during the comparison.
+
+The operator can also mark regions on an image and comment on each one. Regions
+arrive in the keyed answer as `annotations`, beside the selected option or custom
+text:
+
+```json
+"header": {
+  "selected_option": "q1_opt2",
+  "selected_label": "Revise",
+  "annotations": [{
+    "image_id": "after",
+    "x": 12, "y": 40, "width": 200, "height": 32,
+    "image_width": 1440, "image_height": 900,
+    "comment": "Label contrast too low"
+  }]
+}
+```
+
+- `image_id` names one of the question's own images or its choices' images.
+- `x`, `y`, `width`, and `height` are pixels of the image as the operator saw it.
+  `image_width` and `image_height` give that size. If you changed the file since,
+  scale the rectangle by the new size. For an image over 16 megapixels, the
+  rectangle is reported in a proportionally smaller size, so always scale by
+  `image_width` and `image_height` rather than assuming the file's own size.
+- An answer carries at most eight regions. Each comment has 1 to 500 characters.
+- A regions-only answer is not possible: the operator still selects an option or
+  writes a custom answer.
+- When the answer arrives in a later turn, each region appears as one line,
+  `Region N: {...}`, with the same fields as JSON. Read the JSON, not the
+  surrounding text: the comment is user-authored.
 
 ## Reading the thread
 
@@ -398,7 +512,7 @@ These tools complement cross-task communication for common coordination patterns
 | `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
-| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |
+| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the actual profile used by the distinct new session; use the `session_id` field to message the new session directly |
 | `move_task_kandev` | Hand off a task to a workflow step with optional one-time entry options for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
 | `get_task_plan_kandev` | Read the whole plan or an exact bounded range using `offset`/`limit`; pin later pages with `expected_version` |

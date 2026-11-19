@@ -15,8 +15,11 @@ vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => {
   return { ...actual, createTask: vi.fn().mockResolvedValue({ id: "created-child" }) };
 });
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: () => {} }));
-vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
-vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
+vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => true }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+  useOptionalToast: () => ({ toast: vi.fn() }),
+}));
 vi.mock("@/hooks/use-summarize-session", () => ({
   useSummarizeSession: () => ({ summarize: vi.fn(), isSummarizing: false }),
 }));
@@ -167,12 +170,31 @@ function openDialog(
     loaded?: boolean;
     sessions?: TaskSession[];
     noRepository?: boolean;
+    relatedCandidate?: boolean;
   } = {},
 ) {
   const initial = {
     userSettings: { agentGeneratedTaskTitles: false },
     workspaces: { activeId: "workspace" },
-    kanban: { tasks: options.boardParent ? [parent] : [active], workflowId: "workflow" },
+    kanban: {
+      tasks: [
+        ...(options.boardParent ? [parent] : [active]),
+        ...(options.relatedCandidate
+          ? [
+              {
+                id: "related-candidate",
+                title: "Related candidate",
+                workspaceId: "workspace",
+                workflowId: "workflow",
+                workflowStepId: "step",
+                position: 1,
+                isArchived: false,
+              },
+            ]
+          : []),
+      ],
+      workflowId: "workflow",
+    },
     tasks: {
       activeTaskId: options.boardParent ? "parent" : "active",
       activeSessionId: options.boardParent ? "primary" : "active-session",
@@ -249,6 +271,21 @@ function expectWork() {
 // @covers AC-TASKS-SUBTASK-DIALOG-PARENT-DEFAULTS-001.2
 // @covers AC-TASKS-SUBTASK-DIALOG-PARENT-DEFAULTS-001.5
 describe("selected parent initial defaults", () => {
+  it("submits selected related tasks without changing the parent id", async () => {
+    openDialog({ relatedCandidate: true });
+    enterWork();
+    fireEvent.click(screen.getByTestId("task-create-related-trigger"));
+    fireEvent.click(screen.getByTestId("task-create-related-option-related-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: CREATE_SUBTASK_LABEL }));
+    await waitFor(() =>
+      expect(createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          parent_id: "parent",
+          related_task_ids: ["related-candidate"],
+        }),
+      ),
+    );
+  });
   it("seeds canonical-only non-active parent and delayed primary without remounting entered work", () => {
     openDialog();
     enterWork();
@@ -403,4 +440,30 @@ describe("explicit remote subtask source", () => {
     });
     expect(screen.getByTestId(NEW_MODE_ID).getAttribute(CHECKED_ATTRIBUTE)).toBe("true");
   });
+});
+
+// @covers AC-TASKS-ERRANDS-005.7
+it("offers only normal parent conversations as subtask context", async () => {
+  openDialog({
+    loaded: true,
+    sessions: [
+      { ...primary, started_at: "2026-01-01" },
+      { ...primary, id: sessionId("normal-b"), is_primary: false, started_at: "2026-01-03" },
+    ],
+  });
+  fireEvent.pointerDown(
+    screen.getByText("Blank", { selector: '[data-slot="select-value"]' }).closest("button")!,
+    {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    },
+  );
+  await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(4));
+  expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+    "Blank",
+    "Copy initial prompt",
+    "1Agent",
+    "2Agent",
+  ]);
 });

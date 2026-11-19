@@ -1,0 +1,261 @@
+package sqlite
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+var errandScenarioBase = time.Date(2026, time.October, 26, 9, 0, 0, 0, time.UTC)
+
+func newErrandTask(t *testing.T, repo *Repository, suffix string) string {
+	t.Helper()
+	ctx := context.Background()
+	workspaceID := "ws-errand-" + suffix
+	taskID := "task-errand-" + suffix
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Errands " + suffix}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Errands " + suffix}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	return taskID
+}
+
+func createErrandScenarioSession(t *testing.T, repo *Repository, session *models.TaskSession) {
+	t.Helper()
+	if err := repo.CreateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("CreateTaskSession %s: %v", session.ID, err)
+	}
+}
+
+func sampleErrand(id, taskID, parentID string, created time.Time) *models.Errand {
+	return &models.Errand{
+		ID: id, TaskID: taskID, ParentSessionID: parentID,
+		Title: "Title " + id, Objective: "Objective " + id, AgentProfileID: "profile-" + id,
+		MCPServerIDs: []string{"mcp-a", "mcp-b"}, FirstTurnID: "turn-" + id, SubmissionID: "submission-" + id,
+		MCPExcludedServerIDs: []string{"excluded-mcp"},
+		Lifecycle:            models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone,
+		AwaitingResult: true, CreatedAt: created, UpdatedAt: created,
+	}
+}
+
+func mustCreateErrand(t *testing.T, repo *Repository, errand *models.Errand) {
+	t.Helper()
+	if err := repo.CreateErrand(context.Background(), errand); err != nil {
+		t.Fatalf("CreateErrand %s: %v", errand.ID, err)
+	}
+}
+
+func errandIDs(errands []*models.Errand) []string {
+	ids := make([]string, 0, len(errands))
+	for _, errand := range errands {
+		ids = append(ids, errand.ID)
+	}
+	return ids
+}
+
+func equalOptionalTime(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
+}
+
+func assertErrandFields(t *testing.T, got, want *models.Errand) {
+	t.Helper()
+	gotCopy, wantCopy := *got, *want
+	if !gotCopy.CreatedAt.Equal(wantCopy.CreatedAt) || !equalOptionalTime(gotCopy.DeliveredAt, wantCopy.DeliveredAt) ||
+		!equalOptionalTime(gotCopy.SettledAt, wantCopy.SettledAt) {
+		t.Fatalf("errand timestamps = (%v, %v, %v), want (%v, %v, %v)", gotCopy.CreatedAt, gotCopy.DeliveredAt,
+			gotCopy.SettledAt, wantCopy.CreatedAt, wantCopy.DeliveredAt, wantCopy.SettledAt)
+	}
+	for _, errand := range []*models.Errand{&gotCopy, &wantCopy} {
+		errand.CreatedAt, errand.UpdatedAt, errand.DeliveredAt, errand.SettledAt = time.Time{}, time.Time{}, nil, nil
+	}
+	if !reflect.DeepEqual(gotCopy, wantCopy) {
+		t.Fatalf("errand = %+v\nwant %+v", gotCopy, wantCopy)
+	}
+}
+
+func assertErrandSchema(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	for _, table := range []string{"task_session_errands", "errand_turns", "errand_messages", "errand_execution_generations"} {
+		if exists, err := db.TableExistsContext(ctx, repo.db, table); err != nil || !exists {
+			t.Fatalf("table %s exists = %v, err = %v", table, exists, err)
+		}
+	}
+	for _, column := range []string{"teardown_intent", "last_read_message_id"} {
+		if exists, err := db.ColumnExistsContext(ctx, repo.db, "task_session_errands", column); err != nil || !exists {
+			t.Fatalf("Errand column %s exists = %v, err = %v", column, exists, err)
+		}
+	}
+	for _, index := range []string{
+		"idx_task_session_errands_task_lifecycle",
+		"idx_task_session_errands_parent",
+		errBrowserHistoryIndexName,
+		"idx_errand_messages_unread",
+	} {
+		if exists, err := db.IndexExistsContext(ctx, repo.db, index); err != nil || !exists {
+			t.Fatalf("index %s exists = %v, err = %v", index, exists, err)
+		}
+	}
+}
+
+func exerciseErrandSchemaReplay(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	assertErrandSchema(t, repo)
+	taskID := newErrandTask(t, repo, "schema")
+	parent := &models.TaskSession{ID: "parent-schema", TaskID: taskID, Name: "Original parent"}
+	createErrandScenarioSession(t, repo, parent)
+	row := sampleErrand("errand-schema", taskID, parent.ID, errandScenarioBase)
+	mustCreateErrand(t, repo, row)
+
+	reopened, err := NewWithDB(repo.db, repo.ro, nil)
+	if err != nil {
+		t.Fatalf("replay Errand schema: %v", err)
+	}
+	assertErrandSchema(t, reopened)
+	got, err := reopened.GetErrand(ctx, row.ID)
+	if err != nil {
+		t.Fatalf("read replayed Errand: %v", err)
+	}
+	assertErrandFields(t, got, row)
+	ordinary, err := reopened.GetTaskSession(ctx, parent.ID)
+	if err != nil || ordinary.Name != parent.Name || ordinary.TaskID != taskID {
+		t.Fatalf("ordinary parent after replay = %+v, err = %v", ordinary, err)
+	}
+	if _, err := reopened.GetTaskSession(ctx, row.ID); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("Errand identity resolved as a session: %v", err)
+	}
+}
+
+// exerciseErrandRoundTrip proves that every errand field round-trips and
+// that updates are compare-and-set on the version.
+func exerciseErrandRoundTrip(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	taskID := newErrandTask(t, repo, "roundtrip")
+	errand := sampleErrand("errand-roundtrip", taskID, "parent-roundtrip", errandScenarioBase)
+	mustCreateErrand(t, repo, errand)
+	if errand.Version != 1 {
+		t.Fatalf("inserted version = %d, want 1", errand.Version)
+	}
+	stored, err := repo.GetErrand(ctx, errand.ID)
+	if err != nil {
+		t.Fatalf("GetErrand: %v", err)
+	}
+	assertErrandFields(t, stored, errand)
+
+	if err := repo.CreateErrand(ctx, sampleErrand(errand.ID, taskID, "parent-roundtrip", errandScenarioBase)); err == nil {
+		t.Fatal("duplicate CreateErrand succeeded")
+	}
+	invalid := sampleErrand("errand-invalid", taskID, "parent-roundtrip", errandScenarioBase)
+	invalid.Lifecycle = ""
+	if err := repo.CreateErrand(ctx, invalid); !errors.Is(err, models.ErrInvalidErrand) {
+		t.Fatalf("invalid CreateErrand = %v, want ErrInvalidErrand", err)
+	}
+
+	settled := errandScenarioBase.Add(5 * time.Minute)
+	delivered := errandScenarioBase.Add(6 * time.Minute)
+	update := *stored
+	update.Lifecycle, update.LastOutcome, update.AwaitingResult = models.ErrandLifecycleLaunched, models.ErrandOutcomeDone, false
+	update.ResultText, update.ResultTruncated, update.ResultTurnID = "result é", true, "turn-result"
+	update.ResultKind, update.ResultState = models.ErrandResultOutput, models.ErrandResultDelivered
+	update.DeliveredRoute, update.DeliveryToken, update.DeliveredAt = models.ErrandDeliveryNotification, "token-1", &delivered
+	update.LatestSettledTurnID, update.SettledAt = "turn-result", &settled
+	if err := repo.UpdateErrand(ctx, &update); err != nil {
+		t.Fatalf("UpdateErrand: %v", err)
+	}
+	if update.Version != 2 {
+		t.Fatalf("updated version = %d, want 2", update.Version)
+	}
+	after, err := repo.GetErrand(ctx, errand.ID)
+	if err != nil {
+		t.Fatalf("GetErrand after update: %v", err)
+	}
+	assertErrandFields(t, after, &update)
+
+	immutable := *after
+	immutable.Title, immutable.Objective, immutable.ParentSessionID = "changed", "changed", "other-parent"
+	immutable.MCPServerIDs, immutable.FirstTurnID, immutable.SubmissionID = []string{"other"}, "other", "other"
+	immutable.MCPExcludedServerIDs = []string{"other-exclusion"}
+	if err := repo.UpdateErrand(ctx, &immutable); err != nil {
+		t.Fatalf("UpdateErrand with immutable changes: %v", err)
+	}
+	if fixed, err := repo.GetErrand(ctx, errand.ID); err != nil || fixed.Title != errand.Title ||
+		fixed.Objective != errand.Objective || fixed.ParentSessionID != errand.ParentSessionID ||
+		!reflect.DeepEqual(fixed.MCPServerIDs, errand.MCPServerIDs) || fixed.FirstTurnID != errand.FirstTurnID ||
+		!reflect.DeepEqual(fixed.MCPExcludedServerIDs, errand.MCPExcludedServerIDs) ||
+		fixed.SubmissionID != errand.SubmissionID {
+		t.Fatalf("immutable errand fields changed: %+v, err = %v", fixed, err)
+	}
+
+	stale := *stored
+	stale.ResultState = models.ErrandResultSuperseded
+	if err := repo.UpdateErrand(ctx, &stale); !errors.Is(err, models.ErrErrandVersionConflict) {
+		t.Fatalf("stale UpdateErrand = %v, want ErrErrandVersionConflict", err)
+	}
+	if current, err := repo.GetErrand(ctx, errand.ID); err != nil || current.ResultState != models.ErrandResultDelivered {
+		t.Fatalf("stale update changed the row: %+v, err = %v", current, err)
+	}
+
+	missing := sampleErrand("errand-missing", taskID, "parent-roundtrip", errandScenarioBase)
+	missing.Version = 1
+	if err := repo.UpdateErrand(ctx, missing); !errors.Is(err, models.ErrErrandNotFound) {
+		t.Fatalf("missing UpdateErrand = %v, want ErrErrandNotFound", err)
+	}
+	if _, err := repo.GetErrand(ctx, missing.ID); !errors.Is(err, models.ErrErrandNotFound) {
+		t.Fatalf("missing GetErrand = %v, want ErrErrandNotFound", err)
+	}
+}
+
+// exerciseErrandConcurrentUpdate proves that exactly one of two writers
+// holding the same version wins.
+func exerciseErrandConcurrentUpdate(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	taskID := newErrandTask(t, repo, "race")
+	mustCreateErrand(t, repo, sampleErrand("errand-race", taskID, "parent-race", errandScenarioBase))
+	base, err := repo.GetErrand(ctx, "errand-race")
+	if err != nil {
+		t.Fatalf("GetErrand: %v", err)
+	}
+	results := make([]error, 2)
+	var wg sync.WaitGroup
+	for index, state := range []models.ErrandResultState{models.ErrandResultPending, models.ErrandResultDiscarded} {
+		writer := *base
+		writer.ResultState = state
+		wg.Add(1)
+		go func(index int, writer models.Errand) {
+			defer wg.Done()
+			results[index] = repo.UpdateErrand(ctx, &writer)
+		}(index, writer)
+	}
+	wg.Wait()
+	wins, conflicts := 0, 0
+	for _, result := range results {
+		switch {
+		case result == nil:
+			wins++
+		case errors.Is(result, models.ErrErrandVersionConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent UpdateErrand returned %v", result)
+		}
+	}
+	if wins != 1 || conflicts != 1 {
+		t.Fatalf("concurrent updates: %d wins, %d conflicts; want exactly one of each", wins, conflicts)
+	}
+	if final, err := repo.GetErrand(ctx, "errand-race"); err != nil || final.Version != 2 {
+		t.Fatalf("final errand = %+v, err = %v; want version 2", final, err)
+	}
+}

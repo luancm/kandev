@@ -82,6 +82,9 @@
   "priorityIndicatorLabel": "優先度 {{priority}}",
   "queuedCount_one": "{{count}} 件キュー",
   "queuedCount_other": "{{count}} 件キュー",
+  "errandsLive_one": "{{count}} 件の依頼",
+  "errandsLive_other": "{{count}} 件の依頼",
+  "errandsWaiting": "依頼の結果を待っています",
   "queuedForStep": "{{step}} にキュー",
   "queuedSection": "キュー",
   "reorderPositionAnnouncement": "{{title}}、位置 {{position}} / {{total}}",
@@ -133,5 +136,6 @@
   "bulkActions": "操作",
   "selectTasks": "タスクを選択",
   "cancelTaskSelection": "選択をキャンセル",
-  "groupTasksIntoSectionsByWorkflowStep": "タスクをワークフローのステップ、ワークフロー、リポジトリ、プラグインが提供する値でセクションにまとめるか、グループ化しない設定を選びます。"
+  "groupTasksIntoSectionsByWorkflowStep": "タスクをワークフローのステップ、ワークフロー、リポジトリ、プラグインが提供する値でセクションにまとめるか、グループ化しない設定を選びます。",
+  "graph": "グラフ"
 }

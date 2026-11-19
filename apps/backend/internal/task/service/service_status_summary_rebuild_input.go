@@ -1,15 +1,18 @@
 package service
 
 import (
+	"strings"
+	"time"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
-	"strings"
-	"time"
 )
 
 func (s *Service) rebuildInput(
 	taskError *statussummary.ActiveErrorSummary,
+	turnError *statussummary.TurnErrorSummary,
+	turnErrorObserved bool,
 	sessions []*models.TaskSession,
 	taskEnvironmentIDs []string,
 	pendingBySession map[string]models.TaskPendingAction,
@@ -21,6 +24,7 @@ func (s *Service) rebuildInput(
 	launchQueue *statussummary.LaunchQueueSummary,
 	completionGate *statussummary.CompletionGateSummary,
 	completionGateObserved bool,
+	errands errandsSummaryObservation,
 	lastActivityAt time.Time,
 	activityObserved bool,
 	sessionsObserved bool,
@@ -30,6 +34,8 @@ func (s *Service) rebuildInput(
 		Sessions:               make([]statussummary.RebuildSession, 0, len(sessions)),
 		SessionsObserved:       sessionsObserved,
 		TaskError:              taskError,
+		TurnError:              turnError,
+		TurnErrorObserved:      turnErrorObserved,
 		PendingActions:         make(map[string]string),
 		ActivityObserved:       s.foregroundActivity != nil,
 		LastActivityAt:         nil,
@@ -40,7 +46,11 @@ func (s *Service) rebuildInput(
 		LaunchQueue:            cloneLaunchQueueForService(launchQueue),
 		CompletionGate:         cloneCompletionGateForService(completionGate),
 		CompletionGateObserved: completionGateObserved,
+		ErrandsObserved:        errands.observed,
 		Now:                    now,
+	}
+	if errands.summary != nil {
+		input.Errands = *errands.summary
 	}
 	if activityObserved && !lastActivityAt.IsZero() {
 		activityCopy := lastActivityAt.UTC()

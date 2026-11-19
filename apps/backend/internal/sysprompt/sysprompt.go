@@ -11,6 +11,7 @@ package sysprompt
 
 import (
 	"fmt"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"regexp"
 	"strconv"
 	"strings"
@@ -159,7 +160,7 @@ func contextKindForBlock(block string, trustedContents []string) contextKind {
 
 // OfficeContext returns the restricted first-turn prompt used by Office runs.
 // Its tool inventory must stay exactly aligned with MCP ModeOffice.
-func OfficeContext() string { return prompts.Get("office-context") }
+func OfficeContext() string { return FormatOfficeContext("{task_id}", "{session_id}") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {
@@ -168,7 +169,8 @@ func FormatOfficeContext(taskID, sessionID string) string {
 
 const stepCompleteRecoveryInstruction = "If it reports that the workflow step changed, retries in this turn cannot recover. " +
 	"End the turn and have the user resume the session for the current step, then complete it in the new turn. " +
-	"already_signaled means the signal was accepted. " +
+	"already_signaled returns the retained outcome; pending means only that the signal was recorded, not that a transition committed or a reviewer received the handoff. " +
+	"A later turn in the same step can replace an unconsumed signal, so end the turn after an accepted signal. " +
 	"Do not move the task solely to bypass a stale-turn error.\n"
 
 const officeStepCompleteInstruction = "This workflow step requires an explicit completion signal. " +
@@ -181,15 +183,7 @@ const officeStepCompleteInstruction = "This workflow step requires an explicit c
 // workflow step. The imperative completion instruction is present only when
 // the step's auto-advance policy requires the signal.
 func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
-	instruction := ""
-	if requiresSignal {
-		instruction = officeStepCompleteInstruction
-	}
-	return Resolve("office-context", map[string]string{
-		"task_id":                   taskID,
-		"session_id":                sessionID,
-		"step_complete_instruction": instruction,
-	})
+	return FormatOfficeContextWithPackages(taskID, sessionID, requiresSignal, nil)
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
@@ -221,14 +215,14 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 // task, session, capability, and question placeholders — use
 // [FormatKandevContext] to inject values.
 func KandevContext() string {
-	return Resolve("kandev-context", map[string]string{
+	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
 		"canvas_guidance_section":          "",
 		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
-	})
+	}, nil)
 }
 
 const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Keep shared context to 1-3 short sentences or brief bullets (about 100 words or fewer); put full reports, logs, and repeated conversation outside this call, before it. Keep each question and its options self-contained. Treat this as a hard user-input barrier: do no more work, make no tool calls, or send a final response until completed answers or structured rejection. On validation error before question creation, correct and retry. If an accepted call returns incomplete (including timeout, disconnect, or pending wait), end the turn without inferring an answer or continuing work.
@@ -243,6 +237,10 @@ This task runs in autopilot mode. Continue independently and make reasonable dec
 
 const canvasGuidanceSection = `CANVAS AUTHORING:
 Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
+`
+
+const worktreeAdoptionSection = `WORKTREE ADOPTION:
+If you create a Git worktree, create it inside the task workspace, then call add_branch_to_task_kandev with worktree_path so Kandev tracks it. Or call add_branch_to_task_kandev without worktree_path and Kandev creates the worktree.
 `
 
 const richOutputSection = `- show_rich_output_kandev: For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now. Table compares; StatusList checks; Callout notes. Use version=2,catalog_version=1,spec; discover schema/examples. Workspace-relative paths. Kandev owns layout/styling. Label series with units. No ASCII/SVG/HTML/separate app. Otherwise prose or small Markdown tables.
@@ -305,6 +303,7 @@ func PendingTaskTitlePassthroughInstruction() string {
 // KandevContextOptions controls capability-dependent sections in the first-turn
 // Kandev context.
 type KandevContextOptions struct {
+	BuiltinPackages                *mcpprofile.BuiltinManifest
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
@@ -312,6 +311,79 @@ type KandevContextOptions struct {
 	Autopilot                      bool
 	IncludeUserQuestionTool        bool
 	IncludeParentQuestionTool      bool
+	// IncludeWorktreeAdoption tells the agent to create any new Git worktree
+	// inside the task workspace and report it. Only host Worktree and Local
+	// executors set this.
+	IncludeWorktreeAdoption bool
+	// IncludeErrandTools adds the errand delegation policy and the three
+	// errand tools. Only an eligible parent session sets it.
+	IncludeErrandTools bool
+	// ErrandProfiles lists the agent profiles an errand can run with. Only
+	// read when IncludeErrandTools is set; it is capped at MaxErrandProfiles.
+	ErrandProfiles []ErrandProfile
+}
+
+// ErrandProfile is one agent profile offered to a parent for errands.
+type ErrandProfile struct {
+	Name  string
+	Agent string
+	Model string
+}
+
+// MaxErrandProfiles bounds the profile list in the first-turn context.
+const MaxErrandProfiles = 20
+
+// defaultDelegationPolicy is the delegation policy of every task session when
+// errands are off. Its text is pinned by the flag-off golden test.
+const defaultDelegationPolicy = "DELEGATION POLICY:\n" +
+	"Use your host agent's native subagent mechanism only when the user has explicitly authorized delegation; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.\n" +
+	"Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id=\"self\". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.\n"
+
+// errandDelegationPolicy replaces the default policy for an eligible parent.
+const errandDelegationPolicy = "DELEGATION POLICY:\n" +
+	"Errands are the default way to delegate bounded work: start_errand_kandev runs it in a separate errand session on this task, and its result returns to this conversation as a message. A turn that starts with errands in flight opens with an errand status block; that block is Kandev context, not a user request. " +
+	"Use your host agent's native subagent mechanism only for quick read-only lookups that finish within the current turn; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.\n" +
+	"Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id=\"self\". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.\n"
+
+// errandToolsSection lists the parent errand tools. The descriptions agree
+// with the tool descriptions: start returns at once, and await is an optional
+// in-turn join.
+func errandToolsSection(profiles []ErrandProfile) string {
+	return "- start_errand_kandev: Start a bounded errand in a separate session on this task. It returns at once with errand_id and status; end your turn after starting errands and continue when their results arrive as messages. Optional agent_profile takes an ID or exact name. Compatible profiles: " +
+		formatErrandProfiles(profiles) + ".\n" +
+		"- await_errands_kandev: Optional in-turn join. Wait for 1 to 5 errands (mode all or any, max_wait_seconds up to 600) only when a result is needed inside this turn; otherwise end the turn and wait to be notified.\n" +
+		"- cancel_errand_kandev: Cancel an errand you started.\n"
+}
+
+func formatErrandProfiles(profiles []ErrandProfile) string {
+	if len(profiles) == 0 {
+		return "none is compatible with this task's executor (start_errand_kandev reports the reason)"
+	}
+	if len(profiles) > MaxErrandProfiles {
+		profiles = profiles[:MaxErrandProfiles]
+	}
+	entries := make([]string, 0, len(profiles))
+	for _, profile := range profiles {
+		entry := StripTags(profile.Name)
+		details := StripTags(profile.Agent)
+		if model := StripTags(profile.Model); model != "" {
+			details += ", " + model
+		}
+		if details != "" {
+			entry += " (" + details + ")"
+		}
+		entries = append(entries, entry)
+	}
+	return strings.Join(entries, "; ")
+}
+
+// FormatErrandContext fills the errand prompt for one errand launch. Values pass
+// through StripTags because they reach the trusted system block.
+func FormatErrandContext(parentSessionID, title string) string {
+	return Resolve("errand", map[string]string{
+		"parent_session_id": StripTags(parentSessionID),
+		"errand_title":      StripTags(title),
+	})
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
@@ -327,7 +399,7 @@ func FormatKandevContext(taskID, sessionID string, requiresCompletionSignal bool
 	})
 }
 
-// FormatKandevContextWithOptions returns capability-aware Kandev context.
+// FormatKandevContextWithOptions returns capability-aware task context.
 func FormatKandevContextWithOptions(taskID, sessionID string, options KandevContextOptions) string {
 	section := ""
 	if options.RequiresCompletionSignal {
@@ -340,6 +412,12 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	taskTitle := ""
 	if options.IncludeTaskTitleTool {
 		taskTitle = taskTitleSection
+	}
+	delegation := defaultDelegationPolicy
+	errandTools := ""
+	if options.IncludeErrandTools {
+		delegation = errandDelegationPolicy
+		errandTools = errandToolsSection(options.ErrandProfiles)
 	}
 	questionTool := ""
 	switch {
@@ -356,17 +434,24 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeCanvasGuidance {
 		canvasGuidance = canvasGuidanceSection
 	}
-	return Resolve("kandev-context", map[string]string{
+	worktreeAdoption := ""
+	if options.IncludeWorktreeAdoption {
+		worktreeAdoption = worktreeAdoptionSection
+	}
+	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
 		"canvas_guidance_section":          canvasGuidance,
+		"worktree_adoption_section":        worktreeAdoption,
 		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
-	})
+		"delegation_policy_section":        delegation,
+		"errand_tools_section":             errandTools,
+	}, options.BuiltinPackages)
 }
 
 // ConfigContext returns the system prompt for config-mode MCP sessions.

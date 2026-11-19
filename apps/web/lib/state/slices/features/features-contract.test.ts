@@ -31,8 +31,16 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.dynamicAgentRouting).toBe(false);
   });
 
+  it("omits the retired dynamic circuit backoff toggle", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("dynamicCircuitBackoffEscalation");
+  });
+
   it("keeps canvases disabled by default", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
+  });
+
+  it("keeps errands disabled by default", () => {
+    expect(defaultFeatureFlags).toHaveProperty("errands", false);
   });
 
   it("keeps Integrated control opt-in in the frontend", () => {

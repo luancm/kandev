@@ -1,0 +1,306 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/kandev/kandev/internal/errands"
+	"github.com/kandev/kandev/internal/task/models"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
+)
+
+// ErrandMCPService is the errands.Service surface the errand MCP actions use.
+type ErrandMCPService interface {
+	Start(ctx context.Context, req errands.StartRequest) (*errands.StartResult, error)
+	Await(ctx context.Context, req errands.AwaitRequest) (errands.AwaitResult, error)
+	OfferAwait(context.Context, models.ErrandAwaitIdentity, models.ErrandAwaitDelivery) error
+	AbortOwnedAwait(context.Context, models.ErrandAwaitIdentity) error
+	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
+	ParentOutstanding(ctx context.Context, parentSessionID string) (bool, error)
+	ReadErrandMessages(ctx context.Context, taskID, errandID, before string, limit int) ([]*models.Message, bool, error)
+}
+
+// SetErrands wires the errands service and its release toggle. While the
+// toggle is off the start, await, and cancel actions fail with
+// feature_disabled; guards on other actions still apply to existing errands.
+func (h *Handlers) SetErrands(service ErrandMCPService, enabled bool) {
+	h.errands = service
+	h.errandsEnabled = enabled
+}
+
+func (h *Handlers) registerErrandHandlers(d *guardedMCPDispatcher) {
+	d.RegisterFunc(ws.ActionMCPStartErrand, h.handleStartErrand)
+	d.RegisterFunc(ws.ActionMCPAwaitErrands, h.handleAwaitErrands)
+	d.RegisterFunc(ws.ActionMCPAwaitErrandsRelease, h.handleAwaitErrandsRelease)
+	d.RegisterFunc(ws.ActionMCPCancelErrand, h.handleCancelErrand)
+}
+
+type startErrandRequest struct {
+	TaskID          string `json:"task_id"`
+	Title           string `json:"title"`
+	Prompt          string `json:"prompt"`
+	AgentProfile    string `json:"agent_profile"`
+	SenderTaskID    string `json:"sender_task_id"`
+	SenderSessionID string `json:"sender_session_id"`
+}
+
+type awaitErrandsRequest struct {
+	ErrandIDs       []string `json:"errand_ids"`
+	Mode            string   `json:"mode"`
+	MaxWaitSeconds  int      `json:"max_wait_seconds"`
+	AwaitToken      string   `json:"await_token"`
+	SenderTaskID    string   `json:"sender_task_id"`
+	SenderSessionID string   `json:"sender_session_id"`
+}
+
+type cancelErrandRequest struct {
+	ErrandID        string `json:"errand_id"`
+	SenderTaskID    string `json:"sender_task_id"`
+	SenderSessionID string `json:"sender_session_id"`
+}
+
+// awaitErrandView is one errand in an await response. Result and Truncated
+// describe this await's claim; DeliveredVia identifies another claim's route.
+type awaitErrandView struct {
+	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
+	ErrandID        string                       `json:"errand_id"`
+	Status          string                       `json:"status"`
+	Result          string                       `json:"result,omitempty"`
+	Truncated       bool                         `json:"truncated,omitempty"`
+	DeliveredVia    string                       `json:"delivered_via,omitempty"`
+}
+
+type awaitErrandsResponse struct {
+	Delivery   models.ErrandAwaitDelivery `json:"await_delivery"`
+	DurationMS int64                      `json:"duration_ms"`
+	EndReason  string                     `json:"end_reason,omitempty"`
+	Errands    []awaitErrandView          `json:"errands"`
+	Ended      bool                       `json:"ended,omitempty"`
+}
+
+// handleStartErrand starts an errand for a verified parent session. The
+// result returns at once; the errand's answer comes back as a message.
+func (h *Handlers) handleStartErrand(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req startErrandRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if refusal := h.errandsDisabled(msg); refusal != nil {
+		return refusal, nil
+	}
+	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
+	if parent == nil || parent.IsPassthrough || isConfigSession(parent) {
+		return errandRefusal(msg, errands.ReasonNotSupported, "start_errand_kandev needs an ordinary agent session on this task"), nil
+	}
+	if refusal := h.errandTaskRefusal(ctx, msg, parent.TaskID); refusal != nil {
+		return refusal, nil
+	}
+	result, err := h.errands.Start(ctx, errands.StartRequest{
+		TaskID:          parent.TaskID,
+		ParentSessionID: parent.ID,
+		Title:           req.Title,
+		Objective:       req.Prompt,
+		Profile:         req.AgentProfile,
+	})
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	return ws.NewResponse(msg.ID, msg.Action, startErrandView(result))
+}
+
+func startErrandView(result *errands.StartResult) map[string]interface{} {
+	view := map[string]interface{}{
+		stopTaskStatusKey:    string(result.Status),
+		"agent_profile_name": result.ProfileName,
+	}
+	if result.AttentionReason != "" {
+		view["attention_reason"] = result.AttentionReason
+	}
+	if result.Errand != nil {
+		view[errandIDKey] = result.Errand.ID
+		view["session_id"] = result.Errand.ID
+		view["agent_profile_id"] = result.Errand.AgentProfileID
+	}
+	return view
+}
+
+// handleAwaitErrands is an optional in-turn join on the parent's errands.
+func (h *Handlers) handleAwaitErrands(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req awaitErrandsRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if refusal := h.errandsDisabled(msg); refusal != nil {
+		return refusal, nil
+	}
+	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
+	if parent == nil {
+		return errandRefusal(msg, errands.ReasonNotPermitted, "await_errands_kandev needs a parent session"), nil
+	}
+	owner, err := awaitCallerIdentity(ctx, parent, req.AwaitToken, false)
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	result, err := h.errands.Await(ctx, errands.AwaitRequest{
+		Owner:          owner,
+		ErrandIDs:      req.ErrandIDs,
+		Mode:           req.Mode,
+		MaxWaitSeconds: req.MaxWaitSeconds,
+	})
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	return h.offerAwaitResponse(ctx, msg, owner, result)
+}
+
+func awaitErrandsView(result errands.AwaitResult) awaitErrandsResponse {
+	views := make([]awaitErrandView, 0, len(result.Errands))
+	for _, item := range result.Errands {
+		views = append(views, awaitErrandView{
+			AttentionReason: item.AttentionReason,
+			ErrandID:        item.ErrandID,
+			Status:          item.Status,
+			Result:          item.Result,
+			Truncated:       item.Truncated,
+			DeliveredVia:    item.DeliveredVia,
+		})
+	}
+	return awaitErrandsResponse{Delivery: result.Delivery, Errands: views, Ended: result.Ended, DurationMS: result.DurationMS, EndReason: result.EndReason}
+}
+
+// handleAwaitErrandsRelease returns the claim of an abandoned await so its
+// results are delivered with the parent's next turn.
+func (h *Handlers) handleAwaitErrandsRelease(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req awaitErrandsRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if h.errands == nil {
+		return errandRefusal(msg, errands.ReasonNotPermitted, "errand service is unavailable"), nil
+	}
+	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
+	if parent == nil {
+		return errandRefusal(msg, errands.ReasonNotPermitted, "only a parent session can release an await"), nil
+	}
+	owner, err := awaitCallerIdentity(ctx, parent, req.AwaitToken, true)
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	if err := h.errands.AbortOwnedAwait(ctx, owner); err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"released": true})
+}
+
+// handleCancelErrand cancels one errand of the verified parent.
+func (h *Handlers) handleCancelErrand(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req cancelErrandRequest
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if refusal := h.errandsDisabled(msg); refusal != nil {
+		return refusal, nil
+	}
+	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
+	if parent == nil {
+		return errandRefusal(msg, errands.ReasonNotPermitted, "cancel_errand_kandev needs a parent session"), nil
+	}
+	snapshot, err := h.errands.Cancel(ctx, errands.CancelRequest{
+		ErrandID:        req.ErrandID,
+		TaskID:          parent.TaskID,
+		ParentSessionID: parent.ID,
+		Source:          models.ErrandCancelSourceParent,
+	})
+	if err != nil {
+		return errandServiceError(msg, err), nil
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		errandIDKey:       req.ErrandID,
+		stopTaskStatusKey: string(snapshot.Status),
+	})
+}
+
+// errandsDisabled refuses an errand action while the release toggle is off or
+// no errands service is wired.
+func (h *Handlers) errandsDisabled(msg *ws.Message) *ws.Message {
+	if h.errands != nil && h.errandsEnabled {
+		return nil
+	}
+	return errandRefusal(msg, errands.ReasonFeatureDisabled, "errands are disabled")
+}
+
+// verifiedSession returns the caller's session only when it belongs to the
+// named task. The session ID is server-injected; the task check keeps a
+// forged or stale ID from acting as another task's parent.
+func (h *Handlers) verifiedSession(ctx context.Context, taskID, sessionID string) *models.TaskSession {
+	if sessionID == "" || taskID == "" || h.taskSvc == nil {
+		return nil
+	}
+	session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID {
+		return nil
+	}
+	return session
+}
+
+// errandTaskRefusal refuses a start on a task that cannot delegate errands:
+// Office, ephemeral, coordinator, and automation tasks.
+func (h *Handlers) errandTaskRefusal(ctx context.Context, msg *ws.Message, taskID string) *ws.Message {
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return errandRefusal(msg, errands.ReasonNotSupported, "errands are not available for this task")
+	}
+	if task.IsFromOffice || task.IsEphemeral || task.Origin == models.TaskOriginCoordinator ||
+		models.IsAutomationTaskOrigin(task.Origin) {
+		return errandRefusal(msg, errands.ReasonNotSupported, "errands are not available for this task")
+	}
+	return nil
+}
+
+// errandOutstandingRefusal refuses a parent's step completion while its
+// errands owe an outcome. It runs before any signal is recorded.
+func (h *Handlers) errandOutstandingRefusal(ctx context.Context, msg *ws.Message, parentSessionID string) *ws.Message {
+	if h.errands == nil || parentSessionID == "" {
+		return nil
+	}
+	outstanding, err := h.errands.ParentOutstanding(ctx, parentSessionID)
+	if err != nil {
+		h.logger.Warn("failed to read errand state for step completion",
+			zap.String("session_id", parentSessionID), zap.Error(err))
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to read errand state", nil)
+		return resp
+	}
+	if !outstanding {
+		return nil
+	}
+	return errandRefusal(msg, errands.ReasonErrandsOutstanding,
+		"wait for your errands to report before completing this step")
+}
+
+// errandIDKey is the payload key carrying an errand's identifier.
+const errandIDKey = "errand_id"
+
+// errandRefusal renders a typed errand failure with its reason in details.
+func errandRefusal(msg *ws.Message, reason errands.Reason, message string) *ws.Message {
+	resp, _ := ws.NewError(msg.ID, msg.Action, errands.ErrorCode(reason), message,
+		map[string]interface{}{mcpReasonKey: string(reason)})
+	return resp
+}
+
+func errandServiceError(msg *ws.Message, err error) *ws.Message {
+	if resp, ok := errands.WSError(msg.ID, msg.Action, err); ok {
+		return resp
+	}
+	resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "errand request failed: "+err.Error(), nil)
+	return resp
+}
+
+// isConfigSession reports whether a session runs in configuration mode.
+func isConfigSession(session *models.TaskSession) bool {
+	if session == nil || session.Metadata == nil {
+		return false
+	}
+	configMode, ok := session.Metadata["config_mode"].(bool)
+	return ok && configMode
+}

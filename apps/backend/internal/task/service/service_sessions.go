@@ -200,7 +200,49 @@ func (s *Service) MarkSessionRead(ctx context.Context, sessionID, messageID stri
 	if err := s.sessions.UpdateTaskSessionLastReadMessageID(ctx, sessionID, messageID); err != nil {
 		return nil, err
 	}
-	return s.sessions.GetTaskSession(ctx, sessionID)
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	s.publishReadCursorChanged(ctx, session, message)
+	return session, nil
+}
+
+// publishReadCursorChanged announces the persisted cursor, which may be newer
+// than the requested message when the monotonic write rejected a stale one.
+func (s *Service) publishReadCursorChanged(ctx context.Context, session *models.TaskSession, requested *models.Message) {
+	if s.eventBus == nil || session == nil || session.LastReadMessageID == "" {
+		return
+	}
+	eventCtx := context.WithoutCancel(ctx)
+	cursor := requested
+	if session.LastReadMessageID != requested.ID {
+		persisted, err := s.messages.GetMessage(eventCtx, session.LastReadMessageID)
+		if err != nil {
+			s.logger.Warn("failed to read persisted read cursor message",
+				zap.String("session_id", session.ID),
+				zap.Error(err))
+			return
+		}
+		cursor = persisted
+	}
+	data := map[string]interface{}{
+		sessionEventFieldTaskID:    session.TaskID,
+		sessionEventFieldSessionID: session.ID,
+		"last_read_message_id":     cursor.ID,
+		"last_read_created_at":     cursor.CreatedAt.UTC().Format(time.RFC3339Nano),
+		"reset":                    false,
+	}
+	if err := s.eventBus.Publish(eventCtx, events.TaskSessionReadCursorChanged, bus.NewEvent(
+		events.TaskSessionReadCursorChanged,
+		"task-service",
+		data,
+	)); err != nil {
+		s.logger.Warn("failed to publish read cursor event",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
 }
 
 // GetPrimarySession returns the primary session for a task.
@@ -289,13 +331,23 @@ func (s *Service) ListTaskSessionSummaryObservations(
 	return result, nil
 }
 
+// ListOrdinaryTaskSessionSummaryObservations returns the shared TaskSession
+// projection for callers of the ordinary navigation route.
+func (s *Service) ListOrdinaryTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	return s.ListTaskSessionSummaryObservations(ctx, taskID)
+}
+
 func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSessionSummaryObservation {
 	if session == nil {
 		return nil
 	}
 	observation := &models.TaskSessionSummaryObservation{
-		ID: session.ID, TaskID: session.TaskID, QueueIncarnationID: session.QueueIncarnationID,
-		Name: session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
+		ID: session.ID, TaskID: session.TaskID,
+		QueueIncarnationID: session.QueueIncarnationID,
+		Name:               session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
 		AgentProfileID: session.AgentProfileID, ExecutionProfileID: session.ExecutionProfileID,
 		RouteGeneration: session.RouteGeneration, RouteState: session.RouteState, RouteReason: session.RouteReason,
 		ExecutorID: session.ExecutorID, ExecutorProfileID: session.ExecutorProfileID,
@@ -310,6 +362,9 @@ func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSess
 	}
 	if raw, ok := session.Metadata[models.SessionMetaKeyLastAgentError]; ok {
 		observation.Metadata[models.SessionMetaKeyLastAgentError] = raw
+	}
+	for key, value := range models.ProjectSessionContextMetadata(session.Metadata) {
+		observation.Metadata[key] = value
 	}
 	if label := models.ProjectSessionModelLabel(session.Metadata); label != nil {
 		observation.Metadata[models.SessionMetaKeyACPModelState] = label

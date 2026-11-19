@@ -140,6 +140,21 @@ describe("buildSidebarItem", () => {
     expect(item.queuedCount).toBe(3);
   });
 
+  it("projects the bounded errands count and waiting state to the row", () => {
+    const item = buildSidebarItem(
+      task({
+        statusSummary: {
+          revision: 6,
+          updated_at: SUMMARY_UPDATED_AT,
+          errands: { live: 2, waiting: true },
+        },
+      }),
+      emptyContext(),
+    );
+
+    expect(item.errandsSummary).toEqual({ live: 2, waiting: true });
+  });
+
   it("leaves queuedCount undefined when the summary has no queued prompts", () => {
     const item = buildSidebarItem(
       task({ statusSummary: { revision: 5, updated_at: UPDATED_AT } }),
@@ -288,5 +303,27 @@ describe("buildSidebarItem activity", () => {
       emptyContext(),
     );
     expect(createdFallback.lastActivityAt).toBe(CREATED_AT);
+  });
+});
+
+describe("buildSidebarItem unread projection", () => {
+  const UPDATED_AT = "2026-07-22T00:00:00Z";
+
+  it("carries the summary unread aggregate onto the sidebar row", () => {
+    const item = buildSidebarItem(
+      task({
+        statusSummary: { revision: 1, updated_at: UPDATED_AT, unread_session_ids: ["session-1"] },
+      }),
+      emptyContext(),
+    );
+    expect(item.unreadSessionIds).toEqual(["session-1"]);
+  });
+
+  it("reports no unread sessions without a summary or with an empty list", () => {
+    expect(buildSidebarItem(task(), emptyContext()).unreadSessionIds).toBeUndefined();
+    const cleared = task({
+      statusSummary: { revision: 2, updated_at: UPDATED_AT, unread_session_ids: [] },
+    });
+    expect(buildSidebarItem(cleared, emptyContext()).unreadSessionIds).toBeUndefined();
   });
 });

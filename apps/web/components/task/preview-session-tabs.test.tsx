@@ -647,7 +647,7 @@ describe("PreviewSessionTabs delete session selection", () => {
     expect(onSessionChange).toHaveBeenCalledWith("session-b");
   });
 
-  it("calls onSessionChange with null when the last remaining session is deleted", async () => {
+  it("clears selection after the last session is deleted", async () => {
     mocks.sessions = [makeSession("session-a", { state: "COMPLETED" })];
     const onSessionChange = vi.fn();
     render(

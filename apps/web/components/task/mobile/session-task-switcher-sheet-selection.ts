@@ -7,6 +7,7 @@ import {
   effectiveTaskPendingAction,
   resolvePreferredSessionId,
   resolveTaskSessionId,
+  resolveLoadedSessionId,
   taskPendingSelectionMatches,
   taskPendingSelectionSnapshot,
   type TaskPendingSelectionSnapshot,
@@ -99,7 +100,7 @@ export async function selectPendingTaskFromSheet(
   try {
     const sessions = await params.loadTaskSessionsForTask(params.taskId, { force: true });
     targetSessionId = resolveTaskSessionId({
-      sessions,
+      sessions: sessions.filter((session) => session.task_id === params.taskId),
       preferredSessionId: params.preferredSessionId,
       taskPendingAction: params.taskPendingAction,
     });
@@ -136,7 +137,10 @@ async function selectTaskWithoutPrimarySession(taskId: string, actions: Selectio
   try {
     const sessions = await actions.loadTaskSessionsForTask(taskId);
     if (!selectionIsCurrent(actions)) return;
-    const sessionId = sessions[0]?.id ?? null;
+    const sessionId = resolveLoadedSessionId(
+      sessions.filter((session) => session.task_id === taskId),
+      "",
+    );
     if (sessionId) {
       actions.setActiveSession(taskId, sessionId);
       navigate(taskId, sessionId);

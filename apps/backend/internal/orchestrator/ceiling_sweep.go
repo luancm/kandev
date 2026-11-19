@@ -155,5 +155,24 @@ func (s *Service) ceilingSweepTick(ctx context.Context) {
 	if s.sessionCeiling != nil {
 		s.sessionCeiling.expireStaleReservations()
 	}
+	lifecycleAvailable := s.reconcileErrandLifecycle(ctx)
 	s.drainDeferredCeilingLaunches(ctx)
+	if lifecycleAvailable {
+		s.drainQueuedErrands(ctx)
+		s.sweepErrandDelivery(ctx)
+	}
+	s.resumeFixedProfileWaits(ctx)
+	s.retryMessageCapacityWaits(ctx)
+}
+
+// Row failures remain local: drain and delivery validate their own task
+// inventories even when this recovery pass reports an incomplete result.
+func (s *Service) reconcileErrandLifecycle(ctx context.Context) bool {
+	if s.errands == nil {
+		return false
+	}
+	if err := s.errands.ReconcileLifecycle(ctx); err != nil {
+		s.logger.Warn("errand lifecycle sweep remains incomplete", zap.Error(err))
+	}
+	return true
 }

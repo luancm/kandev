@@ -28,6 +28,8 @@ const (
 	SurfaceManagedConversation Surface = "managed-conversation"
 	// SurfaceCoordinator is the copilot's conversation MCP surface.
 	SurfaceCoordinator Surface = "coordinator"
+	// SurfaceErrand is the fixed, read-only catalog of an errand session.
+	SurfaceErrand Surface = "errand"
 )
 
 type Capability string
@@ -39,6 +41,12 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityErrands grants a parent session the errand start, await, and
+	// cancel tools. It is granted only while features.errands is on.
+	CapabilityErrands Capability = "errands"
+	// CapabilityWorkspaceCollaborationReport exposes the report-only delivery
+	// mode on the task message tool while collaboration enforcement is enabled.
+	CapabilityWorkspaceCollaborationReport Capability = "workspace-collaboration-report"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent
@@ -52,6 +60,7 @@ type Context struct {
 	// CoordinatorToolPolicy is the tool list bound to a coordinator
 	// conversation; nil for every other surface.
 	CoordinatorToolPolicy *CoordinatorToolPolicy `json:"coordinator_tool_policy,omitempty"`
+	BuiltinPackages       *BuiltinManifest       `json:"builtin_packages,omitempty"`
 }
 
 // ManagedToolPolicy is the backend-resolved authority for one retained plugin
@@ -173,6 +182,7 @@ func (c Context) WithManagedToolPolicy(policy ManagedToolPolicy) Context {
 // canonicalization rules.
 func Normalize(c Context) Context {
 	normalized := New(c.Surface, c.Capabilities, c.Providers)
+	normalized.BuiltinPackages = c.BuiltinPackages.Clone()
 	if c.ManagedToolPolicy != nil {
 		policy := *c.ManagedToolPolicy
 		policy.AgentToolNames = slices.Clone(c.ManagedToolPolicy.AgentToolNames)
@@ -183,6 +193,7 @@ func Normalize(c Context) Context {
 	if c.CoordinatorToolPolicy != nil && c.Surface == SurfaceCoordinator {
 		policy := *c.CoordinatorToolPolicy
 		policy.ToolNames = slices.Clone(c.CoordinatorToolPolicy.ToolNames)
+		policy.PluginTools = slices.Clone(c.CoordinatorToolPolicy.PluginTools)
 		normalized.CoordinatorToolPolicy = &policy
 	}
 	return normalized
@@ -248,10 +259,13 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 		surface = SurfaceAutomation
 	case mcpmode.Coordinator:
 		surface = SurfaceCoordinator
+	case mcpmode.Errand:
+		surface = SurfaceErrand
 	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
+	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation &&
+		surface != SurfaceCoordinator && surface != SurfaceErrand {
 		capabilities = append(capabilities, CapabilityUserQuestion)
 	}
 	return New(surface, capabilities, providers)
@@ -259,7 +273,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation, SurfaceCoordinator:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation, SurfaceCoordinator, SurfaceErrand:
 		return surface
 	default:
 		return SurfaceKanbanTask

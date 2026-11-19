@@ -33,8 +33,10 @@ func kubernetesSessionEnvironment(req *ExecutorCreateRequest) map[string]string 
 		}
 	}
 	env["HOME"] = kubernetesSessionHome(req)
-	env[kubernetesEnvSessionID] = req.SessionID
-	env[kubernetesEnvTaskID] = req.TaskID
+	if req.ErrandMCPOwner == nil {
+		env[kubernetesEnvSessionID] = req.SessionID
+		env[kubernetesEnvTaskID] = req.TaskID
+	}
 	env[kubernetesEnvInstanceID] = req.InstanceID
 	env[kubernetesEnvEnvironmentID] = req.TaskEnvironmentID
 	env[kubernetesEnvAgentProfile] = req.OfficeAgentProfileID

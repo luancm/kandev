@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 )
 
@@ -41,6 +42,7 @@ func (s *Service) CancelTurn(ctx context.Context, sessionID, expectedTurnID stri
 	if active != expectedTurnID {
 		return ErrTurnNotActive
 	}
+	s.endParentAwaits(sessionID)
 	operation, owner, _, accepted := s.claimCancellationWithActionExclusive(sessionID, cancellationKindInternal, nil)
 	if !accepted || !owner {
 		return ErrCancelInFlight
@@ -95,7 +97,13 @@ func (s *Service) runTurnCancellationOwned(ctx context.Context, taskID, sessionI
 	}
 	s.setCancellationCompletionEligible(sessionID, operation, completionEligible)
 	prepared := cancelAgentPreparation{session: session, identity: identity, completionEligible: completionEligible}
-	return s.finishSilentCancelledAgentTurn(ctx, taskID, sessionID, prepared)
+	if err := s.finishSilentCancelledAgentTurn(ctx, taskID, sessionID, prepared); err != nil {
+		return err
+	}
+	// A user cancel never starts a result notification; pending results wait
+	// for a later parent turn.
+	_, _ = s.settleParentTurn(ctx, sessionID, errands.SettleCauseUserCancel)
+	return nil
 }
 
 // capturePromptActivity overlays the execution, prompt generation and

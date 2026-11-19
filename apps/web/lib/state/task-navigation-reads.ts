@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
-import { fetchTask, listTaskSessions } from "@/lib/api";
+import { isTemporaryReadError } from "@/lib/api/temporary-read-error";
+import { fetchTask, listOrdinaryTaskSessions } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
@@ -16,12 +17,14 @@ import {
 } from "@/lib/state/task-navigation-attempt";
 import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
+import type { ErrandInspection } from "@/lib/types/errands";
 import type { AppState } from "./store";
 
 export type TaskNavigationIdentity = {
   task: Task;
   allSessionsResponse: TaskSessionsResponse;
   sessionListUnavailable?: boolean;
+  selectedErrandInspection?: ErrandInspection;
 };
 
 export type TaskNavigationContext = {
@@ -36,6 +39,8 @@ export type TaskNavigationReadSnapshot = {
   identity?: TaskNavigationIdentity;
   error?: unknown;
   temporary: boolean;
+  /** Set once temporary recovery exhausts; cleared on success or scope invalidation. */
+  exhausted: boolean;
   revision: number;
   cycle: number;
 };
@@ -55,6 +60,7 @@ const IDLE_SNAPSHOT: TaskNavigationReadSnapshot = Object.freeze({
   phase: "idle",
   attempt: 0,
   temporary: false,
+  exhausted: false,
   revision: 0,
   cycle: 0,
 });
@@ -68,16 +74,7 @@ export function isTaskNavigationAbort(error: unknown): boolean {
 }
 
 export function isTemporaryTaskNavigationError(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
-  if (error instanceof TaskNavigationCycleDeadlineError) return true;
-  if (!(error instanceof ApiError)) return false;
-  if ([429, 502, 503, 504].includes(error.status)) return true;
-  return (
-    error.body !== null &&
-    typeof error.body === "object" &&
-    "code" in error.body &&
-    (error.body as { code?: unknown }).code === "persistence_unavailable"
-  );
+  return isTemporaryReadError(error);
 }
 
 export class TaskNavigationReads {
@@ -297,7 +294,14 @@ export class TaskNavigationReads {
             this.loadIdentity,
           );
           this.assertCurrent(record, controller.signal);
-          this.publish(record, { phase: "succeeded", attempt, identity, temporary: false, cycle });
+          this.publish(record, {
+            phase: "succeeded",
+            attempt,
+            identity,
+            temporary: false,
+            exhausted: false,
+            cycle,
+          });
           return identity;
         } catch (error) {
           const outcome = this.classifyAttemptFailure({
@@ -353,7 +357,14 @@ export class TaskNavigationReads {
     this.assertCurrent(record, controller.signal);
     const temporary = isTemporaryTaskNavigationError(error);
     if (!temporary || attempt === RETRY_DELAYS_MS.length) {
-      this.publish(record, { phase: "failed", attempt, error, temporary, cycle });
+      this.publish(record, {
+        phase: "failed",
+        attempt,
+        error,
+        temporary,
+        exhausted: temporary,
+        cycle,
+      });
       return { kind: "fatal", error };
     }
     const retryAfterMs = error instanceof ApiError ? (error.retryAfterSeconds ?? 0) * 1_000 : 0;
@@ -388,6 +399,7 @@ export class TaskNavigationReads {
       attempt,
       error: deadlineError,
       temporary: true,
+      exhausted: true,
       cycle,
     });
     return deadlineError;
@@ -401,10 +413,14 @@ export class TaskNavigationReads {
 
   private publish(
     record: TaskNavigationReadRecord,
-    update: Omit<TaskNavigationReadSnapshot, "revision">,
+    update: Omit<TaskNavigationReadSnapshot, "revision" | "exhausted"> & { exhausted?: boolean },
   ) {
     if (this.records.get(readKey(record.generation, record.taskId)) !== record) return;
-    record.snapshot = { ...update, revision: record.snapshot.revision + 1 };
+    record.snapshot = {
+      ...update,
+      exhausted: update.exhausted ?? record.snapshot.exhausted,
+      revision: record.snapshot.revision + 1,
+    };
     this.listeners
       .get(readKey(record.generation, record.taskId))
       ?.forEach((listener) => listener());
@@ -437,13 +453,21 @@ async function fetchTaskNavigationIdentity(
   const overviewReadId = store.getState().beginTaskOverviewRead();
   try {
     const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
-    const release = sessionReads.retain(taskId);
-    const sessionList = raceAbort(
-      sessionReads.read(taskId, (readSignal) =>
-        listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
-      ),
-      signal,
-    ).finally(release);
+    const readSessionList = (reads: TaskSessionReads) => {
+      const release = reads.retain(taskId);
+      return raceAbort(
+        reads.read(taskId, (readSignal) =>
+          listOrdinaryTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+        ),
+        signal,
+      ).finally(release);
+    };
+    const sessionList = readSessionList(sessionReads).catch((error: unknown) => {
+      if (!isTaskNavigationAbort(error) || signal.aborted || !scopeIsCurrent()) throw error;
+      const currentReads = getTaskSessionReads(store);
+      if (currentReads === sessionReads) throw error;
+      return readSessionList(currentReads);
+    });
     const [task, sessionResponse] = await Promise.all([
       taskRequest,
       sessionList.then(
@@ -504,12 +528,17 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       identity,
       token: Object.freeze({}),
     } as NavigationReadOwner;
-    const sessionReads = getTaskSessionReads(store);
     const scopeIsCurrent = () =>
       owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity;
     nextOwner.reads = new TaskNavigationReads(
       (taskId, signal) =>
-        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, scopeIsCurrent),
+        fetchTaskNavigationIdentity(
+          store,
+          taskId,
+          signal,
+          getTaskSessionReads(store),
+          scopeIsCurrent,
+        ),
       scopeIsCurrent,
     );
     owner = nextOwner;

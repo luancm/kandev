@@ -139,4 +139,3 @@ Verification on 2026-10-28 from repository root:
   orchestrator, and mock-agent.
 - `go build ./...` passed.
 - `bash scripts/lint-go-changed <changed-go-files>` reported 0 issues.
-

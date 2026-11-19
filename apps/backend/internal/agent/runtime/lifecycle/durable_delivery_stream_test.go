@@ -530,8 +530,8 @@ func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
 		DeliverySubmissionID: "submission-1",
 	}
 	durableEvent := durableAgentEvent(execution, event)
-	process, _, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		context.Background(), execution, durableEvent, repository, nil,
+	process, _, effect, _, err := sm.prepareDurableAgentDeliveryEvent(
+		context.Background(), execution, durableEvent, repository, nil, false, nil,
 	)
 	if err != nil {
 		t.Fatalf("prepare durable event: %v", err)
@@ -654,7 +654,10 @@ func deliveryProjectionFixture(t *testing.T, event agentctl.AgentEvent, ack *rec
 			t.Error(err)
 		}
 		w.WriteHeader(http.StatusNoContent)
-		acked <- struct{}{}
+		select {
+		case acked <- struct{}{}:
+		case <-r.Context().Done():
+		}
 	}))
 	t.Cleanup(server.Close)
 	endpoint, err := url.Parse(server.URL)

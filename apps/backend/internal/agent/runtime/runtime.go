@@ -17,6 +17,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/task/models"
 	"time"
 
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -30,9 +31,19 @@ import (
 type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
 type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
+type ErrandPermissionTarget = lifecycle.ErrandPermissionTarget
+type ErrandPermissionSnapshot = lifecycle.ErrandPermissionSnapshot
 type LaunchRequest = lifecycle.LaunchRequest
+type WorkspaceInfo = lifecycle.WorkspaceInfo
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
+
+// CapturedResourceCircuitKey reads the immutable resource of an execution;
+// it never reconstructs identity from current profile settings.
+func CapturedResourceCircuitKey(metadata map[string]interface{}, executionID, profileID string) string {
+	return lifecycle.CapturedResourceCircuitKey(metadata, executionID, profileID)
+}
+
 type AgentExecution = lifecycle.AgentExecution
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
@@ -41,6 +52,7 @@ type DeliveryRecordEvidence = lifecycle.DeliveryRecordEvidence
 type DeliveryRecordSubmissionRequest = lifecycle.DeliveryRecordSubmissionRequest
 type DeliveryRecordSubmission = lifecycle.DeliveryRecordSubmission
 type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
+type RequestNotSentError = client.RequestNotSentError
 type RemoteRecoverySnapshot = lifecycle.RemoteRecoverySnapshot
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
@@ -57,6 +69,9 @@ const (
 	BackgroundWorkloadProbeResultSettled = client.ProbeResultSettled
 	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
 )
+
+// MetadataKeyTaskEnvironmentID identifies the environment bound to an executor runtime.
+const MetadataKeyTaskEnvironmentID = lifecycle.MetadataKeyTaskEnvironmentID
 
 type CursorMCPAuthenticationSpec = lifecycle.CursorMCPAuthenticationSpec
 type CursorMCPRetryResult = lifecycle.CursorMCPRetryResult
@@ -83,8 +98,9 @@ type SessionExecutionControl interface {
 }
 
 const (
-	ExecutionOwnerTask = lifecycle.ExecutionOwnerTask
-	ExecutionOwnerRun  = lifecycle.ExecutionOwnerRun
+	ExecutionOwnerTask   = lifecycle.ExecutionOwnerTask
+	ExecutionOwnerRun    = lifecycle.ExecutionOwnerRun
+	ExecutionOwnerErrand = lifecycle.ExecutionOwnerErrand
 )
 
 // Runtime is the public surface for launching, resuming, stopping, and
@@ -136,6 +152,19 @@ type Runtime interface {
 
 	// ExecuteBackgroundWorkAction executes an action on a background workload in the running execution.
 	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
+
+	// ResolveRunPermission selects one offered option on a pending permission
+	// request of a run-owned execution.
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+
+	// CancelRunPermission cancels a pending permission request of a run-owned
+	// execution.
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
+
+	// Errand permission snapshots are in-process live-client capabilities.
+	SnapshotErrandPermissions(ctx context.Context, target ErrandPermissionTarget) (*ErrandPermissionSnapshot, error)
+	ResolveErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource, optionID string) (*streams.PermissionResolveResponse, error)
+	CancelErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource) (*streams.PermissionCancelResponse, error)
 }
 
 // LaunchSpec carries everything the runtime needs to start an agent.
@@ -267,3 +296,6 @@ type TurnChangeCaptureHandlerBinder interface {
 func InstallTurnChangeCaptureHandler(binder TurnChangeCaptureHandlerBinder, handler TurnChangeCaptureHandler) {
 	binder.SetTurnChangeCaptureHandler(handler)
 }
+
+// ErrErrandRecoveryRequiresReconnect indicates that inventory alone cannot prove a remote execution stopped.
+var ErrErrandRecoveryRequiresReconnect = lifecycle.ErrErrandRecoveryRequiresReconnect

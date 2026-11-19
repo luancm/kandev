@@ -13,17 +13,20 @@ type SanitizeLayoutOptions =
       stripSessionPanels?: false | undefined;
       stripEnvScopedPanels?: boolean;
       excludeSessionIds?: Set<string>;
+      validSessionIds?: ReadonlySet<string>;
     };
 
 function describeSanitizeMode(options: {
   stripSessionPanels?: boolean;
   stripEnvScopedPanels?: boolean;
   excludeSessionIds?: Set<string>;
+  validSessionIds?: ReadonlySet<string>;
 }): string {
   if (options.stripSessionPanels && options.stripEnvScopedPanels)
     return "stripSessionsAndEnvScoped";
   if (options.stripSessionPanels) return "stripAllSessions";
   if (options.stripEnvScopedPanels) return "stripEnvScoped";
+  if (options.validSessionIds) return "allowListedSessions";
   if (options.excludeSessionIds) return "excludeSpecificSessions";
   return "keepAll";
 }
@@ -33,6 +36,7 @@ function logSanitizeOutcome(
     stripSessionPanels?: boolean;
     stripEnvScopedPanels?: boolean;
     excludeSessionIds?: Set<string>;
+    validSessionIds?: ReadonlySet<string>;
   },
   totalPanels: Record<string, any>,
   validPanels: Record<string, any>,
@@ -42,6 +46,7 @@ function logSanitizeOutcome(
   debug("sanitizeSerializedLayout", {
     mode: describeSanitizeMode(options),
     excludeSessionCount: options.excludeSessionIds?.size ?? 0,
+    validSessionCount: options.validSessionIds?.size,
     excludeSessionIds: options.excludeSessionIds
       ? Array.from(options.excludeSessionIds)
       : undefined,
@@ -53,15 +58,9 @@ function logSanitizeOutcome(
 
 function shouldKeepSessionPanel(id: string, options: SanitizeLayoutOptions): boolean {
   if (options.stripSessionPanels) return false;
-  if (!options.excludeSessionIds) return true;
-
-  // Per-env restore: drop session panels that we know belong to a
-  // different env (a phantom from a previously-deleted task). Sessions
-  // we have no mapping for are kept — they may be a still-loading WS
-  // arrival, and useAutoSessionTab's reconcile will clean them up if
-  // they turn out to be stale.
   const sid = id.slice("session:".length);
-  return !options.excludeSessionIds.has(sid);
+  if (options.validSessionIds && !options.validSessionIds.has(sid)) return false;
+  return !options.excludeSessionIds?.has(sid);
 }
 
 function shouldKeepPanel(

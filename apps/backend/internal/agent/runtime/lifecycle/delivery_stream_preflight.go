@@ -67,13 +67,18 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 	return after, err
 }
 
-// A first child can exit before ACP initialization commits the native owner.
-// Replay its retained events from zero; the existing bootstrap processor waits
-// for committed authority before writing receipts or acknowledgments.
+// A child can exit before ACP initialization commits the native owner, either
+// within this execution or in a predecessor whose launch never committed one.
+// While no native identity, SQL generation, cursor, or submission exists for the
+// incarnation, replay its retained events from zero; the existing bootstrap
+// processor waits for committed authority before writing receipts or acknowledgments.
+// An explicit fresh-start replacement may also replay the selected stream whose
+// committed SQL predecessor is exactly one positive generation behind it. Any
+// receipt, projection, or acknowledgement still waits for the successor commit.
 func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
 	stream := status.Stream
-	if !execution.deliveryBootstrap.Load() || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
-		execution.isResumedSession || execution.DeliveryHarnessGeneration != 1 || stream == nil || stream.FirstRetained != 1 ||
+	if execution == nil || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
+		stream == nil || stream.FirstRetained != 1 ||
 		stream.Acknowledged != 0 || status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
 		return false
 	}
@@ -84,8 +89,12 @@ func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecutio
 	if !supported {
 		return false
 	}
-	_, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
-	return errors.Is(err, models.ErrTaskSessionNotFound)
+	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	if execution.deliveryBootstrap.Load() {
+		return execution.DeliveryHarnessGeneration == 1 && errors.Is(err, models.ErrTaskSessionNotFound)
+	}
+	return err == nil && execution.DeliveryHarnessGeneration > 1 && current != nil && current.Generation > 0 &&
+		replacementGenerationPending(execution, current)
 }
 
 func canUseLegacyEmptyDelivery(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, streamID string, err error) bool {
@@ -142,7 +151,7 @@ func (sm *StreamManager) projectReceivedDeliveryPrefix(ctx context.Context, exec
 func (sm *StreamManager) projectReceivedDeliveryPage(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, cursor *models.AgentDeliveryCursor, events []*models.AgentDeliveryEvent) error {
 	for _, event := range events {
 		if event.Sequence != cursor.ProjectedSequence+1 || event.Sequence > cursor.ReceivedSequence || event.StreamID != cursor.StreamID ||
-			event.SessionID != execution.SessionID || event.IncarnationID != execution.DeliveryIncarnationID || event.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) {
+			event.SessionID != deliveryTransportSessionID(execution) || event.IncarnationID != execution.DeliveryIncarnationID || event.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) {
 			return ErrDeliveryOwnerMismatch
 		}
 		if err := sm.projectReceivedDeliveryEvent(ctx, execution, delivery, event); err != nil {

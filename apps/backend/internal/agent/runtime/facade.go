@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/models"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -28,6 +29,22 @@ func IsNotFound(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, lifecycle.ErrExecutionNotFound)
 }
 
+// IsTerminalPermissionError reports whether a permission operation returned a
+// result that cannot be changed by retrying the same request.
+func IsTerminalPermissionError(err error) bool {
+	type permissionError interface{ PermissionCode() string }
+	var coded permissionError
+	if !errors.As(err, &coded) {
+		return false
+	}
+	switch coded.PermissionCode() {
+	case streams.PermissionErrorAlreadyResolved, streams.PermissionErrorStale, streams.PermissionErrorNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
 // facade is the default Runtime implementation: a thin adapter over
 // the lifecycle Manager (or any Backend).
 type facade struct {
@@ -43,7 +60,7 @@ type facade struct {
 // multi-repo specs, attachments) reach the runtime in Phase 1 without
 // canonicalising them onto LaunchSpec yet.
 func (f *facade) Launch(ctx context.Context, spec LaunchSpec) (ExecutionRef, error) {
-	if spec.Owner.Kind == ExecutionOwnerRun {
+	if spec.Owner.Kind == ExecutionOwnerRun || spec.Owner.Kind == ExecutionOwnerErrand {
 		if spec.OwnerAdmission == nil {
 			return ExecutionRef{}, fmt.Errorf("execution owner %q has no admission provider", spec.Owner.Kind)
 		}
@@ -87,7 +104,7 @@ func (f *facade) StartExecution(ctx context.Context, executionID string) error {
 	if !ok || execution == nil {
 		return ErrNotFound
 	}
-	if execution.Owner.Kind == ExecutionOwnerRun && execution.OwnerAdmission != nil {
+	if (execution.Owner.Kind == ExecutionOwnerRun || execution.Owner.Kind == ExecutionOwnerErrand) && execution.OwnerAdmission != nil {
 		if err := execution.OwnerAdmission.AdmitExecution(ctx, execution.Owner); err != nil {
 			return err
 		}
@@ -202,6 +219,72 @@ func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID st
 		}, nil
 	}
 	return f.backend.ExecuteBackgroundWorkAction(ctx, executionID, req)
+}
+
+type runPermissionBackend interface {
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
+}
+
+type errandPermissionBackend interface {
+	SnapshotErrandPermissions(context.Context, lifecycle.ErrandPermissionTarget) (*lifecycle.ErrandPermissionSnapshot, error)
+	ResolveErrandPermission(context.Context, *lifecycle.ErrandPermissionSnapshot, models.ErrandPermissionSource, string) (*streams.PermissionResolveResponse, error)
+	CancelErrandPermission(context.Context, *lifecycle.ErrandPermissionSnapshot, models.ErrandPermissionSource) (*streams.PermissionCancelResponse, error)
+}
+
+func (f *facade) SnapshotErrandPermissions(ctx context.Context, target ErrandPermissionTarget) (*ErrandPermissionSnapshot, error) {
+	backend, ok := f.backend.(errandPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.SnapshotErrandPermissions(ctx, target)
+}
+
+func (f *facade) ResolveErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource, optionID string) (*streams.PermissionResolveResponse, error) {
+	backend, ok := f.backend.(errandPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.ResolveErrandPermission(ctx, snapshot, source, optionID)
+}
+
+func (f *facade) CancelErrandPermission(ctx context.Context, snapshot *ErrandPermissionSnapshot, source models.ErrandPermissionSource) (*streams.PermissionCancelResponse, error) {
+	backend, ok := f.backend.(errandPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.CancelErrandPermission(ctx, snapshot, source)
+}
+
+func (f *facade) runPermissionBackend(executionID string) (runPermissionBackend, error) {
+	if executionID == "" {
+		return nil, fmt.Errorf("runtime: executionID is required")
+	}
+	backend, ok := f.backend.(runPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend, nil
+}
+
+// ResolveRunPermission delegates to a backend that can address permissions
+// by execution.
+func (f *facade) ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error {
+	backend, err := f.runPermissionBackend(executionID)
+	if err != nil {
+		return err
+	}
+	return backend.ResolveRunPermission(ctx, executionID, requestID, pendingID, optionID)
+}
+
+// CancelRunPermission delegates to a backend that can address permissions
+// by execution.
+func (f *facade) CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error {
+	backend, err := f.runPermissionBackend(executionID)
+	if err != nil {
+		return err
+	}
+	return backend.CancelRunPermission(ctx, executionID, requestID, pendingID)
 }
 
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend

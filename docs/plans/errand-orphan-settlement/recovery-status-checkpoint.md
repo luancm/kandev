@@ -1,0 +1,13 @@
+# Recovery status and continuation acceptance
+
+The recovery status package based on integrated `b2bbe9d5b7` is accepted for commit and push. The broader initiative still requires the parent-owned terminal identity correction, successful cleanup and duration work. No live repair or deployment was performed.
+
+- AC002.4–.5: shared evidence-aware attention and SQL capacity/outstanding parity implemented. Primary race4944 passed Errands (1.321s), SQLite (6.671s), DTO (1.090s); child scoped checks/lint/SQL guard/conformance passed. See attention-projection-handoff.md.
+- AC002.6: reason propagates through DTO/events/MCP/parent/browser surfaces. Persisted recovery-only changes notify Errand observers and awaiting parents; stale clears do not. Primary six-case race64784 passed (1.639s). Era Sol d9919da3 accepted observer correction; frontend review075cfb6e found no production defect. All required locales and existing desktop/phone compositions covered.
+- AC002.7–.8: exact-receipt preflight and narrow interrupted native restoration allow only new explicit work. Unresolved continuation returns stable conflict reason without admission side effects. Primary race91849 passed orchestrator (1.832s) and backendapp (2.260s); Era Sol fe59bc44 accepted. See continuation-handoff.md.
+- Frontend focused suite: 124 tests, typecheck, full lint, i18n check and ratchet passed; see frontend-recovery-handoff.md. Original resumed frontend RED logs were unavailable and no RED claim is made.
+- Real browser admission: standard global setup, desktop2/2 handle20473 (20.0s), phone2/2 handle21907 (27.4s). Repeated actual backend refusal preserves messages/turns/revision/provider trace; new explicit instruction after exact interrupted receipt preserves native identity and does not replay original. Direct passthrough hook tests17/17 passed. Era Sol60481218 accepted the test packet. See browser-admission-handoff.md for exact commands and fixture limits.
+
+PostgreSQL runtime fixtures were selected but skipped because the DSN is unset. The broader orchestrator run retained a Send Now failure reproduced against baseline; no universally green-suite claim is made. Browser coverage uses mock ACP and browser Stop followed by fixture-authorized exact domain settlement. It does not establish historical interruption authority, external provider certification or live incident repair eligibility.
+
+Public how-to and agent-reference documentation now explain recovery attention, blocked continuation and retained uncertainty. Normal commit hooks and remote receipt are recorded in the shared task plan and final handoff after delivery; no commit receipt is claimed in advance.

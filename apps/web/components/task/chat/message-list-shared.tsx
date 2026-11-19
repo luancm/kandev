@@ -47,6 +47,7 @@ export type MessageListProps = {
   historyRefreshPending?: boolean;
   historyStatus?: MessageHistoryStatus;
   historyError?: unknown;
+  ownedPagination?: { hasMore: boolean; isLoadingMore: boolean; loadMore: () => Promise<number> };
   onRetryHistory?: () => void;
   isWorking: boolean;
   sessionState?: TaskSessionState;

@@ -1,0 +1,595 @@
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState, useSyncExternalStore } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ErrandBrowserCounts, ErrandBrowserRow } from "@/lib/types/errands";
+import { ErrandsChip } from "./errands-chip";
+
+const TASK_ID = "task-1";
+const MAIN = "session-main";
+const SECOND = "session-second";
+const CHIP = "errands-chip";
+const STOP_ALL = "errands-stop-all";
+const POPOVER = "errands-popover";
+const OPEN_E1 = "Open errand Errand e1";
+const ROW_E1 = "errands-panel-row-e1";
+const ROW_E2 = "errands-panel-row-e2";
+const DRAWER = "errands-drawer-content";
+const DELIVERY_UNCERTAIN = "Result delivery uncertain";
+
+const mocks = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    state: {} as Record<string, unknown>,
+    listeners,
+    errands: [] as ErrandBrowserRow[],
+    summaryCounts: null as null | {
+      live: number;
+      capacity: number;
+      queued: number;
+      outstanding: number;
+      finished: number;
+      pending_results: number;
+      unread: number;
+    },
+    summaryStatus: "loaded" as "loaded" | "loading" | "error" | "idle",
+    historyOpenCalls: 0,
+    historyRangeStart: 0,
+    useTaskErrands: vi.fn(),
+    isMobile: false,
+    finePointer: true,
+    openSession: vi.fn(),
+    cancelAllErrands: vi.fn(),
+    pending: new Set<string>(),
+    toast: vi.fn(),
+  };
+});
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({ errands: { historyByOwnerId: {} }, closeErrandHistory: vi.fn() }),
+  }),
+  useAppStore: <T,>(selector: (state: Record<string, unknown>) => T) =>
+    useSyncExternalStore(
+      (listener) => {
+        mocks.listeners.add(listener);
+        return () => mocks.listeners.delete(listener);
+      },
+      () => selector(mocks.state),
+    ),
+}));
+vi.mock("@/hooks/domains/session/use-task-errands", () => ({
+  useTaskErrands: (taskId: string, options: { parentSessionId?: string | null } = {}) => {
+    mocks.useTaskErrands(taskId, options);
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [historyRangeStart, setHistoryRangeStart] = useState(mocks.historyRangeStart);
+    const scoped = options.parentSessionId
+      ? mocks.errands.filter((item) => item.parent_session_id === options.parentSessionId)
+      : mocks.errands;
+    const outstanding = scoped.filter((item) => item.outstanding);
+    const countsFor = (rows: ErrandBrowserRow[]): ErrandBrowserCounts => ({
+      live: rows.filter((item) => item.live).length,
+      capacity: 4,
+      queued: rows.filter((item) => item.status === "queued").length,
+      outstanding: rows.filter((item) => item.outstanding).length,
+      finished: rows.filter((item) => !item.outstanding).length,
+      pending_results: rows.filter((item) => item.result_state === "pending").length,
+      unread: rows.filter((item) => item.unread).length,
+    });
+    const taskCounts = mocks.summaryCounts ?? countsFor(mocks.errands);
+    const scopedCounts = mocks.summaryCounts ?? countsFor(scoped);
+    const parents = Array.from(new Set(mocks.errands.map((item) => item.parent_session_id)));
+    const summary = {
+      scope: { task_id: taskId },
+      errands: mocks.errands.filter((item) => item.outstanding),
+      counts: taskCounts,
+      parent_counts: parents.map((parent_session_id) => ({
+        parent_session_id,
+        counts:
+          mocks.summaryCounts ??
+          countsFor(mocks.errands.filter((item) => item.parent_session_id === parent_session_id)),
+      })),
+    };
+    return {
+      outstanding,
+      counts: scopedCounts,
+      parentCounts: scopedCounts,
+      taskCounts,
+      summary,
+      summaryStatus: mocks.summaryStatus,
+      summaryError: undefined,
+      isSummaryLoaded: mocks.summaryStatus === "loaded",
+      history: historyOpen
+        ? {
+            taskId,
+            parentSessionId: options.parentSessionId ?? MAIN,
+            pages: [{ errands: scoped.filter((item) => !item.outstanding) }],
+            totalFinished: scoped.filter((item) => !item.outstanding).length,
+            hasMore: false,
+            nextCursor: null,
+            rangeStart: historyRangeStart,
+            status: "loaded",
+            stale: false,
+          }
+        : undefined,
+      historyRows: historyOpen ? scoped.filter((item) => !item.outstanding) : [],
+      openHistory: () => {
+        mocks.historyOpenCalls += 1;
+        setHistoryOpen(true);
+      },
+      closeHistory: () => setHistoryOpen(false),
+      loadMoreHistory: vi.fn(),
+      retryHistory: vi.fn(),
+      refreshHistory: vi.fn(),
+      startHistoryAgain: () => {
+        mocks.historyRangeStart = 0;
+        setHistoryRangeStart(0);
+      },
+      retrySummary: vi.fn(),
+    };
+  },
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    isMobile: mocks.isMobile,
+    isFinePointer: mocks.finePointer,
+    usesDesktopWorkbench: !mocks.isMobile,
+  }),
+}));
+vi.mock("./use-open-task-session", () => ({ useOpenTaskSession: () => mocks.openSession }));
+vi.mock("@/hooks/domains/session/use-errand-actions", () => ({
+  useErrandActions: () => ({
+    cancelErrand: vi.fn(),
+    sendErrandResult: vi.fn(),
+    cancelAllErrands: mocks.cancelAllErrands,
+    isPending: (action: string, id: string) => mocks.pending.has(`${action}:${id}`),
+  }),
+}));
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: mocks.toast }) }));
+
+function errand(id: string, overrides: Partial<ErrandBrowserRow> = {}): ErrandBrowserRow {
+  const status = overrides.status ?? "running";
+  const live = overrides.live ?? ["queued", "running", "needs_attention"].includes(status);
+  const outstanding = overrides.outstanding ?? live;
+  return {
+    errand_id: id,
+    task_id: TASK_ID,
+    parent_session_id: MAIN,
+    title: `Errand ${id}`,
+    agent_profile_id: "profile-1",
+    status,
+    result_state: status === "done" ? "delivered" : "none",
+    result_truncated: false,
+    created_at: new Date(Date.now() - 2 * 60_000).toISOString(),
+    updated_at: new Date().toISOString(),
+    settled_at: null,
+    version: 1,
+    live,
+    outstanding,
+    unread: false,
+    can_send_result: false,
+    ...overrides,
+  };
+}
+
+function setState(enabled = true) {
+  mocks.state = {
+    features: { errands: enabled },
+    contextWindow: { bySessionId: {} },
+    taskSessions: {
+      items: {
+        [MAIN]: { id: MAIN, task_id: TASK_ID, name: "Main" },
+        [SECOND]: { id: SECOND, task_id: TASK_ID, name: "Reviewer" },
+      },
+    },
+    errands: { byTaskId: {} },
+    agentProfiles: { items: [] },
+    sessionModels: { bySessionId: {} },
+    activeModel: { bySessionId: {} },
+    connection: { status: "connected" },
+    setContextWindow: vi.fn(),
+  };
+}
+
+function openChip() {
+  fireEvent.click(screen.getByTestId(CHIP));
+}
+
+afterEach(cleanup);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.errands = [errand("e1"), errand("e2", { status: "done" })];
+  mocks.summaryCounts = null;
+  mocks.summaryStatus = "loaded";
+  mocks.historyOpenCalls = 0;
+  mocks.historyRangeStart = 0;
+  mocks.isMobile = false;
+  mocks.finePointer = true;
+  mocks.pending.clear();
+  mocks.cancelAllErrands.mockResolvedValue(1);
+  mocks.openSession.mockResolvedValue(true);
+  setState();
+});
+
+describe("ErrandsChip visibility and label", () => {
+  it("renders and loads nothing while the errands flag is off", () => {
+    setState(false);
+    render(<ErrandsChip taskId={TASK_ID} />);
+    expect(screen.queryByTestId(CHIP)).toBeNull();
+    expect(mocks.useTaskErrands).not.toHaveBeenCalled();
+  });
+
+  it("renders nothing for a task without errands", () => {
+    mocks.errands = [];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    expect(screen.queryByTestId(CHIP)).toBeNull();
+  });
+
+  it("is labelled with the live count", () => {
+    render(<ErrandsChip taskId={TASK_ID} />);
+    const chip = screen.getByTestId(CHIP);
+    expect(chip.textContent).toBe("Errands: 1 running");
+    expect(chip.getAttribute("data-tone")).toBe("live");
+  });
+
+  it("shows authoritative capacity, pending-result, and unread totals on desktop", async () => {
+    mocks.summaryCounts = {
+      live: 2,
+      capacity: 5,
+      queued: 0,
+      outstanding: 1,
+      finished: 1,
+      pending_results: 4,
+      unread: 3,
+    };
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+
+    const counts = await screen.findByTestId("errands-panel-counts");
+    expect(counts.textContent).toContain("Capacity 2 of 5");
+    expect(counts.textContent).toContain("4 results pending");
+    expect(counts.textContent).toContain("3 unread");
+  });
+
+  it("turns amber and says so when an errand needs attention", () => {
+    mocks.errands = [errand("e1", { status: "needs_attention" }), errand("e2")];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    const chip = screen.getByTestId(CHIP);
+    expect(chip.getAttribute("data-tone")).toBe("attention");
+    expect(chip.textContent).toBe("Errands: 1 needs attention and 1 running");
+    expect(chip.getAttribute("aria-label")).toBe("Errands: 1 needs attention and 1 running");
+  });
+
+  it("counts only nonzero running, queued, and attention statuses for the selected parent", () => {
+    mocks.errands = [
+      errand("e1", { parent_session_id: MAIN, status: "running" }),
+      errand("e2", { parent_session_id: MAIN, status: "queued" }),
+      errand("e3", { parent_session_id: MAIN, status: "needs_attention" }),
+      errand("e4", { parent_session_id: MAIN, status: "done" }),
+      errand("e5", { parent_session_id: SECOND, status: "running" }),
+      errand("e6", { parent_session_id: SECOND, status: "running" }),
+    ];
+
+    render(<ErrandsChip taskId={TASK_ID} sessionId={SECOND} />);
+
+    expect(screen.getByTestId(CHIP).textContent).toBe("Errands: 2 running");
+  });
+
+  it("shows attention, running, and queued counts in order without counting settled errands", () => {
+    mocks.errands = [
+      errand("e1", { status: "queued" }),
+      errand("e2", { status: "needs_attention" }),
+      errand("e3", { status: "running" }),
+      errand("e4", { status: "done" }),
+      errand("e5", { status: "failed" }),
+    ];
+
+    render(<ErrandsChip taskId={TASK_ID} />);
+
+    expect(screen.getByTestId(CHIP).textContent).toBe(
+      "Errands: 1 needs attention, 1 running, and 1 queued",
+    );
+  });
+
+  it("names recovery verification accessibly when attention has a recovery reason", () => {
+    mocks.errands = [
+      errand("e1", {
+        status: "needs_attention",
+        ...({ attention_reason: "recovery_unresolved" } as Partial<ErrandBrowserRow>),
+      }),
+    ];
+    render(<ErrandsChip taskId={TASK_ID} />);
+
+    const chip = screen.getByTestId(CHIP);
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Errands: 1 needs attention, recovery needs verification",
+    );
+    expect(chip.querySelector("svg")?.getAttribute("class")).toContain("text-amber-500");
+  });
+
+  it("falls back to a total with plural forms when nothing is live", () => {
+    mocks.errands = [errand("e1", { status: "done" })];
+    const { unmount } = render(<ErrandsChip taskId={TASK_ID} />);
+    expect(screen.getByTestId(CHIP).textContent).toBe("1 errand");
+    expect(screen.getByTestId(CHIP).getAttribute("data-tone")).toBe("idle");
+    unmount();
+
+    mocks.errands = [errand("e1", { status: "done" }), errand("e2", { status: "failed" })];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    expect(screen.getByTestId(CHIP).textContent).toBe("2 errands");
+  });
+});
+
+it("keeps history closed until its parent disclosure is opened", async () => {
+  mocks.errands = [
+    errand("e1"),
+    errand("e2", { parent_session_id: SECOND, status: "done" }),
+    errand("e3", { status: "needs_attention" }),
+  ];
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+
+  const popover = await screen.findByTestId(POPOVER);
+  expect(within(popover).getByText("3 total")).toBeTruthy();
+  expect(within(popover).queryByTestId(ROW_E2)).toBeNull();
+  expect(mocks.historyOpenCalls).toBe(0);
+  const groups = within(popover).getAllByTestId("errands-panel-group");
+  expect(groups).toHaveLength(1);
+  expect(within(groups[0]).getByRole("heading", { name: "Main" })).toBeTruthy();
+  expect(within(groups[0]).getAllByRole("listitem")).toHaveLength(2);
+  fireEvent.click(await within(popover).findByTestId(`errands-history-toggle-${SECOND}`));
+  await waitFor(() => expect(within(popover).getByTestId(ROW_E2)).toBeTruthy());
+  expect(mocks.historyOpenCalls).toBe(1);
+  const row = within(popover).getByTestId(ROW_E1);
+  expect(row.textContent).toContain("Errand e1");
+  expect(row.textContent).toContain("Running");
+  expect(row.textContent).toContain("2m");
+  expect(within(popover).getByTestId("errands-panel-row-e3").textContent).toContain(
+    "Needs attention",
+  );
+});
+
+it("uses one history-chain owner across parent groups in the same panel", async () => {
+  mocks.errands = [
+    errand("finished-main", { parent_session_id: MAIN, status: "done" }),
+    errand("finished-second", { parent_session_id: SECOND, status: "done" }),
+  ];
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  await screen.findByTestId(POPOVER);
+
+  const parentOwners = mocks.useTaskErrands.mock.calls
+    .map(([, options]) => options as { parentSessionId?: string; historyOwner?: object })
+    .filter((options) => options.parentSessionId)
+    .map((options) => options.historyOwner);
+
+  expect(parentOwners).toHaveLength(2);
+  expect(new Set(parentOwners).size).toBe(1);
+});
+
+it("returns the history scroller to the first row when starting again", async () => {
+  mocks.errands = Array.from({ length: 40 }, (_, index) =>
+    errand(`finished-${index}`, { status: "done" }),
+  );
+  mocks.historyRangeStart = 25;
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  const popover = await screen.findByTestId(POPOVER);
+  fireEvent.click(await within(popover).findByTestId(`errands-history-toggle-${MAIN}`));
+  const list = within(popover).getByTestId("errands-panel-list");
+  const startAgain = await within(popover).findByTestId(`errands-history-start-again-${MAIN}`);
+  list.scrollTop = 160;
+  expect(list.scrollTop).toBeGreaterThan(0);
+
+  fireEvent.click(startAgain);
+
+  await waitFor(() => expect(list.scrollTop).toBe(0));
+});
+
+it("opens an errand without a primary change and closes the popover", async () => {
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  const popover = await screen.findByTestId(POPOVER);
+
+  fireEvent.click(within(popover).getByRole("button", { name: OPEN_E1 }));
+
+  expect(mocks.openSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      taskId: TASK_ID,
+      sessionId: "e1",
+      title: "Errand e1",
+      isErrand: true,
+    }),
+  );
+  await waitFor(() => expect(screen.queryByTestId(POPOVER)).toBeNull());
+});
+
+it("disables Open for a queued errand that has no session yet", async () => {
+  mocks.errands = [errand("e1", { status: "queued" })];
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  const popover = await screen.findByTestId(POPOVER);
+  const open = within(popover).getByRole("button", { name: OPEN_E1 });
+  expect((open as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("stops every errand of the task with Stop all errands", async () => {
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  fireEvent.click(await screen.findByTestId(STOP_ALL));
+  expect(mocks.cancelAllErrands).toHaveBeenCalledWith(TASK_ID);
+  expect(mocks.toast).not.toHaveBeenCalled();
+});
+
+it("reports a failed Stop all errands", async () => {
+  mocks.cancelAllErrands.mockRejectedValue(new Error("boom"));
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  fireEvent.click(await screen.findByTestId(STOP_ALL));
+  await waitFor(() =>
+    expect(mocks.toast).toHaveBeenCalledWith({
+      title: "Could not stop the errands",
+      variant: "error",
+    }),
+  );
+});
+
+it("disables Stop all errands while the request is in flight", async () => {
+  mocks.pending.add(`cancel_all:${TASK_ID}`);
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  const stop = await screen.findByTestId(STOP_ALL);
+  expect((stop as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("omits Stop all errands when no errand is live", async () => {
+  mocks.errands = [errand("e1", { status: "done" }), errand("e2", { status: "cancelled" })];
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  await screen.findByTestId(POPOVER);
+  expect(screen.queryByTestId(STOP_ALL)).toBeNull();
+});
+
+it("shows a loading line until the errand list arrives", async () => {
+  mocks.summaryStatus = "loading";
+  render(<ErrandsChip taskId={TASK_ID} />);
+  openChip();
+  expect(await screen.findByTestId("errands-panel-loading")).toBeTruthy();
+});
+describe("Errand recovery attention", () => {
+  it("explains unresolved recovery separately from permission attention", async () => {
+    mocks.errands = [
+      errand("e1", {
+        status: "needs_attention",
+        ...({ attention_reason: "recovery_unresolved" } as Partial<ErrandBrowserRow>),
+      }),
+      errand("e2", { status: "needs_attention" }),
+    ];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+    const popover = await screen.findByTestId(POPOVER);
+
+    const recoveryRow = within(popover).getByTestId(ROW_E1);
+    const permissionRow = within(popover).getByTestId(ROW_E2);
+    expect(within(recoveryRow).getByTestId("errand-recovery-notice").textContent).toContain(
+      "Earlier work and possible external effects are unknown.",
+    );
+    expect(within(recoveryRow).getByTestId("errand-status").textContent).toBe(
+      "Recovery needs verification",
+    );
+    expect(within(permissionRow).queryByTestId("errand-recovery-notice")).toBeNull();
+    expect(within(permissionRow).getByTestId("errand-status").textContent).toBe("Needs attention");
+  });
+});
+
+describe("Errand delivery uncertainty", () => {
+  it("shows the warning only when a current desktop row explicitly reports it", async () => {
+    mocks.errands = [
+      errand("e1", { delivery_state: "uncertain" }),
+      errand("e2", { status: "done", delivery_state: "received" }),
+      errand("e3", { status: "done" }),
+    ];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+
+    const popover = await screen.findByTestId(POPOVER);
+    fireEvent.click(await within(popover).findByTestId(`errands-history-toggle-${MAIN}`));
+
+    expect(within(popover).getByTestId("errand-delivery-uncertain").textContent).toBe(
+      DELIVERY_UNCERTAIN,
+    );
+    expect(within(popover).getByTestId(ROW_E2).textContent).not.toContain(DELIVERY_UNCERTAIN);
+    expect(within(popover).getByTestId("errands-panel-row-e3").textContent).not.toContain(
+      DELIVERY_UNCERTAIN,
+    );
+  });
+});
+
+describe("ErrandsChip drawer", () => {
+  beforeEach(() => {
+    mocks.isMobile = true;
+    mocks.finePointer = false;
+  });
+
+  it("opens a drawer with full-width rows and a Stop all errands footer", async () => {
+    mocks.summaryCounts = {
+      live: 1,
+      capacity: 4,
+      queued: 0,
+      outstanding: 1,
+      finished: 1,
+      pending_results: 1,
+      unread: 1,
+    };
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+
+    const drawer = await screen.findByTestId(DRAWER);
+    expect(screen.queryByTestId(POPOVER)).toBeNull();
+    expect(within(drawer).getByRole("heading", { name: "Errands" })).toBeTruthy();
+    const row = within(drawer).getByRole("button", { name: "Open errand Errand e1, Running" });
+    expect(row.className).toContain("min-h-11");
+    expect(within(drawer).getByTestId(STOP_ALL).className).toContain("min-h-11");
+    expect(within(drawer).getByTestId("errands-panel-list").className).toContain("overflow-y-auto");
+    expect(within(drawer).getByTestId("errands-panel-counts").textContent).toContain(
+      "1 result pending",
+    );
+  });
+
+  it("describes delivery uncertainty on the single phone Open target", async () => {
+    mocks.errands = [errand("e1", { delivery_state: "uncertain" })];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+
+    const drawer = await screen.findByTestId(DRAWER);
+    const row = within(drawer).getByTestId(ROW_E1);
+    const warning = within(row).getByTestId("errand-delivery-uncertain");
+
+    expect(warning.textContent).toBe(DELIVERY_UNCERTAIN);
+    expect(row.getAttribute("aria-describedby")).toContain(warning.id);
+    expect(row.className).toContain("min-h-11");
+  });
+
+  it("opens the tapped errand and closes the drawer", async () => {
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+    const drawer = await screen.findByTestId(DRAWER);
+
+    fireEvent.click(within(drawer).getByRole("button", { name: "Open errand Errand e1, Running" }));
+
+    expect(mocks.openSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: TASK_ID,
+        sessionId: "e1",
+        title: "Errand e1",
+        isErrand: true,
+      }),
+    );
+    // vaul keeps the exiting content mounted until its animation ends.
+    await waitFor(() =>
+      expect(screen.getByTestId(CHIP).getAttribute("aria-expanded")).toBe("false"),
+    );
+  });
+
+  it("omits the footer once nothing is live", async () => {
+    mocks.errands = [errand("e1", { status: "done" })];
+    render(<ErrandsChip taskId={TASK_ID} />);
+    openChip();
+    await screen.findByTestId(DRAWER);
+    expect(screen.queryByTestId(STOP_ALL)).toBeNull();
+  });
+});
+
+it("shows only the rendered parent's errands when switching conversations", async () => {
+  mocks.errands = [errand("e1"), errand("e2", { parent_session_id: SECOND })];
+  const { rerender } = render(<ErrandsChip taskId={TASK_ID} sessionId={MAIN} />);
+  openChip();
+  let panel = await screen.findByTestId(POPOVER);
+  expect(within(panel).getByTestId(ROW_E1)).toBeTruthy();
+  expect(within(panel).queryByTestId(ROW_E2)).toBeNull();
+  rerender(<ErrandsChip taskId={TASK_ID} sessionId={SECOND} />);
+  openChip();
+  panel = await screen.findByTestId(POPOVER);
+  expect(within(panel).getByTestId(ROW_E2)).toBeTruthy();
+  expect(within(panel).queryByTestId(ROW_E1)).toBeNull();
+});

@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/docker/seccomp"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
@@ -41,6 +42,8 @@ const (
 
 // ContainerConfig holds configuration for launching a Docker container
 type ContainerConfig struct {
+	// CopilotNativeSessionEvents is the manager-resolved native-event opt-in.
+	CopilotNativeSessionEvents bool
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth            *acpprovider.GatewayAuth
@@ -64,6 +67,7 @@ type ContainerConfig struct {
 	PromptSuggestions              bool
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
+	ErrandMCPOwner                 *agentctltypes.ErrandMCPOwner
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
 	AllowUserNamespaces            bool   // If true, the container is launched with a relaxed seccomp profile and apparmor=unconfined.
@@ -83,6 +87,7 @@ type ContainerConfig struct {
 	DeliveryStreamID            string
 	DeliveryIncarnationID       string
 	DeliveryHarnessGeneration   uint64
+	OpenCodePluginRuntime       *agentctltypes.OpenCodePluginRuntime
 	// OnProgress streams preparation progress for this launch. The remote
 	// runtime seeds container inputs during the launch rather than before it,
 	// so its warnings reach the user through the launch's own callback rather
@@ -146,8 +151,10 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
 		PromptSuggestions:          config.PromptSuggestions,
+		CopilotNativeSessionEvents: config.CopilotNativeSessionEvents,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
+		ErrandMCPOwner:             config.ErrandMCPOwner,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
@@ -160,6 +167,7 @@ func buildContainerCreateInstanceRequest(
 		DeliveryStreamID:           config.DeliveryStreamID,
 		DeliveryIncarnationID:      config.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  config.DeliveryHarnessGeneration,
+		OpenCodePluginRuntime:      config.OpenCodePluginRuntime,
 	}
 }
 

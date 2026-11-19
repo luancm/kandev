@@ -381,6 +381,14 @@ type peerLaunchAgentManager struct {
 	onFailure        func()
 }
 
+func (*peerLaunchAgentManager) RequiresCloneURL(string) bool          { return false }
+func (*peerLaunchAgentManager) ShouldApplyPreferredShell(string) bool { return false }
+func (*peerLaunchAgentManager) ValidateExecutorRuntime(string) error  { return nil }
+
+func (*peerLaunchAgentManager) ValidateExecutionRuntime(context.Context, string, string, string) error {
+	return nil
+}
+
 func (m *peerLaunchAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	m.launchEntered <- req
 	select {
@@ -410,6 +418,10 @@ func (m *peerLaunchAgentManager) RegisterInitialPromptAdmissionCallbacks(
 	m.beforeAdmission = beforeAdmission
 	m.onDispatched = onDispatched
 	m.onFailure = onFailure
+	return nil
+}
+
+func (*peerLaunchAgentManager) SetInitialDeliverySubmissionID(context.Context, string, string) error {
 	return nil
 }
 

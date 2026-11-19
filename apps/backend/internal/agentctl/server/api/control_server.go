@@ -140,6 +140,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.POST("/instances/:id/stop-errand", m.handleStopErrandInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
@@ -192,7 +193,19 @@ func (m *ControlServer) handleHandshake(c *gin.Context) {
 	m.ownership.Renew()
 	m.logger.Info("bootstrap handshake completed, auth token issued",
 		zap.String("nonce_fingerprint", commonconfig.NonceFingerprint(req.Nonce)))
-	c.JSON(http.StatusOK, gin.H{"token": token})
+	response := gin.H{"token": token}
+	if binding := m.cfg.SSHLaunchBinding; binding != nil {
+		receipt, receiptErr := buildLaunchReceipt(*binding)
+		if receiptErr != nil {
+			// The nonce is already consumed; this launch attempt fails closed so
+			// no row is published without the proof its cleanup depends on.
+			m.logger.Error("handshake failed: cannot capture launch receipt", zap.Error(receiptErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "launch receipt unavailable"})
+			return
+		}
+		response["launch"] = receipt
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func (m *ControlServer) handleCreateInstance(c *gin.Context) {
@@ -202,6 +215,12 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid request body: " + err.Error(),
 		})
+		return
+	}
+
+	if req.ManagedRuntimeInstallContext != nil &&
+		(!c.GetBool(controlAuthorizationConsumedContextKey) || !req.ManagedRuntimeInstallContext.Valid()) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "authenticated installer provenance is required for reusable repairs"})
 		return
 	}
 

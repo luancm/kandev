@@ -7,6 +7,14 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+const errandDeliveryOwnerExistsSQL = `EXISTS (SELECT 1 FROM errand_harness_bindings owner
+ WHERE sessions.session_id = 'errand:' || owner.errand_id AND (
+ EXISTS (SELECT 1 FROM agent_delivery_cursors c WHERE c.session_id=sessions.session_id AND c.incarnation_id=owner.incarnation_id AND c.harness_generation=owner.harness_generation AND c.stream_id=owner.stream_id)
+ OR EXISTS (SELECT 1 FROM agent_delivery_inbox i WHERE i.session_id=sessions.session_id AND i.incarnation_id=owner.incarnation_id AND i.harness_generation=owner.harness_generation AND i.stream_id=owner.stream_id)
+ OR EXISTS (SELECT 1 FROM agent_delivery_submissions s WHERE s.session_id=sessions.session_id AND s.incarnation_id=owner.incarnation_id AND s.harness_generation=owner.harness_generation)
+ OR EXISTS (SELECT 1 FROM agent_delivery_effects e WHERE e.session_id=sessions.session_id AND e.incarnation_id=owner.incarnation_id AND e.harness_generation=owner.harness_generation AND e.stream_id=owner.stream_id)
+ ))`
+
 // Each recursive step seeks the next session through the four session-leading
 // indexes. Live rows and unknown provenance advance the same durable cursor.
 const agentDeliveryOrphanScanQuery = `WITH RECURSIVE sessions(session_id, n) AS (
@@ -16,7 +24,8 @@ const agentDeliveryOrphanScanQuery = `WITH RECURSIVE sessions(session_id, n) AS 
  WHERE session_id IS NOT NULL AND n < ?
 )
 SELECT sessions.session_id, COALESCE((SELECT MIN(value) FROM (SELECT MIN(incarnation_id) AS value FROM agent_delivery_inbox WHERE session_id = sessions.session_id AND incarnation_id > '' UNION ALL SELECT MIN(incarnation_id) AS value FROM agent_delivery_submissions WHERE session_id = sessions.session_id AND incarnation_id > '' UNION ALL SELECT MIN(incarnation_id) AS value FROM agent_delivery_cursors WHERE session_id = sessions.session_id AND incarnation_id > '' UNION ALL SELECT MIN(incarnation_id) AS value FROM agent_delivery_effects WHERE session_id = sessions.session_id AND session_id <> '' AND incarnation_id > '')), ''),
- EXISTS (SELECT 1 FROM task_sessions live WHERE live.id = sessions.session_id),
+ (EXISTS (SELECT 1 FROM task_sessions live WHERE live.id = sessions.session_id)
+ OR ` + errandDeliveryOwnerExistsSQL + `),
  EXISTS (SELECT 1 FROM agent_delivery_cleanup_jobs job WHERE job.session_id = sessions.session_id)
 FROM sessions WHERE sessions.session_id IS NOT NULL ORDER BY sessions.session_id`
 

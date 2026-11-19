@@ -10,8 +10,75 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type ownedMCPResolutionRecorder struct {
+	received mcpconfig.ResolutionContext
+	policy   mcpconfig.Policy
+}
+
+func (r *ownedMCPResolutionRecorder) Resolve(_ context.Context, rc mcpconfig.ResolutionContext, policy mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error) {
+	r.received = rc
+	r.policy = policy
+	return &mcpconfig.EffectiveMCPResolution{}, nil
+}
+
+func TestOwnedErrandMCPResolutionUsesSavedSelection(t *testing.T) {
+	manager := newTestManager(t)
+	resolver := &ownedMCPResolutionRecorder{}
+	manager.mcpResolver = resolver
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "owning-task", WorkspaceID: "workspace",
+		ErrandID: "owned-errand", Generation: 1,
+	}
+	selection := &mcpconfig.SelectionSnapshot{DefinitionIDs: []string{"added"}, ExcludedDefinitionIDs: []string{"removed"}}
+	executorProfile := &models.ExecutorProfile{ID: "saved-profile", ExecutorID: "saved-executor", McpPolicy: `{"allow_stdio":false}`}
+	manager.SetExecutorProfileReader(&fakeExecutorProfileReader{profiles: map[string]*models.ExecutorProfile{executorProfile.ID: executorProfile}})
+	req := &LaunchRequest{
+		Owner: owner, WorkspaceID: owner.WorkspaceID, ErrandMCPSelection: selection, ExecutorType: string(models.ExecutorTypeLocal),
+		Metadata: map[string]interface{}{
+			"executor_id": executorProfile.ExecutorID, MetadataKeyExecutorProfileID: executorProfile.ID,
+			"executor_mcp_policy": `{"allow_stdio":true}`,
+		},
+	}
+	_, err := manager.resolveMcpServersForLaunch(t.Context(), req, &testAgent{id: "agent"})
+	require.NoError(t, err)
+	require.Equal(t, owner.TaskID, resolver.received.TaskID)
+	require.Empty(t, resolver.received.SessionID)
+	require.NotNil(t, resolver.received.Errand)
+	require.Equal(t, owner.ErrandID, resolver.received.Errand.ErrandID)
+	require.Equal(t, owner.WorkspaceID, resolver.received.Errand.WorkspaceID)
+	require.Equal(t, owner.TaskID, resolver.received.Errand.TaskID)
+	require.Equal(t, *selection, resolver.received.Errand.Snapshot)
+	require.False(t, resolver.policy.AllowStdio, "the saved executor profile supplies the MCP policy")
+}
+
+func TestSSHExecutorRequestUsesErrandOwnerForLaunchReceipt(t *testing.T) {
+	log := newTestRegistryLogger()
+	registry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameSSH}}
+	registry.Register(backend)
+	manager := &Manager{executorRegistry: registry, executorFallbackPolicy: ExecutorFallbackDeny, logger: log}
+	owner := ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "owning-task", WorkspaceID: "workspace",
+		ErrandID: "owned-errand", Generation: 1,
+	}
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeSSH), EnvironmentFinalized: true,
+		WorkspaceReuseRequired: true, Owner: owner,
+	}
+	providerRequest, _, _, err := manager.launchBuildExecutorRequest(
+		t.Context(), "candidate", req, &testAgent{id: "agent"}, &AgentProfileInfo{}, "", "", "", nil,
+	)
+	require.NoError(t, err)
+	require.Same(t, backend.lastRequest, providerRequest)
+	require.Equal(t, owner.TaskID, providerRequest.TaskID, "the SSH receipt requires the explicit owner task")
+	require.Equal(t, models.ErrandExecutionIdentity(owner.ErrandID), providerRequest.SessionID)
+	require.Empty(t, req.TaskID)
+	require.Empty(t, req.SessionID)
+}
 
 func validTestRemoteContribution(number int, sourcePath string) models.RemoteContribution {
 	return models.RemoteContribution{
@@ -70,11 +137,13 @@ func TestBuildLaunchMetadataUsesTrustedCausingRunID(t *testing.T) {
 		Metadata:     map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
 	}, "", "", "")
 	require.Equal(t, "office-run-1", metadata[MetadataKeyCausingRunID])
+	require.Equal(t, "office-run-1", metadata[MetadataKeyTerminalCausingRunID])
 
 	metadata = buildLaunchMetadata(&LaunchRequest{
 		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
 	}, "", "", "")
 	require.NotContains(t, metadata, MetadataKeyCausingRunID)
+	require.NotContains(t, metadata, MetadataKeyTerminalCausingRunID)
 }
 
 func TestBuildLaunchMetadataExecutorConfigWinsForKubernetesConnectionKeys(t *testing.T) {

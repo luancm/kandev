@@ -481,3 +481,25 @@ describe("resolveFocusedThreadId", () => {
     expect(resolveFocusedThreadId(threads, null)).toBeNull();
   });
 });
+
+// @covers AC-TASKS-ERRANDS-010.5
+it("carries the bounded errands summary without changing native subagent counts", () => {
+  const summary = {
+    revision: 1,
+    updated_at: SUMMARY_UPDATED_AT,
+    primary_session: { id: LIVE_SESSION, state: WAITING_FOR_INPUT },
+    active_subagent_count: 3,
+    errands: { live: 2, waiting: true },
+  };
+  const [result] = selectActiveThreads({
+    "wf-1": snapshot("wf-1", "Delivery", [
+      task({
+        id: TASK_1,
+        primarySessionId: LIVE_SESSION,
+        primarySessionState: WAITING_FOR_INPUT,
+        statusSummary: summary as never,
+      }),
+    ]),
+  });
+  expect(result).toMatchObject({ errandsSummary: summary.errands, activeSubagentCount: 3 });
+});

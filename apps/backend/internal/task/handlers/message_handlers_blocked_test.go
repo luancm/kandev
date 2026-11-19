@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -60,6 +61,28 @@ type messageAddSwitchRepo struct {
 	promptHistoryCalls           int
 	promptHistoryBarrier         chan struct{}
 	promptHistoryBarrierAfter    int
+	acknowledgedTurnError        string
+	turnErrorAckErr              error
+}
+
+func (r *messageAddSwitchRepo) RecordTaskTurnError(context.Context, string, models.TaskTurnError) (bool, error) {
+	return false, nil
+}
+
+func (r *messageAddSwitchRepo) AcknowledgeTaskTurnErrorIfStamp(
+	_ context.Context,
+	_ string,
+	stamp string,
+	_ time.Time,
+	_ string,
+) (models.TurnErrorAcknowledgementResult, error) {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
+	if r.turnErrorAckErr != nil {
+		return models.TurnErrorAcknowledgementMissing, r.turnErrorAckErr
+	}
+	r.acknowledgedTurnError = stamp
+	return models.TurnErrorAcknowledgementStored, nil
 }
 
 func (r *messageAddSwitchRepo) messageCount() int {
@@ -1188,8 +1211,9 @@ func TestWSAddMessage_SteerEligibleDispatchesSteer(t *testing.T) {
 
 func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 	tests := []struct {
-		name         string
-		state        models.TaskSessionState
+		name  string
+		state models.TaskSessionState
+
 		activity     v1.ForegroundActivity
 		wantResponse ws.MessageType
 		wantPrompt   bool
@@ -1248,7 +1272,7 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 
 			resp, err := h.wsAddMessage(t.Context(), req)
 			require.NoError(t, err)
-			require.Equal(t, tt.wantResponse, resp.Type)
+			require.Equal(t, tt.wantResponse, resp.Type, string(resp.Payload))
 			if !tt.wantPrompt {
 				assert.Empty(t, repo.messages)
 				select {
@@ -1293,7 +1317,7 @@ func TestErrorForBlockedMessageSession_UsesOrchestratorActivityPolicy(t *testing
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &MessageHandlers{orchestrator: fgActivityOrchestrator{activity: tc.activity}, logger: log}
-			got := h.errorForBlockedMessageSession(msg, "s1", tc.state)
+			got := h.errorForBlockedMessageSession(msg, dto.TaskSessionDTO{ID: "s1", State: tc.state})
 			if tc.wantBlock {
 				assert.NotNil(t, got, "expected the message to be blocked")
 			} else {

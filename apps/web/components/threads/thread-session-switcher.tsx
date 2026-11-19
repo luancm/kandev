@@ -10,7 +10,8 @@ import {
   IconShieldQuestion,
   IconX,
 } from "@tabler/icons-react";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-visibility";
 import { useTranslation } from "react-i18next";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
@@ -30,6 +31,8 @@ export type ThreadSessionView = {
   agentName: string | null;
   isPrimary: boolean;
 };
+
+const SELECT_SESSION_KEY = "threads:selectSession";
 
 const LABEL_SEPARATOR = " \u2022 ";
 
@@ -75,14 +78,36 @@ export function buildThreadSessionViews(
   });
 }
 
+function ThreadWorkingIcon({
+  ownerVisible,
+  ...props
+}: {
+  ownerVisible: boolean;
+  className: string;
+  "aria-label": string;
+  "data-testid"?: string;
+}) {
+  const ref = useRef<SVGSVGElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const visibility = createPersistentMotionVisibility(element, { ownerVisible });
+    visibility.register(element);
+    return () => visibility.dispose();
+  }, [ownerVisible]);
+  return <IconLoader2 {...props} ref={ref} />;
+}
+
 export function ThreadSessionStatusIcon({
   status,
   label,
   testId,
+  ownerVisible = true,
 }: {
   status: ThreadStatus;
   label: string;
   testId?: string;
+  ownerVisible?: boolean;
 }) {
   const iconProps = {
     "aria-label": label,
@@ -105,9 +130,10 @@ export function ThreadSessionStatusIcon({
     case "starting":
     case "working":
       return (
-        <IconLoader2
+        <ThreadWorkingIcon
+          ownerVisible={ownerVisible}
           {...iconProps}
-          className={`${iconProps.className} animate-spin text-blue-500`}
+          className={`${iconProps.className} animate-spin motion-reduce:animate-none text-blue-500`}
         />
       );
     case "failed":
@@ -240,19 +266,19 @@ function MobileSessionPicker({
   return (
     <>
       <MobilePillButton
-        label={selected?.label ?? t("threads:selectSession")}
+        label={selected?.label ?? t(SELECT_SESSION_KEY)}
         count={`${selectedIndex + 1}/${views.length}`}
         compact={false}
         fullWidth
         isOpen={open}
         onClick={() => setOpen(true)}
         data-testid="thread-session-picker-trigger"
-        ariaLabel={t("threads:selectSession")}
+        ariaLabel={t(SELECT_SESSION_KEY)}
       />
       <MobilePickerSheet
         open={open}
         onOpenChange={setOpen}
-        title={t("threads:selectSession")}
+        title={t(SELECT_SESSION_KEY)}
         description={t("threads:selectSessionDescription")}
         contentTestId="thread-session-picker-sheet"
       >

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createElement, type ReactNode } from "react";
 import { renderHook, act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import type { Message } from "@/lib/types/http";
+import { OwnedErrandContext } from "../errands/owned-errand-context";
 import {
   parsePermission,
   usePermissionResponseHandlers,
@@ -70,6 +72,54 @@ function renderHandlers(message: Message): RenderHookResult<Handlers, unknown>["
 function firstPayload(): Record<string, unknown> {
   return requestMock.mock.calls[0][1] as Record<string, unknown>;
 }
+
+describe("owned Errand permission", () => {
+  function renderOwnedPermission(message: Message) {
+    return renderHook(
+      () =>
+        usePermissionResponseHandlers({
+          permissionMetadata: message.metadata as unknown as PermissionRequestMetadata,
+          permissionMessage: message,
+        }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(
+            OwnedErrandContext.Provider,
+            { value: { taskId: "task-1", errandId: "errand-1", readScope: "scope" } },
+            children,
+          ),
+      },
+    ).result;
+  }
+
+  it("uses the Errand identity and the exact provider request", async () => {
+    const result = renderOwnedPermission({
+      ...makePermissionMessage(),
+      session_id: toSessionId(""),
+    });
+    await act(async () => result.current.handleApprove());
+    expect(requestMock).toHaveBeenCalledExactlyOnceWith("errand.permission.respond", {
+      task_id: "task-1",
+      errand_id: "errand-1",
+      request_id: "req-1",
+      pending_id: "pend-1",
+      option_id: "allow",
+      cancelled: false,
+    });
+  });
+
+  it("does not respond to retained native questions", async () => {
+    const message = makePermissionMessage();
+    const result = renderOwnedPermission({
+      ...message,
+      session_id: toSessionId(""),
+      metadata: { ...message.metadata, permission_human_input: true },
+    });
+    await act(async () => result.current.handleApprove());
+    expect(result.current.isUnavailable).toBe(true);
+    expect(requestMock).not.toHaveBeenCalled();
+  });
+});
 
 describe("handleApprove", () => {
   it("sends cancelled=false and rejected=false", async () => {

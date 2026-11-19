@@ -24,7 +24,7 @@ func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, req *http.Req
 		b.logBootError("get task detail task", err)
 		return nil
 	}
-	sessionObservations, err := b.p.taskSvc.ListTaskSessionSummaryObservations(ctx, task.ID)
+	sessionObservations, err := b.p.taskSvc.ListOrdinaryTaskSessionSummaryObservations(ctx, task.ID)
 	if err != nil {
 		b.logBootError("list task detail session summaries", err)
 		sessionObservations = nil
@@ -42,7 +42,7 @@ func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, req *http.Req
 		if err != nil {
 			b.logBootError("get task detail active session", err)
 			activeSession = nil
-		} else if activeSession.TaskID != task.ID {
+		} else if activeSession == nil || activeSession.TaskID != task.ID {
 			activeSession = nil
 		}
 	}
@@ -228,10 +228,13 @@ func resolveTaskDetailSessionID(task *taskmodels.Task, sessions []*taskmodels.Ta
 	if task == nil {
 		return ""
 	}
-	for _, session := range sessions {
-		if session != nil && session.TaskID == task.ID && session.ID == requestedSessionID && requestedSessionID != "" {
-			return session.ID
+	if requestedSessionID != "" {
+		for _, session := range sessions {
+			if session != nil && session.TaskID == task.ID && session.ID == requestedSessionID {
+				return session.ID
+			}
 		}
+		return ""
 	}
 	for _, session := range sessions {
 		if session != nil && session.TaskID == task.ID && session.IsPrimary {

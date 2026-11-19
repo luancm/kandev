@@ -33,6 +33,7 @@ type SessionTabSyncApi = {
 
 type SessionTabSyncStore = {
   getState: () => {
+    errands: { byTaskId: Record<string, Record<string, never>> };
     tasks: { activeTaskId: string; activeSessionId: string };
     taskSessions: {
       items: Record<string, { id: string; task_id: string }>;
@@ -98,6 +99,7 @@ function makeSessionTabSyncHarness(args: {
   };
   const appStore: SessionTabSyncStore = {
     getState: () => ({
+      errands: { byTaskId: {} },
       tasks: {
         activeTaskId: args.activeTaskId,
         activeSessionId: args.activeSessionId,
@@ -389,4 +391,16 @@ describe("setupSessionTabSync explicit activation", () => {
     expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
     expect(harness.activePanelSetActive).not.toHaveBeenCalled();
   });
+});
+
+it("preserves an explicit Errand URL during layout restoration", () => {
+  const previous = window.location.href;
+  window.history.replaceState({}, "", `/t/${TASK_ID}?sessionId=owned-errand`);
+  try {
+    const harness = makeDefaultSessionTabSyncHarness({ restoredSessionId: OTHER_SESSION_ID });
+    startSessionTabSync(harness);
+    expect(harness.setActiveSessionAuto).not.toHaveBeenCalled();
+  } finally {
+    window.history.replaceState({}, "", previous);
+  }
 });

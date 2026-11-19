@@ -12,17 +12,13 @@ import {
 import { StateHydrator } from "@/components/state-hydrator";
 import { useAppStoreApi } from "@/components/state-provider";
 import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
-import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
+import { TaskDetailConversationShell } from "./task-detail-conversation-shell";
 import {
   buildTaskNavigationShellData,
-  extractInitialRepositories,
-  extractInitialScripts,
   fetchTaskNavigationEnrichment,
   type FetchedSessionData,
 } from "@/lib/ssr/session-page-state";
 import { useTranslation } from "react-i18next";
-import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-conversation";
-import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
 import { captureActiveTurnWindowObservations } from "@/lib/state/slices/session/turn-actions";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
@@ -36,6 +32,7 @@ import {
 } from "@/lib/state/task-navigation-reads";
 import type { TaskNavigationContext } from "@/lib/state/task-navigation-reads";
 import { TaskLoadErrorState } from "@/components/task/task-page-content";
+import { TaskLoadProgressState } from "@/components/task/task-load-progress-state";
 import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
 import { useTaskDetailRouteRecovery } from "./task-detail-route-recovery";
 import { deriveTaskDetailRouteView } from "./task-detail-route-view";
@@ -71,7 +68,10 @@ function routeDataMatchesSelection(
   taskId: string,
   sessionId?: string,
 ): data is FetchedSessionData {
-  return routeDataMatchesTask(data, taskId) && (!sessionId || data.sessionId === sessionId);
+  return (
+    routeDataMatchesTask(data, taskId) &&
+    (!sessionId || data.sessionId === sessionId || data.ownedErrand?.errand.errand_id === sessionId)
+  );
 }
 
 function initialRouteState(
@@ -121,10 +121,13 @@ export function TaskDetailRoute({
   }
 
   if (route.showInitialLoading) {
-    if (route.readState.phase === "retrying") {
-      return <TaskLoadErrorState temporaryError retrying onRetry={route.retrySessionRead} />;
+    const retrying = route.readState.phase === "loading" || route.readState.phase === "retrying";
+    if (route.readState.exhausted) {
+      return (
+        <TaskLoadErrorState temporaryError retrying={retrying} onRetry={route.retrySessionRead} />
+      );
     }
-    return <TaskRouteLoading />;
+    return <TaskLoadProgressState onRetry={route.retrySessionRead} />;
   }
 
   return (
@@ -172,25 +175,12 @@ function TaskDetailRouteBody({
       {route.showShell ? (
         <TaskRouteSessionHydrationProvider isReady={routeDataReady}>
           <div className="h-full min-h-0 w-full" inert={route.isLoadingOverPreviousRoute}>
-            {route.task && isDetachedManagedConversation(route.task) ? (
-              <RetainedManagedConversationTranscript
-                task={route.task}
-                sessionId={route.activeSessionId}
-              />
-            ) : (
-              <KanbanTaskShell
-                task={route.task}
-                taskId={route.shellTaskId}
-                sessionId={route.activeSessionId}
-                initialRepositories={extractInitialRepositories(route.initialState, route.task)}
-                initialScripts={extractInitialScripts(route.initialState, route.task)}
-                initialTerminals={route.data?.initialTerminals ?? []}
-                defaultLayouts={{}}
-                initialLayout={layout}
-                urlSimple={simple}
-                urlMode={mode}
-              />
-            )}
+            <TaskDetailConversationShell
+              route={route}
+              layout={layout}
+              simple={simple}
+              mode={mode}
+            />
           </div>
         </TaskRouteSessionHydrationProvider>
       ) : (
@@ -219,6 +209,7 @@ function useTaskDetailRouteData({
   const store = useAppStoreApi();
   const projection = useTaskRouteProjection(taskId, sessionId);
   const routeKey = taskRouteKey(taskId, sessionId);
+  const errandInspectionOwnerId = `task-route-${routeKey}`;
   const navigationOwnerRef = useRef<object>({});
   const navigationContext = beginTaskNavigation(store, navigationOwnerRef.current, routeKey);
   const selectedSessionForNavigationRef = useRef<{
@@ -268,6 +259,7 @@ function useTaskDetailRouteData({
     setRouteState,
     previousLoadedRouteRef,
     store,
+    errandInspectionOwnerId,
     navigationContext,
     hydrationEpochsAtRequestStartRef,
   });
@@ -329,21 +321,23 @@ function useTaskDetailRouteEnrichment(args: {
 
     const routeKey = view.routeKey;
     const navigationContext = view.navigationContext;
-    if (!navigationContext || !isTaskNavigationCurrent(store, navigationContext)) return;
+    if (!navigationContext) return;
+    const isCurrent = () =>
+      isTaskNavigationCurrent(store, navigationContext) && (view.inspectionIsCurrent?.() ?? true);
+    if (!isCurrent()) return;
     const shellState: TaskDetailRouteState = {
       routeKey,
       status: "loaded",
       data: view.data,
       forceMergeSession: false,
       navigationContext,
+      inspectionIsCurrent: view.inspectionIsCurrent,
       hydrationEpochsAtRequestStart: view.hydrationEpochsAtRequestStart,
       turnWindowObservationsAtRequestStart: view.turnWindowObservationsAtRequestStart,
     };
     previousLoadedRouteRef.current = shellState;
     setRouteState((current) =>
-      current.routeKey === routeKey &&
-      current.status === "loaded" &&
-      isTaskNavigationCurrent(store, navigationContext)
+      current.routeKey === routeKey && current.status === "loaded" && isCurrent()
         ? shellState
         : current,
     );
@@ -354,9 +348,10 @@ function useTaskDetailRouteEnrichment(args: {
     const turnWindowObservationsAtRequestStart = captureActiveTurnWindowObservations(
       store.getState(),
     );
-    void fetchTaskNavigationEnrichment(identity, view.data.sessionId ?? undefined, { store })
+    const requestedId = view.data.ownedErrand?.errand.errand_id ?? view.data.sessionId ?? undefined;
+    void fetchTaskNavigationEnrichment(identity, requestedId, { store })
       .then((enriched) => {
-        if (!isTaskNavigationCurrent(store, navigationContext)) return;
+        if (!isCurrent()) return;
         const loadedState: TaskDetailRouteState = {
           ...shellState,
           data: enriched,
@@ -375,7 +370,7 @@ function useTaskDetailRouteEnrichment(args: {
           current.routeKey === routeKey &&
           current.status === "loaded" &&
           current.navigationContext === navigationContext &&
-          isTaskNavigationCurrent(store, navigationContext)
+          isCurrent()
             ? loadedState
             : current,
         );
@@ -394,6 +389,7 @@ function useTaskDetailRouteEnrichment(args: {
     view.data,
     view.displayedRouteKey,
     view.enrichmentIdentity,
+    view.inspectionIsCurrent,
     view.hydrationEpochsAtRequestStart,
     view.turnWindowObservationsAtRequestStart,
     view.navigationContext,
@@ -422,11 +418,64 @@ type TaskDetailRouteFetchArgs = {
   setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
   previousLoadedRouteRef: MutableRefObject<TaskDetailRouteState | null>;
   store: ReturnType<typeof useAppStoreApi>;
+  errandInspectionOwnerId: string;
   navigationContext: TaskNavigationContext;
   hydrationEpochsAtRequestStartRef: MutableRefObject<
     Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
   >;
 };
+
+function beginTaskDetailRouteRead(args: {
+  routeKey: string;
+  setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
+  store: ReturnType<typeof useAppStoreApi>;
+  taskId: string;
+  hydrationEpochsAtRequestStartRef: MutableRefObject<
+    Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
+  >;
+}) {
+  args.setRouteState({ routeKey: args.routeKey, status: "loading", data: null });
+  args.hydrationEpochsAtRequestStartRef.current = captureTaskSessionHydrationEpochs(
+    args.store.getState(),
+    args.taskId,
+  );
+}
+
+function useInitialTaskDetailRouteData(
+  args: Pick<
+    TaskDetailRouteFetchArgs,
+    | "routeInitialData"
+    | "taskId"
+    | "sessionId"
+    | "routeKey"
+    | "store"
+    | "errandInspectionOwnerId"
+    | "previousLoadedRouteRef"
+    | "setRouteState"
+  >,
+): boolean {
+  const {
+    routeInitialData,
+    taskId,
+    sessionId,
+    routeKey,
+    store,
+    errandInspectionOwnerId,
+    previousLoadedRouteRef,
+    setRouteState,
+  } = args;
+  if (!routeDataMatchesSelection(routeInitialData, taskId, sessionId)) return false;
+  store.getState().releaseErrandInspection(errandInspectionOwnerId);
+  const loadedState: TaskDetailRouteState = {
+    routeKey,
+    status: "loaded",
+    data: routeInitialData,
+    forceMergeSession: true,
+  };
+  previousLoadedRouteRef.current = loadedState;
+  setRouteState(loadedState);
+  return true;
+}
 
 function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
   const {
@@ -438,6 +487,7 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
     setRouteState,
     previousLoadedRouteRef,
     store,
+    errandInspectionOwnerId,
     navigationContext,
     hydrationEpochsAtRequestStartRef,
   } = args;
@@ -454,38 +504,37 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
     ) {
       return;
     }
-    if (routeDataMatchesSelection(routeInitialData, taskId, sessionId)) {
-      const loadedState: TaskDetailRouteState = {
-        routeKey,
-        status: "loaded",
-        data: routeInitialData,
-        forceMergeSession: true,
-      };
-      previousLoadedRouteRef.current = loadedState;
-      setRouteState(loadedState);
-      return;
-    }
+    if (useInitialTaskDetailRouteData(args)) return;
     let cancelled = false;
-    setRouteState({ routeKey, status: "loading", data: null });
-    hydrationEpochsAtRequestStartRef.current = captureTaskSessionHydrationEpochs(
-      store.getState(),
+    beginTaskDetailRouteRead({
+      routeKey,
+      setRouteState,
+      store,
       taskId,
-    );
+      hydrationEpochsAtRequestStartRef,
+    });
     readTaskNavigationIdentity(store, taskId, {
       context: navigationContext,
       ...(revision ? { refresh: true } : {}),
     })
-      .then((identity) => {
+      .then(async (identity) => {
         if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
-        assertRequestedSession(identity, taskId, sessionId);
+        const admission = await assertRequestedSession(store, identity, taskId, sessionId);
+        if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
+        if (admission && !admission.retain(errandInspectionOwnerId)) return;
+        const selectedErrandInspection = admission?.inspection;
+        const routeIdentity = selectedErrandInspection
+          ? { ...identity, selectedErrandInspection }
+          : identity;
         const shellState: TaskDetailRouteState = {
           routeKey,
           status: "loaded",
-          data: buildTaskNavigationShellData(identity, selectedSessionId),
+          data: buildTaskNavigationShellData(routeIdentity, sessionId ?? selectedSessionId),
           forceMergeSession: false,
           navigationContext,
           hydrationEpochsAtRequestStart: hydrationEpochsAtRequestStartRef.current,
-          enrichmentIdentity: identity,
+          enrichmentIdentity: routeIdentity,
+          inspectionIsCurrent: admission?.isCurrent,
         };
         previousLoadedRouteRef.current = shellState;
         setRouteState((current) =>
@@ -503,10 +552,12 @@ function useTaskDetailRouteFetch(args: TaskDetailRouteFetchArgs) {
       });
     return () => {
       cancelled = true;
+      store.getState().releaseErrandInspection(errandInspectionOwnerId);
     };
   }, [
     routeInitialData,
     routeKey,
+    errandInspectionOwnerId,
     sessionId,
     selectedSessionId,
     taskId,

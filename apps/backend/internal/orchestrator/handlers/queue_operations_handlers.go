@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/errands"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -124,6 +126,9 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 		drained, err = h.queueDrainer.DrainQueuedMessage(ctx, req.SessionID)
 	}
 	if err != nil {
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
+		}
 		switch {
 		case errors.Is(err, orchestrator.ErrAgentPromptInProgress):
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
@@ -172,6 +177,11 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
 		return denied, nil
 	}
+	if *req.Enabled {
+		if denied := h.authorizeQueueScope(ctx, msg, req.SessionID, authz.ScopeSessionPrompt); denied != nil {
+			return denied, nil
+		}
+	}
 	if h.queueAutoRun == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue Auto-run is unavailable", nil)
 	}
@@ -186,6 +196,9 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 		autoRun, dispatched, err = h.queueAutoRun.SetQueueAutoRun(ctx, req.SessionID, *req.Enabled)
 	}
 	if err != nil {
+		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+			return response, nil
+		}
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
 		}
@@ -320,6 +333,9 @@ func validateSendNowRequest(req wsSendNowRequest) string {
 
 // sendNowErrorResponse maps send-now failures to their stable websocket error codes.
 func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, err error) (*ws.Message, error) {
+	if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
+		return response, nil
+	}
 	switch {
 	case errors.Is(err, orchestrator.ErrSendNowEntryNotFound):
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
