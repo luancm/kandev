@@ -379,7 +379,6 @@ func errandBrowserColumns(driver string) string {
 	` + errandBrowserOutstandingPredicate(driver) + `,
 	` + errandBrowserUnreadPredicate(driver) + `,
 	e.latest_settled_turn_id, e.result_turn_id,
-	COALESCE(s.tokens_in, 0), COALESCE(s.tokens_cached_in, 0), COALESCE(s.tokens_out, 0),
 	` + errandContextMetadataColumn
 }
 
@@ -495,7 +494,6 @@ func scanErrandBrowserProjection(row errandRowScanner, extra ...interface{}) (*m
 		&status, &attention, &resultState, &deliveryState, &item.ResultTruncated,
 		&rawCreatedAt, &item.UpdatedAt, &settledAt, &item.Version,
 		&live, &outstanding, &unread, &latestSettled, &resultTurn,
-		&item.TokensIn, &item.TokensCachedIn, &item.TokensOut,
 		&contextMetadata,
 	}
 	destinations = append(destinations, extra...)

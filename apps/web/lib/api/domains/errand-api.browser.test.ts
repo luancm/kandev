@@ -31,9 +31,6 @@ function makeBrowserRow(status: "needs_attention" | "done") {
     outstanding: status === "needs_attention",
     unread: status === "needs_attention",
     can_send_result: false,
-    tokens_in: 0,
-    tokens_cached_in: 0,
-    tokens_out: 0,
   };
 }
 

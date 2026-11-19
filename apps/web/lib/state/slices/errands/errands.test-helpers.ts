@@ -50,9 +50,6 @@ export function makeBrowserErrandRow(overrides: Partial<ErrandBrowserRow> = {}):
     outstanding: false,
     unread: false,
     can_send_result: false,
-    tokens_in: 0,
-    tokens_cached_in: 0,
-    tokens_out: 0,
     ...overrides,
   };
 }

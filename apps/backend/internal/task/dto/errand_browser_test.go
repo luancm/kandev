@@ -21,12 +21,14 @@ func TestErrandBrowserDTOOmitsObjectiveAndResultBodies(t *testing.T) {
 		t.Fatalf("marshal compact row: %v", err)
 	}
 	encoded := string(wire)
-	for _, forbidden := range []string{"objective", "result_text", "private result body", "mcp_server_ids"} {
+	for _, forbidden := range []string{
+		"objective", "result_text", "private result body", "mcp_server_ids", "tokens_in", "tokens_cached_in", "tokens_out",
+	} {
 		if strings.Contains(encoded, forbidden) {
 			t.Errorf("compact row contains forbidden field/content %q: %s", forbidden, encoded)
 		}
 	}
-	for _, expected := range []string{"errand_id", "parent_session_id", "status", "result_state", "metadata", "tokens_in"} {
+	for _, expected := range []string{"errand_id", "parent_session_id", "status", "result_state", "metadata"} {
 		if !strings.Contains(encoded, expected) {
 			t.Errorf("compact row omits expected field %q: %s", expected, encoded)
 		}

@@ -369,11 +369,8 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 		row.SettledAt = &base
 		createErrandScenarioSession(t, repo, &models.TaskSession{
 			ID: id, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
-			State: models.TaskSessionStateCompleted, StartedAt: base, TokensIn: int64(index + 1),
+			State: models.TaskSessionStateCompleted, StartedAt: base,
 		})
-		if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE task_sessions SET tokens_in = ? WHERE id = ?`), index+1, id); err != nil {
-			t.Fatalf("set token usage for %s: %v", id, err)
-		}
 		mustCreateErrand(t, repo, row)
 		if index == 0 {
 			seedErrandHistoryContext(t, repo, row)
@@ -395,7 +392,7 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 	running.Lifecycle, running.AwaitingResult = models.ErrandLifecycleLaunched, false
 	createErrandScenarioSession(t, repo, &models.TaskSession{
 		ID: running.ID, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
-		State: models.TaskSessionStateRunning, TokensIn: 80,
+		State: models.TaskSessionStateRunning,
 	})
 	mustCreateErrand(t, repo, running)
 	failed := sampleErrand("browser-history-failed", taskID, parentID, base.Add(-time.Minute))
@@ -415,7 +412,6 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 	require.NotNil(t, first.NextCursor)
 	require.Equal(t, "browser-history-24", first.Errands[len(first.Errands)-1].ID)
 	require.False(t, first.Errands[0].Unread)
-	require.EqualValues(t, 1, first.Errands[0].TokensIn)
 	require.Equal(t, 120000.0, first.Errands[0].ContextMetadata[models.SessionMetaKeyContextWindow].(map[string]interface{})["size"])
 
 	second, err := repo.GetErrandHistoryPage(ctx, models.ErrandHistoryPageRequest{

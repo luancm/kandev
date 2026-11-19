@@ -48,9 +48,6 @@ type ErrandBrowserRowDTO struct {
 	Unread          bool                         `json:"unread"`
 	CanSendResult   bool                         `json:"can_send_result"`
 	Metadata        map[string]interface{}       `json:"metadata,omitempty"`
-	TokensIn        int64                        `json:"tokens_in"`
-	TokensCachedIn  int64                        `json:"tokens_cached_in"`
-	TokensOut       int64                        `json:"tokens_out"`
 }
 
 type ErrandBrowserSummaryDTO struct {
@@ -103,7 +100,6 @@ func FromErrandBrowserObservation(row *models.ErrandBrowserObservation) ErrandBr
 		ResultTruncated: row.ResultTruncated, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		SettledAt: row.SettledAt, Version: row.Version, Live: row.Live, Outstanding: row.Outstanding,
 		Unread: row.Unread, CanSendResult: row.CanSendResult, Metadata: row.ContextMetadata,
-		TokensIn: row.TokensIn, TokensCachedIn: row.TokensCachedIn, TokensOut: row.TokensOut,
 	}
 }
 

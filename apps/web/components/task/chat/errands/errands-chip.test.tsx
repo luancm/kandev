@@ -167,9 +167,6 @@ function errand(id: string, overrides: Partial<ErrandBrowserRow> = {}): ErrandBr
     outstanding,
     unread: false,
     can_send_result: false,
-    tokens_in: 0,
-    tokens_cached_in: 0,
-    tokens_out: 0,
     ...overrides,
   };
 }

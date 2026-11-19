@@ -85,9 +85,6 @@ export type ErrandBrowserRow = {
   unread: boolean;
   can_send_result: boolean;
   metadata?: ErrandBrowserContextMetadata;
-  tokens_in: number;
-  tokens_cached_in: number;
-  tokens_out: number;
 };
 
 export type ErrandBrowserCounts = {

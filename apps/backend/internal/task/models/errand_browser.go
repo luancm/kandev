@@ -24,9 +24,6 @@ type ErrandBrowserObservation struct {
 	Unread          bool
 	CanSendResult   bool
 	ContextMetadata map[string]interface{}
-	TokensIn        int64
-	TokensCachedIn  int64
-	TokensOut       int64
 }
 
 // ErrandBrowserCounts are authoritative database totals, not page counts.

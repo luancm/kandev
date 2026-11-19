@@ -46,14 +46,15 @@ function renderModel() {
 
 it("refreshes an owned inspection when an Errand update advances its revision", async () => {
   const running = ownedInspection({ status: "running", live: true });
-  const completed = ownedInspection({ status: "done", tokens_out: 120 });
+  const completed = ownedInspection({
+    status: "done",
+    metadata: { context_window: { size: 1000, used: 120 } },
+  });
   api.inspectErrand.mockResolvedValueOnce(running).mockResolvedValueOnce(completed);
   const { result } = renderModel();
   await waitFor(() => expect(result.current.model.errand?.status).toBe("running"));
   act(() => result.current.store.getState().advanceErrandBrowserRevision(ERRAND_TASK_ID));
-  await waitFor(() =>
-    expect(result.current.model.errand).toMatchObject({ status: "done", tokens_out: 120 }),
-  );
+  await waitFor(() => expect(result.current.model.errand).toMatchObject(completed.errand));
   expect(api.inspectErrand).toHaveBeenCalledTimes(2);
 });
 
