@@ -31,6 +31,7 @@ With the experimental `features.errands` flag enabled and a compatible structure
 | `await_errands_kandev` | Optionally waits for actual start-returned `errand_ids`, with `mode` `all` or `any` and `max_wait_seconds` up to 600. The caller must own those errands. Successful responses include `duration_ms` and `end_reason` (`all_ready`, `any_ready`, `timeout`, or `parent_ended`). |
 | `cancel_errand_kandev` | Stops the named `errand_id`. |
 | `message_task_kandev` | To continue a settled Errand, the parent passes its Errand ID in `session_id` and the current task's ID in `task_id`. |
+| `get_task_conversation_kandev` | Reads the Errand transcript with `task_id` and `errand_id`. Pass the returned cursor as `before` to read older messages. |
 | `list_task_sessions_kandev` | Lists the task's ordinary sessions. Use the Errand IDs from start or await to identify delegated work. |
 
 Known delivery failures retry automatically. If reception is uncertain, Kandev retains the result for inspection and deliberate recovery instead of automatically sending it again.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,7 +21,11 @@ func exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T, r
 	row, intent := seedExactOrdinaryAdmission(t, repo)
 	binding := map[string]any{"task_id": row.TaskID, "session_id": row.ID, "execution_id": "execution", "incarnation_id": intent.IncarnationID, "harness_generation": 1, "prompt_generation": 7, "stream_id": intent.StreamID, "submission_id": intent.SubmissionID, "turn_id": intent.TurnID}
 	running := &models.ExecutorRunning{ID: row.ID, SessionID: row.ID, TaskID: row.TaskID, AgentExecutionID: "execution", Metadata: map[string]any{"delivery_prompt_turn_binding": binding}}
-	_, err := repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{ID: intent.SubmissionID, SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, PayloadHash: "hash", Payload: []byte(`{}`)})
+	require.NoError(t, repo.CreateHarnessSessionGeneration(t.Context(), &models.HarnessSessionGeneration{
+		SessionID: row.ID, IncarnationID: intent.IncarnationID, Generation: 1,
+		NativeSessionID: "native", CreationReason: "test",
+	}))
+	_, err := repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{ID: intent.SubmissionID, SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, OwnerGeneration: 1, PayloadHash: "hash", Payload: []byte(`{}`)})
 	require.NoError(t, err)
 	require.NoError(t, repo.UpsertExecutorRunning(t.Context(), running))
 	require.NoError(t, repo.CompleteTurn(t.Context(), intent.TurnID))
@@ -37,7 +42,8 @@ func exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T, r
 	require.NoError(t, err)
 	require.Empty(t, saved.Metadata)
 	binding["prompt_generation"] = 7
-	require.NoError(t, repo.DeleteExecutorRunningBySessionID(t.Context(), row.ID))
+	running.AgentExecutionID = "replacement"
+	require.NoError(t, repo.UpsertExecutorRunning(t.Context(), running))
 	// A successor turn cannot acquire an existing prompt admission.
 	_, err = repo.db.Exec(`INSERT INTO task_session_turns(id,task_session_id,task_id,started_at,created_at,updated_at) VALUES('successor',$1,$2,$3,$3,$3)`, row.ID, row.TaskID, errandScenarioBase.Add(1))
 	require.NoError(t, err)
@@ -51,7 +57,11 @@ func exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T, r
 		t.Run(tc.name, func(t *testing.T) {
 			payload, err := json.Marshal(streams.AgentEvent{Type: "message_chunk", Text: "late A", CanonicalMessageID: tc.name, PromptGeneration: tc.generation, TurnID: tc.turn})
 			require.NoError(t, err)
-			event := &models.AgentDeliveryEvent{SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, StreamID: intent.StreamID, Sequence: 1, SubmissionID: intent.SubmissionID, EventType: "message_chunk", Payload: payload}
+			event := &models.AgentDeliveryEvent{
+				TaskID: row.TaskID, SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1,
+				ExecutionID: running.AgentExecutionID, OwnerGeneration: 1, ExpectedStreamID: intent.StreamID,
+				StreamID: intent.StreamID, Sequence: 1, SubmissionID: intent.SubmissionID, EventType: "message_chunk", Payload: payload,
+			}
 			if tc.reject {
 				event.Sequence = 3
 				_, err = repo.ReceiveAgentDeliveryEvent(t.Context(), event, 1)
@@ -62,6 +72,14 @@ func exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T, r
 			if tc.turn != "" {
 				event.Sequence = 2
 			}
+			attributedTurn, err := repo.ResolveAgentDeliveryEventTurn(t.Context(), event)
+			require.NoError(t, err)
+			require.Equal(t, intent.TurnID, attributedTurn)
+			stale := *event
+			stale.ExecutionID = "execution"
+			inserted, err := repo.ReceiveAgentDeliveryEvent(t.Context(), &stale, stale.Sequence)
+			require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryIdentityMismatch)
+			require.False(t, inserted)
 			_, err = repo.ReceiveAgentDeliveryEvent(t.Context(), event, event.Sequence)
 			require.NoError(t, err)
 			result, err := repo.ProjectCanonicalAgentDeliveryEvent(t.Context(), event, nil)
@@ -74,6 +92,7 @@ func exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T, r
 			require.NoError(t, err)
 		})
 	}
+	require.NoError(t, repo.DeleteExecutorRunningBySessionID(t.Context(), row.ID))
 	terminal, err := json.Marshal(streams.AgentEvent{Type: "complete", PromptGeneration: 7})
 	require.NoError(t, err)
 	event := &models.AgentDeliveryEvent{

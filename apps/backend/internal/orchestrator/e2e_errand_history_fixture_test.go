@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/executor"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -75,7 +78,7 @@ func TestErrandHistoryBrowserFixture(t *testing.T) {
 		require.Len(t, seed.OrdinarySessionIDs, 2)
 		require.GreaterOrEqual(t, seed.FinishedCount, 0)
 		require.LessOrEqual(t, seed.FinishedCount, 1000)
-		_, err := repo.GetTask(ctx, seed.TaskID)
+		task, err := repo.GetTask(ctx, seed.TaskID)
 		require.NoError(t, err, "seed task must already exist in the isolated E2E database")
 		existing, err := repo.ListErrandsByTask(ctx, seed.TaskID)
 		require.NoError(t, err)
@@ -92,12 +95,10 @@ func TestErrandHistoryBrowserFixture(t *testing.T) {
 				models.TaskSessionStateWaitingForInput, base.Add(-time.Duration(index+8)*time.Minute), nil, false)
 		}
 
+		seedFinishedErrands(t, ctx, repo, seed, base)
 		if seed.IncludeOutstanding {
 			seedPendingErrand(t, ctx, repo, seed, base)
-			seedRecoveryErrand(t, ctx, repo, seed, base)
-		}
-		for index := 0; index < seed.FinishedCount; index++ {
-			seedFinishedErrand(t, ctx, repo, seed, base, index)
+			seedRecoveryErrand(t, ctx, repo, seed, task.WorkspaceID, base)
 		}
 
 		recoveryAttention := false
@@ -162,34 +163,71 @@ func completedAtOr(startedAt time.Time, completedAt *time.Time) time.Time {
 	return startedAt
 }
 
-func seedFinishedErrand(
-	t *testing.T,
-	ctx context.Context,
-	repo *tasksqlite.Repository,
-	seed errandHistoryFixtureTask,
-	base time.Time,
-	index int,
-) {
+func seedFinishedErrands(t *testing.T, ctx context.Context, repo *tasksqlite.Repository, seed errandHistoryFixtureTask, base time.Time) {
+	t.Helper()
+	if seed.FinishedCount == 0 {
+		return
+	}
+	rows := make([]*models.Errand, 0, seed.FinishedCount)
+	for index := 0; index < seed.FinishedCount; index++ {
+		rows = append(rows, seedFinishedErrand(t, ctx, repo, seed, base, index))
+	}
+	candidates := models.ErrandInventory(rows)
+	claimed, err := repo.ClaimResults(ctx, seed.TaskID, seed.ParentSessionID, models.ErrandDeliveryNotification,
+		"history-delivery-"+seed.ParentSessionID, candidates, base, candidates)
+	require.NoError(t, err)
+	require.Len(t, claimed, seed.FinishedCount)
+}
+
+func seedFinishedErrand(t *testing.T, ctx context.Context, repo *tasksqlite.Repository, seed errandHistoryFixtureTask, base time.Time, index int) *models.Errand {
 	t.Helper()
 	id := fmt.Sprintf("%s-history-%04d", seed.ParentSessionID, index)
 	createdAt := base.Add(-time.Duration(index) * time.Second)
 	completedAt := createdAt.Add(-time.Minute)
-	deliveredAt := completedAt
 	row := &models.Errand{
 		ID: id, TaskID: seed.TaskID, ParentSessionID: seed.ParentSessionID,
 		Title:          fmt.Sprintf("Retained review %04d: deterministic delivered Errand result", index),
 		Objective:      strings.Repeat("Review the finished Errand output and retain its parent identity. ", 5),
-		AgentProfileID: seed.AgentProfileID,
-		Lifecycle:      models.ErrandLifecycleLaunched, LastOutcome: models.ErrandOutcomeDone,
-		ResultKind: models.ErrandResultOutput, ResultState: models.ErrandResultDelivered,
-		DeliveredRoute: models.ErrandDeliveryNotification, DeliveryToken: "history-delivery-" + id,
-		DeliveredAt: &deliveredAt, SettledAt: &completedAt,
-		ResultText: strings.Repeat("The retained review completed successfully with a concise, reproducible result. ", 19),
-		CreatedAt:  createdAt, UpdatedAt: createdAt,
+		AgentProfileID: seed.AgentProfileID, FirstTurnID: id + "-turn", SubmissionID: id + "-submission",
+		Lifecycle: models.ErrandLifecycleLaunched, AwaitingResult: true,
+		CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
 	require.NoError(t, repo.CreateErrand(ctx, row))
-	_, err := repo.ReserveErrandExecutionGeneration(ctx, id, 0)
+	binding := seedHistoryErrandExecution(t, ctx, repo, row, createdAt.Add(-10*time.Minute))
+	target := seedHistoryErrandTerminal(t, ctx, repo, row, binding, completedAt)
+	row.LatestSettledTurnID, row.ResultTurnID = target.TurnID, target.TurnID
+	row.AwaitingResult, row.LastOutcome, row.SettledAt = false, models.ErrandOutcomeDone, &completedAt
+	row.ResultState, row.ResultKind = models.ErrandResultPending, models.ErrandResultOutput
+	row.ResultText = strings.Repeat("The retained review completed successfully with a concise, reproducible result. ", 19)
+	row.TeardownIntent = &models.ErrandTeardownIntent{
+		Version: models.ErrandTeardownIntentVersion, ID: id + "-close", RequestedAt: completedAt,
+		State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCompletion, Target: target,
+	}
+	require.NoError(t, repo.UpdateErrand(ctx, row))
+	closed, err := repo.TransitionErrandTeardownIntent(ctx, id, row.TeardownIntent.ID, row.Version, models.ErrandTeardownIntentCompleted)
 	require.NoError(t, err)
+	return closed
+}
+
+func seedHistoryErrandTerminal(t *testing.T, ctx context.Context, repo *tasksqlite.Repository, row *models.Errand, binding models.ErrandHarnessBinding, completedAt time.Time) models.ErrandTeardownTarget {
+	t.Helper()
+	payload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeComplete, SessionID: binding.NativeSessionID, TurnID: row.FirstTurnID, PromptGeneration: 1})
+	require.NoError(t, err)
+	event := &models.AgentDeliveryEvent{
+		SessionID: models.ErrandExecutionIdentity(row.ID), TaskID: row.TaskID, ExecutionID: binding.ExecutionID,
+		IncarnationID: binding.IncarnationID, HarnessGeneration: binding.HarnessGeneration, OwnerGeneration: int64(binding.Generation),
+		StreamID: binding.StreamID, ExpectedStreamID: binding.StreamID, Sequence: 1, SubmissionID: row.SubmissionID,
+		EventType: streams.EventTypeComplete, Terminal: true, Payload: payload, ReceivedAt: completedAt,
+	}
+	_, err = repo.ReceiveAgentDeliveryEvent(ctx, event, 1)
+	require.NoError(t, err)
+	_, err = repo.ProjectAgentDeliveryEvent(ctx, event, nil)
+	require.NoError(t, err)
+	_, err = repo.SettleAgentDeliveryTerminal(ctx, binding.StreamID, 1, models.DeliverySubmissionCompleted, completedAt)
+	require.NoError(t, err)
+	target, _, err := repo.ReadOwnedErrandLatestTerminal(ctx, row.ID)
+	require.NoError(t, err)
+	return target
 }
 
 func seedPendingErrand(
@@ -217,6 +255,7 @@ func seedRecoveryErrand(
 	ctx context.Context,
 	repo *tasksqlite.Repository,
 	seed errandHistoryFixtureTask,
+	workspaceID string,
 	base time.Time,
 ) {
 	t.Helper()
@@ -234,6 +273,18 @@ func seedRecoveryErrand(
 		CreatedAt:  base.Add(-time.Second), UpdatedAt: base.Add(-time.Second),
 	}
 	require.NoError(t, repo.CreateErrand(ctx, row))
+	binding := seedHistoryErrandExecution(t, ctx, repo, row, startedAt)
+	changed, err := repo.RecordErrandRecoveryObservation(ctx, models.ErrandRecoveryObservation{
+		TaskID: seed.TaskID, Binding: binding, TurnID: turnID, SubmissionID: submissionID, PromptGeneration: 1, Unresolved: true,
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+	seedRecoveryErrandInventory(t, ctx, repo, row, binding, workspaceID)
+}
+
+func seedHistoryErrandExecution(t *testing.T, ctx context.Context, repo *tasksqlite.Repository, row *models.Errand, startedAt time.Time) models.ErrandHarnessBinding {
+	t.Helper()
+	id := row.ID
 	generation, err := repo.ReserveErrandExecutionGeneration(ctx, id, 0)
 	require.NoError(t, err)
 	binding := models.ErrandHarnessBinding{
@@ -244,25 +295,33 @@ func seedRecoveryErrand(
 	require.NoError(t, err)
 	require.True(t, bound)
 	require.NoError(t, repo.AppendErrandHarnessBinding(ctx, &binding, 0))
-	require.NoError(t, repo.CreateErrandTurn(ctx, id, &models.Turn{ID: turnID, StartedAt: startedAt}))
+	require.NoError(t, repo.CreateErrandTurn(ctx, id, &models.Turn{ID: row.FirstTurnID, StartedAt: startedAt}))
 	prompt := []byte(row.Objective)
 	admitted, err := repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{
 		ErrandID: id, Generation: binding.Generation, ExecutionID: binding.ExecutionID, IncarnationID: binding.IncarnationID,
 		HarnessGeneration: 1, StreamID: binding.StreamID, NativeSessionID: binding.NativeSessionID,
-		PromptGeneration: 1, TurnID: turnID,
+		PromptGeneration: 1, TurnID: row.FirstTurnID,
 		Submission: &models.AgentDeliverySubmission{
-			ID: submissionID, DispatchAttemptID: binding.ExecutionID, State: models.DeliverySubmissionAccepted,
+			ID: row.SubmissionID, DispatchAttemptID: binding.ExecutionID, State: models.DeliverySubmissionAccepted,
 			Payload: prompt, PayloadHash: journal.SubmissionHash(prompt),
 		},
 	})
 	require.NoError(t, err)
 	require.True(t, admitted)
-	changed, err := repo.RecordErrandRecoveryObservation(ctx, models.ErrandRecoveryObservation{
-		TaskID: seed.TaskID, Binding: binding, TurnID: turnID, SubmissionID: submissionID, PromptGeneration: 1, Unresolved: true,
-	})
-	require.NoError(t, err)
-	require.True(t, changed)
+	return binding
+}
 
+func seedRecoveryErrandInventory(t *testing.T, ctx context.Context, repo *tasksqlite.Repository, row *models.Errand, binding models.ErrandHarnessBinding, workspaceID string) {
+	t.Helper()
+	// Reset uses the current control runtime to confirm absence of this exact fixture execution.
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: binding.ExecutionID, SessionID: models.ErrandExecutionIdentity(row.ID),
+		Runtime: executor.NameStandalone, Status: models.ExecutorRunningStatusStopped, AgentExecutionID: binding.ExecutionID,
+		Metadata: map[string]any{"execution_owner": runtimeapi.ExecutionOwner{
+			Kind: runtimeapi.ExecutionOwnerErrand, WorkspaceID: workspaceID, TaskID: row.TaskID, ErrandID: row.ID,
+			Generation: binding.Generation, AgentProfileID: row.AgentProfileID,
+		}},
+	}))
 }
 
 func historyPendingID(parentSessionID string) string {

@@ -1,5 +1,6 @@
 import { isToolPayloadRemovedError } from "@/lib/utils/tool-payload-retention";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchErrandShellCommandOutput } from "@/lib/api/domains/errand-api";
 import {
   fetchShellCommandOutput,
   type ShellCommandOutputSnapshot,
@@ -12,6 +13,7 @@ const MAX_CACHED_OUTPUTS = 200;
 
 export type UseShellCommandOutputOptions = {
   sessionId: string;
+  errandOwner?: { taskId: string; errandId: string; readScope: string };
   messageId: string;
   isOpen: boolean;
   messageStatus?: string;
@@ -22,13 +24,6 @@ export type UseShellCommandOutputResult = {
   isLoading: boolean;
   error: Error | null;
   retry: () => void;
-};
-
-type PollOperation = {
-  generation: number;
-  outputKey: string;
-  consumer: symbol | null;
-  timer: ReturnType<typeof setTimeout> | null;
 };
 
 type SharedRequest = {
@@ -75,8 +70,7 @@ function readCachedOutput(outputKey: string) {
 
 function requestSharedOutput(
   outputKey: string,
-  sessionId: string,
-  messageId: string,
+  load: (signal: AbortSignal) => Promise<ShellCommandOutputSnapshot>,
   consumer: symbol,
   terminalProjection: boolean,
 ) {
@@ -99,9 +93,7 @@ function requestSharedOutput(
     controller,
     consumers: new Set([consumer]),
     terminalProjection,
-    promise: fetchShellCommandOutput(sessionId, messageId, {
-      init: { signal: controller.signal },
-    })
+    promise: load(controller.signal)
       .then((snapshot) => {
         if (output.request === request) {
           output.snapshot = snapshot;
@@ -131,10 +123,17 @@ function releaseSharedOutput(outputKey: string, consumer: symbol) {
 
 export function useShellCommandOutput({
   sessionId,
+  errandOwner,
   messageId,
   isOpen,
   messageStatus,
 }: UseShellCommandOutputOptions): UseShellCommandOutputResult {
+  const taskId = errandOwner?.taskId;
+  const errandId = errandOwner?.errandId;
+  let outputKey = sessionId ? `${sessionId}:${messageId}` : "";
+  if (taskId && errandId) {
+    outputKey = JSON.stringify(["errand", taskId, errandId, errandOwner?.readScope, messageId]);
+  }
   const [snapshot, setSnapshot] = useState<ShellCommandOutputSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -142,34 +141,14 @@ export function useShellCommandOutput({
   const snapshotRef = useRef<ShellCommandOutputSnapshot | null>(null);
   const outputKeyRef = useRef("");
   const messageStatusRef = useRef(messageStatus);
-  const operationRef = useRef<PollOperation>({
-    generation: 0,
-    outputKey: "",
-    consumer: null,
-    timer: null,
-  });
   messageStatusRef.current = messageStatus;
 
-  const stop = useCallback(() => {
-    const operation = operationRef.current;
-    operation.generation += 1;
-    if (operation.timer) clearTimeout(operation.timer);
-    operation.timer = null;
-    if (operation.outputKey && operation.consumer) {
-      releaseSharedOutput(operation.outputKey, operation.consumer);
-    }
-    operation.outputKey = "";
-    operation.consumer = null;
-  }, []);
-
   useEffect(() => {
-    stop();
-    if (!isOpen || !sessionId || !messageId) {
+    if (!isOpen || !outputKey || !messageId) {
       setIsLoading(false);
       return;
     }
 
-    const outputKey = `${sessionId}:${messageId}`;
     if (outputKeyRef.current !== outputKey) {
       outputKeyRef.current = outputKey;
       snapshotRef.current = readCachedOutput(outputKey);
@@ -177,29 +156,29 @@ export function useShellCommandOutput({
       setError(null);
     }
 
-    const operation = operationRef.current;
-    const generation = operation.generation;
-    const consumer = Symbol(outputKey);
-    operation.outputKey = outputKey;
-    operation.consumer = consumer;
-    let failureCount = 0;
-
     if (snapshotRef.current && isTerminalToolCallStatus(snapshotRef.current.status)) {
       setIsLoading(false);
-      return stop;
+      return;
     }
+    const consumer = Symbol(outputKey);
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let failureCount = 0;
+    const load = (signal: AbortSignal) =>
+      taskId && errandId
+        ? fetchErrandShellCommandOutput(taskId, errandId, messageId, { init: { signal } })
+        : fetchShellCommandOutput(sessionId, messageId, { init: { signal } });
 
     const requestSnapshot = async () => {
       if (!snapshotRef.current) setIsLoading(true);
       try {
         const nextSnapshot = await requestSharedOutput(
           outputKey,
-          sessionId,
-          messageId,
+          load,
           consumer,
           isTerminalToolCallStatus(messageStatusRef.current),
         );
-        if (operation.generation !== generation) return;
+        if (disposed) return;
         failureCount = 0;
         snapshotRef.current = nextSnapshot;
         setSnapshot(nextSnapshot);
@@ -209,10 +188,10 @@ export function useShellCommandOutput({
           !isTerminalToolCallStatus(nextSnapshot.status) &&
           !isTerminalToolCallStatus(messageStatusRef.current)
         ) {
-          operation.timer = setTimeout(requestSnapshot, POLL_INTERVAL_MS);
+          timer = setTimeout(requestSnapshot, POLL_INTERVAL_MS);
         }
       } catch (requestError) {
-        if (operation.generation !== generation) return;
+        if (disposed) return;
         if (isToolPayloadRemovedError(requestError)) {
           snapshotRef.current = null;
           setSnapshot(null);
@@ -224,15 +203,25 @@ export function useShellCommandOutput({
         setError(asError(requestError));
         setIsLoading(false);
         if (!isTerminalToolCallStatus(messageStatusRef.current)) {
-          operation.timer = setTimeout(requestSnapshot, retryDelay(failureCount));
+          timer = setTimeout(requestSnapshot, retryDelay(failureCount));
         }
       }
     };
 
     void requestSnapshot();
-    return stop;
-  }, [isOpen, messageId, messageStatus, retryVersion, sessionId, stop]);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      releaseSharedOutput(outputKey, consumer);
+    };
+  }, [errandId, isOpen, messageId, messageStatus, outputKey, retryVersion, sessionId, taskId]);
 
   const retry = useCallback(() => setRetryVersion((version) => version + 1), []);
-  return { snapshot, isLoading, error, retry };
+  const currentTarget = outputKeyRef.current === outputKey;
+  return {
+    snapshot: currentTarget ? snapshot : null,
+    isLoading,
+    error: currentTarget ? error : null,
+    retry,
+  };
 }

@@ -18,6 +18,7 @@ type ErrandMCPService interface {
 	AbortOwnedAwait(context.Context, models.ErrandAwaitIdentity) error
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	ParentOutstanding(ctx context.Context, parentSessionID string) (bool, error)
+	ReadErrandMessages(ctx context.Context, taskID, errandID, before string, limit int) ([]*models.Message, bool, error)
 }
 
 // SetErrands wires the errands service and its release toggle. While the

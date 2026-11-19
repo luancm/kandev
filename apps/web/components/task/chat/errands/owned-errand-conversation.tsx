@@ -12,7 +12,7 @@ import { MessageList } from "../message-list";
 import { usePageVisible } from "../use-session-read-tracking";
 import { ErrandHeader } from "./errand-header";
 import { ErrandStatusAnnouncer } from "./errand-status-announcer";
-import { OwnedErrandPermissionContext } from "./owned-errand-permission-context";
+import { OwnedErrandContext } from "./owned-errand-context";
 import { OwnedErrandContinuation } from "./owned-errand-continuation";
 
 export function OwnedErrandConversation({
@@ -43,7 +43,7 @@ export function OwnedErrandConversation({
     historyInitialized: transcript.status === "ready",
     hasOlderMessages: transcript.hasMore,
   });
-  const permissionOwner = useMemo(() => ({ taskId, errandId }), [taskId, errandId]);
+  const owner = useMemo(() => ({ taskId, errandId, readScope }), [taskId, errandId, readScope]);
   return (
     <section
       data-testid="errand-conversation"
@@ -52,7 +52,7 @@ export function OwnedErrandConversation({
     >
       <ErrandHeader taskId={taskId} errandId={errandId} onBack={onClose} />
       <ErrandStatusAnnouncer taskId={taskId} sessionId={errandId} active />
-      <OwnedErrandPermissionContext.Provider value={permissionOwner}>
+      <OwnedErrandContext.Provider value={owner}>
         <MessageList
           taskId={taskId}
           sessionId={null}
@@ -71,7 +71,7 @@ export function OwnedErrandConversation({
             loadMore: transcript.loadMore,
           }}
         />
-      </OwnedErrandPermissionContext.Provider>
+      </OwnedErrandContext.Provider>
       <OwnedErrandContinuation
         key={readScope}
         taskId={taskId}

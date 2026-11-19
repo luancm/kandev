@@ -60,6 +60,10 @@ func (f *fakeErrandService) ReadErrandMessages(context.Context, string, string, 
 	return nil, false, f.browserErr
 }
 
+func (f *fakeErrandService) ReadErrandMessageDetail(context.Context, string, string, string) (*models.Message, error) {
+	return nil, models.ErrErrandNotFound
+}
+
 func (f *fakeErrandService) MarkErrandRead(context.Context, string, string, string) error {
 	return f.browserErr
 }

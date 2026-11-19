@@ -142,6 +142,8 @@ await return Errand IDs. To continue a settled Errand, its authenticated parent
 passes the Errand ID as the explicit `session_id` argument to
 `message_task_kandev`. Failures follow [Error codes](#error-codes).
 
+For a retained transcript, pass `task_id` and `errand_id` to `get_task_conversation_kandev`. The default page is newest first. Pass the returned cursor as `before` for older pages. The task and Errand must match, and the caller must be authorized to read the task.
+
 ### Error codes
 
 Each failure is a `ws.NewError` with a code from `pkg/websocket/actions.go`
@@ -175,6 +177,8 @@ the flag off, and never fall back to complete lists. API, internal and MCP
 inventories remain complete; mutations retain feature and ownership gates.
 
 The gateway authorizes Errand requests through their owning task. Cancellation resolves the Errand’s task from its durable row, including while queued. Errand updates refresh the owned browser state. The ordinary parent’s session events carry `waiting_on_errands`.
+
+Owned transcript pages carry compact command-output summaries. The shared command-output disclosure loads one message on demand through `GET /api/v1/tasks/:id/errands/:errand_id/messages/:message_id/shell-output`. The handler verifies workspace read access and the task, Errand and message relationship before resolving output. Payloads removed by retention return HTTP 410.
 
 Each result-bearing parent user message persists an `errand_delivery`
 object: `token`, `route`, and `items` (`errand_id`, `title`, `status`,

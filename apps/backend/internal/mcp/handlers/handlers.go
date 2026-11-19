@@ -3177,6 +3177,9 @@ func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Messag
 	if errResp != nil {
 		return errResp, nil
 	}
+	if req.ErrandID != "" {
+		return h.handleOwnedErrandConversation(ctx, msg, req)
+	}
 
 	session, errResp := h.resolveConversationSession(ctx, msg, req.TaskID, req.SessionID)
 	if errResp != nil {
@@ -3211,6 +3214,7 @@ func (h *Handlers) handleGetTaskConversation(ctx context.Context, msg *ws.Messag
 type taskConversationRequest struct {
 	TaskID    string   `json:"task_id"`
 	SessionID string   `json:"session_id"`
+	ErrandID  string   `json:"errand_id"`
 	Limit     int      `json:"limit"`
 	Before    string   `json:"before"`
 	After     string   `json:"after"`
@@ -3234,6 +3238,9 @@ func parseTaskConversationRequest(msg *ws.Message) (*taskConversationRequest, *w
 	}
 	if req.Limit < 0 {
 		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "limit must be non-negative")
+	}
+	if req.ErrandID != "" && (req.SessionID != "" || req.After != "" || req.Sort == "asc") {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "errand_id uses before pagination, with no session_id or ascending sort")
 	}
 	return &req, nil
 }

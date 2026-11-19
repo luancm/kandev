@@ -754,6 +754,7 @@ func (s *Server) resolveAgentPermissionHandler() server.ToolHandlerFunc {
 func buildTaskConversationPayload(req mcp.CallToolRequest, taskID string) map[string]interface{} {
 	payload := map[string]interface{}{"task_id": taskID}
 	copyOptionalStringArg(payload, req, "session_id")
+	copyOptionalStringArg(payload, req, "errand_id")
 	copyOptionalStringArg(payload, req, "before")
 	copyOptionalStringArg(payload, req, "after")
 	copyOptionalStringArg(payload, req, "sort")

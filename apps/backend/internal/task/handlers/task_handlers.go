@@ -273,6 +273,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.PUT("/tasks/:id/completion-gate/criteria/:criterion_id/evidence", h.httpVerifyTaskCompletionCriterion)
 	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
+	api.GET("/tasks/:id/errands/:errand_id/messages/:message_id/shell-output", h.httpErrandShellOutput)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
 	api.POST("/tasks/:id/turn-error/dismiss", h.httpDismissTaskTurnError)

@@ -150,10 +150,11 @@ func (r *Repository) ResolveAgentDeliveryEventTurn(ctx context.Context, event *m
 }
 
 func (p promptAdmission) matchesEvent(taskID string, event *models.AgentDeliveryEvent, payload streams.AgentEvent) bool {
+	// The receipt verifies the current execution separately. A replacement
+	// reader can replay a frame admitted by the original execution.
 	return p.TaskID == taskID && p.SessionID == event.SessionID && p.IncarnationID == event.IncarnationID &&
 		p.HarnessGeneration == uint64(event.HarnessGeneration) && p.StreamID == event.StreamID &&
 		p.SubmissionID == event.SubmissionID && p.PromptGeneration != 0 &&
-		(event.ExecutionID == "" || p.ExecutionID == event.ExecutionID) &&
 		(payload.PromptGeneration == 0 || payload.PromptGeneration == p.PromptGeneration) &&
 		(payload.TurnID == "" || payload.TurnID == p.TurnID)
 }

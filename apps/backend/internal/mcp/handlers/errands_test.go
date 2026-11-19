@@ -80,6 +80,10 @@ func (f *fakeErrandService) ParentOutstanding(_ context.Context, _ string) (bool
 	return f.outstanding, f.outstandingErr
 }
 
+func (f *fakeErrandService) ReadErrandMessages(context.Context, string, string, string, int) ([]*models.Message, bool, error) {
+	return nil, false, models.ErrErrandNotFound
+}
+
 func (f *fakeErrandService) List(_ context.Context, _ string) ([]errands.Snapshot, error) {
 	f.listCalls++
 	return nil, f.listErr

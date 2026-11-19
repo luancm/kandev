@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
@@ -12,6 +12,7 @@ import { isTerminalToolCallStatus, normalizeToolCallStatus } from "@/lib/utils/t
 import type { ShellExecOutputSummary } from "../types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { OwnedErrandContext } from "../errands/owned-errand-context";
 
 type ShellOutputDisclosureProps = {
   sessionId: string;
@@ -128,7 +129,9 @@ export function ShellOutputDisclosure({
 }: ShellOutputDisclosureProps) {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
-  const output = useShellCommandOutput({ sessionId, messageId, isOpen, messageStatus });
+  const owner = useContext(OwnedErrandContext);
+  const options = { sessionId, messageId, isOpen, messageStatus };
+  const output = useShellCommandOutput(owner ? { ...options, errandOwner: owner } : options);
   const label = formatOutputSize(summary);
 
   return (

@@ -200,6 +200,55 @@ export async function exerciseOwnedErrandView({
   }
 }
 
+export async function exerciseOwnedErrandShellOutput({
+  page,
+  api,
+  seed,
+  backend,
+  phone,
+}: {
+  page: Page;
+  api: ApiClient;
+  seed: SeedData;
+  backend: BackendContext;
+  phone: boolean;
+}) {
+  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
+  try {
+    const script = [
+      'e2e:shell_stream({"id":"owned","action":"start","command":"inspect-output","seed_bytes":4096})',
+      'e2e:shell_stream({"id":"owned","action":"finish","stdout":"OWNED_STDOUT","stderr":"OWNED_STDERR","exit_code":0})',
+      'e2e:message("owned output ready")',
+    ].join("\n");
+    const { taskId, parentId, errands } = await startErrands(api, seed, backend, {
+      prompts: [script],
+    });
+    const errandId = errands[0].errand_id;
+    await waitDelivered(api, taskId, [errandId]);
+    const reads: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().endsWith("/shell-output")) reads.push(request.url());
+    });
+    const { conversation } = await openOwnedErrandConversation(page, taskId, parentId, errandId, {
+      phone,
+    });
+    const disclosure = conversation.getByRole("button", { name: "Show command output" });
+    await expect(disclosure).toBeVisible();
+    await expect(conversation.getByText("OWNED_STDOUT", { exact: true })).toHaveCount(0);
+    expect(reads).toHaveLength(0);
+    if (phone) await disclosure.tap();
+    else await disclosure.click();
+    const output = conversation.getByTestId("tool-execute-output");
+    await expect(output).toContainText("OWNED_STDOUT");
+    await expect(output).toContainText("OWNED_STDERR");
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toContain(`/api/v1/tasks/${taskId}/errands/${errandId}/messages/`);
+    if (phone) await expectNoHorizontalOverflow(page);
+  } finally {
+    await restore();
+  }
+}
+
 export async function exerciseOwnedErrandAutomaticPermission({
   page,
   api,

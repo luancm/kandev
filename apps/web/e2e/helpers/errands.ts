@@ -947,11 +947,11 @@ export async function expectNormalContextSources(
     await expectNoHorizontalOverflow(page);
     await page.goto(`/t/${fixture.taskId}?sessionId=${fixture.errands[0].errand_id}`);
     await expect(
-      parentChat(page, fixture.errands[0].errand_id).getByTestId("errand-header"),
+      ownedErrandChat(page, fixture.errands[0].errand_id).getByTestId("errand-header"),
     ).toBeVisible();
-    expect((await api.listTaskSessions(fixture.taskId)).sessions.map((row) => row.id)).toEqual(
-      expect.arrayContaining(fixture.errands.map((row) => row.errand_id)),
-    );
+    expect((await api.listTaskSessions(fixture.taskId)).sessions.map((row) => row.id)).toEqual([
+      fixture.parentId,
+    ]);
   } finally {
     for (const gate of gates) await gate.release();
     await restore();

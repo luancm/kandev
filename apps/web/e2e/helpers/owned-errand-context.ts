@@ -115,6 +115,10 @@ export async function exerciseOwnedErrandContext({
     await expect(contextRow(reloaded, measured.errand_id)).toContainText(
       "Context window: 82.0K of 100.0K tokens",
     );
+    const historyToggle = reloaded.getByTestId(`errands-history-toggle-${parentId}`);
+    await expect(historyToggle).toHaveAttribute("aria-expanded", "true");
+    await activateContextControl(historyToggle, phone);
+    await expect(historyToggle).toHaveAttribute("aria-expanded", "false");
 
     await socket.setOfflineAndClose();
     await clear.release();
@@ -125,6 +129,7 @@ export async function exerciseOwnedErrandContext({
     const cleared = contextRow(reloaded, measured.errand_id);
     await expect(cleared).toBeVisible();
     await expect(cleared).not.toContainText("Context window");
+    await activateContextControl(historyToggle, phone);
     await expect(contextRow(reloaded, unmeasured.errand_id)).toContainText("usage not measured");
     await expectNoHorizontalOverflow(page);
     await cleared.scrollIntoViewIfNeeded();

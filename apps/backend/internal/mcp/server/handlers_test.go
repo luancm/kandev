@@ -1108,6 +1108,19 @@ func TestGetTaskConversation_ForwardsToBackend(t *testing.T) {
 	assert.Equal(t, []string{"message", "tool_call"}, payload["message_types"])
 }
 
+func TestGetTaskConversation_ForwardsOwnedErrand(t *testing.T) {
+	backend := &testBackend{response: map[string]any{"errand_id": "owned"}}
+	s := newTaskModeServer(t, backend, "task-current")
+	result := callTool(t, s, "get_task_conversation_kandev", map[string]any{
+		"task_id": "task-current", "errand_id": "owned", "before": "oldest",
+	})
+	require.False(t, result.IsError)
+	require.Equal(t, ws.ActionMCPGetTaskConversation, backend.lastAction)
+	require.Equal(t, map[string]any{
+		"task_id": "task-current", "errand_id": "owned", "before": "oldest",
+	}, backend.lastPayload)
+}
+
 func TestGetTaskConversation_MissingTaskID_ReturnsError(t *testing.T) {
 	backend := &testBackend{}
 	s := newTaskModeServer(t, backend, "task-current")

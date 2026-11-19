@@ -3,7 +3,7 @@ import { createElement, type ReactNode } from "react";
 import { renderHook, act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import type { Message } from "@/lib/types/http";
-import { OwnedErrandPermissionContext } from "../errands/owned-errand-permission-context";
+import { OwnedErrandContext } from "../errands/owned-errand-context";
 import {
   parsePermission,
   usePermissionResponseHandlers,
@@ -84,8 +84,8 @@ describe("owned Errand permission", () => {
       {
         wrapper: ({ children }: { children: ReactNode }) =>
           createElement(
-            OwnedErrandPermissionContext.Provider,
-            { value: { taskId: "task-1", errandId: "errand-1" } },
+            OwnedErrandContext.Provider,
+            { value: { taskId: "task-1", errandId: "errand-1", readScope: "scope" } },
             children,
           ),
       },

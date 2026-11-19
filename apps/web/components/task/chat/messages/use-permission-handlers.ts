@@ -24,7 +24,7 @@ import {
   type PermissionOption,
   type PermissionRequestIdentity,
 } from "@/lib/permissions/respond";
-import { OwnedErrandPermissionContext } from "../errands/owned-errand-permission-context";
+import { OwnedErrandContext } from "../errands/owned-errand-context";
 
 export type { PermissionActionChoice, PermissionOption };
 
@@ -147,7 +147,7 @@ export function usePermissionResponseHandlers({
 }: UsePermissionHandlersParams) {
   const [isResponding, setIsResponding] = useState(false);
   const [isUnavailable, setIsUnavailable] = useState(false);
-  const owner = useContext(OwnedErrandPermissionContext);
+  const owner = useContext(OwnedErrandContext);
   const unavailableInErrand =
     owner !== null &&
     permissionMessage !== undefined &&

@@ -1,4 +1,6 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { fetchJson, type ApiRequestOptions } from "@/lib/api/client";
+import type { ShellCommandOutputSnapshot } from "./session-api";
 import type { Message } from "@/lib/types/http";
 import {
   normalizeErrandAttention,
@@ -19,6 +21,19 @@ const INVALID_ERRAND_MESSAGE_PAGE = "Invalid Errand message page";
 
 /** Cancelling stops errand sessions, which can outlast the default request timeout. */
 const ERRAND_MUTATION_TIMEOUT_MS = 15_000;
+
+export function fetchErrandShellCommandOutput(
+  taskId: string,
+  errandId: string,
+  messageId: string,
+  options?: ApiRequestOptions,
+) {
+  const [task, errand, message] = [taskId, errandId, messageId].map(encodeURIComponent);
+  return fetchJson<ShellCommandOutputSnapshot>(
+    `/api/v1/tasks/${task}/errands/${errand}/messages/${message}/shell-output`,
+    options,
+  );
+}
 
 function requireClient() {
   const client = getWebSocketClient();

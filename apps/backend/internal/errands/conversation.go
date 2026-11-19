@@ -30,6 +30,28 @@ func (s *Service) ReadErrandMessages(ctx context.Context, taskID, errandID, befo
 	return messages, more, err
 }
 
+// ReadErrandMessageDetail resolves externalized output for one owned message.
+func (s *Service) ReadErrandMessageDetail(ctx context.Context, taskID, errandID, messageID string) (*models.Message, error) {
+	row, err := s.Lookup(ctx, errandID)
+	if err != nil {
+		return nil, err
+	}
+	if row.TaskID != taskID {
+		return nil, notFound()
+	}
+	reader, ok := s.store.(interface {
+		GetErrandMessageDetail(context.Context, string, string) (*models.Message, error)
+	})
+	if !ok {
+		return nil, errors.New("errand conversation storage is unavailable")
+	}
+	message, err := reader.GetErrandMessageDetail(ctx, row.ID, messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, notFound()
+	}
+	return message, err
+}
+
 // MarkErrandRead acknowledges a message the browser has observed in the conversation.
 func (s *Service) MarkErrandRead(ctx context.Context, taskID, errandID, messageID string) error {
 	writer, ok := s.store.(interface {

@@ -124,11 +124,8 @@ test("phone Errand history stays in a bounded drawer with its composer and Stop-
     const stopRequest = ws.waitForResponse("errand.cancel_all", {
       requestWhere: (payload) => payload.task_id === scenario.taskId,
     });
-    const stopUnconfirmed = expect(stopRequest).rejects.toThrow(
-      /some errands could not be stopped.*"cancelled":1/,
-    );
     await stopAll.tap();
-    await stopUnconfirmed;
+    expect((await stopRequest).payload).toMatchObject({ cancelled: 1 });
     expect(
       (await listErrands(api, scenario.taskId)).find(
         (row) => row.errand_id === `${scenario.parentId}-recovery`,

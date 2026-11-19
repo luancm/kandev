@@ -3,6 +3,7 @@ import {
   exerciseOwnedErrandAutomaticPermission,
   exerciseOwnedErrandContinuation,
   exerciseOwnedErrandDeepLink,
+  exerciseOwnedErrandShellOutput,
   exerciseOwnedErrandView,
 } from "../../helpers/owned-errand";
 
@@ -14,6 +15,16 @@ test("desktop opens a finished owned Errand from a direct link", async ({
 }) => {
   test.setTimeout(120_000);
   await exerciseOwnedErrandDeepLink({ page, api, seed, backend, phone: false });
+});
+
+test("desktop reads owned command output only after disclosure", async ({
+  testPage: page,
+  apiClient: api,
+  seedData: seed,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await exerciseOwnedErrandShellOutput({ page, api, seed, backend, phone: false });
 });
 
 test("desktop opens an owned Errand and returns to its parent", async ({

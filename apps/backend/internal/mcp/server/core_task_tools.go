@@ -83,6 +83,7 @@ func (s *Server) registerGetTaskConversationTool() {
 			mcp.WithDescription(description),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
+			mcp.WithString("errand_id", mcp.Description("Optional owned Errand within task_id. Use before to page through it from newest to oldest. Omit session_id, after and ascending sort.")),
 			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
 			mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
 			mcp.WithString("after", mcp.Description("Optional cursor message ID to fetch messages after this ID")),
