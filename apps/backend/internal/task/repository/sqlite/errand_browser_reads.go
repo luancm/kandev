@@ -395,6 +395,7 @@ func errandBrowserStatusExpression(driver string) string {
 		WHEN e.lifecycle = 'queued' THEN 'queued'
 		WHEN ` + ownedErrandExists + ` THEN CASE
 			WHEN ` + ownedErrandWorking(driver) + ` AND ` + ownedErrandPermission(driver) + ` THEN 'needs_attention'
+			WHEN ` + ownedErrandRecoveryAttention(driver) + ` THEN 'needs_attention'
 			WHEN ` + ownedErrandWorking(driver) + ` THEN 'running'
 			ELSE e.last_outcome END
 		WHEN s.id IS NULL OR s.state = 'FAILED' THEN 'failed'

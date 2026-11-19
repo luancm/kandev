@@ -5,11 +5,27 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // recoveryAttentionPredicate is shared by status reads and capacity summaries.
 // Recovery identity is admission evidence only; this observation never settles work.
 func recoveryAttentionPredicate(driver string) string {
+	return `(` + ownedErrandRecoveryAttention(driver) + ` OR ` + sessionErrandRecoveryAttention(driver) + `)`
+}
+
+func ownedErrandRecoveryAttention(driver string) string {
+	marker := dialect.JSONExtract(driver, "t.metadata", models.ErrandTurnRecoveryUnresolvedKey)
+	return `(e.lifecycle='launched' AND EXISTS (
+	 SELECT 1 FROM errand_execution_generations g JOIN errand_turns t ON t.errand_id=g.errand_id AND t.id=g.active_turn_id
+	 JOIN errand_harness_bindings b ON b.errand_id=g.errand_id AND b.owner_generation=g.generation AND b.execution_id=g.execution_id
+	 WHERE g.errand_id=e.id AND g.active_submission_id<>'' AND t.completed_at IS NULL
+	 AND g.generation=(SELECT MAX(generation) FROM errand_execution_generations WHERE errand_id=e.id)
+	 AND b.stream_id=` + marker + `
+	 AND b.binding_sequence=(SELECT MAX(binding_sequence) FROM errand_harness_bindings WHERE errand_id=e.id AND owner_generation=g.generation)))`
+}
+
+func sessionErrandRecoveryAttention(driver string) string {
 	recovery := func(key string) string {
 		return "(" + dialect.JSONExtractPath(driver, "s.metadata", "agent_delivery_recovery", key) + ")"
 	}
@@ -47,7 +63,7 @@ func recoveryAttentionPredicate(driver string) string {
 func (r *Repository) ErrandRecoveryAttention(ctx context.Context, id string) (bool, error) {
 	var attention bool
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT EXISTS (SELECT 1
- FROM task_session_errands e JOIN task_sessions s ON s.id = e.id
+	FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
  WHERE e.id = ? AND `+recoveryAttentionPredicate(r.ro.DriverName())+`)`), id).Scan(&attention)
 	if err != nil {
 		return false, fmt.Errorf("read errand recovery attention: %w", err)

@@ -95,6 +95,49 @@ func TestBusPublisherRoutesByWorkspaceAndSkipsUnresolvedWorkspaces(t *testing.T)
 	}
 }
 
+type ownedRecoveryStatusReader struct{ *memoryStore }
+
+func (r ownedRecoveryStatusReader) ReadErrandStatuses(_ context.Context, _, errandID string) (map[string]models.ErrandBrowserObservation, error) {
+	return map[string]models.ErrandBrowserObservation{
+		errandID: {ID: errandID, Status: models.ErrandStatusNeedsAttention, AttentionReason: models.ErrandAttentionRecoveryUnresolved},
+	}, nil
+}
+
+func TestPublishOwnedStatusWakesOnlyItsParent(t *testing.T) {
+	h := newHarness(t)
+	ctx := t.Context()
+	row := &models.Errand{ID: "owned-errand", TaskID: testTask, ParentSessionID: testParent, Lifecycle: models.ErrandLifecycleLaunched}
+	if err := h.store.CreateErrand(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	h.service.store = ownedRecoveryStatusReader{h.store}
+	parent := h.service.awaits.register(testParent, "parent-wait")
+	defer h.service.awaits.remove(parent)
+	other := h.service.awaits.register("other-parent", "other-wait")
+	defer h.service.awaits.remove(other)
+
+	h.service.PublishOwnedStatus(ctx, "other-task", row.ID)
+	select {
+	case <-parent.wake:
+		t.Fatal("a foreign task woke the parent")
+	default:
+	}
+	h.service.PublishOwnedStatus(ctx, testTask, row.ID)
+	select {
+	case <-parent.wake:
+	default:
+		t.Fatal("the parent did not wake after recovery status publication")
+	}
+	select {
+	case <-other.wake:
+		t.Fatal("an unrelated parent woke")
+	default:
+	}
+	if statuses := h.publisher.statuses(); len(statuses) != 1 || statuses[0] != models.ErrandStatusNeedsAttention {
+		t.Fatalf("published statuses = %v, want one recovery attention update", statuses)
+	}
+}
+
 // @covers AC-TASKS-ERRANDS-013.1
 func TestCountersUseOnlyClosedLabelSets(t *testing.T) {
 	h := newHarness(t)

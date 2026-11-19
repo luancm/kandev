@@ -2,6 +2,18 @@ package models
 
 import "time"
 
+const ErrandTurnRecoveryUnresolvedKey = "errand_recovery_unresolved"
+
+// ErrandRecoveryObservation identifies the active prompt behind a stream recovery transition.
+type ErrandRecoveryObservation struct {
+	TaskID           string
+	Binding          ErrandHarnessBinding
+	TurnID           string
+	SubmissionID     string
+	PromptGeneration uint64
+	Unresolved       bool
+}
+
 type ErrandExecutionDescriptor struct {
 	ErrandID           string
 	TaskID             string

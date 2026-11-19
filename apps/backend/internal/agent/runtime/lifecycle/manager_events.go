@@ -1293,7 +1293,11 @@ func (m *Manager) recordDeliveryReconciliationPhaseWithRuntimeDisposition(
 			zap.Error(err))
 		return
 	}
-	m.eventPublisher.PublishAgentctlDeliveryRecovery(context.Background(), execution, identity, phase)
+	ctx := context.Background()
+	if identity.Owner.Kind == ExecutionOwnerErrand {
+		m.streamManager.projectErrandRecovery(ctx, identity, phase)
+	}
+	m.eventPublisher.PublishAgentctlDeliveryRecovery(ctx, execution, identity, phase)
 }
 
 func applyDeliveryReconciliationPhase(

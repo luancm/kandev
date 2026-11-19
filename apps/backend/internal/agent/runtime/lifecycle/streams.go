@@ -64,6 +64,7 @@ type StreamManager struct {
 	isExecutionCurrent             func(*AgentExecution) bool
 	onDeliveryReconciliationPhase  func(*AgentExecution, DeliveryReconciliationIdentity, DeliveryReconciliationPhase)
 	deliverySubmissionSettler      func(context.Context, *AgentExecution, DeliveryReconciliationIdentity, *journal.Submission) (bool, error)
+	errandRecoveryRefresh          func(context.Context, string, string)
 	deliveryMu                     sync.RWMutex
 	delivery                       AgentDeliveryRepository
 	errandAwaitRefresh             func(context.Context, string)
