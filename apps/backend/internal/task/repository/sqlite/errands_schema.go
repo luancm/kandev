@@ -62,13 +62,3 @@ func (r *Repository) initErrandsSchema() error {
 	}
 	return r.initErrandDeliverySchema()
 }
-
-// migrateTaskSessionErrandColumns adds the immutable session role and parent
-// link. It must run after the task_sessions rebuilds, which copy an explicit
-// column list and would drop columns added before them.
-func (r *Repository) migrateTaskSessionErrandColumns() {
-	_ = r.migrate.Apply("task_sessions.role", `ALTER TABLE task_sessions ADD COLUMN role TEXT NOT NULL DEFAULT ''`)
-	_ = r.migrate.Apply("task_sessions.parent_session_id", `ALTER TABLE task_sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''`)
-	_ = r.migrate.Apply("idx_task_sessions_parent_session_id",
-		`CREATE INDEX IF NOT EXISTS idx_task_sessions_parent_session_id ON task_sessions(parent_session_id)`)
-}

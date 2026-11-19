@@ -38,18 +38,3 @@ func TestErrandCanSendResult(t *testing.T) {
 		})
 	}
 }
-
-func TestAddSessionRoleFieldsOnlyForErrandSessions(t *testing.T) {
-	errand := map[string]interface{}{"session_id": "errand-1"}
-	AddSessionRoleFields(errand, &TaskSession{ID: "errand-1", Role: SessionRoleErrand, ParentSessionID: "parent-1"})
-	if errand["role"] != "errand" || errand["parent_session_id"] != "parent-1" {
-		t.Fatalf("errand fields = %v, want role=errand and parent_session_id=parent-1", errand)
-	}
-
-	ordinary := map[string]interface{}{"session_id": "session-1"}
-	AddSessionRoleFields(ordinary, &TaskSession{ID: "session-1"})
-	AddSessionRoleFields(ordinary, nil)
-	if len(ordinary) != 1 {
-		t.Fatalf("ordinary event payload = %v, want it unchanged", ordinary)
-	}
-}

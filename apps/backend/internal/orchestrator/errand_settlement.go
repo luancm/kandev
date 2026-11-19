@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -14,81 +13,6 @@ import (
 // errandOutstandingReason is the delivery workflow no-op reason recorded when
 // a parent turn ends while its errands still owe an outcome.
 const errandOutstandingReason = "errands_outstanding"
-
-// settleErrandTurn records a settled errand turn. Only the errand's own
-// settled turn is captured; a session that is not an errand is ignored.
-func (s *Service) settleErrandTurn(
-	ctx context.Context, sessionID, turnID string, outcome models.ErrandOutcome, failureSummary string, submissionIDs ...string,
-) error {
-	settler := s.errands
-	if settler == nil || sessionID == "" || turnID == "" {
-		return nil
-	}
-	submissionID := ""
-	if len(submissionIDs) > 0 {
-		submissionID = submissionIDs[0]
-	}
-	err := settler.OnErrandTurnSettled(ctx, errands.TurnSettlement{
-		SessionID: sessionID, TurnID: turnID, SubmissionID: submissionID,
-		Outcome: outcome, FailureSummary: failureSummary,
-	})
-	if err != nil {
-		s.logger.Warn("failed to record errand turn settlement",
-			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
-	}
-	return err
-}
-
-func (s *Service) settleCompletedErrandTurn(ctx context.Context, data watcher.AgentEventData, session *models.TaskSession, turnID string) error {
-	settler := s.errands
-	if settler == nil || session == nil || !models.IsErrandSession(session) || session.ID == "" || turnID == "" {
-		return nil
-	}
-	target := models.ErrandTeardownTarget{
-		TaskID: session.TaskID, SessionID: session.ID, SessionIncarnation: session.QueueIncarnationID,
-		ExecutionID: data.AgentExecutionID, TurnID: turnID, PromptGeneration: data.PromptGeneration,
-	}
-	err := settler.OnErrandTurnSettled(ctx, errands.TurnSettlement{
-		SessionID: session.ID, TurnID: turnID, SubmissionID: data.DeliverySubmissionID,
-		Outcome: models.ErrandOutcomeDone, CompletionTarget: &target,
-	})
-	if err != nil {
-		s.logger.Warn("failed to record successful errand completion",
-			zap.String("session_id", session.ID), zap.String("turn_id", turnID), zap.Error(err))
-	}
-	return err
-}
-
-func (s *Service) scheduleErrandCompletionRetry(ctx context.Context, sessionID string) {
-	controller := s.errands
-	if controller == nil || sessionID == "" {
-		return
-	}
-	go func() {
-		attemptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := controller.RetryErrandCompletion(attemptCtx, sessionID); err != nil {
-			s.logger.Warn("errand completion cleanup remains pending",
-				zap.String("session_id", sessionID), zap.Error(err))
-		}
-	}()
-}
-
-func (s *Service) settleCancelledErrandTurn(ctx context.Context, sessionID, turnID, submissionID string) {
-	canceller := s.errands
-	if canceller == nil || sessionID == "" || turnID == "" {
-		return
-	}
-	if err := s.reconcileAgentDeliverySubmissionSettlements(withSettledDeliverySessionStateConvergenceSkipped(ctx), sessionID, submissionID); err != nil {
-		s.logger.Warn("skipping interrupted errand settlement while durable terminal evidence is unresolved",
-			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
-		return
-	}
-	if err := canceller.OnErrandTurnCancelled(ctx, sessionID, turnID, submissionID); err != nil {
-		s.logger.Warn("failed to settle cancelled errand turn",
-			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
-	}
-}
 
 // settleParentTurn runs the parent-side settlement and reports whether the
 // parent still owes an errand outcome. Unreadable inventory defers task workflow
@@ -107,7 +31,7 @@ func (s *Service) settleParentTurn(ctx context.Context, sessionID string, cause 
 }
 
 // evaluateCompletedAgentWorkflow runs the workflow half of a completed agent
-// turn. An errand turn settles its result; a parent turn settles its errands
+// turn. A parent turn settles its errands
 // before the queue drain. It reports whether the workflow transitioned, and
 // whether task workflow is deferred with no turn started and no transition,
 // which the caller settles without writing task review state.
@@ -120,9 +44,6 @@ func (s *Service) evaluateCompletedAgentWorkflow(
 		if err := s.recordNotRequiredDeliveryWorkflowOutcome(completionCtx, data.TaskID, workflowEffectFromContext(completionCtx)); err != nil {
 			s.logger.Warn("failed to record non-workflow completion outcome",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
-		}
-		if models.IsErrandSession(session) {
-			return false, false
 		}
 		return false, false
 	}

@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -31,18 +32,6 @@ type memoryStore struct {
 }
 
 // Terminal settlement tests use SQLite; this fixture must never infer a decision.
-func (*memoryStore) ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error {
-	panic("terminal settlement requires the SQLite fixture")
-}
-
-func (*memoryStore) CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error) {
-	panic("terminal settlement requires the SQLite fixture")
-}
-
-func (*memoryStore) PendingErrandTurnSettlements(context.Context, string) ([]*models.AgentDeliveryEffect, error) {
-	panic("terminal settlement requires the SQLite fixture")
-}
-
 func (s *memoryStore) BeginErrandAwait(context.Context, models.ErrandAwaitIdentity) error { return nil }
 func (s *memoryStore) OfferErrandAwait(context.Context, models.ErrandAwaitIdentity, []models.ErrandAwaitDeliveryItem) error {
 	return nil
@@ -535,9 +524,14 @@ func (h *harness) mustStart(title string) *StartResult {
 	return result
 }
 
-func (*memoryStore) SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error {
-	panic("terminal settlement requires the SQLite fixture")
+func (*memoryStore) ListOwnedErrandsAwaitingSettlement(context.Context) ([]*models.Errand, error) {
+	return nil, nil
 }
-func (*memoryStore) CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error {
-	panic("terminal settlement requires the SQLite fixture")
+
+func (*memoryStore) ReadOwnedErrandLatestTerminal(context.Context, string) (models.ErrandTeardownTarget, models.DeliverySubmissionState, error) {
+	return models.ErrandTeardownTarget{}, "", sql.ErrNoRows
+}
+
+func (*memoryStore) ReadOwnedErrandParentAdmission(context.Context, models.ErrandParentAdmission) (models.ErrandAdmissionState, error) {
+	return "", nil
 }

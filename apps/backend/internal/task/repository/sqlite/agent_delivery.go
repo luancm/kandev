@@ -281,7 +281,7 @@ func (r *Repository) prepareAgentDeliveryEventReceipt(event *models.AgentDeliver
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64, contentHash string) (int64, error) {
-	turn, errand, err := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
+	turn, err := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
 	if err != nil {
 		return 0, err
 	}
@@ -312,12 +312,6 @@ func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.T
 		if err := r.retainErrandAdmittedToolSourceTx(ctx, tx, errandID, event, turn); err != nil {
 			return 0, err
 		}
-	}
-	if err := r.retainUnownedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
-		return 0, err
-	}
-	if err := r.retainAdmittedToolSourceTx(ctx, tx, event, turn, errand); err != nil {
-		return 0, err
 	}
 	if err := r.receiveErrandAwaitReceiptTx(ctx, tx, event); err != nil {
 		return 0, err
@@ -576,7 +570,7 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if !matches {
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
-	admittedTurn, _, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &stored)
+	admittedTurn, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &stored)
 	if err != nil {
 		return false, err
 	}

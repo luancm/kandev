@@ -368,17 +368,13 @@ func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *A
 			return err
 		}
 	}
-	if prior != nil && prior.AgentExecutionID != execution.ID {
-		if execution.Owner.Kind == ExecutionOwnerErrand {
-			predecessor := execution.Owner
-			predecessor.Generation--
-			if !matchesStoppedErrandInventory(prior, predecessor) {
-				return models.ErrExecutionRotated
-			}
-			prior = nil
-		} else if err := m.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
-			return err
+	if prior != nil && prior.AgentExecutionID != execution.ID && execution.Owner.Kind == ExecutionOwnerErrand {
+		predecessor := execution.Owner
+		predecessor.Generation--
+		if !matchesStoppedErrandInventory(prior, predecessor) {
+			return models.ErrExecutionRotated
 		}
+		prior = nil
 	}
 	if execution.AgentProfileID == "" && prior != nil {
 		execution.AgentProfileID = prior.ExecutionProfileID

@@ -57,7 +57,7 @@ func (s *Service) readParentLifecycle(ctx context.Context, parentID string) life
 
 func liveLifecycleParent(parent *models.TaskSession, row *models.Errand) bool {
 	return parent != nil && parent.ID == row.ParentSessionID && parent.TaskID == row.TaskID &&
-		parent.Role == "" && parent.ParentSessionID == "" && !parent.IsPassthrough && !isTerminalParent(parent.State)
+		!parent.IsPassthrough && !isTerminalParent(parent.State)
 }
 
 // Each durable task and parent is read at most once per inventory, independent

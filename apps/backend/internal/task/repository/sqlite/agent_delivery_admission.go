@@ -2,10 +2,8 @@ package sqlite
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -79,61 +77,48 @@ func (r *Repository) retainPromptAdmissionTx(ctx context.Context, tx *sqlx.Tx, r
 	return nil
 }
 
-// agentDeliveryEventAdmissionTx resolves a submission's exact admitted turn.
-// Its boolean reports the session role and remains independent of attribution.
-func (r *Repository) agentDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, bool, error) {
+// agentDeliveryEventAdmissionTx resolves the exact admitted turn for either owner.
+func (r *Repository) agentDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, error) {
 	if errandID, ok := errandDeliveryIdentity(event.SessionID); ok {
-		turn, err := r.errandDeliveryEventAdmissionTx(ctx, tx, errandID, event)
-		return turn, false, err
+		return r.errandDeliveryEventAdmissionTx(ctx, tx, errandID, event)
 	}
 	return r.taskDeliveryEventAdmissionTx(ctx, tx, event)
 }
 
-func (r *Repository) taskDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, bool, error) {
-	var role, taskID string
-	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT role,task_id FROM task_sessions WHERE id=?`), event.SessionID).Scan(&role, &taskID)
+func (r *Repository) taskDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent) (string, error) {
+	var taskID string
+	err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT task_id FROM task_sessions WHERE id=?`), event.SessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
-		return "", false, nil
+		return "", nil
 	}
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
-	isErrand := role == string(models.SessionRoleErrand)
 	var payload streams.AgentEvent
 	if err = json.Unmarshal(event.Payload, &payload); err != nil {
-		if isErrand {
-			return "", true, err
-		}
-		return "", false, r.validateOpaqueOrdinaryPayloadTx(ctx, tx, event, err)
+		return "", r.validateOpaqueOrdinaryPayloadTx(ctx, tx, event, err)
 	}
 	conflict := repoerrors.ErrAgentDeliveryIdentityMismatch
 	if conflictingAdmissionEnvelope(taskID, event, payload) {
-		return "", isErrand, conflict
+		return "", conflict
 	}
 	if event.SubmissionID == "" {
-		if !isErrand {
-			return "", false, nil
-		}
-		turn, err := r.unownedErrandEventTurnTx(ctx, tx, event, payload)
-		return turn, true, err
+		return "", nil
 	}
 	var raw string
 	err = tx.QueryRowContext(ctx, tx.Rebind(`SELECT outcome FROM agent_delivery_effects WHERE effect_key=? AND effect_type=?`), promptAdmissionEffect+":"+event.SubmissionID, promptAdmissionEffect).Scan(&raw)
 	if err == sql.ErrNoRows {
-		if isErrand {
-			return "", true, conflict
-		}
-		return "", false, nil
+		return "", nil
 	}
 	if err != nil {
-		return "", isErrand, err
+		return "", err
 	}
 	var p promptAdmission
 	if err = json.Unmarshal([]byte(raw), &p); err != nil {
-		return "", isErrand, err
+		return "", err
 	}
 	if !p.matchesEvent(taskID, event, payload) {
-		return "", isErrand, conflict
+		return "", conflict
 	}
 	var valid bool
 	err = tx.QueryRowContext(ctx, tx.Rebind(`
@@ -145,20 +130,20 @@ func (r *Repository) taskDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.
 			WHERE ts.id = ? AND ts.task_id = ? AND ts.queue_incarnation_id = ? AND t.id = ?
 		)`), p.SubmissionID, p.HarnessGeneration, p.SessionID, p.TaskID, p.IncarnationID, p.TurnID).Scan(&valid)
 	if err != nil {
-		return "", isErrand, err
+		return "", err
 	}
 	if !valid {
-		return "", isErrand, conflict
+		return "", conflict
 	}
-	return p.TurnID, isErrand, r.validateAdmissionNativeSessionTx(ctx, tx, event, payload.SessionID, p.NativeSessionID)
+	return p.TurnID, r.validateAdmissionNativeSessionTx(ctx, tx, event, payload.SessionID, p.NativeSessionID)
 }
 
 // ResolveAgentDeliveryEventTurn resolves callback attribution without changing
 // the received payload. Inbox admission repeats the check under writer locks.
-func (r *Repository) ResolveAgentDeliveryEventTurn(ctx context.Context, event *models.AgentDeliveryEvent) (string, bool, error) {
+func (r *Repository) ResolveAgentDeliveryEventTurn(ctx context.Context, event *models.AgentDeliveryEvent) (string, error) {
 	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
 	return r.agentDeliveryEventAdmissionTx(ctx, tx, event)
@@ -173,24 +158,6 @@ func (p promptAdmission) matchesEvent(taskID string, event *models.AgentDelivery
 		(payload.TurnID == "" || payload.TurnID == p.TurnID)
 }
 
-func unownedDeliveryTurnID(event *models.AgentDeliveryEvent, payload streams.AgentEvent) string {
-	switch event.EventType {
-	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeToolCall, streams.EventTypeToolUpdate, streams.EventTypeShellOutputUpdate:
-	default:
-		return ""
-	}
-	scope := payload.ProtocolMessageID
-	if scope == "" && payload.ControlTurnID != 0 {
-		scope = fmt.Sprintf("native-turn:%d", payload.ControlTurnID)
-	}
-	if scope == "" {
-		scope = fmt.Sprint(event.Sequence)
-	}
-	raw, _ := json.Marshal([]any{event.SessionID, event.IncarnationID, event.HarnessGeneration, event.StreamID, payload.PromptGeneration, scope})
-	digest := sha256.Sum256(raw)
-	return fmt.Sprintf("agent-delivery-unowned-%x", digest[:16])
-}
-
 func (p promptAdmission) invalidRunningBinding(running *models.ExecutorRunning) bool {
 	return p.TaskID != running.TaskID || p.SessionID != running.SessionID || p.ExecutionID != running.AgentExecutionID || p.IncarnationID == "" || p.HarnessGeneration == 0 || p.StreamID == "" || p.SubmissionID == "" || p.TurnID == ""
 }
@@ -200,30 +167,11 @@ func conflictingAdmissionEnvelope(taskID string, event *models.AgentDeliveryEven
 }
 
 func (r *Repository) resolveCanonicalAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, stored *models.AgentDeliveryEvent, event streams.AgentEvent) (streams.AgentEvent, error) {
-	turn, errand, err := r.agentDeliveryEventAdmissionTx(ctx, tx, stored)
-	if err != nil || !errand {
-		if err != nil {
-			return event, err
-		}
-		if turn != "" && event.TurnID == "" {
-			event.TurnID = turn
-		}
-		return event, nil
-	}
-	if stored.SubmissionID == "" && turn != "" {
-		turn, err = r.canonicalDeliveryTurnTx(ctx, tx, stored.SessionID, "", "", stored)
-		if err != nil {
-			return event, err
-		}
-	}
-	if event.TurnID == "" {
+	turn, err := r.agentDeliveryEventAdmissionTx(ctx, tx, stored)
+	if err == nil && turn != "" && event.TurnID == "" {
 		event.TurnID = turn
 	}
-	if event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning {
-		event.CanonicalMessageBaseID = fmt.Sprintf("agent-delivery-owned:%s:%s:%s", turn, event.Type, event.ProtocolMessageID)
-		event.CanonicalMessageID = event.CanonicalMessageBaseID
-	}
-	return event, nil
+	return event, err
 }
 
 // ACP payload session IDs name native conversations, while the envelope names

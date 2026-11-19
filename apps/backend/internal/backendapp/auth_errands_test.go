@@ -3,7 +3,7 @@ package backendapp
 import (
 	"context"
 	"encoding/json"
-	"errors"
+
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -41,16 +41,7 @@ type authErrandTestStopper struct {
 
 // This fixture owns no physical runtime and acknowledges the exact stored intent.
 func (s authErrandTestStopper) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
-	target := errands.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID}
-	session, err := s.store.GetTaskSession(ctx, row.ID)
-	switch {
-	case errors.Is(err, models.ErrTaskSessionNotFound):
-		target.FirstTurnID, target.ReservedSubmissionID = row.FirstTurnID, row.SubmissionID
-	case err != nil:
-		return err
-	default:
-		target.SessionIncarnation, target.NoTurn = session.QueueIncarnationID, true
-	}
+	target := errands.ErrandTeardownTarget{TaskID: row.TaskID, ErrandID: row.ID, NoTurn: true}
 	if err := commit(target); err != nil {
 		return err
 	}
@@ -63,7 +54,7 @@ func (s authErrandTestStopper) CancelErrandWithTarget(ctx context.Context, row *
 }
 
 func (s authErrandTestStopper) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
-	row, err := s.store.GetErrand(ctx, intent.Target.SessionID)
+	row, err := s.store.GetErrand(ctx, intent.Target.ErrandID)
 	if err != nil {
 		return "", err
 	}
@@ -133,10 +124,6 @@ func TestGatewayAuthorizesQueuedErrandIDsThroughTheirOwningTask(t *testing.T) {
 		_, sessionErr := taskRepo.GetTaskSession(ctx, id)
 		require.ErrorIs(t, sessionErr, models.ErrTaskSessionNotFound, "queued identity has no session row")
 	}
-	require.NoError(t, taskRepo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "retained-errand", TaskID: "task-b", Role: models.SessionRoleErrand,
-		ParentSessionID: "parent-b", State: models.TaskSessionStateWaitingForInput, StartedAt: time.Now().UTC(),
-	}))
 	require.NoError(t, taskRepo.CreateErrand(ctx, &models.Errand{
 		ID: "retained-errand", TaskID: "task-b", ParentSessionID: "parent-b", Title: "Retained",
 		Objective: "Retained errand", AgentProfileID: "profile-reviewer", FirstTurnID: "retained-first",
@@ -172,22 +159,6 @@ func TestGatewayAuthorizesQueuedErrandIDsThroughTheirOwningTask(t *testing.T) {
 			return nil, err
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]string{"status": string(cancelled.Status)})
-	})
-	gateway.Dispatcher.RegisterFunc(ws.ActionSessionDelete, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		var request struct {
-			SessionID string `json:"session_id"`
-		}
-		if err := msg.ParsePayload(&request); err != nil {
-			return nil, err
-		}
-		session, err := taskRepo.GetTaskSession(ctx, request.SessionID)
-		if err != nil {
-			return nil, err
-		}
-		if err := taskRepo.DeleteTaskSession(ctx, session); err != nil {
-			return nil, err
-		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"deleted": true})
 	})
 
 	gin.SetMode(gin.TestMode)
@@ -239,17 +210,9 @@ func TestGatewayAuthorizesQueuedErrandIDsThroughTheirOwningTask(t *testing.T) {
 	require.Equal(t, models.ErrandCancelSourceUser, ownedErrand.CancelSource)
 	require.Equal(t, models.ErrandResultPending, ownedErrand.ResultState)
 
-	// A retained errand still follows ordinary session authorization while the
-	// feature is off; the errand-specific cancellation route is not required.
-	errService.SetEnabled(func() bool { return false })
-	retained, err := taskRepo.GetTaskSession(ctx, "retained-errand")
-	require.NoError(t, err)
-	require.Equal(t, models.SessionRoleErrand, retained.Role)
-	deleted := dispatchErrandScopeRequest(t, ownerConn, "retained", ws.ActionSessionDelete,
-		map[string]string{"session_id": "retained-errand"})
-	require.Equal(t, ws.MessageTypeResponse, deleted.Type)
 	_, sessionErr := taskRepo.GetTaskSession(ctx, "retained-errand")
 	require.ErrorIs(t, sessionErr, models.ErrTaskSessionNotFound)
+
 }
 
 func assertQueuedErrandUnchanged(t *testing.T, repo *sqlite.Repository, id string) {

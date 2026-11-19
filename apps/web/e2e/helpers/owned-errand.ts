@@ -1,6 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import type { Message } from "../../lib/types/http";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
@@ -8,9 +7,11 @@ import { createAutomaticPermissionProfile } from "./automatic-permission-present
 import { watchWs } from "./causal-waits";
 import {
   expectNoHorizontalOverflow,
+  expectOwnedErrandContinuationRetry,
   expectTouchTarget,
   listErrands,
   parentChat,
+  readOwnedMessages,
   startErrands,
   waitDelivered,
   waitNewParentTurnSettled,
@@ -322,29 +323,6 @@ export async function exerciseOwnedErrandContinuation({
   }
 }
 
-async function expectOwnedErrandContinuationRetry(
-  api: ApiClient,
-  backend: BackendContext,
-  request: { task_id: string; errand_id: string; client_message_id: string; content: string },
-) {
-  async function submit() {
-    try {
-      return (await api.wsRequest<{ turn_id: string }>("errand.continue", request)).turn_id;
-    } catch (error) {
-      if (String(error).includes("Earlier errand work and its external effects remain uncertain"))
-        return undefined;
-      const logs = await readFile(backend.logPath, "utf8").catch(() => "");
-      const failure = logs
-        .split("\n")
-        .findLast((line) => line.includes("errand continuation failed"));
-      throw new Error(failure ? `${String(error)}\n${failure}` : String(error), { cause: error });
-    }
-  }
-  let turnId: string | undefined;
-  await expect.poll(async () => (turnId = await submit())).toEqual(expect.any(String));
-  expect(await submit()).toBe(turnId);
-}
-
 async function sendOwnedErrandFollowUp(
   page: Page,
   { taskId, parentId, errandId }: { taskId: string; parentId: string; errandId: string },
@@ -412,14 +390,6 @@ async function openOwnedErrandConversation(
 async function readOwnedPermission(api: ApiClient, taskId: string, errandId: string) {
   const messages = await readOwnedMessages(api, taskId, errandId);
   return messages.find((message) => message.type === "permission_request");
-}
-
-async function readOwnedMessages(api: ApiClient, taskId: string, errandId: string) {
-  const page = await api.wsRequest<{ messages: Message[] }>("errand.messages", {
-    task_id: taskId,
-    errand_id: errandId,
-  });
-  return page.messages;
 }
 
 async function expectStalePermissionRefused(api: ApiClient, taskId: string, errandId: string) {

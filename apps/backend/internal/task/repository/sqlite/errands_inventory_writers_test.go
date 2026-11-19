@@ -45,7 +45,7 @@ func exerciseErrandInventoryWriter(t *testing.T, repo *Repository, writer string
 		}
 		claimAdmissionResult(t, repo, sibling, route)
 	}
-	session := &models.TaskSession{ID: sibling.ID, TaskID: row.TaskID, Role: models.SessionRoleErrand, ParentSessionID: parent.ID, AgentProfileID: sibling.AgentProfileID}
+	session := &models.TaskSession{ID: sibling.ID, TaskID: row.TaskID, AgentProfileID: sibling.AgentProfileID}
 	createErrandScenarioSession(t, repo, session)
 	if writer == "ephemeral_profile" || writer == "ephemeral_expired" {
 		if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE tasks SET is_ephemeral = 1, updated_at = ? WHERE id = ?`), errandScenarioBase, row.TaskID); err != nil {

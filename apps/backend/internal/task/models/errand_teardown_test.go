@@ -14,9 +14,9 @@ func TestErrandValidateRejectsPartialTeardownTarget(t *testing.T) {
 		Lifecycle: ErrandLifecycleCancelled, CancelSource: ErrandCancelSourceUser,
 		ResultState: ErrandResultNone,
 		TeardownIntent: &ErrandTeardownIntent{
-			Version: 1, ID: "intent-1", State: ErrandTeardownIntentPending,
+			Version: 1, ID: "intent-1", State: ErrandTeardownIntentPending, Purpose: ErrandTeardownPurposeCancellation,
 			RequestedAt: time.Date(2026, time.November, 1, 12, 0, 0, 0, time.UTC),
-			Target:      ErrandTeardownTarget{TaskID: "task-1", SessionID: "errand-1", TurnID: "turn-1"},
+			Target:      ErrandTeardownTarget{TaskID: "task-1", ErrandID: "errand-1", TurnID: "turn-1"},
 		},
 	}
 	if err := errand.Validate(); !errors.Is(err, ErrInvalidErrand) {
@@ -32,7 +32,7 @@ func TestErrandValidateRejectsBlankTeardownIdentities(t *testing.T) {
 	}
 	intent := func(target ErrandTeardownTarget) *ErrandTeardownIntent {
 		return &ErrandTeardownIntent{
-			Version: ErrandTeardownIntentVersion, ID: "intent-1", State: ErrandTeardownIntentPending,
+			Version: ErrandTeardownIntentVersion, ID: "intent-1", State: ErrandTeardownIntentPending, Purpose: ErrandTeardownPurposeCancellation,
 			RequestedAt: time.Date(2026, time.November, 1, 12, 0, 0, 0, time.UTC), Target: target,
 		}
 	}
@@ -43,20 +43,20 @@ func TestErrandValidateRejectsBlankTeardownIdentities(t *testing.T) {
 	}{
 		{
 			name:   "session turn",
-			target: ErrandTeardownTarget{TaskID: "task-1", SessionID: "errand-1", SessionIncarnation: "queue-1", TurnID: " ", ExecutionID: "execution-1"},
+			target: ErrandTeardownTarget{TaskID: "task-1", ErrandID: "errand-1", TurnID: " ", ExecutionID: "execution-1"},
 		},
 		{
 			name:   "execution",
-			target: ErrandTeardownTarget{TaskID: "task-1", SessionID: "errand-1", SessionIncarnation: "queue-1", TurnID: "turn-1", ExecutionID: " ", SubmissionID: "submission-1"},
+			target: ErrandTeardownTarget{TaskID: "task-1", ErrandID: "errand-1", TurnID: "turn-1", ExecutionID: " ", SubmissionID: "submission-1"},
 		},
 		{
 			name:   "submission",
-			target: ErrandTeardownTarget{TaskID: "task-1", SessionID: "errand-1", SessionIncarnation: "queue-1", TurnID: "turn-1", SubmissionID: "\t"},
+			target: ErrandTeardownTarget{TaskID: "task-1", ErrandID: "errand-1", TurnID: "turn-1", SubmissionID: "\t"},
 		},
 		{
 			name:   "reserved launch tuple",
 			errand: Errand{FirstTurnID: " ", SubmissionID: "\t"},
-			target: ErrandTeardownTarget{TaskID: "task-1", SessionID: "errand-1", FirstTurnID: " ", ReservedSubmissionID: "\t"},
+			target: ErrandTeardownTarget{TaskID: "task-1", ErrandID: "errand-1", NoTurn: true, SubmissionID: "\t"},
 		},
 	}
 	for _, test := range cases {
@@ -64,7 +64,7 @@ func TestErrandValidateRejectsBlankTeardownIdentities(t *testing.T) {
 			row := base
 			row.FirstTurnID, row.SubmissionID = test.errand.FirstTurnID, test.errand.SubmissionID
 			target := test.target
-			target.TaskID, target.SessionID = row.TaskID, row.ID
+			target.TaskID, target.ErrandID = row.TaskID, row.ID
 			row.TeardownIntent = intent(target)
 			if err := row.Validate(); !errors.Is(err, ErrInvalidErrand) {
 				t.Fatalf("Validate() = %v, want ErrInvalidErrand for blank teardown identity", err)
@@ -82,7 +82,7 @@ func TestErrandValidateAcceptsSessionAndReservedTeardownTargets(t *testing.T) {
 	}
 	intent := func(target ErrandTeardownTarget) *ErrandTeardownIntent {
 		return &ErrandTeardownIntent{
-			Version: ErrandTeardownIntentVersion, ID: "intent-1", State: ErrandTeardownIntentPending,
+			Version: ErrandTeardownIntentVersion, ID: "intent-1", State: ErrandTeardownIntentPending, Purpose: ErrandTeardownPurposeCancellation,
 			RequestedAt: time.Date(2026, time.November, 1, 12, 0, 0, 0, time.UTC), Target: target,
 		}
 	}
@@ -93,19 +93,19 @@ func TestErrandValidateAcceptsSessionAndReservedTeardownTargets(t *testing.T) {
 		{
 			name: "session turn",
 			target: ErrandTeardownTarget{
-				TaskID: "task-1", SessionID: "errand-1", SessionIncarnation: "queue-1",
-				ExecutionID: "execution-1", TurnID: "turn-1", SubmissionID: "submission-1",
+				TaskID: "task-1", ErrandID: "errand-1",
+				OwnerGeneration: 1, ExecutionID: "execution-1", TurnID: "turn-1", SubmissionID: "submission-1", PromptGeneration: 1,
 			},
 		},
 		{
 			name:   "session with explicit no-turn witness",
-			target: ErrandTeardownTarget{TaskID: "task-1", SessionID: "errand-1", SessionIncarnation: "queue-1", NoTurn: true},
+			target: ErrandTeardownTarget{TaskID: "task-1", ErrandID: "errand-1", NoTurn: true},
 		},
 		{
 			name: "reserved initial launch",
 			target: ErrandTeardownTarget{
-				TaskID: "task-1", SessionID: "errand-1",
-				FirstTurnID: "first-turn-1", ReservedSubmissionID: "first-submission-1",
+				TaskID: "task-1", ErrandID: "errand-1",
+				NoTurn: true,
 			},
 		},
 	}
@@ -122,7 +122,7 @@ func TestErrandValidateAcceptsSessionAndReservedTeardownTargets(t *testing.T) {
 
 func TestErrandCompletionCleanupAcceptsCompletionIntentForLaunchedErrand(t *testing.T) {
 	var intent ErrandTeardownIntent
-	encoded := `{"version":1,"id":"intent-1","state":"pending","requested_at":"2026-11-01T12:00:00Z","purpose":"completion","target":{"task_id":"task-1","session_id":"errand-1","session_incarnation":"incarnation-1","execution_id":"execution-1","turn_id":"turn-1"}}`
+	encoded := `{"version":1,"id":"intent-1","state":"pending","requested_at":"2026-11-01T12:00:00Z","purpose":"completion","target":{"task_id":"task-1","errand_id":"errand-1","owner_generation":1,"execution_id":"execution-1","turn_id":"turn-1","submission_id":"submission-1","prompt_generation":1}}`
 	if err := json.Unmarshal([]byte(encoded), &intent); err != nil {
 		t.Fatalf("Unmarshal completion intent: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestErrandCompletionCleanupAcceptsCompletionIntentForLaunchedErrand(t *test
 
 func TestErrandCompletionCleanupRejectsMissingPurposeOnLaunchedErrand(t *testing.T) {
 	var intent ErrandTeardownIntent
-	encoded := `{"version":1,"id":"intent-1","state":"pending","requested_at":"2026-11-01T12:00:00Z","target":{"task_id":"task-1","session_id":"errand-1","session_incarnation":"incarnation-1","execution_id":"execution-1","turn_id":"turn-1"}}`
+	encoded := `{"version":1,"id":"intent-1","state":"pending","requested_at":"2026-11-01T12:00:00Z","target":{"task_id":"task-1","errand_id":"errand-1","owner_generation":1,"execution_id":"execution-1","turn_id":"turn-1","submission_id":"submission-1","prompt_generation":1}}`
 	if err := json.Unmarshal([]byte(encoded), &intent); err != nil {
 		t.Fatalf("Unmarshal legacy intent: %v", err)
 	}

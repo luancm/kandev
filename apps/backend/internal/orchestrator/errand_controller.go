@@ -7,15 +7,11 @@ import (
 )
 
 // ErrandController is the part of errands.Service that session lifecycle code
-// calls. Every method is safe to call for sessions that are not errands or
-// parents.
+// calls for ordinary parent conversations.
 type ErrandController interface {
 	DrainQueued(ctx context.Context)
 	CascadeParent(parentSessionID string) bool
-	OnErrandTurnSettled(ctx context.Context, settlement errands.TurnSettlement) error
-	OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error
 	OnParentTurnSettled(ctx context.Context, parentSessionID string, cause errands.SettleCause) (bool, error)
-	RetryErrandCompletion(ctx context.Context, sessionID string) error
 	ReconcileLifecycle(ctx context.Context) error
 	Reconcile(ctx context.Context) error
 }

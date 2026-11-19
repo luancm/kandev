@@ -17,10 +17,7 @@ type ownedErrandResultStore interface {
 }
 
 func (s *Service) reconcileOwnedErrandResults(ctx context.Context) error {
-	store, ok := s.store.(ownedErrandResultStore)
-	if !ok {
-		return nil
-	}
+	store := s.store
 	rows, err := store.ListOwnedErrandsAwaitingSettlement(ctx)
 	if err != nil {
 		return err
@@ -49,10 +46,10 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 	if !view.Completed {
 		return errors.New("owned errand terminal receipt has no completed turn")
 	}
-	settlement := TurnSettlement{TurnID: target.TurnID, SubmissionID: target.SubmissionID, Outcome: models.ErrandOutcomeDone}
+	settlement := turnSettlement{TurnID: target.TurnID, Outcome: models.ErrandOutcomeDone}
 	if outcome != models.DeliverySubmissionCompleted {
 		settlement.Outcome = models.ErrandOutcomeFailed
-		settlement.Interrupted = outcome == models.DeliverySubmissionCancelled
+		settlement.Interrupted = outcome == models.DeliverySubmissionCancelled || outcome == models.DeliverySubmissionInterruptedUnknown
 	}
 	parentInitiated, err := s.reconcileOwnedErrandResultOrigin(ctx, store, row, target)
 	if err != nil {
@@ -62,8 +59,7 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 	now := s.clock.Now()
 	unlock := s.parentLocks.lock(row.ParentSessionID)
 	next, changed, err := s.update(ctx, row.ID, func(e *models.Errand) bool {
-		if e.Lifecycle != models.ErrandLifecycleLaunched || e.LatestSettledTurnID != row.LatestSettledTurnID ||
-			e.LatestSettledTurnID == target.TurnID || (parentInitiated && !e.AwaitingResult) {
+		if !canSettleOwnedErrand(e, row.LatestSettledTurnID, target.TurnID, parentInitiated) {
 			return false
 		}
 		applySettlement(e, settlement, parentInitiated, text, truncated, kind, now)
@@ -78,13 +74,24 @@ func (s *Service) reconcileOwnedErrandResult(ctx context.Context, store ownedErr
 	if err != nil || !changed {
 		return err
 	}
-	s.recordTerminalSettlement(next, settlement, parentInitiated, false)
 	if parentInitiated {
+		status := models.ErrandStatusDone
+		if settlement.Outcome == models.ErrandOutcomeFailed {
+			status = models.ErrandStatusFailed
+		}
+		countSettled(status)
+		s.logger.Info("errand.settled", s.errandFields(next, "status", string(status))...)
 		s.afterResultWrite(ctx, next)
 	} else {
 		s.publish(ctx, next)
 	}
 	return nil
+}
+
+func canSettleOwnedErrand(current *models.Errand, previousTurnID, terminalTurnID string, parentInitiated bool) bool {
+	return current.Lifecycle == models.ErrandLifecycleLaunched &&
+		current.LatestSettledTurnID == previousTurnID && current.LatestSettledTurnID != terminalTurnID &&
+		(!parentInitiated || current.AwaitingResult)
 }
 
 func (s *Service) reconcileOwnedErrandResultOrigin(ctx context.Context, store ownedErrandResultStore, row *models.Errand, target models.ErrandTeardownTarget) (bool, error) {

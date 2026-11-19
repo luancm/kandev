@@ -14,11 +14,9 @@ import (
 // The service fake implements the complete capability; runtime identity and
 // admission arbitration are exercised by the production-adapter integration.
 func (s *fakeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(ErrandTeardownTarget) error) error {
-	target := ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID}
+	target := ErrandTeardownTarget{TaskID: row.TaskID, ErrandID: row.ID, NoTurn: true}
 	if row.Lifecycle == models.ErrandLifecycleLaunched {
-		target.SessionIncarnation, target.ExecutionID, target.NoTurn = "test-incarnation", row.ID, true
-	} else {
-		target.FirstTurnID, target.ReservedSubmissionID = row.FirstTurnID, row.SubmissionID
+		target.OwnerGeneration, target.ExecutionID = 1, row.ID
 	}
 	if s.target != nil {
 		target = *s.target
@@ -36,9 +34,6 @@ func (s *fakeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Er
 
 func (s *fakeStopper) RetryErrandTeardown(ctx context.Context, intent ErrandTeardownIntent) (TeardownOutcome, error) {
 	errandID := intent.Target.ErrandID
-	if errandID == "" {
-		errandID = intent.Target.SessionID
-	}
 	row, err := s.store.GetErrand(ctx, errandID)
 	if err != nil {
 		return "", err
@@ -55,12 +50,6 @@ func (s *fakeStopper) RetryErrandTeardown(ctx context.Context, intent ErrandTear
 	}
 	if intent.Target.ExecutionID != "" && row.TeardownIntent.State == models.ErrandTeardownIntentPending {
 		if err := s.stopRuntime(ctx, errandID, reason); err != nil {
-			return "", err
-		}
-	}
-	if intent.Purpose == models.ErrandTeardownPurposeCompletion && row.TeardownIntent.State == models.ErrandTeardownIntentPending {
-		row, err = s.store.TransitionErrandTeardownIntent(ctx, row.ID, intent.ID, row.Version, models.ErrandTeardownIntentClosed)
-		if err != nil {
 			return "", err
 		}
 	}

@@ -1,12 +1,16 @@
 import { copyFile, mkdir, chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import {
   deliverySnapshots,
+  expectOwnedErrandContinuationRetry,
   listErrands,
+  ownedErrandChat,
   parentChat,
+  readOwnedMessages,
   waitDelivered,
   waitParentIdle,
 } from "../../helpers/errands";
@@ -134,30 +138,38 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
       .getByTestId("errands-popover")
       .getByTestId(`errand-open-${errands[0].errand_id}`)
       .click();
-    await expect(parentChat(page, errands[0].errand_id).getByTestId("errand-header")).toBeVisible();
-    await parentChat(page, errands[0].errand_id).getByTestId("errand-back-to-parent").click();
+    const firstErrand = ownedErrandChat(page, errands[0].errand_id);
+    await expect(firstErrand.getByTestId("errand-header")).toBeVisible();
+    await firstErrand.getByTestId("errand-back-to-parent").click();
     await writeFile(markers[0], "release");
     await waitDelivered(api, task.id, [errands[0].errand_id]);
     await waitParentIdle(api, task.id, launched.session_id);
     await expect(chat.getByTestId("errand-finished-preview")).toContainText(
       "ERRAND_PILOT_RESULT_1",
     );
-    await api.addUserMessage(
-      task.id,
-      errands[0].errand_id,
-      "Reply PILOT_CHILD_STEERED. Do not use tools, write files, or start any work.",
-    );
+    await expectOwnedErrandContinuationRetry(api, backend, {
+      task_id: task.id,
+      errand_id: errands[0].errand_id,
+      client_message_id: randomUUID(),
+      content: "Reply PILOT_CHILD_STEERED. Do not use tools, write files, or start any work.",
+    });
     await expect
       .poll(
         async () =>
-          (await api.listSessionMessages(errands[0].errand_id)).messages.some(
+          (await readOwnedMessages(api, task.id, errands[0].errand_id)).some(
             (message) =>
               message.author_type === "agent" && message.content.includes("PILOT_CHILD_STEERED"),
           ),
         { timeout: 90_000 },
       )
       .toBe(true);
-    await waitParentIdle(api, task.id, errands[0].errand_id);
+    await expect
+      .poll(
+        async () =>
+          (await listErrands(api, task.id)).find((row) => row.errand_id === errands[0].errand_id)
+            ?.can_send_result,
+      )
+      .toBe(true);
     await api.wsRequest("errand.send_result", { session_id: errands[0].errand_id });
     await expect
       .poll(async () => (await deliverySnapshots(api, launched.session_id)).length, {
@@ -217,13 +229,13 @@ test("selected real Codex profile delivers errands and preserves opt-in rollback
     release = null;
     await page.reload();
     await expect(page.getByTestId("errands-chip")).toHaveCount(0);
-    const retained = (await api.listTaskSessions(task.id)).sessions.filter((row) =>
-      errands.some((errand) => errand.errand_id === row.id),
-    );
-    expect(retained).toHaveLength(2);
-    expect(retained.every((row) => !row.is_primary)).toBe(true);
+    expect((await api.listTaskSessions(task.id)).sessions.map(({ id }) => id)).toEqual([
+      launched.session_id,
+    ]);
+    for (const errand of errands)
+      expect(await readOwnedMessages(api, task.id, errand.errand_id)).not.toHaveLength(0);
     evidence.rollback =
-      "disabled flag, restarted disposable backend, retained two detached sessions";
+      "disabled flag, restarted disposable backend, retained two owned transcripts";
     evidence.outcome = "passed";
   } catch (error) {
     evidence.outcome = "failed";

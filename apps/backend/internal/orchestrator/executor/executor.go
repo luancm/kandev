@@ -785,10 +785,6 @@ const McpModeAutomation = mcpmode.Automation
 // (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
 const McpModeCoordinator = mcpmode.Coordinator
 
-// McpModeErrand selects the fixed read-only errand MCP catalog for an errand
-// session. Parent errand tools never appear in this mode.
-const McpModeErrand = mcpmode.Errand
-
 // McpModeManagedConversation selects the isolated managed-conversation MCP surface.
 const McpModeManagedConversation = "managed-conversation"
 

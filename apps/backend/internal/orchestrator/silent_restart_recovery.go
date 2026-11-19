@@ -410,13 +410,6 @@ func (s *Service) removeProvenDeadSourceExecution(
 	if err != nil {
 		return err
 	}
-	if store, ok := s.repo.(interface {
-		PreserveErrandInterruptedDelegation(context.Context, *models.ExecutorRunning) error
-	}); ok {
-		if err := store.PreserveErrandInterruptedDelegation(ownerCtx, running); err != nil {
-			return err
-		}
-	}
 	return s.cleanupProvenDeadSilentRestoreExecution(ownerCtx, running)
 }
 

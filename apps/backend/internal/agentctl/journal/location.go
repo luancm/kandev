@@ -47,6 +47,10 @@ type Location struct {
 	Path    string
 }
 
+func ErrandStorageOwnerID(errandID string) string {
+	return "errand-" + errandID
+}
+
 func ResolveLocation(root, ownerID string) (Location, error) {
 	root = filepath.Clean(strings.TrimSpace(root))
 	if root == "." || !filepath.IsAbs(root) {

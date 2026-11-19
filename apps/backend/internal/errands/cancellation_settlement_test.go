@@ -30,17 +30,3 @@ func TestParentTurnCancellationLeavesResultsAndLiveErrandsForLaterTurn(t *testin
 	require.NoError(t, err)
 	require.Len(t, h.deliverer.delivered(), before+1, "a later completed turn can request notification")
 }
-
-// @covers AC-TASKS-ERRANDS-002.1
-func TestCancelledErrandTurnPreservesCompletionThatWonTheRace(t *testing.T) {
-	h, repo, errand, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "finished first", "")
-
-	require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), errand.ID, errand.FirstTurnID, errand.SubmissionID))
-	row, err := repo.GetErrand(t.Context(), errand.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandOutcomeDone, row.LastOutcome)
-	require.Equal(t, models.ErrandResultOutput, row.ResultKind)
-	require.Equal(t, "finished first", row.ResultText)
-	require.False(t, row.AwaitingResult)
-}

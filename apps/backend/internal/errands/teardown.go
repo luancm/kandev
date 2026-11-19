@@ -110,22 +110,6 @@ func (s *Service) retryTeardown(ctx context.Context, row *models.Errand) error {
 	return err
 }
 
-// RetryErrandCompletion resumes one durable success-close obligation. It is
-// independent of the new-errand admission flag and safe for explicit admission.
-func (s *Service) RetryErrandCompletion(ctx context.Context, id string) error {
-	row, err := s.store.GetErrand(ctx, id)
-	if errors.Is(err, models.ErrErrandNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if row.TeardownIntent == nil || row.TeardownIntent.Purpose != models.ErrandTeardownPurposeCompletion {
-		return nil
-	}
-	return s.retryTeardown(ctx, row)
-}
-
 // retryPendingTeardowns runs on startup and the existing sweep even when new
 // errands are disabled. Each row has a bounded attempt and independent error.
 func (s *Service) retryPendingTeardowns(ctx context.Context) error {

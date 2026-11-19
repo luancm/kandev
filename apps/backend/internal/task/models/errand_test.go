@@ -5,30 +5,6 @@ import (
 	"testing"
 )
 
-// @covers AC-TASKS-ERRANDS-001.1
-func TestSessionRoleProjectsThroughToAPIAndSummary(t *testing.T) {
-	errand := &TaskSession{ID: "errand-1", TaskID: "task-1", Role: SessionRoleErrand, ParentSessionID: "parent-1"}
-	api := errand.ToAPI()
-	if api["role"] != "errand" || api["parent_session_id"] != "parent-1" {
-		t.Fatalf("errand ToAPI role fields = (%v, %v), want (errand, parent-1)", api["role"], api["parent_session_id"])
-	}
-
-	ordinary := (&TaskSession{ID: "session-1", TaskID: "task-1"}).ToAPI()
-	for _, key := range []string{"role", "parent_session_id"} {
-		if _, ok := ordinary[key]; ok {
-			t.Fatalf("ordinary session ToAPI contains %q; ordinary payloads must stay unchanged", key)
-		}
-	}
-
-	observation := &TaskSessionSummaryObservation{
-		ID: "errand-1", TaskID: "task-1", Role: SessionRoleErrand, ParentSessionID: "parent-1",
-	}
-	session := observation.ToTaskSession()
-	if session.Role != SessionRoleErrand || session.ParentSessionID != "parent-1" {
-		t.Fatalf("summary observation role fields = (%q, %q), want (errand, parent-1)", session.Role, session.ParentSessionID)
-	}
-}
-
 func TestErrandValidateRequiresIdentityAndKnownStates(t *testing.T) {
 	valid := func() *Errand {
 		return &Errand{

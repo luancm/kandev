@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect } from "@playwright/test";
 import type { Errand } from "../../lib/types/errands";
 import type { ApiClient } from "./api-client";
-import { deliverySnapshots } from "./errands";
+import { deliverySnapshots, listErrands, readOwnedMessages } from "./errands";
 
 export type ErrandDeliverySnapshot = {
   errand_id: string;
@@ -60,32 +60,34 @@ export async function recordedDurationSnapshotsForErrand(
   );
 }
 
-export async function waitNewTurnSettled(
-  api: ApiClient,
-  sessionId: string,
-  previousTurnIds: string[],
-) {
-  const previous = new Set(previousTurnIds);
+export const DURATION_FOLLOWUP_PROMPT = 'e2e:message("DURATION_FOLLOWUP_RESULT")';
+
+export async function waitErrandDurationFollowUp(api: ApiClient, taskId: string, errandId: string) {
   await expect
     .poll(
       async () => {
-        const turns = (await api.listSessionTurns(sessionId)).turns.filter(
-          (turn) => !previous.has(turn.id) && turn.metadata?.lifecycle_only !== true,
+        const messages = await readOwnedMessages(api, taskId, errandId);
+        const prompt = messages.filter(
+          (message) =>
+            message.author_type === "user" && message.content === DURATION_FOLLOWUP_PROMPT,
         );
-        if (turns.length > 1) {
-          throw new Error(`Expected one child follow-up turn; observed ${JSON.stringify(turns)}`);
-        }
-        const messages = (await api.listSessionMessages(sessionId)).messages;
+        const followUp = messages.filter((message) => message.turn_id === prompt[0]?.turn_id);
+        const errand = (await listErrands(api, taskId)).find((row) => row.errand_id === errandId);
         return {
-          completed: turns.length === 1 && Boolean(turns[0].completed_at),
-          promptErrors: messages
-            .filter((message) => message.type === "error" && !previous.has(message.turn_id ?? ""))
-            .map((message) => message.metadata?.error ?? message.content),
+          status: errand?.status,
+          prompts: prompt.length,
+          replied: followUp.some(
+            (message) =>
+              message.author_type === "agent" && message.content === "DURATION_FOLLOWUP_RESULT",
+          ),
+          errors: followUp
+            .filter((message) => message.type === "error")
+            .map((message) => message.content),
         };
       },
-      { message: "The child follow-up turn completes", timeout: 60_000 },
+      { message: "The explicit Errand follow-up settles in the owned transcript", timeout: 60_000 },
     )
-    .toEqual({ completed: true, promptErrors: [] });
+    .toEqual({ status: "done", prompts: 1, replied: true, errors: [] });
 }
 
 export function recordedElapsedDurationMs(errand: Errand): number {

@@ -267,15 +267,15 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 		return models.ErrandBrowserInspection{}, fmt.Errorf("read errand inspection row: %w", err)
 	}
 	parent := models.ErrandBrowserParentIdentity{}
-	var parentID, parentTitle, parentRole, environmentID, taskEnvironmentID string
-	parentErr := tx.QueryRowContext(ctx, tx.Rebind(`SELECT id, COALESCE(name, ''), COALESCE(role, ''),
+	var parentID, parentTitle, environmentID, taskEnvironmentID string
+	parentErr := tx.QueryRowContext(ctx, tx.Rebind(`SELECT id, COALESCE(name, ''),
 		COALESCE(environment_id, ''), COALESCE(task_environment_id, '') FROM task_sessions
 		WHERE id = ? AND task_id = ?`), projection.ParentSessionID, taskID).Scan(
-		&parentID, &parentTitle, &parentRole, &environmentID, &taskEnvironmentID,
+		&parentID, &parentTitle, &environmentID, &taskEnvironmentID,
 	)
 	if parentErr == nil {
 		parent = models.ErrandBrowserParentIdentity{
-			Available: true, ID: parentID, Title: parentTitle, Role: models.SessionRole(parentRole),
+			Available: true, ID: parentID, Title: parentTitle,
 			EnvironmentID: environmentID, TaskEnvironmentID: taskEnvironmentID,
 		}
 	} else if !errors.Is(parentErr, sql.ErrNoRows) {

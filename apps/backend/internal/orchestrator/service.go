@@ -4061,7 +4061,7 @@ func (s *Service) reconcileActiveSessionOnStartup(
 
 	// Only an ordinary session that was not re-tracked can move an unarchived,
 	// still IN_PROGRESS task to REVIEW.
-	if !retracked && running.TaskID != "" && !models.IsErrandSession(session) {
+	if !retracked && running.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
@@ -4236,7 +4236,7 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS);
 	// an errand never owns task runtime state.
-	if session.TaskID != "" && !models.IsErrandSession(session) {
+	if session.TaskID != "" {
 		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
 		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",

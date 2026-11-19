@@ -64,7 +64,6 @@ type parentTerminalIdentityObservation struct {
 	turnID          string
 	successorTurnID string
 	resolvedTurn    string
-	resolvedErrand  bool
 	conflictingErr  error
 	drained         bool
 }
@@ -160,7 +159,7 @@ func exerciseParentTerminalIdentityQueueRelease(t *testing.T, scenario parentTer
 	projectParentTerminalIdentityEvent(t, repo, ctx, transcriptEvent)
 	terminalEvent := parentTerminalIdentityEvent(t, sessionID, taskID, executionID, incarnationID,
 		streamID, submissionID, 2, streams.AgentEvent{Type: streams.EventTypeComplete, PromptGeneration: 7})
-	resolvedTurn, resolvedErrand, resolveErr := repo.ResolveAgentDeliveryEventTurn(ctx, &terminalEvent)
+	resolvedTurn, resolveErr := repo.ResolveAgentDeliveryEventTurn(ctx, &terminalEvent)
 	if resolveErr != nil && scenario != parentTerminalIdentityMissingAdmission {
 		t.Fatalf("resolve ordinary parent terminal from exact admission: %v", resolveErr)
 	}
@@ -175,7 +174,7 @@ func exerciseParentTerminalIdentityQueueRelease(t *testing.T, scenario parentTer
 	}
 	conflictingEvent := terminalEvent
 	conflictingEvent.Payload = conflictingBytes
-	_, _, conflictingErr := repo.ResolveAgentDeliveryEventTurn(ctx, &conflictingEvent)
+	_, conflictingErr := repo.ResolveAgentDeliveryEventTurn(ctx, &conflictingEvent)
 	nativeAsyncPayload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeMessageChunk, Text: "native async output"})
 	if err != nil {
 		t.Fatalf("marshal native asynchronous control: %v", err)
@@ -185,10 +184,10 @@ func exerciseParentTerminalIdentityQueueRelease(t *testing.T, scenario parentTer
 	nativeAsyncEvent.EventType = streams.EventTypeMessageChunk
 	nativeAsyncEvent.Terminal = false
 	nativeAsyncEvent.Payload = nativeAsyncPayload
-	nativeTurn, nativeErrand, nativeErr := repo.ResolveAgentDeliveryEventTurn(ctx, &nativeAsyncEvent)
-	if nativeErr != nil || nativeTurn != "" || nativeErrand {
-		t.Fatalf("ordinary native asynchronous attribution = turn %q, errand %t, error %v; want no admission owner",
-			nativeTurn, nativeErrand, nativeErr)
+	nativeTurn, nativeErr := repo.ResolveAgentDeliveryEventTurn(ctx, &nativeAsyncEvent)
+	if nativeErr != nil || nativeTurn != "" {
+		t.Fatalf("ordinary native asynchronous attribution = turn %q, error %v; want no admission owner",
+			nativeTurn, nativeErr)
 	}
 	rawTerminalPayload := append([]byte(nil), terminalEvent.Payload...)
 	projectParentTerminalIdentityEvent(t, repo, ctx, terminalEvent)
@@ -291,7 +290,7 @@ func exerciseParentTerminalIdentityQueueRelease(t *testing.T, scenario parentTer
 			scenario: scenario, repo: repo, service: service, dispatched: dispatched,
 			queued: queued, status: status, terminal: terminal, sessionID: sessionID,
 			turnID: turnID, successorTurnID: successorTurnID, resolvedTurn: resolvedTurn,
-			resolvedErrand: resolvedErrand, conflictingErr: conflictingErr, drained: drained,
+			conflictingErr: conflictingErr, drained: drained,
 		})
 	} else {
 		assertParentTerminalIdentityProtected(t, ctx, parentTerminalIdentityObservation{
@@ -334,13 +333,13 @@ func assertParentTerminalIdentityReleased(t *testing.T, ctx context.Context, obs
 		`SELECT completed_at FROM task_session_turns WHERE id = ?`, observation.successorTurnID).Scan(&successorCompletedAt); err != nil {
 		t.Fatalf("load successor completion state: %v", err)
 	}
-	if observation.resolvedTurn != observation.turnID || observation.resolvedErrand || observation.conflictingErr == nil ||
+	if observation.resolvedTurn != observation.turnID || observation.conflictingErr == nil ||
 		observation.terminal.TurnID != observation.turnID && observation.scenario == parentTerminalIdentityFresh ||
 		!observation.drained || delivered != observation.queued.Content || len(observation.dispatched) != 0 || observation.status.Count != 0 ||
 		workflowOutcome.TurnID != observation.turnID || workflowOutcome.Outcome != "not_required" || workflowOutcome.State != models.DeliveryEffectCompleted ||
 		settledTerminal.TurnID != observation.turnID || successorCompletedAt.Valid {
-		t.Fatalf("parent terminal handoff: resolved=%q errand=%t terminal=%q want=%q scenario=%d drained=%t delivered=%q duplicate=%t queue=%+v workflow=%+v successor_completed=%v",
-			observation.resolvedTurn, observation.resolvedErrand, settledTerminal.TurnID, observation.turnID, observation.scenario,
+		t.Fatalf("parent terminal handoff: resolved=%q terminal=%q want=%q scenario=%d drained=%t delivered=%q duplicate=%t queue=%+v workflow=%+v successor_completed=%v",
+			observation.resolvedTurn, settledTerminal.TurnID, observation.turnID, observation.scenario,
 			observation.drained, delivered, len(observation.dispatched) != 0, observation.status.Entries, workflowOutcome, successorCompletedAt)
 	}
 	if observation.scenario == parentTerminalIdentityIncomplete {

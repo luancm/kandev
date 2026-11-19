@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -83,11 +84,11 @@ func TestErrandHistoryBrowserFixture(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, sessions, "baseline fixture task must start without sessions")
 		base := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
-		createHistorySession(t, ctx, repo, seed.TaskID, seed.ParentSessionID, seed.AgentProfileID, "", "",
+		createHistorySession(t, ctx, repo, seed.TaskID, seed.ParentSessionID, seed.AgentProfileID,
 			models.TaskSessionStateWaitingForInput, base.Add(-10*time.Minute), nil, true)
 		for index, sessionID := range seed.OrdinarySessionIDs {
 			require.NotEmpty(t, sessionID)
-			createHistorySession(t, ctx, repo, seed.TaskID, sessionID, seed.AgentProfileID, "", "",
+			createHistorySession(t, ctx, repo, seed.TaskID, sessionID, seed.AgentProfileID,
 				models.TaskSessionStateWaitingForInput, base.Add(-time.Duration(index+8)*time.Minute), nil, false)
 		}
 
@@ -140,7 +141,7 @@ func createHistorySession(
 	t *testing.T,
 	ctx context.Context,
 	repo *tasksqlite.Repository,
-	taskID, sessionID, agentProfileID, role, parentID string,
+	taskID, sessionID, agentProfileID string,
 	state models.TaskSessionState,
 	startedAt time.Time,
 	completedAt *time.Time,
@@ -149,7 +150,6 @@ func createHistorySession(
 	t.Helper()
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: sessionID, TaskID: taskID, AgentProfileID: agentProfileID,
-		Role: models.SessionRole(role), ParentSessionID: parentID,
 		State: state, StartedAt: startedAt, CompletedAt: completedAt,
 		UpdatedAt: completedAtOr(startedAt, completedAt), IsPrimary: primary,
 	}))
@@ -174,8 +174,6 @@ func seedFinishedErrand(
 	id := fmt.Sprintf("%s-history-%04d", seed.ParentSessionID, index)
 	createdAt := base.Add(-time.Duration(index) * time.Second)
 	completedAt := createdAt.Add(-time.Minute)
-	createHistorySession(t, ctx, repo, seed.TaskID, id, seed.AgentProfileID, string(models.SessionRoleErrand),
-		seed.ParentSessionID, models.TaskSessionStateCompleted, createdAt.Add(-10*time.Minute), &completedAt, false)
 	deliveredAt := completedAt
 	row := &models.Errand{
 		ID: id, TaskID: seed.TaskID, ParentSessionID: seed.ParentSessionID,
@@ -190,6 +188,8 @@ func seedFinishedErrand(
 		CreatedAt:  createdAt, UpdatedAt: createdAt,
 	}
 	require.NoError(t, repo.CreateErrand(ctx, row))
+	_, err := repo.ReserveErrandExecutionGeneration(ctx, id, 0)
+	require.NoError(t, err)
 }
 
 func seedPendingErrand(
@@ -202,8 +202,6 @@ func seedPendingErrand(
 	t.Helper()
 	id := historyPendingID(seed.ParentSessionID)
 	completedAt := base.Add(-time.Minute)
-	createHistorySession(t, ctx, repo, seed.TaskID, id, seed.AgentProfileID, string(models.SessionRoleErrand),
-		seed.ParentSessionID, models.TaskSessionStateCompleted, base.Add(-10*time.Minute), &completedAt, false)
 	require.NoError(t, repo.CreateErrand(ctx, &models.Errand{
 		ID: id, TaskID: seed.TaskID, ParentSessionID: seed.ParentSessionID,
 		Title: "Terminal Errand with an outstanding result", Objective: "Keep this result visible while measuring finished history.",
@@ -226,8 +224,6 @@ func seedRecoveryErrand(
 	turnID := id + "-turn"
 	submissionID := "history-recovery-submission-" + id
 	startedAt := base.Add(-5 * time.Minute)
-	createHistorySession(t, ctx, repo, seed.TaskID, id, seed.AgentProfileID, string(models.SessionRoleErrand),
-		seed.ParentSessionID, models.TaskSessionStateWaitingForInput, startedAt, nil, false)
 	row := &models.Errand{
 		ID: id, TaskID: seed.TaskID, ParentSessionID: seed.ParentSessionID,
 		Title: "Errand recovery needs verification", Objective: "Hold one fixed unresolved recovery case outside finished history.",
@@ -238,31 +234,35 @@ func seedRecoveryErrand(
 		CreatedAt:  base.Add(-time.Second), UpdatedAt: base.Add(-time.Second),
 	}
 	require.NoError(t, repo.CreateErrand(ctx, row))
-	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID: turnID, TaskID: seed.TaskID, TaskSessionID: id,
-		StartedAt: startedAt, CreatedAt: startedAt, UpdatedAt: startedAt,
-	}))
-	session, err := repo.GetTaskSession(ctx, id)
+	generation, err := repo.ReserveErrandExecutionGeneration(ctx, id, 0)
 	require.NoError(t, err)
-	effect := &models.AgentDeliveryEffect{
-		EffectKey: "history-recovery-settlement-" + id, EffectType: "errand.turn_settlement",
-		SessionID: id, IncarnationID: session.QueueIncarnationID, StreamID: "history-recovery-stream-" + id,
-		HarnessGeneration: 1, SubmissionID: submissionID, TurnID: turnID, Outcome: "parent", State: "pending",
+	binding := models.ErrandHarnessBinding{
+		ErrandID: id, Generation: generation.Generation, ExecutionID: id + "-execution",
+		IncarnationID: id + "-incarnation", HarnessGeneration: 1, StreamID: id + "-stream", NativeSessionID: id + "-native",
 	}
-	require.NoError(t, repo.ReserveErrandTurnSettlement(ctx, seed.TaskID, effect))
-	require.NoError(t, repo.CompleteTurn(ctx, turnID))
-	session.State = models.TaskSessionStateWaitingForInput
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
-	}
-	session.Metadata[models.SessionMetaKeyAgentDeliveryRecovery] = models.AgentDeliveryRecovery{
-		Phase: models.AgentDeliveryRecoveryRecovered, Revision: 1,
-		SessionID: id, AgentExecutionID: "baseline-fixture", SubmissionID: submissionID,
-		StreamID: effect.StreamID, IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1,
-		UpdatedAt: base,
-	}
-	require.NoError(t, repo.SetSessionMetadataKey(ctx, id, models.SessionMetaKeyAgentDeliveryRecovery,
-		session.Metadata[models.SessionMetaKeyAgentDeliveryRecovery]))
+	bound, err := repo.BindErrandExecution(ctx, id, binding.Generation, binding.ExecutionID)
+	require.NoError(t, err)
+	require.True(t, bound)
+	require.NoError(t, repo.AppendErrandHarnessBinding(ctx, &binding, 0))
+	require.NoError(t, repo.CreateErrandTurn(ctx, id, &models.Turn{ID: turnID, StartedAt: startedAt}))
+	prompt := []byte(row.Objective)
+	admitted, err := repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{
+		ErrandID: id, Generation: binding.Generation, ExecutionID: binding.ExecutionID, IncarnationID: binding.IncarnationID,
+		HarnessGeneration: 1, StreamID: binding.StreamID, NativeSessionID: binding.NativeSessionID,
+		PromptGeneration: 1, TurnID: turnID,
+		Submission: &models.AgentDeliverySubmission{
+			ID: submissionID, DispatchAttemptID: binding.ExecutionID, State: models.DeliverySubmissionAccepted,
+			Payload: prompt, PayloadHash: journal.SubmissionHash(prompt),
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, admitted)
+	changed, err := repo.RecordErrandRecoveryObservation(ctx, models.ErrandRecoveryObservation{
+		TaskID: seed.TaskID, Binding: binding, TurnID: turnID, SubmissionID: submissionID, PromptGeneration: 1, Unresolved: true,
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+
 }
 
 func historyPendingID(parentSessionID string) string {

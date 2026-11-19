@@ -459,10 +459,9 @@ function useActiveSessionPillLabel(
 } {
   const { t } = useTranslation();
   const storedActiveSessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const { rows, sessions } = useSessionRows(taskId);
+  const { rows } = useSessionRows(taskId);
   const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
-  const parentId = sessions.find((session) => session.id === effectiveSessionId)?.parent_session_id;
-  const activeRow = rows.find((r) => r.id === (parentId ?? effectiveSessionId));
+  const activeRow = rows.find((r) => r.id === effectiveSessionId);
   const total = rows.length;
   const idx = activeRow?.index;
   let count: string | undefined;
@@ -474,7 +473,7 @@ function useActiveSessionPillLabel(
     label: repositoryLabel ? `${agentLabel} · ${repositoryLabel}` : agentLabel,
     count,
     agentName: activeRow?.agentName ?? null,
-    effectiveSessionId: parentId || effectiveSessionId,
+    effectiveSessionId,
     ariaLabel: repositoryLabel
       ? t("task:activeSessionRepositoryTapToSwitch", { agentLabel, repositoryLabel })
       : t("task:activeSessionTapToSwitch", { agentLabel }),

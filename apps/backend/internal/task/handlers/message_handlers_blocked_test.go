@@ -1211,9 +1211,9 @@ func TestWSAddMessage_SteerEligibleDispatchesSteer(t *testing.T) {
 
 func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 	tests := []struct {
-		name         string
-		state        models.TaskSessionState
-		role         models.SessionRole
+		name  string
+		state models.TaskSessionState
+
 		activity     v1.ForegroundActivity
 		wantResponse ws.MessageType
 		wantPrompt   bool
@@ -1237,25 +1237,6 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 			activity:     v1.ForegroundActivityBackground,
 			wantResponse: ws.MessageTypeError,
 		},
-		{
-			name:         "completed errand accepts an explicit follow-up",
-			state:        models.TaskSessionStateCompleted,
-			role:         models.SessionRoleErrand,
-			wantResponse: ws.MessageTypeResponse,
-			wantPrompt:   true,
-		},
-		{
-			name:         "failed errand remains blocked",
-			state:        models.TaskSessionStateFailed,
-			role:         models.SessionRoleErrand,
-			wantResponse: ws.MessageTypeError,
-		},
-		{
-			name:         "cancelled errand remains blocked",
-			state:        models.TaskSessionStateCancelled,
-			role:         models.SessionRoleErrand,
-			wantResponse: ws.MessageTypeError,
-		},
 	}
 
 	for _, tt := range tests {
@@ -1266,13 +1247,9 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 					"t1": {ID: "t1", State: v1.TaskStateInProgress, UpdatedAt: now},
 				},
 				sessions: map[string]*models.TaskSession{
-					"s1": {ID: "s1", TaskID: "t1", State: tt.state, Role: tt.role, AgentProfileID: "profile-1", UpdatedAt: now},
+					"s1": {ID: "s1", TaskID: "t1", State: tt.state, AgentProfileID: "profile-1", UpdatedAt: now},
 				},
 				primaryID: "s1",
-			}
-			if tt.role == models.SessionRoleErrand {
-				repo.sessions["parent"] = &models.TaskSession{ID: "parent", TaskID: "t1", State: models.TaskSessionStateWaitingForInput}
-				repo.primaryID = "parent"
 			}
 			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 			require.NoError(t, err)

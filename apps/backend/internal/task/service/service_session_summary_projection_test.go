@@ -9,7 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
 	internaldb "github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/task/dto"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -20,7 +20,6 @@ type countingSessionSummaryRepository struct {
 	*sqliterepo.Repository
 	batchSummaryCalls int
 	listSummaryCalls  int
-	ordinaryCalls     int
 	fullBatchCalls    int
 	fullListCalls     int
 }
@@ -93,14 +92,6 @@ func (r *countingSessionSummaryRepository) ListTaskSessionSummaryObservations(
 	return r.Repository.ListTaskSessionSummaryObservations(ctx, taskID)
 }
 
-func (r *countingSessionSummaryRepository) ListOrdinaryTaskSessionSummaryObservations(
-	ctx context.Context,
-	taskID string,
-) ([]*models.TaskSessionSummaryObservation, error) {
-	r.ordinaryCalls++
-	return r.Repository.ListOrdinaryTaskSessionSummaryObservations(ctx, taskID)
-}
-
 func (r *countingSessionSummaryRepository) BatchGetSessionsByTaskIDs(
 	ctx context.Context,
 	taskIDs []string,
@@ -115,29 +106,6 @@ func (r *countingSessionSummaryRepository) ListTaskSessions(
 ) ([]*models.TaskSession, error) {
 	r.fullListCalls++
 	return r.Repository.ListTaskSessions(ctx, taskID)
-}
-
-func assertSessionSummaryIdentity(
-	t *testing.T,
-	path string,
-	observation *models.TaskSessionSummaryObservation,
-	wantRole models.SessionRole,
-	wantParent string,
-) {
-	t.Helper()
-	if observation.Role != wantRole || observation.ParentSessionID != wantParent {
-		t.Fatalf("%s observation identity = (%q, %q), want (%q, %q)", path,
-			observation.Role, observation.ParentSessionID, wantRole, wantParent)
-	}
-	if session := observation.ToTaskSession(); session.Role != wantRole || session.ParentSessionID != wantParent {
-		t.Fatalf("%s session identity = (%q, %q), want (%q, %q)", path,
-			session.Role, session.ParentSessionID, wantRole, wantParent)
-	}
-	summary := dto.FromTaskSessionSummaryObservation(observation)
-	if summary.Role != wantRole || summary.ParentSessionID != wantParent {
-		t.Fatalf("%s summary DTO identity = (%q, %q), want (%q, %q)", path,
-			summary.Role, summary.ParentSessionID, wantRole, wantParent)
-	}
 }
 
 func TestSessionSummaryServiceUsesNarrowReads(t *testing.T) {
@@ -156,9 +124,9 @@ func TestSessionSummaryServiceUsesNarrowReads(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "errand-summary-service", TaskID: "task-1", Role: models.SessionRoleErrand,
-		ParentSessionID: "session-summary-service", State: models.TaskSessionStateCompleted,
+	if err := repo.CreateErrand(ctx, &models.Errand{
+		ID: "errand-summary-service", TaskID: "task-1", ParentSessionID: "session-summary-service",
+		Lifecycle: models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone,
 	}); err != nil {
 		t.Fatalf("create errand: %v", err)
 	}
@@ -166,14 +134,14 @@ func TestSessionSummaryServiceUsesNarrowReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("batch session summary observations: %v", err)
 	}
-	if len(batch["task-1"]) != 2 {
+	if len(batch["task-1"]) != 1 {
 		t.Fatalf("batch summary observations = %+v", batch)
 	}
 	listed, err := svc.ListTaskSessionSummaryObservations(ctx, "task-1")
 	if err != nil {
 		t.Fatalf("list session summary observations: %v", err)
 	}
-	if len(listed) != 2 {
+	if len(listed) != 1 {
 		t.Fatalf("listed summary observations = %+v", listed)
 	}
 	ordinary, err := svc.ListOrdinaryTaskSessionSummaryObservations(ctx, "task-1")
@@ -183,9 +151,9 @@ func TestSessionSummaryServiceUsesNarrowReads(t *testing.T) {
 	if len(ordinary) != 1 || ordinary[0].ID != "session-summary-service" {
 		t.Fatalf("ordinary session summary observations = %+v", ordinary)
 	}
-	if reader.batchSummaryCalls != 1 || reader.listSummaryCalls != 1 || reader.ordinaryCalls != 1 || reader.fullBatchCalls != 0 || reader.fullListCalls != 0 {
-		t.Fatalf("summary/full read counts = batch %d/list %d/ordinary %d/full batch %d/full list %d",
-			reader.batchSummaryCalls, reader.listSummaryCalls, reader.ordinaryCalls, reader.fullBatchCalls, reader.fullListCalls)
+	if reader.batchSummaryCalls != 1 || reader.listSummaryCalls != 2 || reader.fullBatchCalls != 0 || reader.fullListCalls != 0 {
+		t.Fatalf("summary/full read counts = batch %d/list %d/full batch %d/full list %d",
+			reader.batchSummaryCalls, reader.listSummaryCalls, reader.fullBatchCalls, reader.fullListCalls)
 	}
 }
 
@@ -222,16 +190,32 @@ func newFallbackSessionSummaryFixture(t *testing.T) (*taskservice.Service, []*mo
 			Metadata: map[string]interface{}{models.SessionMetaKeyContextWindow: "invalid"},
 		},
 		{
-			ID: "fallback-summary-errand", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
-			Role: models.SessionRoleErrand, ParentSessionID: "fallback-summary-parent",
-			Metadata: map[string]interface{}{"role": "peer", "parent_session_id": "metadata-parent"},
-		},
-		{
 			ID: "fallback-summary-peer", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
 		},
 	}
 	fallback.sessionsByTask = map[string][]*models.TaskSession{"task-1": sessions}
 	return svc, sessions
+}
+
+func TestSessionSummaryFallbackPreservesContextMetadata(t *testing.T) {
+	var nilObservation *models.TaskSessionSummaryObservation
+	if session := nilObservation.ToTaskSession(); session != nil {
+		t.Fatalf("nil fallback summary converted to a session: %+v", session)
+	}
+	svc, sessions := newFallbackSessionSummaryFixture(t)
+	batch, err := svc.BatchGetTaskSessionSummaryObservations(t.Context(), []string{"task-1"})
+	if err != nil {
+		t.Fatalf("batch fallback summaries: %v", err)
+	}
+	list, err := svc.ListTaskSessionSummaryObservations(t.Context(), "task-1")
+	if err != nil {
+		t.Fatalf("list fallback summaries: %v", err)
+	}
+	if len(batch["task-1"]) != len(sessions) || len(list) != len(sessions) {
+		t.Fatalf("fallback summary counts: batch=%d list=%d want=%d", len(batch["task-1"]), len(list), len(sessions))
+	}
+	assertFallbackContextMetadata(t, batch["task-1"])
+	assertFallbackContextMetadata(t, list)
 }
 
 func assertFallbackContextMetadata(t *testing.T, observations []*models.TaskSessionSummaryObservation) {
@@ -266,66 +250,4 @@ func assertFallbackContextMetadata(t *testing.T, observations []*models.TaskSess
 			t.Errorf("invalid compaction count was projected for %s: %#v", observation.ID, observation.Metadata[models.SessionMetaKeyContextCompactionCount])
 		}
 	}
-}
-
-func TestSessionSummaryFallbackPreservesErrandIdentity(t *testing.T) {
-	var nilObservation *models.TaskSessionSummaryObservation
-	if session := nilObservation.ToTaskSession(); session != nil {
-		t.Fatalf("nil summary observation conversion = %+v, want nil", session)
-	}
-
-	ctx := context.Background()
-	svc, sessions := newFallbackSessionSummaryFixture(t)
-	batch, err := svc.BatchGetTaskSessionSummaryObservations(ctx, []string{"task-1"})
-	if err != nil {
-		t.Fatalf("batch fallback summaries: %v", err)
-	}
-	listed, err := svc.ListTaskSessionSummaryObservations(ctx, "task-1")
-	if err != nil {
-		t.Fatalf("list fallback summaries: %v", err)
-	}
-	byID := make(map[string]*models.TaskSessionSummaryObservation, len(listed))
-	for _, observation := range listed {
-		byID[observation.ID] = observation
-	}
-	if len(batch["task-1"]) != len(sessions) || len(byID) != len(sessions) {
-		t.Fatalf("fallback summary counts: batch=%d list=%d want=%d", len(batch["task-1"]), len(byID), len(sessions))
-	}
-	wantIdentity := map[string]struct {
-		role   models.SessionRole
-		parent string
-	}{
-		"fallback-summary-errand": {role: models.SessionRoleErrand, parent: "fallback-summary-parent"},
-		"fallback-summary-peer":   {},
-	}
-	for _, projection := range []struct {
-		name         string
-		observations []*models.TaskSessionSummaryObservation
-	}{
-		{name: "batch", observations: batch["task-1"]},
-		{name: "list", observations: listed},
-	} {
-		seen := make(map[string]bool, len(wantIdentity))
-		for _, observation := range projection.observations {
-			want, ok := wantIdentity[observation.ID]
-			if !ok {
-				continue
-			}
-			assertSessionSummaryIdentity(t, projection.name, observation, want.role, want.parent)
-			seen[observation.ID] = true
-			if observation.ID == "fallback-summary-errand" {
-				for _, key := range []string{"role", "parent_session_id"} {
-					if _, exists := observation.Metadata[key]; exists {
-						t.Errorf("%s fallback metadata included %q", projection.name, key)
-					}
-				}
-			}
-		}
-		for id := range wantIdentity {
-			if !seen[id] {
-				t.Errorf("%s fallback omitted identity row %s", projection.name, id)
-			}
-		}
-	}
-	assertFallbackContextMetadata(t, append(batch["task-1"], listed...))
 }

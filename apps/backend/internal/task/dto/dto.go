@@ -465,10 +465,7 @@ type TaskSessionDTO struct {
 	ReviewStatus      models.ReviewStatus   `json:"review_status,omitempty"`
 	TaskEnvironmentID string                `json:"task_environment_id,omitempty"`
 	WorkspaceRecovery *WorkspaceRecoveryDTO `json:"workspace_recovery"`
-	// Role and ParentSessionID are immutable; their absence means an
-	// ordinary session.
-	Role            models.SessionRole `json:"role,omitempty"`
-	ParentSessionID string             `json:"parent_session_id,omitempty"`
+
 	// WaitingOnErrands is set only for a session that owns an errand row; nil
 	// omits the field for ordinary sessions.
 	WaitingOnErrands *bool `json:"waiting_on_errands,omitempty"`
@@ -672,9 +669,7 @@ type TaskSessionSummaryDTO struct {
 	IsPassthrough     bool                     `json:"is_passthrough"`
 	ReviewStatus      models.ReviewStatus      `json:"review_status,omitempty"`
 	TaskEnvironmentID string                   `json:"task_environment_id,omitempty"`
-	// Role and ParentSessionID mirror TaskSessionDTO.
-	Role            models.SessionRole `json:"role,omitempty"`
-	ParentSessionID string             `json:"parent_session_id,omitempty"`
+
 	// WaitingOnErrands mirrors TaskSessionDTO.
 	WaitingOnErrands *bool `json:"waiting_on_errands,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
@@ -1302,9 +1297,8 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		IsPassthrough:      session.IsPassthrough,
 		ReviewStatus:       session.ReviewStatus,
 		TaskEnvironmentID:  session.TaskEnvironmentID,
-		Role:               session.Role,
-		ParentSessionID:    session.ParentSessionID,
-		LastReadMessageID:  session.LastReadMessageID,
+
+		LastReadMessageID: session.LastReadMessageID,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1354,12 +1348,11 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		CompletedAt:          session.CompletedAt,
 		UpdatedAt:            session.UpdatedAt,
 		// Workflow fields
-		IsPrimary:             session.IsPrimary,
-		IsPassthrough:         session.IsPassthrough,
-		ReviewStatus:          session.ReviewStatus,
-		TaskEnvironmentID:     session.TaskEnvironmentID,
-		Role:                  session.Role,
-		ParentSessionID:       session.ParentSessionID,
+		IsPrimary:         session.IsPrimary,
+		IsPassthrough:     session.IsPassthrough,
+		ReviewStatus:      session.ReviewStatus,
+		TaskEnvironmentID: session.TaskEnvironmentID,
+
 		SessionRecoveryBlocks: []SessionRecoveryBlockDTO{},
 		LastReadMessageID:     session.LastReadMessageID,
 		CostSubcents:          session.CostSubcents,

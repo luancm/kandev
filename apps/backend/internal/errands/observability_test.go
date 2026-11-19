@@ -84,8 +84,7 @@ func TestFailedErrandCreateLogsFailureWithoutAdmission(t *testing.T) {
 }
 
 func TestSettlementAndCancellationLogsCarryIdentifiers(t *testing.T) {
-	h, repo, settled, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "settled answer", "")
+	h, repo, settled := newOwnedSettlementFixture(t, models.ErrandOutcomeDone, "settled answer")
 	cancelled := &models.Errand{ID: "cancelled-child", TaskID: testTask, ParentSessionID: testParent,
 		Title: "cancel", Objective: "cancel", AgentProfileID: "profile-1", FirstTurnID: "cancelled-turn", SubmissionID: "cancelled-submission",
 		Lifecycle: models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone}
@@ -93,11 +92,7 @@ func TestSettlementAndCancellationLogsCarryIdentifiers(t *testing.T) {
 	h.stopper.target = nil
 	logs := observeErrandLogs(t, h)
 
-	if err := h.service.OnErrandTurnSettled(context.Background(), TurnSettlement{
-		SessionID: settled.ID, TurnID: settled.FirstTurnID, SubmissionID: settled.SubmissionID, Outcome: models.ErrandOutcomeDone,
-	}); err != nil {
-		t.Fatalf("OnErrandTurnSettled: %v", err)
-	}
+	require.NoError(t, h.service.reconcileOwnedErrandResults(t.Context()))
 	settlement := logs.FilterMessage("errand.settled").All()
 	if len(settlement) != 1 {
 		t.Fatalf("errand.settled logs = %d, want one", len(settlement))
@@ -127,24 +122,26 @@ type terminalCommitFailureStore struct {
 	err error
 }
 
-func (s terminalCommitFailureStore) CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error) {
-	return false, s.err
+func (s terminalCommitFailureStore) UpdateErrand(context.Context, *models.Errand) error {
+	return s.err
 }
 
 func TestReconcileLogsOnlyCommittedTransitions(t *testing.T) {
-	h, repo, row, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "", "failed")
-	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), row.ID, models.TaskSessionStateFailed, ""))
+	h, repo, row := newOwnedSettlementFixture(t, models.ErrandOutcomeFailed, "")
 	logs := observeErrandLogs(t, h)
+	failedLabel := "status=" + string(models.ErrandStatusFailed)
+	before := errandMetricValue("errands_settled_total", failedLabel)
 	h.service.store = terminalCommitFailureStore{Store: repo, err: errors.New("write failed")}
-	require.NoError(t, h.service.Reconcile(t.Context()))
+	require.ErrorContains(t, h.service.reconcileOwnedErrandResults(t.Context()), "write failed")
 	require.Zero(t, logs.FilterMessage("errand.settled").Len(), "failed atomic capture cannot log a settlement")
 	require.Empty(t, h.publisher.statuses(), "failed atomic capture cannot publish a result")
+	require.Equal(t, before, errandMetricValue("errands_settled_total", failedLabel))
 	after := reconcileRow(t, repo, row.ID)
 	require.Equal(t, models.ErrandResultNone, after.ResultState)
 	require.True(t, after.AwaitingResult)
 	h.service.store = repo
 	require.NoError(t, h.service.Reconcile(t.Context()))
+	require.Equal(t, before+1, errandMetricValue("errands_settled_total", failedLabel))
 	settled := logs.FilterMessage("errand.settled").All()
 	require.Len(t, settled, 1)
 	assertErrandLogFields(t, settled[0], map[string]string{

@@ -85,7 +85,6 @@ type ErrandBrowserParentIdentity struct {
 	Available         bool
 	ID                string
 	Title             string
-	Role              SessionRole
 	EnvironmentID     string
 	TaskEnvironmentID string
 }

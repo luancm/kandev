@@ -8,6 +8,7 @@ import { expect, type Browser, type Locator, type Page, type TestInfo } from "@p
 import type { ApiClient } from "./api-client";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
+import { ownedErrandChat } from "./errands";
 import {
   attachGatewayTrafficCapture,
   summarizeGatewayTraffic,
@@ -932,13 +933,12 @@ async function measureHistoryAndChildNavigation(
     await expect(row).toBeVisible();
     const openStarted = performance.now();
     await activateBaselineControl(mobile ? row : row.getByTestId(`errand-open-${childId}`), mobile);
-    await expect(
+    // Frozen pre-Option-C artifacts render their conversation as a session.
+    const child = ownedErrandChat(page, childId).or(
       page.locator(`[data-testid="session-chat"][data-session-id="${childId}"]:visible`),
-    ).toBeVisible({ timeout: 30_000 });
-    childOpenDurations.push(performance.now() - openStarted);
-    const child = page.locator(
-      `[data-testid="session-chat"][data-session-id="${childId}"]:visible`,
     );
+    await expect(child).toBeVisible({ timeout: 30_000 });
+    childOpenDurations.push(performance.now() - openStarted);
     await activateBaselineControl(child.getByTestId("errand-back-to-parent"), mobile);
     await expect(parent).toBeVisible({ timeout: 30_000 });
     await activateBaselineControl(parent.getByTestId("errands-chip"), mobile);

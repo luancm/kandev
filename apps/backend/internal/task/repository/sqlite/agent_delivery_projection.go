@@ -590,19 +590,14 @@ func (r *Repository) canonicalDeliveryTurnWithCreationTx(
 	sessionID, taskID, requestedTurnID string,
 	event *models.AgentDeliveryEvent,
 ) (string, bool, error) {
-	turn, errand, ownershipErr := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
+	turn, ownershipErr := r.agentDeliveryEventAdmissionTx(ctx, tx, event)
 	if ownershipErr != nil {
 		return "", false, ownershipErr
 	}
 	if turn != "" && event.SubmissionID != "" {
 		return turn, false, nil
 	}
-	if errand && taskID == "" {
-		if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT task_id FROM task_sessions WHERE id=?`), sessionID).Scan(&taskID); err != nil {
-			return "", false, err
-		}
-	}
-	if !errand && requestedTurnID != "" {
+	if requestedTurnID != "" {
 		return requestedTurnID, false, nil
 	}
 	var turnID string
@@ -610,7 +605,7 @@ func (r *Repository) canonicalDeliveryTurnWithCreationTx(
 		SELECT id FROM task_session_turns
 		WHERE task_session_id = ? AND completed_at IS NULL
 		ORDER BY started_at DESC, id DESC LIMIT 1`), sessionID).Scan(&turnID)
-	if err == nil && !errand {
+	if err == nil {
 		return turnID, false, nil
 	}
 	if err != nil && err != sql.ErrNoRows {
@@ -620,14 +615,6 @@ func (r *Repository) canonicalDeliveryTurnWithCreationTx(
 	metadata, err := r.canonicalDeliveryTurnMetadataTx(ctx, tx, taskID)
 	if err != nil {
 		return "", false, err
-	}
-	if errand {
-		turnID = turn
-		raw, encodeErr := json.Marshal(map[string]any{"agent_delivery_unowned_v1": map[string]any{"stream_id": event.StreamID, "first_sequence": event.Sequence, "incarnation_id": event.IncarnationID, "harness_generation": event.HarnessGeneration}})
-		if encodeErr != nil {
-			return "", false, encodeErr
-		}
-		metadata = string(raw)
 	}
 	now := r.nowUTC()
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`

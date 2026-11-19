@@ -44,7 +44,7 @@ func (sm *StreamManager) projectReceivedDeliveryEvent(ctx context.Context, execu
 		event.DeliverySubmissionID = origin.SubmissionID
 		event.PromptGeneration = origin.PromptGeneration
 	} else {
-		event, _, err = resolveRetainedEventTurn(ctx, delivery, retained, event)
+		event, err = resolveRetainedEventTurn(ctx, delivery, retained, event)
 		if err != nil {
 			return err
 		}

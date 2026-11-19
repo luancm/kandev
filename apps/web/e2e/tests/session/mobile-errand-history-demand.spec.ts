@@ -5,6 +5,7 @@ import {
   installHistoryCapture,
   seedHistoryScenarios,
 } from "../../helpers/errand-history-baseline";
+import { listErrands } from "../../helpers/errands";
 
 type HistoryCaptureWindow = Window & {
   __historyCapture?: { wsCalls: Array<{ action?: string }> };
@@ -123,8 +124,16 @@ test("phone Errand history stays in a bounded drawer with its composer and Stop-
     const stopRequest = ws.waitForResponse("errand.cancel_all", {
       requestWhere: (payload) => payload.task_id === scenario.taskId,
     });
+    const stopUnconfirmed = expect(stopRequest).rejects.toThrow(
+      /some errands could not be stopped.*"cancelled":1/,
+    );
     await stopAll.tap();
-    await stopRequest;
+    await stopUnconfirmed;
+    expect(
+      (await listErrands(api, scenario.taskId)).find(
+        (row) => row.errand_id === `${scenario.parentId}-recovery`,
+      )?.status,
+    ).toBe("cancelled");
   } finally {
     await restore();
   }

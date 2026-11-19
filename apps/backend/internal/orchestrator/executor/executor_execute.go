@@ -110,11 +110,6 @@ func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (l
 // task is loaded first so a read error fails every session, config-mode
 // included; a coordinator-origin task then wins regardless of config_mode.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
-	if models.IsErrandSession(session) {
-		// An errand always gets the fixed errand catalog, whatever its task
-		// carries. Errand sessions never reach the task-state checks below.
-		return McpModeErrand, nil
-	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
 	if err != nil && !notFound {
@@ -171,9 +166,6 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
-	if models.IsErrandSession(session) {
-		return mcpprofile.New(mcpprofile.SurfaceErrand, nil, nil), nil
-	}
 	task, err := e.repo.GetTask(ctx, taskID)
 	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
 	if err != nil && !notFound {

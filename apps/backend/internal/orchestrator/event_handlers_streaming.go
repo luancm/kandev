@@ -2163,7 +2163,6 @@ func (s *Service) publishTaskSessionStateChanged(
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
 	}
-	models.AddSessionRoleFields(eventData, session)
 	s.addWaitingOnErrandsField(eventData, session)
 	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
 		projection := dto.TaskSessionDTO{}
@@ -2749,17 +2748,6 @@ func (s *Service) setSessionWaitingForInputWithoutTaskState(ctx context.Context,
 	}
 }
 
-// settleDetachedSessionWaitingForInput settles a workflow-detached session.
-// Errands never write task state; a completion follow-up keeps the ordinary
-// settle and its guarded task-state reconciliation.
-func (s *Service) settleDetachedSessionWaitingForInput(ctx context.Context, taskID, sessionID string, session *models.TaskSession) {
-	if models.IsErrandSession(session) {
-		s.setSessionWaitingForInputWithoutTaskState(ctx, taskID, sessionID, session)
-		return
-	}
-	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-}
-
 // setSessionWaitingForInputWithHook is the state transition path used by a
 // stream completion that owns the RUNNING-to-WAITING decision. The callback
 // runs after the CAS succeeds and before publication, so the caller can
@@ -3067,7 +3055,7 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 	for _, session := range sessions {
 		// An errand never owns task runtime state, so its work cannot hold
 		// the task out of REVIEW either.
-		if session == nil || models.IsErrandSession(session) {
+		if session == nil {
 			continue
 		}
 		if currentSessionID != "" && session.ID == currentSessionID {
@@ -3081,8 +3069,7 @@ func (s *Service) otherWorkingSessionID(ctx context.Context, taskID, currentSess
 }
 
 // settledSessionKeepsTaskState reports whether a REVIEW reconcile for the
-// settled session must leave the task state alone: an errand never owns it,
-// and a session that is working again still does.
+// settled session is already working again.
 func (s *Service) settledSessionKeepsTaskState(ctx context.Context, taskID, sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -3090,12 +3077,6 @@ func (s *Service) settledSessionKeepsTaskState(ctx context.Context, taskID, sess
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return false
-	}
-	if models.IsErrandSession(session) {
-		s.logger.Debug("skipping task REVIEW state for errand session",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-		return true
 	}
 	if isWorkingSessionState(session.State) {
 		s.logger.Debug("skipping task REVIEW state because settled session is active again",
@@ -3365,7 +3346,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 }
 
 func runtimeSessionOwnsTaskState(session *models.TaskSession, state v1.TaskState) bool {
-	if session == nil || models.IsErrandSession(session) {
+	if session == nil {
 		return false
 	}
 	switch state {

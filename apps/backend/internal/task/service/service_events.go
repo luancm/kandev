@@ -236,7 +236,6 @@ func (s *Service) publishSessionsCancelled(
 		if sess.TaskEnvironmentID != "" {
 			data["task_environment_id"] = sess.TaskEnvironmentID
 		}
-		models.AddSessionRoleFields(data, sess)
 		event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
 		if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
 			s.logger.Error("failed to publish session cancellation event",
@@ -284,7 +283,6 @@ func (s *Service) publishSessionRecovered(
 	if session.TaskEnvironmentID != "" {
 		data["task_environment_id"] = session.TaskEnvironmentID
 	}
-	models.AddSessionRoleFields(data, session)
 	event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
 	if err := s.eventBus.Publish(sessCtx, events.TaskSessionStateChanged, event); err != nil {
 		s.logger.Error("failed to publish session recovery event",

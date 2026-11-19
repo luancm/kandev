@@ -24,8 +24,7 @@ func (r ownedSettlementTranscript) ReadTurn(ctx context.Context, errandID, turnI
 	if err != nil {
 		return errands.TurnView{}, err
 	}
-	sender, _ := turn.Metadata["sender_session_id"].(string)
-	return errands.TurnView{Completed: turn.CompletedAt != nil, EarliestUserSender: sender}, nil
+	return errands.TurnView{Completed: turn.CompletedAt != nil}, nil
 }
 
 type errandServiceRuntime struct {

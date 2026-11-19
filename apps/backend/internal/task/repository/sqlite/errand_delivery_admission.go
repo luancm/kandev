@@ -67,6 +67,7 @@ func (r *Repository) validateErrandPromptAdmissionTx(ctx context.Context, tx *sq
 
 func (r *Repository) persistErrandPromptAdmissionTx(ctx context.Context, tx *sqlx.Tx, a *models.ErrandDeliveryAdmission, key string) (bool, error) {
 	proof := errandPromptProof{ErrandID: a.ErrandID, Generation: a.Generation, ExecutionID: a.ExecutionID, IncarnationID: a.IncarnationID, HarnessGeneration: a.HarnessGeneration, StreamID: a.StreamID, NativeSessionID: a.NativeSessionID, PromptGeneration: a.PromptGeneration, TurnID: a.TurnID, SubmissionID: a.Submission.ID, PayloadHash: a.Submission.PayloadHash, DispatchAttemptID: a.Submission.DispatchAttemptID}
+	proof.OriginalRuntime = a.OriginalRuntime
 	raw, err := json.Marshal(proof)
 	if err != nil {
 		return false, err

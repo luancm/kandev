@@ -161,27 +161,6 @@ func TestCanonicalConversationReceiptThinking(t *testing.T) {
 	}
 }
 
-func TestCanonicalConversationReceiptErrandUnownedTurnIsIncomplete(t *testing.T) {
-	for _, database := range []string{"sqlite", "postgres"} {
-		t.Run(database, func(t *testing.T) {
-			repo := canonicalReceiptRepo(t, database)
-			seedAgentDeliveryTestSession(t, repo, "receipt-session", "receipt-incarnation")
-			_, err := repo.db.ExecContext(t.Context(), repo.db.Rebind(`UPDATE task_sessions SET role = ? WHERE id = ?`), models.SessionRoleErrand, "receipt-session")
-			require.NoError(t, err)
-
-			events := canonicalReceiptEvents(t, repo, 1, []string{"errand output"}, streams.EventTypeMessageChunk)
-			_, receipt, err := requireCanonicalReceiptProjector(t, repo).ProjectCanonicalAgentDeliveryEventsWithReceipt(
-				t.Context(), events, []*models.AgentDeliveryEffect{nil},
-			)
-			require.NoError(t, err)
-			require.NotNil(t, receipt)
-			require.False(t, receipt.Complete, "the Errand turn was created during admission before the receipt collector observed it")
-			require.Len(t, receipt.Operations, 1)
-			require.Equal(t, models.ConversationEntityMessage, receipt.Operations[0].Entity)
-		})
-	}
-}
-
 func requireCanonicalReceiptProjector(t *testing.T, repo *Repository) canonicalReceiptProjector {
 	t.Helper()
 	projector, ok := any(repo).(canonicalReceiptProjector)

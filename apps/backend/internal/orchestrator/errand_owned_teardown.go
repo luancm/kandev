@@ -28,7 +28,7 @@ func (a *ErrandAdapter) CancelErrandWithTarget(ctx context.Context, row *models.
 
 // RetryErrandTeardown uses the original recorded target.
 func (a *ErrandAdapter) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
-	if intent.Target.ErrandID == "" || intent.Target.SessionID != "" || intent.ID == "" {
+	if intent.Target.ErrandID == "" || intent.ID == "" {
 		return "", models.ErrInvalidErrand
 	}
 	if a.runtime == nil {

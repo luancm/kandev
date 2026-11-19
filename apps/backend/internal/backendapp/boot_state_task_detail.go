@@ -31,7 +31,7 @@ func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, req *http.Req
 	}
 	sessions := make([]*taskmodels.TaskSession, 0, len(sessionObservations))
 	for _, observation := range sessionObservations {
-		if observation != nil && observation.Role != taskmodels.SessionRoleErrand {
+		if observation != nil {
 			sessions = append(sessions, observation.ToTaskSession())
 		}
 	}

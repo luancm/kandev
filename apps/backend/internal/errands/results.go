@@ -22,67 +22,13 @@ const (
 	interruptedTurnNotice = "The errand was interrupted before it finished."
 )
 
-// TurnSettlement is one settled errand turn. Outcome is done or failed.
-// FailureSummary is the sanitized failure text for a failed turn.
-type TurnSettlement struct {
-	SessionID        string
-	TurnID           string
-	SubmissionID     string
-	Outcome          models.ErrandOutcome
-	FailureSummary   string
-	Interrupted      bool
-	CompletionTarget *models.ErrandTeardownTarget
-}
+// turnSettlement is one settled errand turn. Outcome is done or failed.
+type turnSettlement struct {
+	TurnID string
 
-// OnErrandTurnSettled records a settled errand turn. A session that is not an
-// errand is ignored. Capture of a parent-initiated turn is idempotent on the
-// result turn id.
-func (s *Service) OnErrandTurnSettled(ctx context.Context, settlement TurnSettlement) error {
-	return s.settleExactTerminal(ctx, settlement)
-}
+	Outcome models.ErrandOutcome
 
-// OnErrandTurnCancelled settles the exact turn observed by cancellation. A
-// terminal turn that already won the race keeps its real outcome; otherwise a
-// parent-origin turn becomes an interrupted failure and a user-origin turn
-// keeps the errand's prior settled outcome.
-func (s *Service) OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error {
-	if sessionID == "" || turnID == "" {
-		return nil
-	}
-	errand, err := s.store.GetErrand(ctx, sessionID)
-	if errors.Is(err, models.ErrErrandNotFound) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("load errand before cancellation settlement: %w", err)
-	}
-	if turnID == errand.FirstTurnID {
-		if submissionID == "" {
-			submissionID = errand.SubmissionID
-		}
-		if submissionID != errand.SubmissionID {
-			return nil
-		}
-	}
-	outcome := models.ErrandOutcomeFailed
-	interrupted := true
-	if s.turns != nil {
-		latestID, latest, err := s.turns.LatestTurn(ctx, sessionID)
-		if err != nil {
-			return fmt.Errorf("read current errand turn before cancellation settlement: %w", err)
-		}
-		if latestID != "" && latestID != turnID {
-			return nil
-		}
-		if latest.Completed {
-			outcome = models.ErrandOutcomeDone
-			interrupted = false
-		}
-	}
-	return s.OnErrandTurnSettled(ctx, TurnSettlement{
-		SessionID: sessionID, TurnID: turnID, SubmissionID: submissionID,
-		Outcome: outcome, FailureSummary: interruptedTurnNotice, Interrupted: interrupted,
-	})
+	Interrupted bool
 }
 
 // SendResult captures the latest settled turn as a pending result when the
@@ -146,7 +92,7 @@ func (s *Service) readTurn(ctx context.Context, sessionID, turnID string) (TurnV
 }
 
 func applySettlement(
-	e *models.Errand, settlement TurnSettlement, parentInitiated bool,
+	e *models.Errand, settlement turnSettlement, parentInitiated bool,
 	text string, truncated bool, kind models.ErrandResultKind, now time.Time,
 ) bool {
 	if e.Lifecycle == models.ErrandLifecycleCancelled {
@@ -190,23 +136,15 @@ func writePendingResult(
 	e.SettledAt = &now
 }
 
-func resultOf(settlement TurnSettlement, view TurnView, parentInitiated bool) (string, bool, models.ErrandResultKind) {
+func resultOf(settlement turnSettlement, view TurnView, parentInitiated bool) (string, bool, models.ErrandResultKind) {
 	if !parentInitiated {
 		return "", false, ""
 	}
 	if settlement.Interrupted {
-		summary := settlement.FailureSummary
-		if summary == "" {
-			summary = interruptedTurnNotice
-		}
-		text, truncated := boundResult(summary)
-		return text, truncated, models.ErrandResultInterrupted
+		return interruptedTurnNotice, false, models.ErrandResultInterrupted
 	}
 	if settlement.Outcome == models.ErrandOutcomeFailed {
-		summary := settlement.FailureSummary
-		if summary == "" {
-			summary = view.LastAgentText
-		}
+		summary := view.LastAgentText
 		if summary == "" {
 			summary = failureNotice
 		}

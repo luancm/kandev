@@ -38,6 +38,9 @@ func (m *Manager) validateErrandContinuationRuntime(ctx context.Context, req *La
 	if !runtimeSatisfiesSelection(selected, row.Runtime) || !matchesErrandContinuationWorkspace(req, row) {
 		return refuse("errand predecessor workspace does not match")
 	}
+	if err := m.retireOwnedErrandInterruption(ctx, *target); err != nil {
+		return err
+	}
 	req.OriginalWorkspacePath = getMetadataString(row.Metadata, MetadataKeyOriginalWorkspacePath)
 	if req.OriginalWorkspacePath == "" {
 		req.OriginalWorkspacePath = row.WorktreePath

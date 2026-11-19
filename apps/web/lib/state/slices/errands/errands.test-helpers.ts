@@ -100,6 +100,6 @@ export function makeInspection(row = makeBrowserErrandRow()): ErrandInspection {
     errand: row,
     owns_conversation: true,
     // i18n-exempt: test fixture data, never rendered
-    parent: { available: true, id: row.parent_session_id, title: "Parent", role: "primary" },
+    parent: { available: true, id: row.parent_session_id, title: "Parent" },
   };
 }

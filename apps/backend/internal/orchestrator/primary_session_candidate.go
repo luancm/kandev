@@ -82,8 +82,7 @@ func (s *Service) bestPrimarySessionCandidate(
 		bestState int
 	)
 	for _, session := range sessions {
-		if session == nil || session.ID == excludeSessionID || isTerminalSessionState(session.State) ||
-			models.IsErrandSession(session) {
+		if session == nil || session.ID == excludeSessionID || isTerminalSessionState(session.State) {
 			continue
 		}
 		if activeOnly && !isActiveSessionState(session.State) {

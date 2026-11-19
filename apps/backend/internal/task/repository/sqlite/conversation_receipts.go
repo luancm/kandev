@@ -30,14 +30,9 @@ func (r *Repository) beginConversationMutation(ctx context.Context, sessionID st
 	return tx, base, nil
 }
 
-// Turn admission takes task/Errand ownership before the session mutation lock.
 func (r *Repository) beginTurnConversationMutation(ctx context.Context, turn *models.Turn) (*sqlx.Tx, int64, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return nil, 0, err
-	}
-	if err := r.guardErrandTurnReservation(ctx, tx, turn.TaskSessionID, turn.ID); err != nil {
-		_ = tx.Rollback()
 		return nil, 0, err
 	}
 	base, err := r.prepareConversationMutation(ctx, tx, turn.TaskSessionID)

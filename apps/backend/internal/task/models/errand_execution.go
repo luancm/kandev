@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/processidentity"
+)
 
 const ErrandTurnRecoveryUnresolvedKey = "errand_recovery_unresolved"
 
@@ -62,7 +66,19 @@ type ErrandDeliveryAdmission struct {
 	NativeSessionID   string
 	PromptGeneration  uint64
 	TurnID            string
+	OriginalRuntime   processidentity.Identity
 	Submission        *AgentDeliverySubmission
+}
+
+// ErrandInterruptedAdmission identifies an admitted prompt for retained journal recovery.
+type ErrandInterruptedAdmission struct {
+	Binding          ErrandHarnessBinding
+	TaskID           string
+	TurnID           string
+	SubmissionID     string
+	PromptGeneration uint64
+	PayloadHash      string
+	OriginalRuntime  processidentity.Identity
 }
 
 type ErrandHarnessBinding struct {

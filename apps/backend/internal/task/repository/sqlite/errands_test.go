@@ -6,11 +6,6 @@ func TestOwnedErrandSchemaReplaysSQLite(t *testing.T) {
 	exerciseErrandSchemaReplay(t, newRepoForSessionTests(t))
 }
 
-// @covers AC-TASKS-ERRANDS-001.1
-func TestSessionRoleSurvivesEveryReadAndFullRowWriteSQLite(t *testing.T) {
-	exerciseSessionRolePersistence(t, newRepoForSessionTests(t))
-}
-
 func TestErrandRowRoundTripsWithVersionGuardSQLite(t *testing.T) {
 	exerciseErrandRoundTrip(t, newRepoForSessionTests(t))
 }

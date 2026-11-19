@@ -73,8 +73,6 @@ export type TaskSessionStateChangedPayload = {
   session_recovery_blocks?: import("./http").SessionRecoveryBlockProjection[];
   is_passthrough?: boolean;
   /** Omitted for ordinary sessions; see TaskSession in http.ts. */
-  role?: import("./errands").TaskSessionRole;
-  parent_session_id?: string;
   waiting_on_errands?: boolean;
   error_message?: string;
   /** User-supplied session tab label; present (possibly "") on rename broadcasts. */

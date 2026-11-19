@@ -1388,7 +1388,7 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 }
 
 func (s *Service) promoteSessionIfTaskHasNoPrimary(ctx context.Context, taskID string, session *models.TaskSession) {
-	if session == nil || session.IsPrimary || models.IsErrandSession(session) {
+	if session == nil || session.IsPrimary {
 		return
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
@@ -11841,9 +11841,6 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 	continuation, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
 	requireWaiting := prepared.completionEligible || continuation != nil
 	session := prepared.session
-	if models.IsErrandSession(session) {
-		s.settleCancelledErrandTurn(ctx, sessionID, prepared.capturedTurnID, "")
-	}
 	if session != nil {
 		reconciled, err := s.reconcileCancelledTurnOwned(
 			ctx,
@@ -11888,7 +11885,7 @@ func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string
 	if expected, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry); expected == nil {
 		s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)
 	}
-	if session != nil && !models.IsErrandSession(session) {
+	if session != nil {
 		outstanding, settleErr := s.settleParentTurn(ctx, session.ID, errands.SettleCauseUserCancel)
 		if outstanding || settleErr != nil {
 			return nil

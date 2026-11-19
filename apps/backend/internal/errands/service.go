@@ -47,7 +47,7 @@ type Service struct {
 	teardownCursor           string
 	teardownEvidenceWarnings map[string]string
 
-	reconcileInterruptedDelegation func(context.Context, string) error
+	reconcileInterruptions func(context.Context) error
 
 	turns    TurnReader
 	receipts DeliveryLog

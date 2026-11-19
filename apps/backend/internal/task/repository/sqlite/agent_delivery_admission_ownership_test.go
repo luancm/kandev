@@ -9,15 +9,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestErrandAdmissionOwnership(t *testing.T) {
-	exerciseErrandAdmissionOwnership(t, newRepoForSessionTests(t))
+func TestOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T) {
+	exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t, newRepoForSessionTests(t))
 }
-func TestPostgresErrandAdmissionOwnership(t *testing.T) {
-	exerciseErrandAdmissionOwnership(t, newPostgresErrandRepo(t))
+func TestPostgresOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T) {
+	exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t, newPostgresErrandRepo(t))
 }
 
-func exerciseErrandAdmissionOwnership(t *testing.T, repo *Repository) {
-	row, intent := seedExactSettlement(t, repo)
+func exerciseOrdinaryPromptAdmissionSurvivesInventoryReplacement(t *testing.T, repo *Repository) {
+	row, intent := seedExactOrdinaryAdmission(t, repo)
 	binding := map[string]any{"task_id": row.TaskID, "session_id": row.ID, "execution_id": "execution", "incarnation_id": intent.IncarnationID, "harness_generation": 1, "prompt_generation": 7, "stream_id": intent.StreamID, "submission_id": intent.SubmissionID, "turn_id": intent.TurnID}
 	running := &models.ExecutorRunning{ID: row.ID, SessionID: row.ID, TaskID: row.TaskID, AgentExecutionID: "execution", Metadata: map[string]any{"delivery_prompt_turn_binding": binding}}
 	_, err := repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{ID: intent.SubmissionID, SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, PayloadHash: "hash", Payload: []byte(`{}`)})
@@ -38,7 +38,7 @@ func exerciseErrandAdmissionOwnership(t *testing.T, repo *Repository) {
 	require.Empty(t, saved.Metadata)
 	binding["prompt_generation"] = 7
 	require.NoError(t, repo.DeleteExecutorRunningBySessionID(t.Context(), row.ID))
-	// Unrelated open work must never become the owner of original or native output.
+	// A successor turn cannot acquire an existing prompt admission.
 	_, err = repo.db.Exec(`INSERT INTO task_session_turns(id,task_session_id,task_id,started_at,created_at,updated_at) VALUES('successor',$1,$2,$3,$3,$3)`, row.ID, row.TaskID, errandScenarioBase.Add(1))
 	require.NoError(t, err)
 	for _, tc := range []struct {
@@ -74,57 +74,35 @@ func exerciseErrandAdmissionOwnership(t *testing.T, repo *Repository) {
 			require.NoError(t, err)
 		})
 	}
-	_, err = repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{ID: "legacy", SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, PayloadHash: "legacy", Payload: []byte(`{}`)})
+	terminal, err := json.Marshal(streams.AgentEvent{Type: "complete", PromptGeneration: 7})
 	require.NoError(t, err)
-	for _, kind := range []string{"submission", "harness", "incarnation", "session", "missing proof"} {
-		t.Run(kind, func(t *testing.T) {
-			payload, _ := json.Marshal(streams.AgentEvent{Type: "message_chunk", Text: "forged", PromptGeneration: 7})
-			e := &models.AgentDeliveryEvent{SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, StreamID: intent.StreamID, Sequence: 3, SubmissionID: intent.SubmissionID, EventType: "message_chunk", Payload: payload}
-			switch kind {
-			case "submission":
-				e.SubmissionID = "foreign"
-			case "harness":
-				e.HarnessGeneration = 2
-			case "incarnation":
-				e.IncarnationID = "foreign"
-			case "session":
-				e.Payload = []byte(`{"type":"message_chunk","session_id":"foreign","prompt_generation":7}`)
-			case "missing proof":
-				e.SubmissionID = "legacy"
-			}
-			accepted, err := repo.ReceiveAgentDeliveryEvent(t.Context(), e, 3)
-			require.Error(t, err)
-			require.False(t, accepted)
-		})
+	event := &models.AgentDeliveryEvent{
+		SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, StreamID: intent.StreamID,
+		Sequence: 3, SubmissionID: intent.SubmissionID, EventType: "complete", Terminal: true, Payload: terminal,
 	}
-	native, _ := json.Marshal(streams.AgentEvent{Type: "message_chunk", Text: "native work", CanonicalMessageID: "native"})
-	e := &models.AgentDeliveryEvent{SessionID: row.ID, IncarnationID: intent.IncarnationID, HarnessGeneration: 1, StreamID: intent.StreamID, Sequence: 3, EventType: "message_chunk", Payload: native}
-	_, err = repo.ReceiveAgentDeliveryEvent(t.Context(), e, 3)
+	_, err = repo.ReceiveAgentDeliveryEvent(t.Context(), event, 3)
 	require.NoError(t, err)
-	_, err = repo.ProjectCanonicalAgentDeliveryEvent(t.Context(), e, nil)
-	require.NoError(t, err)
-	var nativeTurn string
-	require.NoError(t, repo.db.Get(&nativeTurn, `SELECT turn_id FROM task_session_messages WHERE content='native work'`))
-	require.NotEqual(t, "successor", nativeTurn)
-	require.NotEqual(t, intent.TurnID, nativeTurn)
-	reconstructed := *e
-	reconstructed.Payload = []byte(`{"type":"message_chunk","text":"native work","canonical_message_id":"reconstructed-after-successor"}`)
-	reconstructedTurn, owned, resolveErr := repo.ResolveAgentDeliveryEventTurn(t.Context(), &reconstructed)
-	require.NoError(t, resolveErr)
-	require.True(t, owned)
-	require.Equal(t, nativeTurn, reconstructedTurn, "replay attribution cannot depend on reconstructed canonical fields")
-	terminal, _ := json.Marshal(streams.AgentEvent{Type: "complete", PromptGeneration: 7})
-	e.Sequence = 4
-	e.SubmissionID = intent.SubmissionID
-	e.EventType = "complete"
-	e.Terminal = true
-	e.Payload = terminal
-	_, err = repo.ReceiveAgentDeliveryEvent(t.Context(), e, 4)
-	require.NoError(t, err)
-	_, err = repo.ProjectAgentDeliveryEvent(t.Context(), e, nil)
+	_, err = repo.ProjectAgentDeliveryEvent(t.Context(), event, nil)
 	require.NoError(t, err)
 	var terminalTurn string
-	require.NoError(t, repo.db.Get(&terminalTurn, `SELECT turn_id FROM agent_delivery_effects WHERE effect_type='agent_delivery.terminal_settlement' AND sequence=4`))
+	require.NoError(t, repo.db.Get(&terminalTurn, `SELECT turn_id FROM agent_delivery_effects WHERE effect_type='agent_delivery.terminal_settlement' AND sequence=3`))
 	require.Equal(t, intent.TurnID, terminalTurn, "terminal projection must resolve the same immutable admission")
+}
 
+func seedExactOrdinaryAdmission(t *testing.T, repo *Repository) (*models.TaskSession, *models.AgentDeliveryEffect) {
+	t.Helper()
+	ctx := t.Context()
+	task := &models.Task{ID: "exact-task", Title: "Exact prompt admission"}
+	session := &models.TaskSession{ID: "exact-session", TaskID: task.ID}
+	require.NoError(t, repo.CreateTask(ctx, task))
+	require.NoError(t, repo.CreateTaskSession(ctx, session))
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "exact-A", TaskID: task.ID, TaskSessionID: session.ID, StartedAt: errandScenarioBase,
+	}))
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	return stored, &models.AgentDeliveryEffect{
+		SessionID: stored.ID, IncarnationID: stored.QueueIncarnationID, StreamID: "exact-execution",
+		HarnessGeneration: 1, SubmissionID: "prompt:exact-A", TurnID: "exact-A",
+	}
 }

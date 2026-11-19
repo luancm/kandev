@@ -17,10 +17,7 @@ export function requestedOwnedErrand(
     return undefined;
   }
   const parent = inspection.parent;
-  if (
-    parent.available &&
-    (!parent.id || parent.id !== inspection.errand.parent_session_id || parent.role === "errand")
-  ) {
+  if (parent.available && (!parent.id || parent.id !== inspection.errand.parent_session_id)) {
     return undefined;
   }
   return inspection;

@@ -113,7 +113,7 @@ func (r *Repository) agentDeliveryTerminalIdentityEvidenceTx(
 	if err := json.Unmarshal(terminal.Payload, &payload); err != nil {
 		return "", "", fmt.Errorf("decode retained terminal for identity repair: %w", err)
 	}
-	admittedTurn, _, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &terminal)
+	admittedTurn, err := r.agentDeliveryEventAdmissionTx(ctx, tx, &terminal)
 	if err != nil {
 		return "", "", err
 	}

@@ -7,15 +7,14 @@ import (
 )
 
 func TestErrandCompletionCleanupRecoversIntentFromSealedTerminal(t *testing.T) {
-	h, repo, row, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "result saved after restart", "done")
-	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+	h, repo, row := newOwnedSettlementFixture(t, models.ErrandOutcomeDone, "result saved after restart")
+	require.NoError(t, h.service.reconcileOwnedErrandResults(t.Context()))
 	recovered, err := repo.GetErrand(t.Context(), row.ID)
 	require.NoError(t, err)
 	require.Equal(t, "result saved after restart", recovered.ResultText)
 	require.NotNil(t, recovered.TeardownIntent)
 	require.Equal(t, models.ErrandTeardownPurposeCompletion, recovered.TeardownIntent.Purpose)
-	require.Equal(t, effect.StreamID, recovered.TeardownIntent.Target.ExecutionID)
-	require.Equal(t, effect.TurnID, recovered.TeardownIntent.Target.TurnID)
-	require.Equal(t, effect.SubmissionID, recovered.TeardownIntent.Target.SubmissionID)
+	require.Equal(t, row.ID+"-execution", recovered.TeardownIntent.Target.ExecutionID)
+	require.Equal(t, row.FirstTurnID, recovered.TeardownIntent.Target.TurnID)
+	require.Equal(t, row.SubmissionID, recovered.TeardownIntent.Target.SubmissionID)
 }

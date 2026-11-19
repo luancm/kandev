@@ -14,12 +14,9 @@ import (
 
 // Store owns Errand persistence and reads the ordinary parent.
 type Store interface {
+	ownedErrandResultStore
 	ReadErrandStatuses(ctx context.Context, taskID, errandID string) (map[string]models.ErrandBrowserObservation, error)
-	ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
-	SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
-	CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error
-	CommitErrandTurnSettlement(context.Context, *models.Errand, *models.AgentDeliveryEffect) (bool, error)
-	PendingErrandTurnSettlements(context.Context, string) ([]*models.AgentDeliveryEffect, error)
+
 	BeginErrandAwait(context.Context, models.ErrandAwaitIdentity) error
 	OfferErrandAwait(context.Context, models.ErrandAwaitIdentity, []models.ErrandAwaitDeliveryItem) error
 	AbortErrandAwait(context.Context, models.ErrandAwaitIdentity) ([]*models.Errand, error)
@@ -204,9 +201,8 @@ type EventPublisher interface {
 
 // TurnView is the transcript evidence of one errand turn.
 type TurnView struct {
-	LastAgentText      string
-	EarliestUserSender string
-	Completed          bool
+	LastAgentText string
+	Completed     bool
 }
 
 // TurnReader reads errand transcript evidence. The orchestrator satisfies it
@@ -214,7 +210,6 @@ type TurnView struct {
 // parent-initiated and captures no assistant text.
 type TurnReader interface {
 	ReadTurn(ctx context.Context, sessionID, turnID string) (TurnView, error)
-	LatestTurn(ctx context.Context, sessionID string) (turnID string, view TurnView, err error)
 }
 
 // DeliveryLog reports whether a parent message contains a delivery token.

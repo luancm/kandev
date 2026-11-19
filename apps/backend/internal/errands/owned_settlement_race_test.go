@@ -2,6 +2,7 @@ package errands
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -23,17 +24,17 @@ func (r ownedSettlementTranscript) ReadTurn(ctx context.Context, errandID, turnI
 		return TurnView{}, err
 	}
 	message, err := r.repo.GetErrandLastAssistantMessage(ctx, errandID, turnID)
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return TurnView{}, err
 	}
-	return TurnView{Completed: turn.CompletedAt != nil, LastAgentText: message.Content}, nil
+	view := TurnView{Completed: turn.CompletedAt != nil}
+	if message != nil {
+		view.LastAgentText = message.Content
+	}
+	return view, nil
 }
 
-func (ownedSettlementTranscript) LatestTurn(context.Context, string) (string, TurnView, error) {
-	return "", TurnView{}, errors.New("settlement requires an exact turn")
-}
-
-func newOwnedSettlementRaceFixture(t *testing.T, outcome models.ErrandOutcome) (*harness, *sqlite.Repository, *models.Errand) {
+func newOwnedSettlementFixture(t *testing.T, outcome models.ErrandOutcome, answer string) (*harness, *sqlite.Repository, *models.Errand) {
 	t.Helper()
 	ctx := t.Context()
 	conn := serviceClaimDB(t, false)
@@ -54,23 +55,29 @@ func newOwnedSettlementRaceFixture(t *testing.T, outcome models.ErrandOutcome) (
 	_, err = repo.ReserveErrandExecutionGeneration(ctx, row.ID, 0)
 	require.NoError(t, err)
 	binding := admitOwnedErrandFixture(t, repo, row)
-	require.NoError(t, repo.CreateErrandMessage(ctx, row.ID, &models.Message{
-		ID: "late-answer", TurnID: row.FirstTurnID, AuthorType: models.MessageAuthorAgent, Content: "late answer",
-	}))
-	projectOwnedSettlementRaceTerminal(t, repo, row, binding, outcome)
+	if answer != "" {
+		require.NoError(t, repo.CreateErrandMessage(ctx, row.ID, &models.Message{
+			ID: "first-answer", TurnID: row.FirstTurnID, AuthorType: models.MessageAuthorAgent, Content: answer,
+		}))
+	}
+	if outcome != "" {
+		projectOwnedSettlementTerminal(t, repo, row, binding, outcome)
+	}
 	execution, err := repo.GetErrandExecutionDescriptor(ctx, row.ID)
 	require.NoError(t, err)
-	require.Empty(t, execution.ActiveSubmissionID)
 	h := newHarness(t)
+	h.service.store = repo
+	h.service.SetTurnReader(ownedSettlementTranscript{repo})
 	h.stopper.store = repo
 	h.stopper.target = &ErrandTeardownTarget{
 		TaskID: row.TaskID, ErrandID: row.ID, OwnerGeneration: execution.Generation,
-		ExecutionID: execution.ExecutionID, PromptGeneration: execution.PromptGeneration, NoTurn: true,
+		ExecutionID: execution.ExecutionID, PromptGeneration: execution.PromptGeneration, NoTurn: execution.ActiveTurnID == "",
+		TurnID: execution.ActiveTurnID, SubmissionID: execution.ActiveSubmissionID,
 	}
 	return h, repo, row
 }
 
-func projectOwnedSettlementRaceTerminal(t *testing.T, repo *sqlite.Repository, row *models.Errand, binding models.ErrandHarnessBinding, outcome models.ErrandOutcome) {
+func projectOwnedSettlementTerminal(t *testing.T, repo *sqlite.Repository, row *models.Errand, binding models.ErrandHarnessBinding, outcome models.ErrandOutcome) {
 	t.Helper()
 	ctx := t.Context()
 	kind, state := streams.EventTypeComplete, models.DeliverySubmissionCompleted

@@ -40,20 +40,6 @@ func (f *fakeTurns) LatestTurn(context.Context, string) (string, TurnView, error
 	return "", TurnView{}, nil
 }
 
-type cancellationTurns struct {
-	reader   TurnReader
-	latestID string
-	latest   TurnView
-}
-
-func (f *cancellationTurns) ReadTurn(ctx context.Context, sessionID, turnID string) (TurnView, error) {
-	return f.reader.ReadTurn(ctx, sessionID, turnID)
-}
-
-func (f *cancellationTurns) LatestTurn(context.Context, string) (string, TurnView, error) {
-	return f.latestID, f.latest, nil
-}
-
 // pendingResultHarness seeds a pending result for delivery tests. Terminal
 // settlement itself is covered with the real SQLite fixture below.
 func pendingResultHarness(t *testing.T, text string) (*harness, string) {
@@ -61,7 +47,7 @@ func pendingResultHarness(t *testing.T, text string) (*harness, string) {
 	h := newHarness(t)
 	errand := h.mustStart("audit").Errand
 	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
-		errand.FirstTurnID: {LastAgentText: text, EarliestUserSender: testParent, Completed: true},
+		errand.FirstTurnID: {LastAgentText: text, Completed: true},
 	}})
 	h.store.setErrandWorking(errand.ID, false)
 	row, _, err := h.service.update(t.Context(), errand.ID, func(e *models.Errand) bool {
@@ -77,28 +63,20 @@ func pendingResultHarness(t *testing.T, text string) (*harness, string) {
 
 // @covers AC-TASKS-ERRANDS-003.1
 func TestParentInitiatedTurnCapturesItsFinalMessageAsOneResult(t *testing.T) {
-	h, repo, errand, effect := newTerminalFixture(t)
-	require.NoError(t, repo.CreateMessage(t.Context(), &models.Message{ID: "earlier-output", TaskID: testTask,
-		TaskSessionID: errand.ID, TurnID: effect.TurnID, AuthorType: models.MessageAuthorAgent, Content: "earlier answer"}))
-	completeTerminalTurn(t, repo, effect, "the answer", "")
-	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), errand.ID, models.TaskSessionStateWaitingForInput, ""))
-	settlement := TurnSettlement{SessionID: errand.ID, TurnID: effect.TurnID, SubmissionID: effect.SubmissionID, Outcome: models.ErrandOutcomeDone}
-	require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), settlement))
+	h, repo, errand := newOwnedSettlementFixture(t, models.ErrandOutcomeDone, "the answer")
+	require.NoError(t, h.service.reconcileOwnedErrandResults(t.Context()))
 	row, err := repo.GetErrand(t.Context(), errand.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandResultPending, row.ResultState)
 	require.Equal(t, "the answer", row.ResultText)
-	require.Equal(t, effect.TurnID, row.ResultTurnID)
+	require.Equal(t, errand.FirstTurnID, row.ResultTurnID)
 	require.False(t, row.AwaitingResult)
 	require.Len(t, h.deliverer.delivered(), 1)
-	require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), settlement))
+	require.NoError(t, h.service.reconcileOwnedErrandResults(t.Context()))
 	after, err := repo.GetErrand(t.Context(), errand.ID)
 	require.NoError(t, err)
 	require.Equal(t, row, after, "duplicate settlement cannot create a second result revision")
 	require.Len(t, h.deliverer.delivered(), 1)
-	pending, err := repo.PendingErrandTurnSettlements(t.Context(), errand.ID)
-	require.NoError(t, err)
-	require.Empty(t, pending, "the exact terminal decision committed with its result")
 }
 
 // @covers AC-TASKS-ERRANDS-003.2
@@ -115,115 +93,6 @@ func TestOversizedResultIsBoundedAtACharacterBoundary(t *testing.T) {
 	if short, cut := boundResult("short"); cut || short != "short" {
 		t.Fatalf("short result = %q truncated=%v, want it unchanged", short, cut)
 	}
-}
-
-// @covers AC-TASKS-ERRANDS-003.3
-func TestUserTurnDoesNotProduceAResult(t *testing.T) {
-	h, repo, row, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "parent answer", "done")
-	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
-	_, err := h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
-	require.NoError(t, err)
-	before, err := repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	user := reserveTerminalTurn(t, repo, row, "user-turn", "user-submission", "user")
-	completeTerminalTurn(t, repo, user, "chatter", "")
-	require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), TurnSettlement{
-		SessionID: row.ID, TurnID: user.TurnID, SubmissionID: user.SubmissionID, Outcome: models.ErrandOutcomeDone,
-	}))
-	after, err := repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Equal(t, "user-turn", after.LatestSettledTurnID)
-	require.Equal(t, before.ResultState, after.ResultState)
-	require.Equal(t, before.ResultText, after.ResultText)
-	require.Equal(t, before.ResultTurnID, after.ResultTurnID)
-	require.Equal(t, before.ResultRevision, after.ResultRevision, "user turn commits a no-result decision")
-	pending, err := repo.PendingErrandTurnSettlements(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Empty(t, pending)
-}
-
-func TestCancelledParentTurnProducesInterruptedFailureAndClearsAwaiting(t *testing.T) {
-	h, repo, row, effect := newTerminalFixture(t)
-	reader := terminalTranscript{repo}
-	latest, err := reader.ReadTurn(t.Context(), row.ID, effect.TurnID)
-	require.NoError(t, err)
-	completeTerminalTurn(t, repo, effect, "unfinished output", "")
-	// Cancellation observed the turn before completion; settlement reads the committed turn.
-	h.service.SetTurnReader(&cancellationTurns{reader: reader, latestID: effect.TurnID, latest: latest})
-	require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, effect.TurnID, effect.SubmissionID))
-	after, err := repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandOutcomeFailed, after.LastOutcome)
-	require.Equal(t, models.ErrandResultInterrupted, after.ResultKind)
-	require.Equal(t, interruptedTurnNotice, after.ResultText)
-	require.Equal(t, models.ErrandResultPending, after.ResultState)
-	require.Equal(t, effect.TurnID, after.ResultTurnID)
-	require.False(t, after.AwaitingResult)
-}
-
-func TestCancelledUserTurnPreservesPriorOutcomeWithoutAResult(t *testing.T) {
-	h, repo, row, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "parent answer", "done")
-	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
-	_, err := h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
-	require.NoError(t, err)
-	before, err := repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	user := reserveTerminalTurn(t, repo, row, "user-turn", "user-submission", "user")
-	reader := terminalTranscript{repo}
-	latest, err := reader.ReadTurn(t.Context(), row.ID, user.TurnID)
-	require.NoError(t, err)
-	completeTerminalTurn(t, repo, user, "unfinished user chatter", "")
-	h.service.SetTurnReader(&cancellationTurns{reader: reader, latestID: user.TurnID, latest: latest})
-	h.deliverer.parents = nil
-	require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, user.TurnID, user.SubmissionID))
-	after, err := repo.GetErrand(t.Context(), row.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandOutcomeDone, after.LastOutcome)
-	require.Equal(t, user.TurnID, after.LatestSettledTurnID)
-	require.Equal(t, before.ResultState, after.ResultState)
-	require.Equal(t, before.ResultText, after.ResultText)
-	require.Equal(t, before.ResultTurnID, after.ResultTurnID)
-	require.Equal(t, before.ResultRevision, after.ResultRevision)
-	require.Empty(t, h.deliverer.delivered())
-}
-
-func TestCancelledErrandTurnIgnoresSuccessorAndWrongInitialSubmission(t *testing.T) {
-	t.Run("successor", func(t *testing.T) {
-		h, repo, row, effect := newTerminalFixture(t)
-		completeTerminalTurn(t, repo, effect, "parent answer", "done")
-		require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
-		successor := reserveTerminalTurn(t, repo, row, "successor-turn", "successor-submission", "parent")
-		a := models.ErrandParentAdmission{TaskID: testTask, ParentSessionID: testParent, ErrandID: row.ID,
-			SenderSessionID: testParent, TurnID: successor.TurnID, SubmissionID: successor.SubmissionID}
-		_, err := h.service.ReserveParentAdmission(t.Context(), a)
-		require.NoError(t, err)
-		require.NoError(t, h.service.DecideParentAdmission(t.Context(), a, models.ErrandAdmissionAccepted))
-		before, err := repo.GetErrand(t.Context(), row.ID)
-		require.NoError(t, err)
-		require.True(t, before.AwaitingResult)
-		require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, effect.TurnID, effect.SubmissionID))
-		after, err := repo.GetErrand(t.Context(), row.ID)
-		require.NoError(t, err)
-		require.Equal(t, before, after, "stale cancellation preserves successor result ownership")
-		turn, err := repo.GetTurn(t.Context(), successor.TurnID)
-		require.NoError(t, err)
-		require.Nil(t, turn.CompletedAt)
-	})
-	t.Run("wrong initial submission", func(t *testing.T) {
-		h, repo, row, effect := newTerminalFixture(t)
-		completeTerminalTurn(t, repo, effect, "committed answer", "")
-		before, err := repo.GetErrand(t.Context(), row.ID)
-		require.NoError(t, err)
-		require.NoError(t, h.service.OnErrandTurnCancelled(t.Context(), row.ID, effect.TurnID, "wrong-submission"))
-		after, err := repo.GetErrand(t.Context(), row.ID)
-		require.NoError(t, err)
-		require.Equal(t, before, after)
-		pending, err := repo.PendingErrandTurnSettlements(t.Context(), row.ID)
-		require.NoError(t, err)
-		require.Len(t, pending, 1)
-	})
 }
 
 // @covers AC-TASKS-ERRANDS-003.4
@@ -658,19 +527,19 @@ func TestOutstandingParentReportsOutstandingUntilTheResultIsDelivered(t *testing
 
 // @covers AC-TASKS-ERRANDS-003.5
 func TestSendResultCapturesAUserTurnOnlyWhenTheRuleAllows(t *testing.T) {
-	h, repo, row, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "captured", "done")
-	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
-	_, err := h.service.SendResult(t.Context(), row.ID)
-	require.Error(t, err, "the captured result is still pending")
-	user := reserveTerminalTurn(t, repo, row, "user-turn", "user-submission", "user")
-	completeTerminalTurn(t, repo, user, "sent by the user", "done")
-	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), row.ID, models.TaskSessionStateWaitingForInput, ""))
-	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
-	_, err = h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
+	h, id := pendingResultHarness(t, "parent answer")
+	after, _, err := h.service.update(t.Context(), id, func(row *models.Errand) bool {
+		row.LatestSettledTurnID = "user-turn"
+		return true
+	})
 	require.NoError(t, err)
-	snapshot, err := h.service.SendResult(t.Context(), row.ID)
+	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
+		after.LatestSettledTurnID: {Completed: true, LastAgentText: "sent by the user"},
+	}})
+	snapshot, err := h.service.SendResult(t.Context(), id)
 	require.NoError(t, err)
 	require.Equal(t, "sent by the user", snapshot.Errand.ResultText)
-	require.Equal(t, models.ErrandResultPending, snapshot.Errand.ResultState)
+	require.Equal(t, "user-turn", snapshot.Errand.ResultTurnID)
+	_, err = h.service.SendResult(t.Context(), id)
+	require.Error(t, err)
 }

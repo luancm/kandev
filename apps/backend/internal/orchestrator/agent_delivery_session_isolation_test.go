@@ -74,11 +74,10 @@ func TestDeliverySessionIsolationSettlesOwnedCancellation(t *testing.T) {
 	f := &deliveryWorkflowOutcomeFixture{ctx: t.Context(), repo: cancelled.repo, service: cancelled.service,
 		taskID: cancelled.taskID, session: session, effect: effect}
 	old := seedUnresolvedSessionHistory(t, f, false)
-	controller := &settlingErrandController{}
-	f.service.SetErrandController(controller)
-	f.service.settleCancelledErrandTurn(f.ctx, f.session.ID, effect.TurnID, effect.SubmissionID)
-	if len(controller.cancellations) != 1 || controller.cancellations[0].submissionID != effect.SubmissionID {
-		t.Fatalf("owned cancellation blocked by unrelated history: %+v", controller.cancellations)
+	if err := f.service.reconcileAgentDeliverySubmissionSettlements(
+		withSettledDeliverySessionStateConvergenceSkipped(f.ctx), f.session.ID, effect.SubmissionID,
+	); err != nil {
+		t.Fatal(err)
 	}
 	assertIsolatedTerminalSettlement(t, f, old)
 }

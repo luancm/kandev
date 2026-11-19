@@ -87,7 +87,7 @@ func exerciseErrandToolDelivery(t *testing.T, repo *Repository, injectFailure bo
 	badPayload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeToolUpdate, SessionID: "native-b", ToolCallID: "tool-1", ParentToolCallID: "parent-tool", ToolStatus: "completed", TurnID: "turn", PromptGeneration: 1})
 	require.NoError(t, err)
 	bad.Payload = badPayload
-	_, _, err = repo.ResolveAgentDeliveryEventTurn(ctx, &bad)
+	_, err = repo.ResolveAgentDeliveryEventTurn(ctx, &bad)
 	require.Error(t, err)
 	tampered, err := repo.GetErrandMessage(ctx, "tool-errand", collisionID)
 	require.NoError(t, err)
@@ -160,12 +160,12 @@ func exerciseErrandToolDelivery(t *testing.T, repo *Repository, injectFailure bo
 	require.Equal(t, "After removal", unchanged.Content)
 	ambiguous := makeEvent(5, streams.AgentEvent{Type: streams.EventTypeToolUpdate, ToolCallID: "tool-1", ParentToolCallID: "parent-tool", ToolStatus: "completed"})
 	ambiguous.SubmissionID = ""
-	_, _, err = repo.ResolveAgentDeliveryEventTurn(ctx, ambiguous)
+	_, err = repo.ResolveAgentDeliveryEventTurn(ctx, ambiguous)
 	require.Error(t, err)
 	exactPayload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeToolUpdate, ToolCallID: "tool-1", ParentToolCallID: "parent-tool", ProtocolMessageID: "source-a", ToolStatus: "completed", TurnID: "turn", PromptGeneration: 1})
 	require.NoError(t, err)
 	ambiguous.Payload = exactPayload
-	turn, _, err := repo.ResolveAgentDeliveryEventTurn(ctx, ambiguous)
+	turn, err := repo.ResolveAgentDeliveryEventTurn(ctx, ambiguous)
 	require.NoError(t, err)
 	require.Equal(t, "turn", turn)
 }

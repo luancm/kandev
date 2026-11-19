@@ -1,8 +1,5 @@
 import type { BackendMessage } from "./backend-message";
 
-/** `role` value of an errand session; ordinary sessions omit `role`. */
-export type TaskSessionRole = "errand";
-
 export type ErrandStatus =
   | "queued"
   | "running"
@@ -131,7 +128,6 @@ export type ErrandInspection = {
     available: boolean;
     id?: string;
     title?: string;
-    role?: string;
     environment_id?: string;
     task_environment_id?: string;
   };

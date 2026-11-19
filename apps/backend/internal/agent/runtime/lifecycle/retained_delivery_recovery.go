@@ -90,6 +90,10 @@ func (m *Manager) replayRetainedJournalPages(ctx context.Context, lease *agentct
 		if !matchesDeliveryReconciliationOwner(identity, descriptor, &evidence.Submission) {
 			return nil, after, retainedIdentityMismatchReason, ErrDeliveryOwnerMismatch
 		}
+		if execution.Owner.Kind == ExecutionOwnerErrand &&
+			(!evidence.ProcessTerminated || request.ExpectedHash == "" || request.ExpectedHash != evidence.Submission.Hash) {
+			return nil, after, retainedIdentityMismatchReason, ErrDeliveryOwnerMismatch
+		}
 		if descriptor.Stream == nil {
 			break
 		}

@@ -122,7 +122,6 @@ type ChatInputContainerProps = {
   hasAgentCommands?: boolean;
   isFailed?: boolean;
   isCompleted?: boolean;
-  sessionRole?: string;
   sessionErrorMessage?: string;
   uncertainDelivery?: boolean;
   deliveryRecoveryPhase?: "reconnecting" | "uncertain";
@@ -362,9 +361,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const isMoving = props.isMoving ?? false;
     const executorUnavailable = props.executorUnavailable ?? false;
     const isBusyVisual = isStarting || isMoving;
-    // i18n-exempt: internal persisted session role discriminator.
-    const useUncertainDeliveryControls =
-      props.uncertainDelivery && (!p.isCompleted || props.sessionRole === "errand");
+    const useUncertainDeliveryControls = props.uncertainDelivery && !p.isCompleted;
 
     const s = useChatInputContainer({
       ref,
@@ -448,7 +445,6 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       shouldRenderStoppedSessionBanner({
         isFailed: p.isFailed,
         isCompleted: p.isCompleted,
-        sessionRole: props.sessionRole,
         executorUnavailable,
         launchErrorOwned: p.launchErrorOwned,
         uncertainDelivery: useUncertainDeliveryControls,

@@ -18,11 +18,6 @@ func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, e
 	if execution.Owner.Kind == ExecutionOwnerErrand {
 		return nil
 	}
-	if sm.preserveInterruptedDelegation != nil {
-		if err := sm.preserveInterruptedDelegation(ctx, execution.SessionID); err != nil {
-			return err
-		}
-	}
 	// Clear a predecessor's binding even when the next prompt is legacy or
 	// has no Kandev turn. Missing evidence must not resurrect an older turn.
 	execution.setMetadataValue(deliveryPromptTurnBindingMetadataKey, nil)

@@ -10,7 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func listTaskSessions(t *testing.T, repo *sqliterepo.Repository, taskID string) []*models.TaskSession {
@@ -35,7 +34,7 @@ func TestErrandNeverPrimarySessionCandidate(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "parent", "")
-	seedErrandSession(t, repo, "t1", "parent", "errand", models.TaskSessionStateRunning)
+	seedOwnedErrand(t, repo, "t1", "parent", "errand", models.TaskSessionStateRunning)
 	seedOrdinarySession(t, repo, "t1", "sibling", models.TaskSessionStateWaitingForInput, 30*time.Second)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
@@ -51,25 +50,6 @@ func TestErrandNeverPrimarySessionCandidate(t *testing.T) {
 }
 
 // @covers AC-TASKS-ERRANDS-005.2
-func TestErrandNotPromotedPrimarySessionWhenTaskHasNone(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "parent", "")
-	seedErrandSession(t, repo, "t1", "parent", "errand", models.TaskSessionStateRunning)
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-
-	errand := mustGetSession(t, repo, "errand")
-	svc.promoteSessionIfTaskHasNoPrimary(ctx, "t1", errand)
-	require.False(t, errand.IsPrimary)
-	require.Empty(t, errandTestPrimaryID(t, repo, "t1"))
-
-	parent := mustGetSession(t, repo, "parent")
-	svc.promoteSessionIfTaskHasNoPrimary(ctx, "t1", parent)
-	require.True(t, parent.IsPrimary)
-	require.Equal(t, "parent", errandTestPrimaryID(t, repo, "t1"))
-}
-
-// @covers AC-TASKS-ERRANDS-005.2
 func TestErrandNotPromotedPrimarySessionAfterRemovalOrStop(t *testing.T) {
 	for _, path := range []string{"removal", "stop"} {
 		t.Run(path, func(t *testing.T) {
@@ -77,7 +57,7 @@ func TestErrandNotPromotedPrimarySessionAfterRemovalOrStop(t *testing.T) {
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "parent", "")
 			require.NoError(t, repo.SetSessionPrimary(ctx, "parent"))
-			seedErrandSession(t, repo, "t1", "parent", "errand", models.TaskSessionStateRunning)
+			seedOwnedErrand(t, repo, "t1", "parent", "errand", models.TaskSessionStateRunning)
 			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 			promote := func() {
 				if path == "removal" {
@@ -119,34 +99,17 @@ func TestErrandNeverClaimsGeneratedTaskTitle(t *testing.T) {
 }
 
 // @covers AC-TASKS-ERRANDS-005.3
-func TestErrandSkippedByWorkflowSessionReuseAndMovePreview(t *testing.T) {
-	now := time.Now().UTC()
-	ordinary := &models.TaskSession{ID: "ordinary", AgentProfileID: "codex", State: models.TaskSessionStateWaitingForInput,
-		StartedAt: now, UpdatedAt: now}
-	followUp := &models.TaskSession{ID: "follow-up", AgentProfileID: "codex", State: models.TaskSessionStateWaitingForInput,
-		StartedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
-		Metadata: map[string]interface{}{models.SessionMetaKeyCompletionFollowUp: true}}
-	errand := &models.TaskSession{ID: "errand", AgentProfileID: "codex", State: models.TaskSessionStateRunning,
-		Role: models.SessionRoleErrand, ParentSessionID: "ordinary",
-		StartedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}
-
-	require.Equal(t, ordinary, selectReusableWorkflowSession([]*models.TaskSession{errand, followUp, ordinary}, "codex", ""))
-	require.Nil(t, selectReusableWorkflowSession([]*models.TaskSession{errand, followUp}, "codex", ""))
-	require.Equal(t, followUp, previewCurrentSession([]*models.TaskSession{errand, followUp, ordinary}),
-		"a completion follow-up keeps its place as the preview's current session")
-	require.Nil(t, previewCurrentSession([]*models.TaskSession{errand}))
-}
-
-// @covers AC-TASKS-ERRANDS-005.3
 func TestErrandSkippedByCIAndPullRequestAutomation(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "parent", "")
 	setSessionState(t, ctx, repo, "parent", models.TaskSessionStateWaitingForInput)
-	seedErrandSession(t, repo, "t1", "parent", "errand", models.TaskSessionStateWaitingForInput)
+	seedOwnedErrand(t, repo, "t1", "parent", "errand", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	require.False(t, ciAutomationSessionCanReceivePrompt(mustGetSession(t, repo, "errand")))
+	errandSession, err := repo.GetTaskSession(ctx, "errand")
+	require.Error(t, err)
+	require.Nil(t, errandSession)
 	require.True(t, ciAutomationSessionCanReceivePrompt(mustGetSession(t, repo, "parent")))
 
 	errandID := "errand"
@@ -165,7 +128,7 @@ func TestErrandSkippedByCIAndPullRequestAutomation(t *testing.T) {
 func TestErrandSkippedByEnsureSessionNewestFallback(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "parent", "")
-	seedErrandSession(t, repo, "t1", "parent", "errand", models.TaskSessionStateWaitingForInput)
+	seedOwnedErrand(t, repo, "t1", "parent", "errand", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
 	resp := svc.findExistingSession(context.Background(), "t1")
@@ -180,7 +143,7 @@ func TestErrandSkippedByChildCompletionParentPrompt(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "parent-task", "parent", "step1")
 	setSessionState(t, ctx, repo, "parent", models.TaskSessionStateWaitingForInput)
-	seedErrandSession(t, repo, "parent-task", "parent", "errand", models.TaskSessionStateWaitingForInput)
+	seedOwnedErrand(t, repo, "parent-task", "parent", "errand", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
 	_, session, ok := svc.parentCompletionContext(ctx, "parent-task")
@@ -235,30 +198,6 @@ func TestOwnedErrandActivityBlocksFeederPromotion(t *testing.T) {
 				want = "task-second"
 			}
 			require.Equal(t, want, movedTaskID)
-		})
-	}
-}
-
-// @covers AC-TASKS-ERRANDS-005.1
-func TestErrandStartupReconcileLeavesTaskState(t *testing.T) {
-	for _, errandState := range []models.TaskSessionState{models.TaskSessionStateRunning, models.TaskSessionStateFailed} {
-		t.Run(string(errandState), func(t *testing.T) {
-			ctx := context.Background()
-			repo := setupTestRepo(t)
-			seedSession(t, repo, "t1", "parent", "")
-			setSessionState(t, ctx, repo, "parent", models.TaskSessionStateWaitingForInput)
-			seedErrandSession(t, repo, "t1", "parent", "errand", errandState)
-			now := time.Now().UTC()
-			require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-				ID: "er-errand", SessionID: "errand", TaskID: "t1", CreatedAt: now, UpdatedAt: now,
-			}))
-			taskRepo := newMockTaskRepo()
-			seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
-			svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
-
-			svc.reconcileSessionsOnStartup(ctx)
-
-			require.Empty(t, taskRepo.stateHistory["t1"], "errand startup reconciliation must not write task state")
 		})
 	}
 }

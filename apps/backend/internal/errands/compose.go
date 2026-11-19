@@ -99,7 +99,7 @@ func (s *Service) parentAcceptsBlock(ctx context.Context, parentSessionID string
 	if err != nil || session == nil {
 		return false
 	}
-	if models.IsErrandSession(session) || session.IsPassthrough {
+	if session.IsPassthrough {
 		return false
 	}
 	return true

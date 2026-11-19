@@ -62,7 +62,6 @@ func TestStartPublishesTheQueuedRowBeforeCallingTheLauncher(t *testing.T) {
 // @covers AC-TASKS-ERRANDS-001.4
 func TestStartRefusesIneligibleParentsAndCreatesNothing(t *testing.T) {
 	cases := map[string]*models.TaskSession{
-		"errand parent":      {ID: "errand-parent", TaskID: testTask, Role: models.SessionRoleErrand},
 		"passthrough parent": {ID: "pty-parent", TaskID: testTask, IsPassthrough: true},
 		"other task parent":  {ID: "other-parent", TaskID: "task-2"},
 	}

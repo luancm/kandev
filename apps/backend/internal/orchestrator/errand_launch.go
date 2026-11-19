@@ -50,7 +50,7 @@ func (s *Service) validateErrandLaunchOwner(ctx context.Context, req errands.Lau
 		return fmt.Errorf("read errand parent lifecycle: %w", err)
 	}
 	if parent == nil || parent.ID != req.ParentSessionID || parent.TaskID != req.TaskID ||
-		parent.Role != "" || parent.ParentSessionID != "" || parent.IsPassthrough || isTerminalSessionState(parent.State) {
+		parent.IsPassthrough || isTerminalSessionState(parent.State) {
 		return errors.New("errand parent is no longer runnable")
 	}
 	return nil

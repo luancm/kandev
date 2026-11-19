@@ -289,7 +289,7 @@ func (h *TaskHandlers) wsErrandInspect(ctx context.Context, msg *ws.Message) (*w
 	}
 	parent := dto.ErrandBrowserParentDTO{
 		Available: inspection.Parent.Available, ID: inspection.Parent.ID, Title: inspection.Parent.Title,
-		Role: inspection.Parent.Role, EnvironmentID: inspection.Parent.EnvironmentID,
+		EnvironmentID:     inspection.Parent.EnvironmentID,
 		TaskEnvironmentID: inspection.Parent.TaskEnvironmentID,
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.ErrandInspectionDTO{

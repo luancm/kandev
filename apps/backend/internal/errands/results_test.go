@@ -10,111 +10,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-type terminalTranscript struct{ repo *sqlite.Repository }
-
-func (r terminalTranscript) ReadTurn(ctx context.Context, sessionID, turnID string) (TurnView, error) {
-	turn, err := r.repo.GetTurn(ctx, turnID)
-	if err != nil {
-		return TurnView{}, err
-	}
-	if turn.TaskSessionID != sessionID {
-		return TurnView{}, fmt.Errorf("turn %s belongs to another session", turnID)
-	}
-	messages, err := r.repo.ListMessagesByTurnID(ctx, turnID)
-	view := TurnView{Completed: turn.CompletedAt != nil}
-	for _, message := range messages {
-		if message.AuthorType == models.MessageAuthorAgent && (message.Type == "" || message.Type == models.MessageTypeMessage) {
-			view.LastAgentText = message.Content
-		}
-		if message.AuthorType == models.MessageAuthorUser && view.EarliestUserSender == "" {
-			view.EarliestUserSender, _ = message.Metadata["sender_session_id"].(string)
-		}
-	}
-	return view, err
-}
-
-func (r terminalTranscript) LatestTurn(ctx context.Context, sessionID string) (string, TurnView, error) {
-	turns, err := r.repo.ListTurnsBySession(ctx, sessionID)
-	if err != nil || len(turns) == 0 {
-		return "", TurnView{}, err
-	}
-	id := turns[len(turns)-1].ID
-	view, err := r.ReadTurn(ctx, sessionID, id)
-	return id, view, err
-}
-
-func newTerminalFixture(t *testing.T) (*harness, *sqlite.Repository, *models.Errand, *models.AgentDeliveryEffect) {
-	t.Helper()
-	conn := serviceClaimDB(t, false)
-	repo, err := sqlite.NewWithDB(conn, conn, nil)
-	require.NoError(t, err)
-	require.NoError(t, repo.CreateWorkspace(t.Context(), &models.Workspace{ID: "terminal-ws", Name: "Terminal settlement"}))
-	require.NoError(t, repo.CreateTask(t.Context(), &models.Task{ID: testTask, WorkspaceID: "terminal-ws", Title: "Exact terminal"}))
-	require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: testParent, TaskID: testTask,
-		AgentProfileID: "parent-profile", State: models.TaskSessionStateWaitingForInput}))
-	child := &models.TaskSession{ID: "terminal-child", TaskID: testTask, ParentSessionID: testParent,
-		Role: models.SessionRoleErrand, State: models.TaskSessionStateRunning}
-	require.NoError(t, repo.CreateTaskSession(t.Context(), child))
-	child, err = repo.GetTaskSession(t.Context(), child.ID)
-	require.NoError(t, err)
-	require.NoError(t, repo.CreateHarnessSessionGeneration(t.Context(), &models.HarnessSessionGeneration{
-		SessionID: child.ID, IncarnationID: child.QueueIncarnationID, Generation: 1,
-		NativeSessionID: "terminal-native-session", CreationReason: "initial",
-	}))
-	row := &models.Errand{ID: child.ID, TaskID: testTask, ParentSessionID: testParent, Title: "Exact terminal", Objective: "Capture A",
-		AgentProfileID: "profile-1", FirstTurnID: "terminal-A", SubmissionID: "submit-terminal-A",
-		Lifecycle: models.ErrandLifecycleLaunched, AwaitingResult: true, ResultState: models.ErrandResultNone}
-	require.NoError(t, repo.CreateErrand(t.Context(), row))
-	effect := reserveTerminalTurn(t, repo, row, row.FirstTurnID, row.SubmissionID, "parent")
-	h := newHarness(t)
-	h.service.store = repo
-	h.stopper.store = repo
-	h.stopper.target = &ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID,
-		SessionIncarnation: effect.IncarnationID, TurnID: effect.TurnID, SubmissionID: effect.SubmissionID}
-	h.service.SetTurnReader(terminalTranscript{repo})
-	return h, repo, row, effect
-}
-
-func reserveTerminalTurn(t *testing.T, repo *sqlite.Repository, row *models.Errand, turnID, submissionID, origin string) *models.AgentDeliveryEffect {
-	t.Helper()
-	require.NoError(t, repo.CreateTurn(t.Context(), &models.Turn{ID: turnID, TaskID: row.TaskID, TaskSessionID: row.ID}))
-	session, err := repo.GetTaskSession(t.Context(), row.ID)
-	require.NoError(t, err)
-	_, err = repo.PrepareAgentDeliverySubmission(t.Context(), &models.AgentDeliverySubmission{
-		ID: submissionID, SessionID: row.ID, IncarnationID: session.QueueIncarnationID,
-		HarnessGeneration: 1, OwnerGeneration: 1, DispatchAttemptID: "dispatch:" + submissionID,
-		PayloadHash: "hash:" + submissionID, Payload: []byte("prompt:" + submissionID), State: models.DeliverySubmissionDispatching,
-	})
-	require.NoError(t, err)
-	effect := &models.AgentDeliveryEffect{TaskID: row.TaskID, EffectKey: "terminal:" + turnID, EffectType: db.ErrandTurnSettlementEffect,
-		State: models.DeliveryEffectPending, SessionID: row.ID, IncarnationID: session.QueueIncarnationID,
-		StreamID: "terminal-execution", HarnessGeneration: 1, TurnID: turnID, SubmissionID: submissionID, Outcome: origin}
-	require.NoError(t, repo.ReserveErrandTurnSettlement(t.Context(), row.TaskID, effect))
-	return effect
-}
-
-func completeTerminalTurn(t *testing.T, repo *sqlite.Repository, effect *models.AgentDeliveryEffect, text, cause string) {
-	t.Helper()
-	require.NoError(t, repo.CreateMessage(t.Context(), &models.Message{ID: "output:" + effect.TurnID, TaskID: effect.TaskID,
-		TaskSessionID: effect.SessionID, TurnID: effect.TurnID, AuthorType: models.MessageAuthorAgent, Content: text}))
-	require.NoError(t, repo.CompleteTurn(t.Context(), effect.TurnID))
-	if cause != "" {
-		effect.Outcome += ":" + cause
-		require.NoError(t, repo.ReserveErrandTurnSettlement(t.Context(), effect.TaskID, effect))
-	}
-}
-
 func settledTerminalFixture(t *testing.T, text string) (*harness, *sqlite.Repository, *models.Errand) {
 	t.Helper()
-	h, repo, row, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, text, "done")
-	require.NoError(t, repo.UpdateTaskSessionState(t.Context(), row.ID, models.TaskSessionStateWaitingForInput, ""))
-	require.NoError(t, h.service.ReconcileTerminalDecisions(t.Context(), row.ID))
+	h, repo, row := newOwnedSettlementFixture(t, models.ErrandOutcomeDone, text)
+	require.NoError(t, h.service.reconcileOwnedErrandResults(t.Context()))
 	return h, repo, row
 }
 
@@ -144,10 +47,6 @@ func (r *blockedTurnReader) ReadTurn(ctx context.Context, sessionID, turnID stri
 	r.readStarted <- struct{}{}
 	<-r.readRelease
 	return r.reader.ReadTurn(ctx, sessionID, turnID)
-}
-
-func (r *blockedTurnReader) LatestTurn(ctx context.Context, sessionID string) (string, TurnView, error) {
-	return r.reader.LatestTurn(ctx, sessionID)
 }
 
 func cancelForSettlementRace(ctx context.Context, h *harness, errand *models.Errand, kind string) error {
@@ -190,7 +89,7 @@ func TestLateSettlementPreservesUserCancellationNotice(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, repo, errand := newOwnedSettlementRaceFixture(t, tc.outcome)
+			h, repo, errand := newOwnedSettlementFixture(t, tc.outcome, "late answer")
 			observer := &cancellationObservedStore{Repository: repo, cancelled: make(chan struct{}, 1)}
 			h.service.store = observer
 			reader := &blockedTurnReader{
@@ -251,55 +150,19 @@ func TestLateSettlementPreservesUserCancellationNotice(t *testing.T) {
 	}
 }
 
-// @covers AC-TASKS-ERRANDS-003.1, AC-TASKS-ERRANDS-003.5
-func TestCompletedSettlementBeforeTurnCancellationKeepsTheResult(t *testing.T) {
-	h, repo, errand, effect := newTerminalFixture(t)
-	completeTerminalTurn(t, repo, effect, "completed answer", "")
-	if err := h.service.OnErrandTurnSettled(t.Context(), TurnSettlement{
-		SessionID: errand.ID, TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID, Outcome: models.ErrandOutcomeDone,
-	}); err != nil {
-		t.Fatalf("settle before cancellation: %v", err)
-	}
-	settled, err := repo.GetErrand(t.Context(), errand.ID)
-	if err != nil {
-		t.Fatalf("read settled row: %v", err)
-	}
-	if settled.ResultState != models.ErrandResultPending || settled.ResultText != "completed answer" ||
-		settled.ResultKind != models.ErrandResultOutput || settled.LastOutcome != models.ErrandOutcomeDone {
-		t.Fatalf("settled result = %+v, want the completed result", settled)
-	}
-	if err := h.service.OnErrandTurnCancelled(t.Context(), errand.ID, errand.FirstTurnID, errand.SubmissionID); err != nil {
-		t.Fatalf("cancel callback after settlement: %v", err)
-	}
-	after, err := repo.GetErrand(t.Context(), errand.ID)
-	if err != nil {
-		t.Fatalf("read cancelled row: %v", err)
-	}
-	if after.Lifecycle != models.ErrandLifecycleLaunched || after.ResultState != settled.ResultState ||
-		after.ResultKind != settled.ResultKind || after.ResultText != settled.ResultText ||
-		after.ResultTurnID != settled.ResultTurnID || after.LastOutcome != settled.LastOutcome {
-		t.Fatalf("cancellation changed the result that settled first: %+v", after)
-	}
-}
-
-func TestTerminalSettlementPreservesFailureAndEmptyOutput(t *testing.T) {
+func TestOwnedTerminalSettlementPreservesFailureAndEmptyOutput(t *testing.T) {
 	for _, test := range []struct {
-		name, output, summary, want string
-		outcome                     models.ErrandOutcome
-		kind                        models.ErrandResultKind
+		name, output, want string
+		outcome            models.ErrandOutcome
+		kind               models.ErrandResultKind
 	}{
 		{name: "empty successful output", outcome: models.ErrandOutcomeDone, kind: models.ErrandResultOutput},
-		{name: "sanitized failure summary", output: "partial output", summary: "safe failure", want: "safe failure", outcome: models.ErrandOutcomeFailed, kind: models.ErrandResultFailure},
 		{name: "canonical failure output", output: "canonical failure", want: "canonical failure", outcome: models.ErrandOutcomeFailed, kind: models.ErrandResultFailure},
 		{name: "failure without output", want: failureNotice, outcome: models.ErrandOutcomeFailed, kind: models.ErrandResultFailure},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			h, repo, row, effect := newTerminalFixture(t)
-			completeTerminalTurn(t, repo, effect, test.output, "")
-			require.NoError(t, h.service.OnErrandTurnSettled(t.Context(), TurnSettlement{
-				SessionID: row.ID, TurnID: effect.TurnID, SubmissionID: effect.SubmissionID,
-				Outcome: test.outcome, FailureSummary: test.summary,
-			}))
+			h, repo, row := newOwnedSettlementFixture(t, test.outcome, test.output)
+			require.NoError(t, h.service.reconcileOwnedErrandResults(t.Context()))
 			after, err := repo.GetErrand(t.Context(), row.ID)
 			require.NoError(t, err)
 			require.Equal(t, test.outcome, after.LastOutcome)

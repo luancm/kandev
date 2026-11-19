@@ -318,9 +318,6 @@ type KandevContextOptions struct {
 	// IncludeErrandTools adds the errand delegation policy and the three
 	// errand tools. Only an eligible parent session sets it.
 	IncludeErrandTools bool
-	// ErrandSession marks an errand. Its context is the read-only errand render,
-	// so every other capability option is ignored for it.
-	ErrandSession bool
 	// ErrandProfiles lists the agent profiles an errand can run with. Only
 	// read when IncludeErrandTools is set; it is capped at MaxErrandProfiles.
 	ErrandProfiles []ErrandProfile
@@ -402,13 +399,8 @@ func FormatKandevContext(taskID, sessionID string, requiresCompletionSignal bool
 	})
 }
 
-// FormatKandevContextWithOptions returns capability-aware Kandev context. An
-// errand session gets its read-only context instead, whatever the other options
-// say, so no task, question, or delegation tool is ever advertised to it.
+// FormatKandevContextWithOptions returns capability-aware task context.
 func FormatKandevContextWithOptions(taskID, sessionID string, options KandevContextOptions) string {
-	if options.ErrandSession {
-		return FormatErrandKandevContext(taskID, sessionID)
-	}
 	section := ""
 	if options.RequiresCompletionSignal {
 		section = stepCompleteSection

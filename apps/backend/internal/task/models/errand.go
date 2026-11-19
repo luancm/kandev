@@ -7,20 +7,6 @@ import (
 	"time"
 )
 
-// SessionRole distinguishes errand sessions from ordinary task sessions. It is
-// written once when the session row is inserted and never updated.
-type SessionRole string
-
-// SessionRoleErrand marks a session that a parent session started as an errand.
-const SessionRoleErrand SessionRole = "errand"
-
-// IsErrandSession reports whether session is an errand. An errand never owns
-// the primary role, the generated title, or task runtime state, and is never
-// a default target for task-level routing.
-func IsErrandSession(session *TaskSession) bool {
-	return session != nil && session.Role == SessionRoleErrand
-}
-
 // ErrandLifecycle is the errand-owned launch state, independent of the
 // errand session's runtime state.
 type ErrandLifecycle string
@@ -105,7 +91,6 @@ var (
 	ErrErrandNotFound        = errors.New("errand not found")
 	ErrErrandVersionConflict = errors.New("errand version changed")
 	ErrInvalidErrand         = errors.New("invalid errand")
-	ErrErrandSessionPrimary  = errors.New("an errand session cannot be primary")
 )
 
 // Errand is the bookkeeping row for one errand. ID equals the errand's
@@ -191,25 +176,6 @@ func (e *Errand) CanSendResult(status ErrandStatus) bool {
 		return true
 	}
 	return e.ResultState != ErrandResultPending && e.ResultState != ErrandResultDelivered
-}
-
-func (s *TaskSession) addRoleAPI(result map[string]interface{}) {
-	AddSessionRoleFields(result, s)
-}
-
-// AddSessionRoleFields adds the role and parent session identity of an errand
-// session to a session event or API payload. Ordinary sessions and nil add
-// nothing, so their payloads stay unchanged.
-func AddSessionRoleFields(payload map[string]interface{}, session *TaskSession) {
-	if session == nil {
-		return
-	}
-	if session.Role != "" {
-		payload["role"] = string(session.Role)
-	}
-	if session.ParentSessionID != "" {
-		payload["parent_session_id"] = session.ParentSessionID
-	}
 }
 
 // ErrandClaimCandidate identifies the version observed while preparing a claim.

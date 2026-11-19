@@ -142,18 +142,3 @@ describe("stopped-session error propagation", () => {
     });
   });
 });
-
-describe("retained completed Errand composer", () => {
-  it("keeps explicit continuation available for Errands while ordinary sessions stay completed", () => {
-    const completed = { isFailed: false, isCompleted: true, executorUnavailable: false };
-    expect(shouldRenderStoppedSessionBanner(completed)).toBe(true);
-    expect(shouldRenderStoppedSessionBanner({ ...completed, sessionRole: "errand" })).toBe(false);
-    expect(
-      shouldRenderStoppedSessionBanner({
-        ...completed,
-        sessionRole: "errand",
-        uncertainDelivery: true,
-      }),
-    ).toBe(true);
-  });
-});

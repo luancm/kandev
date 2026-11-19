@@ -10,6 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -22,18 +23,19 @@ func errandDeliveryIdentity(key string) (string, bool) {
 }
 
 type errandPromptProof struct {
-	ErrandID          string `json:"errand_id"`
-	Generation        uint64 `json:"generation"`
-	ExecutionID       string `json:"execution_id"`
-	IncarnationID     string `json:"incarnation_id"`
-	HarnessGeneration int64  `json:"harness_generation"`
-	StreamID          string `json:"stream_id"`
-	NativeSessionID   string `json:"native_session_id"`
-	PromptGeneration  uint64 `json:"prompt_generation"`
-	TurnID            string `json:"turn_id"`
-	SubmissionID      string `json:"submission_id"`
-	PayloadHash       string `json:"payload_hash"`
-	DispatchAttemptID string `json:"dispatch_attempt_id"`
+	ErrandID          string                   `json:"errand_id"`
+	Generation        uint64                   `json:"generation"`
+	ExecutionID       string                   `json:"execution_id"`
+	IncarnationID     string                   `json:"incarnation_id"`
+	HarnessGeneration int64                    `json:"harness_generation"`
+	StreamID          string                   `json:"stream_id"`
+	NativeSessionID   string                   `json:"native_session_id"`
+	PromptGeneration  uint64                   `json:"prompt_generation"`
+	TurnID            string                   `json:"turn_id"`
+	SubmissionID      string                   `json:"submission_id"`
+	PayloadHash       string                   `json:"payload_hash"`
+	DispatchAttemptID string                   `json:"dispatch_attempt_id"`
+	OriginalRuntime   processidentity.Identity `json:"original_runtime,omitzero"`
 }
 
 func (r *Repository) errandDeliveryEventAdmissionTx(ctx context.Context, tx *sqlx.Tx, errandID string, event *models.AgentDeliveryEvent) (string, error) {

@@ -64,7 +64,7 @@ func exerciseErrandNewWorkAdmission(t *testing.T, factory func(*testing.T) *Repo
 					if state.cancelled {
 						purpose = models.ErrandTeardownPurposeCancellation
 					}
-					row.TeardownIntent = &models.ErrandTeardownIntent{Version: 1, ID: "cleanup", State: state.cleanup, Purpose: purpose, RequestedAt: errandScenarioBase, Target: models.ErrandTeardownTarget{TaskID: task, SessionID: row.ID, SessionIncarnation: "incarnation", ExecutionID: "execution", TurnID: "turn"}}
+					row.TeardownIntent = &models.ErrandTeardownIntent{Version: 1, ID: "cleanup", State: state.cleanup, Purpose: purpose, RequestedAt: errandScenarioBase, Target: models.ErrandTeardownTarget{TaskID: task, ErrandID: row.ID, OwnerGeneration: 1, ExecutionID: "execution", TurnID: "turn", SubmissionID: "submission", PromptGeneration: 1}}
 					require.NoError(t, row.TeardownIntent.ValidateFor(row))
 					raw, err := json.Marshal(row.TeardownIntent)
 					require.NoError(t, err)

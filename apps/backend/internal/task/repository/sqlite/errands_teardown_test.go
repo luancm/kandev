@@ -48,8 +48,8 @@ func exerciseErrandTeardownIntentMalformedJSONAndExplicitEmpty(t *testing.T, rep
 		t.Fatal("malformed teardown intent JSON was accepted")
 	}
 
-	partial := pendingSessionTeardownIntent(row)
-	partial.Target.SessionIncarnation = ""
+	partial := pendingErrandTeardownIntent(row)
+	partial.Target.ErrandID = ""
 	encoded, err := json.Marshal(partial)
 	if err != nil {
 		t.Fatalf("marshal partial target: %v", err)
@@ -74,7 +74,7 @@ func exerciseErrandTeardownIntentCASDoesNotOverwriteSuccessor(t *testing.T, repo
 	t.Helper()
 	row := createTeardownIntentErrand(t, repo, "cas")
 	row.Lifecycle, row.CancelSource = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser
-	row.TeardownIntent = pendingSessionTeardownIntent(row)
+	row.TeardownIntent = pendingErrandTeardownIntent(row)
 	if err := repo.UpdateErrand(t.Context(), row); err != nil {
 		t.Fatalf("commit pending intent: %v", err)
 	}
@@ -110,14 +110,14 @@ func exerciseErrandTeardownIntentCASDoesNotOverwriteSuccessor(t *testing.T, repo
 
 	mutated := *completed
 	intent := *completed.TeardownIntent
-	intent.Target.TurnID = "replacement-turn"
+	intent.Target.OwnerGeneration = 1
 	mutated.TeardownIntent = &intent
 	mutated.ResultText = "must stay unchanged"
 	if err := repo.UpdateErrand(t.Context(), &mutated); !errors.Is(err, models.ErrInvalidErrand) {
 		t.Fatalf("same-intent target mutation = %v, want ErrInvalidErrand", err)
 	}
 	unchanged, err := repo.GetErrand(t.Context(), row.ID)
-	if err != nil || unchanged.ResultText != "successor result" || unchanged.TeardownIntent.Target.TurnID != "turn-errand-teardown-cas" {
+	if err != nil || unchanged.ResultText != "successor result" || unchanged.TeardownIntent.Target.OwnerGeneration != 0 {
 		t.Fatalf("immutable target mutation changed stored row: %+v, err = %v", unchanged, err)
 	}
 }
@@ -136,7 +136,7 @@ func exerciseErrandCancellationAndStopIntentCommitTogether(t *testing.T, repo *R
 	}
 	update.Lifecycle, update.CancelSource = models.ErrandLifecycleCancelled, models.ErrandCancelSourceParent
 	update.ResultState = models.ErrandResultDiscarded
-	update.TeardownIntent = pendingSessionTeardownIntent(update)
+	update.TeardownIntent = pendingErrandTeardownIntent(update)
 	removeFault := failErrandUpdate(t, repo, "NEW.lifecycle = 'cancelled' AND NEW.cancel_source = 'parent'")
 	if err := repo.UpdateErrand(ctx, update); err == nil {
 		t.Fatal("injected cancellation write failure did not abort the update")
@@ -190,7 +190,7 @@ func createTeardownIntentErrand(t *testing.T, repo *Repository, suffix string) *
 func persistErrandTeardownIntent(t *testing.T, repo *Repository, suffix string) *models.Errand {
 	t.Helper()
 	row := createTeardownIntentErrand(t, repo, suffix)
-	row.TeardownIntent = pendingSessionTeardownIntent(row)
+	row.TeardownIntent = pendingErrandTeardownIntent(row)
 	row.Lifecycle, row.CancelSource = models.ErrandLifecycleCancelled, models.ErrandCancelSourceUser
 	if err := repo.UpdateErrand(t.Context(), row); err != nil {
 		t.Fatalf("commit teardown intent: %v", err)
@@ -198,13 +198,12 @@ func persistErrandTeardownIntent(t *testing.T, repo *Repository, suffix string) 
 	return row
 }
 
-func pendingSessionTeardownIntent(row *models.Errand) *models.ErrandTeardownIntent {
+func pendingErrandTeardownIntent(row *models.Errand) *models.ErrandTeardownIntent {
 	return &models.ErrandTeardownIntent{
 		Version: models.ErrandTeardownIntentVersion, ID: "intent-" + row.ID,
-		State: models.ErrandTeardownIntentPending, RequestedAt: errandTeardownRequestedAt,
+		State: models.ErrandTeardownIntentPending, Purpose: models.ErrandTeardownPurposeCancellation, RequestedAt: errandTeardownRequestedAt,
 		Target: models.ErrandTeardownTarget{
-			TaskID: row.TaskID, SessionID: row.ID, SessionIncarnation: "incarnation-" + row.ID,
-			ExecutionID: "execution-" + row.ID, TurnID: "turn-" + row.ID, SubmissionID: "submission-" + row.ID,
+			TaskID: row.TaskID, ErrandID: row.ID, NoTurn: true,
 		},
 	}
 }

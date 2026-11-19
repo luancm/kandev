@@ -10,16 +10,8 @@ import type { ApiClient } from "./api-client";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { Errand, ErrandBrowserSummary } from "../../lib/types/errands";
-import type { TaskSessionState } from "../../lib/types/http";
+import type { Message } from "../../lib/types/http";
 import { mockTurnGate } from "./mock-turn-gate";
-
-export type ErrandContextWindowFixture = {
-  size: number;
-  used: number;
-  remaining: number;
-  efficiency: number;
-  source: "acp" | "api";
-} | null;
 
 export type ErrandBrowserSocket = {
   waitForInitialConnection: () => Promise<void>;
@@ -67,7 +59,7 @@ export async function routeErrandUpdateBrowserSocket(
         if (
           refuseNextPrompt &&
           frame?.type === "request" &&
-          (frame.action === "message.add" || frame.action === "message.queue.add") &&
+          frame.action === "errand.continue" &&
           typeof frame.id === "string"
         ) {
           refuseNextPrompt = false;
@@ -197,33 +189,49 @@ export async function listErrands(api: ApiClient, taskId: string): Promise<Erran
   return (await api.wsRequest<{ errands: Errand[] }>("errand.list", { task_id: taskId })).errands;
 }
 
-export async function seedErrandContextWindow(
-  api: ApiClient,
-  taskId: string,
-  sessionId: string,
-  contextWindow: ErrandContextWindowFixture,
-): Promise<void> {
-  const session = (await api.listTaskSessions(taskId)).sessions.find((row) => row.id === sessionId);
-  if (!session) throw new Error(`Expected session ${sessionId} to exist before context seeding`);
-
-  await api.seedTaskSession(taskId, {
-    sessionId,
-    state: session.state as TaskSessionState,
-    agentProfileId: session.agent_profile_id,
-    startedAt: session.started_at,
-    completedAt: session.completed_at ?? undefined,
-    errorMessage: session.error_message ?? undefined,
-    metadata: {
-      ...(session.metadata ?? {}),
-      context_window: contextWindow,
-    },
-  });
+export function contextWindowPrompt(used: number) {
+  return `e2e:context_window(100000,${used})`;
 }
 
 export function parentChat(page: Page, sessionId: string) {
   return page
     .locator(`[data-testid="session-chat"][data-session-id="${sessionId}"]:visible`)
     .first();
+}
+
+export function ownedErrandChat(page: Page, errandId: string): Locator {
+  return page.locator(`[data-testid="errand-conversation"][data-errand-id="${errandId}"]`);
+}
+
+export async function readOwnedMessages(api: ApiClient, taskId: string, errandId: string) {
+  const page = await api.wsRequest<{ messages: Message[] }>("errand.messages", {
+    task_id: taskId,
+    errand_id: errandId,
+  });
+  return page.messages;
+}
+
+export async function expectOwnedErrandContinuationRetry(
+  api: ApiClient,
+  backend: BackendContext,
+  request: { task_id: string; errand_id: string; client_message_id: string; content: string },
+) {
+  async function submit() {
+    try {
+      return (await api.wsRequest<{ turn_id: string }>("errand.continue", request)).turn_id;
+    } catch (error) {
+      if (String(error).includes("Earlier errand work and its external effects remain uncertain"))
+        return undefined;
+      const logs = await readFile(backend.logPath, "utf8").catch(() => "");
+      const failure = logs
+        .split("\n")
+        .findLast((line) => line.includes("errand continuation failed"));
+      throw new Error(failure ? `${String(error)}\n${failure}` : String(error), { cause: error });
+    }
+  }
+  let turnId: string | undefined;
+  await expect.poll(async () => (turnId = await submit())).toEqual(expect.any(String));
+  expect(await submit()).toBe(turnId);
 }
 
 export async function waitParentIdle(api: ApiClient, taskId: string, sessionId: string) {
@@ -233,10 +241,7 @@ export async function waitParentIdle(api: ApiClient, taskId: string, sessionId: 
         const session = (await api.listTaskSessions(taskId)).sessions.find(
           (row) => row.id === sessionId,
         );
-        return (
-          session?.state === "WAITING_FOR_INPUT" ||
-          (session?.role === "errand" && session.state === "COMPLETED")
-        );
+        return session?.state === "WAITING_FOR_INPUT";
       },
       { message: "Parent turn settles while errands remain independent", timeout: 60_000 },
     )
@@ -513,61 +518,6 @@ export async function startMixedParentErrands(
   };
 }
 
-/** Recreates a saved pre-Task29 child tab without mounting a second live conversation. */
-export async function seedLegacyErrandTab(page: Page, parentId: string, childId: string) {
-  await expect
-    .poll(() =>
-      page.evaluate(
-        (parent) =>
-          Object.keys(sessionStorage).some((key) => {
-            if (!key.startsWith("kandev.dockview.env-layout-v3.")) return false;
-            const layout = JSON.parse(sessionStorage.getItem(key)!);
-            return Boolean(layout.panels?.[`session:${parent}`]);
-          }),
-        parentId,
-      ),
-    )
-    .toBe(true);
-  const written = await page.evaluate(
-    ({ parent, child }) => {
-      type Node = { type: string; data: Node[] | { views: string[]; activeView?: string } };
-      const parentPanel = `session:${parent}`;
-      const childPanel = `session:${child}`;
-      let count = 0;
-      for (const key of Object.keys(sessionStorage)) {
-        if (!key.startsWith("kandev.dockview.env-layout-v3.")) continue;
-        const layout = JSON.parse(sessionStorage.getItem(key)!) as {
-          panels: Record<string, { id: string; params?: Record<string, unknown> }>;
-          grid: { root: Node };
-        };
-        const original = layout.panels?.[parentPanel];
-        if (!original) continue;
-        layout.panels[childPanel] = {
-          ...original,
-          id: childPanel,
-          params: { ...original.params, sessionId: child },
-        };
-        const visit = (node: Node) => {
-          if (Array.isArray(node.data)) {
-            node.data.forEach(visit);
-            return;
-          }
-          if (node.data.views.includes(parentPanel)) {
-            node.data.views.push(childPanel);
-            node.data.activeView = childPanel;
-          }
-        };
-        visit(layout.grid.root);
-        sessionStorage.setItem(key, JSON.stringify(layout));
-        count++;
-      }
-      return count;
-    },
-    { parent: parentId, child: childId },
-  );
-  expect(written).toBeGreaterThan(0);
-}
-
 /** Independent timestamp/identity oracle; deliberately does not import the UI sorter. */
 function orderedErrandIds(rows: Errand[]): string[] {
   return [...rows]
@@ -590,7 +540,14 @@ export async function expectMixedParentOrdering(
   backend: BackendContext,
   phone: boolean,
 ) {
-  const first = await startErrands(api, seed, backend, { count: 3 });
+  const gates = Array.from({ length: 3 }, (_, index) =>
+    mockTurnGate(backend.tmpDir, `ERRAND_RESULT_${index + 1}`),
+  );
+  gates[0].prompt = [contextWindowPrompt(68_000), gates[0].prompt].join("\n");
+  const first = {
+    ...(await startErrands(api, seed, backend, { prompts: gates.map((gate) => gate.prompt) })),
+    gates,
+  };
   const secondGates = [
     mockTurnGate(backend.tmpDir, "SECOND_A"),
     mockTurnGate(backend.tmpDir, "SECOND_B"),
@@ -612,10 +569,10 @@ export async function expectMixedParentOrdering(
     const rows = await listErrands(api, first.taskId);
     await expect
       .poll(async () => {
-        const sessions = (await api.listTaskSessions(first.taskId)).sessions;
-        return rows.every(
-          (row) => sessions.find((session) => session.id === row.errand_id)?.state === "RUNNING",
+        const statuses = new Map(
+          (await listErrands(api, first.taskId)).map((row) => [row.errand_id, row.status]),
         );
+        return rows.every((row) => statuses.get(row.errand_id) === "running");
       })
       .toBe(true);
     const secondRows = rows.filter((row) => row.parent_session_id === second.session_id);
@@ -714,15 +671,6 @@ export async function expectMixedParentOrdering(
     await waitDelivered(api, first.taskId, [rowFor(first.gates[2]).errand_id]);
     await assertOrder(first.parentId, true);
     await expect(surface.getByTestId("errands-stop-all")).toBeVisible();
-    await seedErrandContextWindow(api, first.taskId, firstDone[0].errand_id, {
-      size: 100000,
-      used: 68000,
-      remaining: 32000,
-      efficiency: 0.68,
-      source: "acp",
-    });
-    await expect(surface.getByTestId(`errands-history-refresh-${first.parentId}`)).toBeVisible();
-    await refreshHistory(first.parentId);
     await expect(surface.getByTestId(`errands-panel-row-${firstDone[0].errand_id}`)).toContainText(
       "68.0K",
     );
@@ -763,8 +711,8 @@ export async function expectMixedParentOrdering(
     );
     await target.scrollIntoViewIfNeeded();
     await activate(target);
-    await expect(parentChat(page, child.errand_id)).toBeVisible();
-    await activate(parentChat(page, child.errand_id).getByTestId("errand-back-to-parent"));
+    await expect(ownedErrandChat(page, child.errand_id)).toBeVisible();
+    await activate(ownedErrandChat(page, child.errand_id).getByTestId("errand-back-to-parent"));
     await page.reload();
     await open(second.session_id);
     await activate(surface.getByTestId(/^errands-history-toggle-/));
@@ -783,8 +731,11 @@ export async function expectMixedParentOrdering(
     if ((await toggle.getAttribute("aria-expanded")) === "false") await activate(toggle);
     await assertOrder(first.parentId, true);
     await expect(surface.getByTestId("errands-stop-all")).toHaveCount(0);
+    expect((await api.listTaskSessions(first.taskId)).sessions.map(({ id }) => id).sort()).toEqual(
+      [first.parentId, second.session_id].sort(),
+    );
     for (const row of rows)
-      expect((await api.getTaskSession(row.errand_id)).session.id).toBe(row.errand_id);
+      expect(await readOwnedMessages(api, first.taskId, row.errand_id)).not.toHaveLength(0);
   } finally {
     await page.context().setOffline(false);
     for (const gate of allGates) await gate.release();
@@ -853,7 +804,7 @@ export async function expectDurableAwaitRecovery(
     await open();
     await expect(row.getByTestId("errand-delivery-uncertain")).toBeVisible();
     await activate(phone ? row : row.getByTestId(`errand-open-${errands[0].errand_id}`));
-    const child = parentChat(page, errands[0].errand_id);
+    const child = ownedErrandChat(page, errands[0].errand_id);
     await expect(child.getByTestId("errand-header")).toBeVisible();
     await activate(child.getByTestId("errand-back-to-parent"));
     for (const action of ["errand_status", "errand_zero"]) {
@@ -863,8 +814,21 @@ export async function expectDurableAwaitRecovery(
       await expect(row.getByTestId("errand-delivery-uncertain")).toBeVisible();
     }
     await activate(phone ? row : row.getByTestId(`errand-open-${errands[0].errand_id}`));
-    await api.addUserMessage(taskId, errands[0].errand_id, 'e2e:message("SUCCESSOR_RESULT")');
-    await waitParentIdle(api, taskId, errands[0].errand_id);
+    const errandId = errands[0].errand_id;
+    await expectOwnedErrandContinuationRetry(api, backend, {
+      task_id: taskId,
+      errand_id: errandId,
+      client_message_id: randomUUID(),
+      content: 'e2e:message("SUCCESSOR_RESULT")',
+    });
+    await expect(child.getByText("SUCCESSOR_RESULT", { exact: true })).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errandId)
+            ?.can_send_result,
+      )
+      .toBe(true);
     if (phone) {
       await child.getByTestId("errand-actions-menu").tap();
       await page.getByRole("menuitem", { name: "Send result to parent", exact: true }).tap();

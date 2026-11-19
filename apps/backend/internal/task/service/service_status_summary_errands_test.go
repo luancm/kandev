@@ -274,7 +274,6 @@ func TestTaskStatusSummaryErrandsRepairAuthoritativeTransitions(t *testing.T) {
 		return got
 	}
 	got := reconcile(nil, &statussummary.ErrandsSummary{Live: 1, Waiting: true})
-	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "child", TaskID: task.ID, Role: models.SessionRoleErrand, ParentSessionID: "parent", State: models.TaskSessionStateFailed}))
 	errand, err := repo.GetErrand(ctx, "child")
 	require.NoError(t, err)
 	errand.Lifecycle = models.ErrandLifecycleLaunched

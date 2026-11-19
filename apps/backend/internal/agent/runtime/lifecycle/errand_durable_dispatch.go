@@ -60,6 +60,11 @@ func (sm *SessionManager) persistErrandDeliveryBeforeDispatch(ctx context.Contex
 	id := deliverySubmissionIdentityForPrompt(submissionID, "")
 	submission := &models.AgentDeliverySubmission{ID: id, SessionID: models.ErrandExecutionIdentity(execution.Owner.ErrandID), IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: int64(execution.DeliveryHarnessGeneration), OwnerGeneration: int64(execution.DeliveryHarnessGeneration), DispatchAttemptID: execution.ID, Payload: payload, PayloadHash: journal.SubmissionHash(payload), State: models.DeliverySubmissionDispatching}
 	admission := &models.ErrandDeliveryAdmission{ErrandID: execution.Owner.ErrandID, Generation: execution.Owner.Generation, ExecutionID: execution.ID, IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: int64(execution.DeliveryHarnessGeneration), StreamID: execution.DeliveryStreamID, NativeSessionID: execution.ACPSessionID, PromptGeneration: promptGeneration, TurnID: execution.promptTurnIDSnapshot(), Submission: submission}
+	client, release := execution.AcquireAgentCtlClient()
+	if client != nil {
+		admission.OriginalRuntime = withAgentProcessGroup(ctx, client, execution.DeliveryStreamID, client.RuntimeProcessIdentity())
+	}
+	release()
 	created, err := store.PrepareErrandDeliverySubmission(ctx, admission)
 	if err != nil {
 		return nil, err

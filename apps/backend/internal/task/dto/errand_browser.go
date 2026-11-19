@@ -66,12 +66,11 @@ type ErrandHistoryPageDTO struct {
 }
 
 type ErrandBrowserParentDTO struct {
-	Available         bool               `json:"available"`
-	ID                string             `json:"id,omitempty"`
-	Title             string             `json:"title,omitempty"`
-	Role              models.SessionRole `json:"role,omitempty"`
-	EnvironmentID     string             `json:"environment_id,omitempty"`
-	TaskEnvironmentID string             `json:"task_environment_id,omitempty"`
+	Available         bool   `json:"available"`
+	ID                string `json:"id,omitempty"`
+	Title             string `json:"title,omitempty"`
+	EnvironmentID     string `json:"environment_id,omitempty"`
+	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
 }
 
 type ErrandInspectionDTO struct {

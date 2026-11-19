@@ -1,10 +1,14 @@
 package lifecycle
 
-import "context"
+import (
+	"context"
+
+	"github.com/kandev/kandev/internal/agentctl/journal"
+)
 
 func launchJournalOwnerID(req *LaunchRequest) string {
 	if req.Owner.Kind == ExecutionOwnerErrand {
-		return "errand-" + req.Owner.ErrandID
+		return journal.ErrandStorageOwnerID(req.Owner.ErrandID)
 	}
 	if req.SessionID != "" {
 		return req.SessionID

@@ -107,7 +107,7 @@ function makeHeaderInspection(compact: ErrandBrowserRow | null): ErrandInspectio
     scope: { task_id: TASK_ID, child_session_id: ERRAND_ID },
     errand: compact,
     owns_conversation: true,
-    parent: { available: true, id: PARENT_ID, title: "Main", role: "primary" },
+    parent: { available: true, id: PARENT_ID, title: "Main" },
   };
 }
 

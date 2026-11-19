@@ -101,7 +101,7 @@ func (s *Service) loadParent(ctx context.Context, req StartRequest) (*models.Tas
 	if err != nil && !isMissingSession(err) {
 		return nil, fmt.Errorf("load parent session: %w", err)
 	}
-	if parent == nil || parent.TaskID != req.TaskID || models.IsErrandSession(parent) || parent.IsPassthrough {
+	if parent == nil || parent.TaskID != req.TaskID || parent.IsPassthrough {
 		return nil, newError(ReasonNotSupported, "this session cannot start errands", nil)
 	}
 	return parent, nil

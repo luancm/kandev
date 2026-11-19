@@ -291,7 +291,7 @@ func (r *Repository) transitionErrandTeardownIntent(
 
 func validateErrandTeardownWrite(ctx context.Context, tx *sqlx.Tx, current, next *models.Errand) error {
 	before, after := current.TeardownIntent, next.TeardownIntent
-	if after != nil && after.Purpose == models.ErrandTeardownPurposeCompletion && after.Target.ErrandID != "" &&
+	if after != nil && after.Purpose == models.ErrandTeardownPurposeCompletion &&
 		(before == nil || before.ID != after.ID) {
 		return validateOwnedCompletionTarget(ctx, tx, current, next)
 	}
@@ -304,7 +304,7 @@ func validateErrandTeardownWrite(ctx context.Context, tx *sqlx.Tx, current, next
 func validateErrandTeardownUpdate(current, next *models.Errand) error {
 	before, after := current.TeardownIntent, next.TeardownIntent
 	if before == nil {
-		if after == nil || after.State == models.ErrandTeardownIntentPending && teardownPurpose(after.Purpose) == models.ErrandTeardownPurposeCancellation {
+		if after == nil || after.State == models.ErrandTeardownIntentPending && after.Purpose == models.ErrandTeardownPurposeCancellation {
 			return nil
 		}
 		return models.ErrInvalidErrand
@@ -322,7 +322,7 @@ func validateErrandTeardownUpdate(current, next *models.Errand) error {
 }
 
 func validateSameTeardownIntent(before, after *models.ErrandTeardownIntent) error {
-	if before.Version != after.Version || !before.RequestedAt.Equal(after.RequestedAt) || before.Target != after.Target || teardownPurpose(before.Purpose) != teardownPurpose(after.Purpose) {
+	if before.Version != after.Version || !before.RequestedAt.Equal(after.RequestedAt) || before.Target != after.Target || before.Purpose != after.Purpose {
 		return models.ErrInvalidErrand
 	}
 	if before.State != after.State {
@@ -332,7 +332,7 @@ func validateSameTeardownIntent(before, after *models.ErrandTeardownIntent) erro
 }
 
 func cancellationReplacesCompletion(before, after *models.ErrandTeardownIntent, next *models.Errand) bool {
-	return (before.Purpose == models.ErrandTeardownPurposeCompletion || before.Purpose == "" && after.Target == before.Target) && (before.State == models.ErrandTeardownIntentPending || before.State == models.ErrandTeardownIntentClosed) && after.Purpose == models.ErrandTeardownPurposeCancellation && after.State == models.ErrandTeardownIntentPending && next.Lifecycle == models.ErrandLifecycleCancelled && next.CancelSource != ""
+	return before.Purpose == models.ErrandTeardownPurposeCompletion && (before.State == models.ErrandTeardownIntentPending || before.State == models.ErrandTeardownIntentClosed) && after.Purpose == models.ErrandTeardownPurposeCancellation && after.State == models.ErrandTeardownIntentPending && next.Lifecycle == models.ErrandLifecycleCancelled && next.CancelSource != ""
 }
 
 func validateResolvedTeardownReplacement(before, after *models.ErrandTeardownIntent, next *models.Errand) error {
@@ -351,23 +351,10 @@ func validateResolvedTeardownReplacement(before, after *models.ErrandTeardownInt
 	return nil
 }
 
-func teardownPurpose(purpose models.ErrandTeardownPurpose) models.ErrandTeardownPurpose {
-	if purpose == "" {
-		return models.ErrandTeardownPurposeCancellation
-	}
-	return purpose
-}
-
 func validErrandTeardownTransition(intent *models.ErrandTeardownIntent, state models.ErrandTeardownIntentState) bool {
 	if intent.State == models.ErrandTeardownIntentPending {
 		if state == models.ErrandTeardownIntentSuperseded {
 			return true
-		}
-		if teardownPurpose(intent.Purpose) == models.ErrandTeardownPurposeCompletion {
-			if intent.Target.ErrandID != "" {
-				return state == models.ErrandTeardownIntentCompleted
-			}
-			return state == models.ErrandTeardownIntentClosed
 		}
 		return state == models.ErrandTeardownIntentCompleted
 	}

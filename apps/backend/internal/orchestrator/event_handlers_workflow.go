@@ -6580,7 +6580,6 @@ func (s *Service) injectAutoStartRuntimeContext(
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,
 		IncludeUserQuestionTool:        taskForPrompt == nil || !taskForPrompt.Autopilot,
 		IncludeParentQuestionTool:      taskForPrompt != nil && taskForPrompt.Autopilot && taskForPrompt.ParentID != "",
-		ErrandSession:                  models.IsErrandSession(state.session),
 	}
 	return sysprompt.InjectKandevContextWithOptions(
 			state.taskID, state.sessionID, recordedPrompt, options,
@@ -7865,7 +7864,6 @@ func (s *Service) publishSessionWaitingEvent(ctx context.Context, taskID, sessio
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
-		models.AddSessionRoleFields(eventData, session)
 		s.addWaitingOnErrandsField(eventData, session)
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
@@ -7910,7 +7908,6 @@ func (s *Service) publishSessionCreatedEvent(ctx context.Context, taskID, sessio
 		if len(session.Metadata) > 0 {
 			eventData["session_metadata"] = session.Metadata
 		}
-		models.AddSessionRoleFields(eventData, session)
 		s.addWaitingOnErrandsField(eventData, session)
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(

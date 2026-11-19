@@ -23,34 +23,6 @@ func encodeToMap(t *testing.T, value interface{}) map[string]interface{} {
 	return payload
 }
 
-// @covers AC-TASKS-ERRANDS-001.1
-func TestSessionRoleProjectsOnSessionDTOs(t *testing.T) {
-	errand := &models.TaskSession{
-		ID: "errand-1", TaskID: "task-1", State: models.TaskSessionStateRunning,
-		Role: models.SessionRoleErrand, ParentSessionID: "parent-1",
-	}
-	for name, payload := range map[string]map[string]interface{}{
-		"full":    encodeToMap(t, FromTaskSession(errand)),
-		"summary": encodeToMap(t, FromTaskSessionSummary(errand)),
-	} {
-		if payload["role"] != "errand" || payload["parent_session_id"] != "parent-1" {
-			t.Fatalf("%s DTO role fields = (%v, %v), want (errand, parent-1)", name, payload["role"], payload["parent_session_id"])
-		}
-	}
-
-	ordinary := &models.TaskSession{ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateRunning}
-	for name, payload := range map[string]map[string]interface{}{
-		"full":    encodeToMap(t, FromTaskSession(ordinary)),
-		"summary": encodeToMap(t, FromTaskSessionSummary(ordinary)),
-	} {
-		for _, key := range []string{"role", "parent_session_id"} {
-			if _, ok := payload[key]; ok {
-				t.Fatalf("%s DTO for an ordinary session contains %q", name, key)
-			}
-		}
-	}
-}
-
 func TestErrandDTOProjectsPublicFieldsAndBoundedPreview(t *testing.T) {
 	created := time.Date(2026, time.October, 26, 9, 0, 0, 0, time.UTC)
 	settled := created.Add(5 * time.Minute)

@@ -644,15 +644,6 @@ type TaskSessionSummaryObservationReader interface {
 	) ([]*models.TaskSessionSummaryObservation, error)
 }
 
-// OrdinaryTaskSessionSummaryObservationReader reads navigation membership
-// without materializing Errand child rows.
-type OrdinaryTaskSessionSummaryObservationReader interface {
-	ListOrdinaryTaskSessionSummaryObservations(
-		ctx context.Context,
-		taskID string,
-	) ([]*models.TaskSessionSummaryObservation, error)
-}
-
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)

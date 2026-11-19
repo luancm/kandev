@@ -1,10 +1,7 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import {
-  exerciseErrandInterruptedContinuation,
-  exerciseErrandRecoveryRefusal,
-} from "../../helpers/errand-recovery";
+import { exerciseErrandRecoveryRefusal } from "../../helpers/errand-recovery";
 import {
   deliverySnapshots,
   expectNormalContextSources,
@@ -15,17 +12,18 @@ import {
   expectNoHorizontalOverflow,
   listErrands,
   parentChat,
-  routeErrandBrowserSocket,
   routeErrandUpdateBrowserSocket,
-  seedErrandContextWindow,
   seedTimedOutAwait,
-  seedLegacyErrandTab,
   startErrands,
   startMixedParentErrands,
   waitDelivered,
   waitNewParentTurnSettled,
   waitParentIdle,
+  expectOwnedErrandContinuationRetry,
+  ownedErrandChat,
+  readOwnedMessages,
 } from "../../helpers/errands";
+import { exerciseOwnedErrandContext } from "../../helpers/owned-errand-context";
 import { mockTurnGate } from "../../helpers/mock-turn-gate";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 
@@ -55,11 +53,13 @@ test("desktop Threads opens errands through the parent panel and keeps column-ow
     );
     await parentChat(page, parentId).getByTestId(CHIP).click();
     await page.getByTestId(PANEL).getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    await expect(parentChat(page, errands[0].errand_id).getByTestId("errand-header")).toBeVisible();
+    await expect(
+      ownedErrandChat(page, errands[0].errand_id).getByTestId("errand-header"),
+    ).toBeVisible();
     await expect(
       page.locator(`[data-testid="session-chat"][data-session-id="${parentId}"]`),
     ).toHaveAttribute("data-task29-parent", "retained");
-    await parentChat(page, errands[0].errand_id).getByTestId("errand-back-to-parent").click();
+    await ownedErrandChat(page, errands[0].errand_id).getByTestId("errand-back-to-parent").click();
     await expect(parentChat(page, parentId)).toBeVisible();
   } finally {
     await restore();
@@ -83,11 +83,10 @@ test("desktop Threads announces a visible errand transition without marking the 
     await expect
       .poll(
         async () =>
-          (await api.listTaskSessions(taskId)).sessions.find(
-            (row) => row.id === errands[0].errand_id,
-          )?.state,
+          (await listErrands(api, taskId)).find((row) => row.errand_id === errands[0].errand_id)
+            ?.status,
       )
-      .toBe("RUNNING");
+      .toBe("running");
     const readCursorBefore =
       (await api.getTaskSession(parentId)).session.last_read_message_id ?? null;
 
@@ -128,207 +127,7 @@ test("desktop errand rows read each child's persisted context window passively",
   backend,
 }, testInfo) => {
   test.setTimeout(180_000);
-  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
-  try {
-    const { taskId, parentId, errands, gates } = await startErrands(api, seed, backend, {
-      count: 3,
-    });
-    await expect
-      .poll(
-        async () => {
-          const sessions = new Map(
-            (await api.listTaskSessions(taskId)).sessions.map((session) => [
-              session.id,
-              session.state,
-            ]),
-          );
-          return errands.map((errand) => sessions.get(errand.errand_id));
-        },
-        { message: "Child errand turns start before their fixture gates release" },
-      )
-      .toEqual(errands.map(() => "RUNNING"));
-    for (const gate of gates) await gate.release();
-    await waitDelivered(
-      api,
-      taskId,
-      errands.map((errand) => errand.errand_id),
-    );
-    await waitParentIdle(api, taskId, parentId);
-    await expect
-      .poll(
-        async () => {
-          const sessions = new Map(
-            (await api.listTaskSessions(taskId)).sessions.map((session) => [
-              session.id,
-              session.state,
-            ]),
-          );
-          return errands.map((errand) => sessions.get(errand.errand_id));
-        },
-        {
-          message: "Child sessions close before their persisted context fixtures are updated",
-          timeout: 60_000,
-        },
-      )
-      .toEqual(errands.map(() => "COMPLETED"));
-
-    const firstId = errands[0].errand_id;
-    const unmeasuredId = errands[1].errand_id;
-    const unknownId = errands[2].errand_id;
-    const childWindow = (used: number) => ({
-      size: 100_000,
-      used,
-      remaining: 100_000 - used,
-      efficiency: (used / 100_000) * 100,
-      source: "acp" as const,
-    });
-    await seedErrandContextWindow(api, taskId, parentId, childWindow(95_000));
-    await seedErrandContextWindow(api, taskId, firstId, childWindow(68_000));
-    await seedErrandContextWindow(api, taskId, unmeasuredId, childWindow(0));
-
-    const statusesBefore = (await listErrands(api, taskId)).map(({ errand_id, status }) => [
-      errand_id,
-      status,
-    ]);
-    await page.goto(
-      `/threads?workspace=${seed.workspaceId}&taskId=${taskId}&sessionId=${parentId}`,
-    );
-    await expect(parentChat(page, parentId)).toBeVisible({ timeout: 10_000 });
-    const parent = parentChat(page, parentId);
-    await expect(
-      page.locator(`[data-testid="session-chat"][data-session-id="${firstId}"]`),
-    ).toHaveCount(0);
-    await parent.getByTestId("errands-chip").click();
-
-    const panel = page.getByTestId("errands-popover");
-    await panel.getByTestId(/^errands-history-toggle-/).click();
-    const measuredRow = panel.getByTestId(`errands-panel-row-${firstId}`);
-    const unmeasuredRow = panel.getByTestId(`errands-panel-row-${unmeasuredId}`);
-    const unknownRow = panel.getByTestId(`errands-panel-row-${unknownId}`);
-    await expect(measuredRow).toContainText("Context window: 68.0K of 100.0K tokens");
-    await expect(unmeasuredRow).toContainText(
-      "Context window: usage not measured (N/A of 100.0K tokens)",
-    );
-    await expect(unknownRow).not.toContainText("Context window");
-    await expect(panel.getByTestId(`errand-open-${firstId}`)).toBeVisible();
-    await expect(panel.getByTestId("errands-stop-all")).toHaveCount(0);
-
-    await seedErrandContextWindow(api, taskId, firstId, childWindow(82_000));
-    await expect(measuredRow).toContainText("Context window: 82.0K of 100.0K tokens");
-    await expect(
-      page.locator(`[data-testid="session-chat"][data-session-id="${firstId}"]`),
-    ).toHaveCount(0);
-    expect(
-      (await listErrands(api, taskId)).map(({ errand_id, status }) => [errand_id, status]),
-    ).toEqual(statusesBefore);
-
-    await page.reload();
-    const reloadedParent = parentChat(page, parentId);
-    await reloadedParent.getByTestId("errands-chip").click();
-    const reloadedPanel = page.getByTestId("errands-popover");
-    await reloadedPanel.getByTestId(/^errands-history-toggle-/).click();
-    await expect(reloadedPanel.getByTestId(`errands-panel-row-${firstId}`)).toContainText(
-      "Context window: 82.0K of 100.0K tokens",
-    );
-    await expect(reloadedPanel.getByTestId(`errands-panel-row-${unmeasuredId}`)).toContainText(
-      "Context window: usage not measured (N/A of 100.0K tokens)",
-    );
-
-    await seedErrandContextWindow(api, taskId, firstId, null);
-    await expect(reloadedPanel.getByTestId(`errands-panel-row-${firstId}`)).not.toContainText(
-      "Context window",
-    );
-    await page.reload();
-    await parentChat(page, parentId).getByTestId("errands-chip").click();
-    const finalPanel = page.getByTestId("errands-popover");
-    await finalPanel.getByTestId(/^errands-history-toggle-/).click();
-    const clearedRow = finalPanel.getByTestId(`errands-panel-row-${firstId}`);
-    await expect(clearedRow).toBeVisible();
-    await expect(clearedRow).not.toContainText("Context window");
-
-    const siblingId = unmeasuredId;
-    const detailReads = new Set<string>();
-    page.on("request", (request) => {
-      const path = new URL(request.url()).pathname;
-      for (const childId of [firstId, siblingId]) {
-        if (path === `/api/v1/tasks/${taskId}/sessions/${childId}`) detailReads.add(childId);
-      }
-    });
-    await seedErrandContextWindow(api, taskId, firstId, childWindow(68_000));
-    await seedErrandContextWindow(api, taskId, siblingId, childWindow(23_000));
-    await expect(clearedRow).toContainText("Context window: 68.0K of 100.0K tokens");
-    const siblingRow = finalPanel.getByTestId(`errands-panel-row-${siblingId}`);
-    await expect(siblingRow).toContainText("Context window: 23.0K of 100.0K tokens");
-
-    const browserSocket = await routeErrandBrowserSocket(page);
-    await page.reload();
-    await browserSocket.waitForInitialConnection();
-    await parentChat(page, parentId).getByTestId("errands-chip").click();
-    const missedEventPanel = page.getByTestId("errands-popover");
-    await missedEventPanel.getByTestId(/^errands-history-toggle-/).click();
-    const missedClearRow = missedEventPanel.getByTestId(`errands-panel-row-${firstId}`);
-    const missedSiblingRow = missedEventPanel.getByTestId(`errands-panel-row-${siblingId}`);
-    await expect(missedClearRow).toContainText("Context window: 68.0K of 100.0K tokens");
-    await expect(missedSiblingRow).toContainText("Context window: 23.0K of 100.0K tokens");
-
-    await browserSocket.setOfflineAndClose();
-    await seedErrandContextWindow(api, taskId, firstId, null);
-
-    const reconnectSocket = browserSocket.waitForReconnect();
-    const authoritativeList = page.waitForResponse((response) => {
-      const request = response.request();
-      return (
-        request.method() === "GET" &&
-        new URL(response.url()).pathname === `/api/v1/tasks/${taskId}/sessions`
-      );
-    });
-    await page.context().setOffline(false);
-    await reconnectSocket;
-    const listResponse = await authoritativeList;
-    expect(listResponse.ok()).toBe(true);
-    const refreshedSessions = (await listResponse.json()) as {
-      sessions: Array<{ id: string; metadata?: Record<string, unknown> | null }>;
-    };
-    const clearedSessionSnapshot = refreshedSessions.sessions.find(
-      (session) => session.id === firstId,
-    );
-    expect(clearedSessionSnapshot).toBeDefined();
-    expect(clearedSessionSnapshot?.metadata?.context_window).toBeNull();
-
-    await expect(missedClearRow).not.toContainText("Context window");
-    await expect(missedSiblingRow).toContainText("Context window: 23.0K of 100.0K tokens");
-    expect(detailReads).toEqual(new Set());
-    await expect(
-      page.locator(`[data-testid="session-chat"][data-session-id="${firstId}"]`),
-    ).toHaveCount(0);
-    await expect(
-      page.locator(`[data-testid="session-chat"][data-session-id="${siblingId}"]`),
-    ).toHaveCount(0);
-    await expectNoHorizontalOverflow(page);
-    await missedClearRow.scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: testInfo.outputPath("errands-desktop-missed-context-clear.png"),
-    });
-
-    await page.reload();
-    await parentChat(page, parentId).getByTestId("errands-chip").click();
-    const reconnectedPanel = page.getByTestId("errands-popover");
-    await reconnectedPanel.getByTestId(/^errands-history-toggle-/).click();
-    await expect(reconnectedPanel.getByTestId(`errands-panel-row-${firstId}`)).not.toContainText(
-      "Context window",
-    );
-    await expect(reconnectedPanel.getByTestId(`errands-panel-row-${siblingId}`)).toContainText(
-      "Context window: 23.0K of 100.0K tokens",
-    );
-    await expectNoHorizontalOverflow(page);
-    const reloadedClearRow = reconnectedPanel.getByTestId(`errands-panel-row-${firstId}`);
-    await reloadedClearRow.scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: testInfo.outputPath("errands-desktop-missed-context-clear-reload.png"),
-    });
-  } finally {
-    await restore();
-  }
+  await exerciseOwnedErrandContext({ page, api, seed, backend, testInfo, phone: false });
 });
 
 // @covers AC-TASKS-ERRANDS-004.13
@@ -449,7 +248,7 @@ test("conversational parent, explicit Open, follow-up and immutable delivered ca
     await expect(chat.getByText("ERRAND_STATUS_BLOCKS=1", { exact: false })).toBeVisible();
     await chat.getByTestId(CHIP).click();
     await page.getByTestId(PANEL).getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    const child = parentChat(page, errands[0].errand_id);
+    const child = ownedErrandChat(page, errands[0].errand_id);
     await expect(child.getByTestId("errand-header")).toBeVisible();
     await expect(child.getByTestId(INLINE)).toHaveCount(0);
     expect((await api.listTaskSessions(taskId)).sessions.find((row) => row.is_primary)?.id).toBe(
@@ -484,10 +283,18 @@ test("conversational parent, explicit Open, follow-up and immutable delivered ca
         page.getByTestId(PANEL).getByTestId(`errands-panel-row-${row.errand_id}`),
       ).toBeVisible();
     await page.getByTestId(PANEL).getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    await api.addUserMessage(taskId, errands[0].errand_id, 'e2e:message("USER_FOLLOWUP_RESULT")');
-    await waitParentIdle(api, taskId, errands[0].errand_id);
-    await expect(child.getByTestId("errand-send-result-button")).toBeVisible();
-    await child.getByTestId("errand-send-result-button").click();
+    const content = 'e2e:message("USER_FOLLOWUP_RESULT")';
+    await expectOwnedErrandContinuationRetry(api, backend, {
+      task_id: taskId,
+      errand_id: errands[0].errand_id,
+      client_message_id: "desktop-reload-follow-up",
+      content,
+    });
+    await expect(child.getByText("USER_FOLLOWUP_RESULT", { exact: true })).toBeVisible();
+    expect(await deliverySnapshots(api, parentId)).toEqual(snapshots);
+    const send = child.getByTestId("errand-send-result-button");
+    await expect(send).toBeVisible();
+    await send.click();
     await expect.poll(async () => (await deliverySnapshots(api, parentId)).length).toBe(3);
     expect((await deliverySnapshots(api, parentId)).slice(0, 2)).toEqual(snapshots);
   } finally {
@@ -628,7 +435,7 @@ test("completed await history stays quiet and historical through keyboard Open, 
     await page.keyboard.press("Tab");
     await expect(card.getByTestId(`errand-open-${errands[0].errand_id}`)).toBeFocused();
     await page.keyboard.press("Enter");
-    const child = parentChat(page, errands[0].errand_id);
+    const child = ownedErrandChat(page, errands[0].errand_id);
     await expect(child.getByTestId("errand-header")).toBeVisible();
     await child.getByTestId("errand-back-to-parent").click();
     for (const gate of gates) await gate.release();
@@ -719,18 +526,15 @@ test("desktop panel Stop cancels one errand and keeps its transcript and sibling
     gates = fixture.gates;
     await expect
       .poll(async () => {
-        const sessions = new Map(
-          (await api.listTaskSessions(taskId)).sessions.map((session) => [
-            session.id,
-            session.state,
-          ]),
+        const rows = new Map(
+          (await listErrands(api, taskId)).map((row) => [row.errand_id, row.status]),
         );
-        return errands.map((errand) => sessions.get(errand.errand_id));
+        return errands.map((errand) => rows.get(errand.errand_id));
       })
-      .toEqual(errands.map(() => "RUNNING"));
+      .toEqual(errands.map(() => "running"));
 
-    const transcriptBefore = await api.listSessionMessages(errands[0].errand_id);
-    expect(transcriptBefore.messages.length).toBeGreaterThan(0);
+    const transcriptBefore = await readOwnedMessages(api, taskId, errands[0].errand_id);
+    expect(transcriptBefore.length).toBeGreaterThan(0);
     await page.goto(`/t/${taskId}`);
     const chat = parentChat(page, parentId);
     await chat.getByTestId(CHIP).click();
@@ -762,27 +566,29 @@ test("desktop panel Stop cancels one errand and keeps its transcript and sibling
       )
       .toBe("running");
     await expect(chat.getByTestId(CHIP)).toContainText("1 running");
-    const transcriptAfter = await api.listSessionMessages(errands[0].errand_id);
-    const retainedIds = new Set(transcriptAfter.messages.map((message) => message.id));
-    expect(transcriptBefore.messages.every((message) => retainedIds.has(message.id))).toBe(true);
+    const transcriptAfter = await readOwnedMessages(api, taskId, errands[0].errand_id);
+    const retainedIds = new Set(transcriptAfter.map((message) => message.id));
+    expect(transcriptBefore.every((message) => retainedIds.has(message.id))).toBe(true);
 
     await panel.getByTestId(/^errands-history-toggle-/).click();
     const cancelledRow = panel.getByTestId(`errands-panel-row-${errands[0].errand_id}`);
     await expect(cancelledRow).toContainText("Cancelled");
     await expect(cancelledRow.getByTestId(`errand-stop-${errands[0].errand_id}`)).toHaveCount(0);
     await cancelledRow.getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    const child = parentChat(page, errands[0].errand_id);
+    const child = ownedErrandChat(page, errands[0].errand_id);
     await expect(child.getByTestId("errand-header")).toBeVisible();
     await child.getByTestId("errand-back-to-parent").click();
     await expect(chat).toBeVisible();
-    expect((await api.getTaskSession(errands[0].errand_id)).session.id).toBe(errands[0].errand_id);
+    expect((await api.listTaskSessions(taskId)).sessions.map((session) => session.id)).toEqual([
+      parentId,
+    ]);
   } finally {
     for (const gate of gates) await gate.release();
     await restore();
   }
 });
 
-test("two clients remove deleted errands and flag-off restart retains detached sessions", async ({
+test("two clients observe cancellation and a flag-off restart retains the owned transcript", async ({
   testPage: page,
   apiClient: api,
   seedData: seed,
@@ -802,36 +608,26 @@ test("two clients remove deleted errands and flag-off restart retains detached s
         client.getByTestId(PANEL).getByTestId(`errands-panel-row-${errands[0].errand_id}`),
       ).toBeVisible();
     }
-    await api.wsRequest("errand.cancel", { session_id: errands[0].errand_id });
-    await expect
-      .poll(
-        async () =>
-          (await api.listTaskSessions(taskId)).sessions.find(
-            (row) => row.id === errands[0].errand_id,
-          )?.state,
-      )
-      .not.toMatch(/^(RUNNING|STARTING)$/);
-    await api.wsRequest("session.delete", { task_id: taskId, session_id: errands[0].errand_id });
-    for (const client of [page, peer])
-      await expect(
-        client.getByTestId(PANEL).getByTestId(`errands-panel-row-${errands[0].errand_id}`),
-      ).toHaveCount(0);
+    const errandId = errands[0].errand_id;
+    await api.wsRequest("errand.cancel", { session_id: errandId });
+    for (const client of [page, peer]) {
+      const panel = client.getByTestId(PANEL);
+      await panel.getByTestId(/^errands-history-toggle-/).click();
+      await expect(panel.getByTestId(`errands-panel-row-${errandId}`)).toContainText("Cancelled");
+    }
     await api.wsRequest("errand.cancel_all", { task_id: taskId });
     await restore();
     restore = null;
     await page.reload();
     await expect(page.getByTestId(INLINE)).toHaveCount(0);
     await expect(page.getByTestId(CHIP)).toHaveCount(0);
-    const retained = (await api.listTaskSessions(taskId)).sessions.find(
-      (row) => row.id === errands[1].errand_id,
-    );
-    expect(retained).toMatchObject({ role: "errand", is_primary: false });
-    await expect(page.getByTestId(`session-tab-${errands[1].errand_id}`)).toHaveCount(0);
-    await page.goto(`/t/${taskId}?sessionId=${errands[1].errand_id}`);
-    const child = parentChat(page, errands[1].errand_id);
+    expect((await api.listTaskSessions(taskId)).sessions.map(({ id }) => id)).toEqual([parentId]);
+    await page.goto(`/t/${taskId}?sessionId=${errandId}`);
+    const child = ownedErrandChat(page, errandId);
     await expect(child.getByTestId("errand-header")).toBeVisible();
+    await expect(child.getByText(errands[0].objective, { exact: false })).toBeVisible();
     await expect(child.getByTestId(BACK)).toContainText("Back to parent");
-    await expect(page.getByTestId(`session-tab-${errands[1].errand_id}`)).toHaveCount(0);
+    await expect(page.getByTestId(`session-tab-${errandId}`)).toHaveCount(0);
     await page.getByTestId("dockview-add-panel-btn").first().click();
     const reopenMenu = page.locator("[role='menu']:visible").last();
     const reopenRows = reopenMenu.locator(
@@ -839,7 +635,7 @@ test("two clients remove deleted errands and flag-off restart retains detached s
     );
     await expect(reopenRows).toHaveCount(1);
     await expect(reopenMenu.getByTestId(`reopen-session-${parentId}`)).toBeVisible();
-    await expect(reopenMenu.getByTestId(`reopen-session-${errands[1].errand_id}`)).toHaveCount(0);
+    await expect(reopenMenu.getByTestId(`reopen-session-${errandId}`)).toHaveCount(0);
     await page.keyboard.press("Escape");
     await child.getByTestId(BACK).click();
     await expect(parentChat(page, parentId)).toBeVisible();
@@ -890,7 +686,7 @@ test("result delivery retains a scrolled-up reader and follows the bottom when e
       .toBeLessThan(3);
     await chat.getByTestId(CHIP).click();
     await page.getByTestId(PANEL).getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    await parentChat(page, errands[0].errand_id).getByTestId(BACK).click();
+    await ownedErrandChat(page, errands[0].errand_id).getByTestId(BACK).click();
     await expect(chat).toBeVisible();
     await expect
       .poll(async () =>
@@ -985,12 +781,8 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     await expect(panel.getByTestId("errands-panel-row-" + errands[4].errand_id)).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("task29-desktop-history.png") });
     await panel.getByTestId(`errand-open-${errands[0].errand_id}`).click();
-    const child = parentChat(page, errands[0].errand_id);
-    await expect(
-      page.locator(
-        `[data-testid="session-chat"][data-session-id="${errands[0].errand_id}"]:visible`,
-      ),
-    ).toHaveCount(1);
+    const child = ownedErrandChat(page, errands[0].errand_id);
+    await expect(child).toHaveCount(1);
     await expect(child.getByTestId(BACK)).toContainText("Back to parent");
     await expect(page.getByTestId(`session-tab-${errands[0].errand_id}`)).toHaveCount(0);
     const retainedParent = page.locator(
@@ -999,7 +791,6 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     await expect(retainedParent).toHaveCount(1);
     await expect(retainedParent).toBeHidden();
     await expect(retainedParent).toHaveAttribute("data-detail-active", "false");
-    await expect(child).toHaveAttribute("data-detail-active", "true");
     await expect(page.locator(".chat-message-list:visible")).toHaveCount(1);
     await page.getByTestId("dockview-add-panel-btn").first().click();
     const reopenMenu = page.locator("[role='menu']:visible").last();
@@ -1019,7 +810,6 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     for (const row of [...errands, ...secondErrands])
       await expect(reopenMenu.getByTestId(`reopen-session-${row.errand_id}`)).toHaveCount(0);
     await page.keyboard.press("Escape");
-    await seedLegacyErrandTab(page, parentId, errands[0].errand_id);
     expect(new URL(page.url()).searchParams.get("sessionId")).toBe(errands[0].errand_id);
     await page.reload();
     await expect(child).toBeVisible();
@@ -1034,13 +824,13 @@ test("task29 normal conversations keep tabs while parent-owned errands open temp
     ).toBeVisible();
     await expect(panel.getByTestId(`errands-panel-row-${errands[0].errand_id}`)).toHaveCount(0);
     await panel.getByTestId(`errand-open-${secondErrands[0].errand_id}`).click();
-    await expect(parentChat(page, secondErrands[0].errand_id)).toBeVisible();
+    await expect(ownedErrandChat(page, secondErrands[0].errand_id)).toBeVisible();
     await page.getByTestId(`session-tab-${spareId}`).click();
     await expect(parentChat(page, spareId)).toBeVisible();
     await page.getByTestId(`session-tab-${parentId}`).click();
     await expect(chat).toBeVisible();
     await page.goto(`/t/${taskId}?sessionId=${secondErrands[0].errand_id}`);
-    await expect(parentChat(page, secondErrands[0].errand_id)).toBeVisible();
+    await expect(ownedErrandChat(page, secondErrands[0].errand_id)).toBeVisible();
     await expect(page.getByTestId(`session-tab-${secondErrands[0].errand_id}`)).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await page.screenshot({ path: testInfo.outputPath("task29-desktop-child.png") });
@@ -1141,7 +931,7 @@ test("desktop unresolved errand recovery explains the refusal and preserves the 
     await page.screenshot({ path: testInfo.outputPath("errands-desktop-recovery-row.png") });
 
     await panel.getByTestId(`errand-open-${errand.errand_id}`).click();
-    const child = parentChat(page, errand.errand_id);
+    const child = ownedErrandChat(page, errand.errand_id);
     await expect(child.getByTestId("errand-header")).toBeVisible();
     await expect(child.getByTestId("errand-header")).toContainText(
       "Earlier work and possible external effects are unknown",
@@ -1151,23 +941,21 @@ test("desktop unresolved errand recovery explains the refusal and preserves the 
     await expect(transcript).toContainText("ERRAND_RESULT_1");
     await page.screenshot({ path: testInfo.outputPath("errands-desktop-recovery-child.png") });
 
-    const messageCount = (await api.listSessionMessages(errand.errand_id)).messages.length;
-    const turnCount = (await api.listSessionTurns(errand.errand_id)).turns.length;
-    const session = new SessionPage(page);
-    const editor = await session.fillMessage("Check whether the earlier operation completed.");
+    const messages = await readOwnedMessages(api, taskId, errand.errand_id);
+    const continuation = child.getByTestId("errand-continuation");
+    const editor = continuation.locator('.tiptap.ProseMirror[contenteditable="true"]');
+    const send = continuation.getByRole("button", { name: "Send" });
+    const draft = "Check whether the earlier operation completed.";
+    await editor.fill(draft);
     browserSocket.refuseNextPrompt();
-    await session.submitMessageWithKeyboard(editor);
-    const refusal = page
-      .getByTestId("toast-message")
-      .filter({ hasText: "Recovery must verify what happened before this errand can continue." });
-    await expect(refusal).toContainText(
+    await new SessionPage(page).submitMessageWithKeyboard(editor);
+    await expect(continuation.getByRole("alert")).toContainText(
       "Earlier work and possible external effects remain unknown. Recovery must verify what happened before this errand can continue.",
     );
-    await expect(editor).toContainText("Check whether the earlier operation completed.");
-    await expect(session.submitButton()).toBeEnabled();
-    expect(browserSocket.refusedActions()).toEqual(["message.add"]);
-    expect((await api.listSessionMessages(errand.errand_id)).messages).toHaveLength(messageCount);
-    expect((await api.listSessionTurns(errand.errand_id)).turns).toHaveLength(turnCount);
+    await expect(editor).toContainText(draft);
+    await expect(send).toBeEnabled();
+    expect(browserSocket.refusedActions()).toEqual(["errand.continue"]);
+    expect(await readOwnedMessages(api, taskId, errand.errand_id)).toEqual(messages);
   } finally {
     for (const gate of gates) await gate.release();
     await restore();
@@ -1184,28 +972,6 @@ test("desktop real Errand recovery refusal preserves the admitted conversation",
   const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
   try {
     await exerciseErrandRecoveryRefusal({ page, api, seed, backend, testInfo, mobile: false });
-  } finally {
-    await restore();
-  }
-});
-
-test("desktop explicit Errand continuation follows an exact interrupted receipt", async ({
-  testPage: page,
-  apiClient: api,
-  seedData: seed,
-  backend,
-}, testInfo) => {
-  test.setTimeout(240_000);
-  const restore = await backend.useEnv({ KANDEV_FEATURES_ERRANDS: "true" });
-  try {
-    await exerciseErrandInterruptedContinuation({
-      page,
-      api,
-      seed,
-      backend,
-      testInfo,
-      mobile: false,
-    });
   } finally {
     await restore();
   }

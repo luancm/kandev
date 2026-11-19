@@ -17,10 +17,7 @@ func newErrandIsolationTask(t *testing.T, repo *Repository, suffix string) (task
 		ID: parentID, TaskID: taskID, IsPrimary: true,
 		State: models.TaskSessionStateWaitingForInput, StartedAt: errandScenarioBase,
 	})
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: errandID, TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: parentID,
-		State: models.TaskSessionStateRunning, StartedAt: errandScenarioBase.Add(time.Minute),
-	})
+	mustCreateErrand(t, repo, sampleErrand(errandID, taskID, parentID, errandScenarioBase.Add(time.Minute)))
 	return taskID, parentID, errandID
 }
 
@@ -40,27 +37,7 @@ func requirePrimarySession(t *testing.T, repo *Repository, taskID, want string) 
 func exerciseErrandNeverPrimary(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
-	taskID := newErrandTask(t, repo, "primary")
-	errand := &models.TaskSession{
-		ID: "errand-primary", TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: "parent-primary",
-		IsPrimary: true, State: models.TaskSessionStateRunning, StartedAt: errandScenarioBase,
-	}
-	createErrandScenarioSession(t, repo, errand)
-	if errand.IsPrimary {
-		t.Fatal("CreateTaskSession left IsPrimary=true on an errand model")
-	}
-	stored, err := repo.GetTaskSession(ctx, errand.ID)
-	if err != nil {
-		t.Fatalf("GetTaskSession errand: %v", err)
-	}
-	if stored.IsPrimary {
-		t.Fatal("an errand inserted with IsPrimary=true was stored as primary")
-	}
-
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: "parent-primary", TaskID: taskID, State: models.TaskSessionStateWaitingForInput,
-		StartedAt: errandScenarioBase.Add(-time.Minute),
-	})
+	taskID, parentID, errandID := newErrandIsolationTask(t, repo, "primary")
 	createErrandScenarioSession(t, repo, &models.TaskSession{
 		ID: "sibling-primary", TaskID: taskID, State: models.TaskSessionStateWaitingForInput,
 		StartedAt: errandScenarioBase.Add(time.Minute),
@@ -68,14 +45,14 @@ func exerciseErrandNeverPrimary(t *testing.T, repo *Repository) {
 	if err := repo.SetSessionPrimary(ctx, "parent-primary"); err != nil {
 		t.Fatalf("SetSessionPrimary ordinary session: %v", err)
 	}
-	if err := repo.SetSessionPrimary(ctx, errand.ID); !errors.Is(err, models.ErrErrandSessionPrimary) {
-		t.Fatalf("SetSessionPrimary errand = %v, want ErrErrandSessionPrimary", err)
+	if err := repo.SetSessionPrimary(ctx, errandID); err == nil {
+		t.Fatalf("SetSessionPrimary errand = %v, want a missing session error", err)
 	}
-	requirePrimarySession(t, repo, taskID, "parent-primary")
-	if promoted, err := repo.SetSessionPrimaryIfNonterminal(ctx, errand.ID); promoted || !errors.Is(err, models.ErrErrandSessionPrimary) {
-		t.Fatalf("SetSessionPrimaryIfNonterminal errand = (%v, %v), want (false, ErrErrandSessionPrimary)", promoted, err)
+	requirePrimarySession(t, repo, taskID, parentID)
+	if promoted, err := repo.SetSessionPrimaryIfNonterminal(ctx, errandID); promoted || err != nil {
+		t.Fatalf("SetSessionPrimaryIfNonterminal errand = (%v, %v), want (false, nil)", promoted, err)
 	}
-	requirePrimarySession(t, repo, taskID, "parent-primary")
+	requirePrimarySession(t, repo, taskID, parentID)
 
 	if err := repo.SetSessionPrimary(ctx, "sibling-primary"); err != nil {
 		t.Fatalf("SetSessionPrimary ordinary sibling: %v", err)
@@ -89,7 +66,7 @@ func exerciseErrandNeverPrimary(t *testing.T, repo *Repository) {
 func exerciseActiveSessionLookupSkipsErrands(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
-	taskID, parentID, errandID := newErrandIsolationTask(t, repo, "active")
+	taskID, parentID, _ := newErrandIsolationTask(t, repo, "active")
 	active, err := repo.GetActiveTaskSessionByTaskID(ctx, taskID)
 	if err != nil {
 		t.Fatalf("GetActiveTaskSessionByTaskID: %v", err)
@@ -116,8 +93,8 @@ func exerciseActiveSessionLookupSkipsErrands(t *testing.T, repo *Repository) {
 		t.Fatalf("lookup with only a live errand = %v, want ErrTaskSessionNotFound", err)
 	}
 	sessions, err := repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
-	if err != nil || len(sessions) != 1 || sessions[0].ID != errandID {
-		t.Fatalf("ListActiveTaskSessionsByTaskID = (%v, %v), want only the errand so task stops still reach it", sessions, err)
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("ListActiveTaskSessionsByTaskID = (%v, %v), want no active task sessions", sessions, err)
 	}
 }
 

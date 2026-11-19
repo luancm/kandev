@@ -280,14 +280,7 @@ func (s *Service) findExistingSession(ctx context.Context, taskID string) *Ensur
 			return s.existingResponse(ctx, taskID, sess, "existing_primary")
 		}
 	}
-	// ListTaskSessions returns rows ordered by started_at DESC. An errand is
-	// never the task's default session.
-	for _, sess := range sessions {
-		if !models.IsErrandSession(sess) {
-			return s.existingResponse(ctx, taskID, sess, "existing_newest")
-		}
-	}
-	return nil
+	return s.existingResponse(ctx, taskID, sessions[0], "existing_newest")
 }
 
 // findOfficeSessionForResume implements the office-only branch of advanced-mode

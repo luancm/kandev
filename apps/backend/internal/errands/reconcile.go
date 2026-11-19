@@ -22,8 +22,9 @@ const reconcileActionReleasedDelivery = "orphaned_delivery_claim_released"
 // claims or notifications. Unreadable owners exclude only their task.
 func (s *Service) Reconcile(ctx context.Context) (err error) {
 	owners, lifecycleErr := s.reconcileLifecycle(ctx)
+	recoveryErr := s.recoverInterruptions(ctx)
 	// Terminal reconciliation may persist new close obligations in this pass.
-	defer func() { err = errors.Join(s.retryPendingTeardowns(ctx), lifecycleErr, err) }()
+	defer func() { err = errors.Join(s.retryPendingTeardowns(ctx), lifecycleErr, recoveryErr, err) }()
 	if owners == nil {
 		return nil
 	}
@@ -33,20 +34,6 @@ func (s *Service) Reconcile(ctx context.Context) (err error) {
 	if err := s.reconcileOwnedErrandResults(ctx); err != nil {
 		return err
 	}
-	rows, err := s.store.ListErrands(ctx)
-	if err != nil {
-		return fmt.Errorf("list errands for reconciliation: %w", err)
-	}
-	for _, row := range rows {
-		if !owners.permits(row) {
-			continue
-		}
-		if err := s.reconcileLaunched(ctx, row); err != nil {
-			fields := s.errandFields(row)
-			fields = append(fields, zap.Error(err))
-			s.logger.Warn("errand reconciliation skipped a launched row", fields...)
-		}
-	}
 	if err := s.reconcileAwaitRecovery(ctx); err != nil {
 		return err
 	}
@@ -54,13 +41,6 @@ func (s *Service) Reconcile(ctx context.Context) (err error) {
 		return err
 	}
 	return s.deliverForPendingParents(ctx)
-}
-
-func (s *Service) reconcileLaunched(ctx context.Context, row *models.Errand) error {
-	if row.Lifecycle != models.ErrandLifecycleLaunched {
-		return nil
-	}
-	return s.ReconcileTerminalDecisions(ctx, row.ID)
 }
 
 func (s *Service) logReconciled(errand *models.Errand, action string) {

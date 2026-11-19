@@ -510,7 +510,6 @@ export function shouldShowPreviewFeedbackFallback(args: {
   itemCount: number;
   isFailed: boolean;
   isCompleted: boolean;
-  sessionRole?: string;
   executorUnavailable: boolean;
   launchErrorOwned?: boolean;
 }) {
@@ -524,7 +523,6 @@ export function shouldShowPreviewFeedbackFallback(args: {
     shouldRenderStoppedSessionBanner({
       isFailed: args.isFailed,
       isCompleted: args.isCompleted,
-      sessionRole: args.sessionRole,
       executorUnavailable: args.executorUnavailable,
       launchErrorOwned: args.launchErrorOwned,
     })
@@ -550,7 +548,6 @@ function PreviewFeedbackFallbackSurface({
     itemCount: panelState.previewFeedback?.length ?? 0,
     isFailed: panelState.isFailed,
     isCompleted: panelState.isCompleted,
-    sessionRole: panelState.session?.role,
     executorUnavailable,
     launchErrorOwned,
   });

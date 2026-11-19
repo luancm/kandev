@@ -16,56 +16,6 @@ type taskSessionSummaryProjectionReader interface {
 	ListTaskSessionSummaryObservations(context.Context, string) ([]*models.TaskSessionSummaryObservation, error)
 }
 
-type ordinaryTaskSessionSummaryReader interface {
-	ListOrdinaryTaskSessionSummaryObservations(context.Context, string) ([]*models.TaskSessionSummaryObservation, error)
-}
-
-func TestOrdinarySessionSummaryProjectionFiltersErrands(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	assertOrdinarySessionSummaryProjection(t, repo)
-}
-
-func assertOrdinarySessionSummaryProjection(t *testing.T, repo *Repository) {
-	t.Helper()
-	ctx := context.Background()
-	const taskID = "task-ordinary-session-summary"
-	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Ordinary session summary"}); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	for _, session := range []*models.TaskSession{
-		{ID: "ordinary-session", TaskID: taskID, IsPrimary: true, State: models.TaskSessionStateWaitingForInput},
-		{ID: "errand-session", TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: "ordinary-session", State: models.TaskSessionStateCompleted},
-	} {
-		if err := repo.CreateTaskSession(ctx, session); err != nil {
-			t.Fatalf("create session %s: %v", session.ID, err)
-		}
-	}
-	reader, ok := any(repo).(ordinaryTaskSessionSummaryReader)
-	if !ok {
-		t.Fatal("task repository does not implement ordinary session summary projections")
-	}
-	rows, err := reader.ListOrdinaryTaskSessionSummaryObservations(ctx, taskID)
-	if err != nil {
-		t.Fatalf("list ordinary session summaries: %v", err)
-	}
-	complete, err := repo.ListTaskSessionSummaryObservations(ctx, taskID)
-	if err != nil {
-		t.Fatalf("list complete session summaries: %v", err)
-	}
-	var want []*models.TaskSessionSummaryObservation
-	for _, observation := range complete {
-		if observation.Role != models.SessionRoleErrand {
-			want = append(want, observation)
-		}
-	}
-	if len(complete) != 2 || len(want) != 1 || want[0].ID != "ordinary-session" {
-		t.Fatalf("complete summary observations = %+v, want ordinary and Errand controls", complete)
-	}
-	if !reflect.DeepEqual(rows, want) {
-		t.Fatalf("ordinary session summaries = %+v, want complete-reader ordinary projection %+v", rows, want)
-	}
-}
-
 func TestSessionSummaryProjectionExcludesUnrelatedMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	assertSessionSummaryProjection(t, repo)
@@ -75,7 +25,6 @@ func TestSessionSummaryProjectionExcludesUnrelatedMetadata(t *testing.T) {
 
 func TestSessionSummaryProjectionPostgres(t *testing.T) {
 	repo := openPostgresRepo(t)
-	assertOrdinarySessionSummaryProjection(t, repo)
 	assertSessionSummaryProjection(t, repo)
 	assertSessionSummaryProviderModel(t, repo)
 	assertSessionSummaryContextWindowShapes(t, repo)

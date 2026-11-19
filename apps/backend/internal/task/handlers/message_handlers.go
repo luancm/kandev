@@ -300,7 +300,6 @@ func (h *MessageHandlers) injectMessageContext(
 		Autopilot:                      task.Autopilot,
 		IncludeUserQuestionTool:        !task.Autopilot && !sessionResp.Session.IsPassthrough,
 		IncludeParentQuestionTool:      task.Autopilot && task.ParentID != "",
-		ErrandSession:                  sessionResp.Session.Role == models.SessionRoleErrand,
 	}, referenceContext, trustedPromptContext, pullRequestTargetContext)
 }
 
@@ -1458,7 +1457,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 			zap.Error(err))
 		return nil, errors.New("failed to reload submitted session after on_turn_start")
 	}
-	if reloaded.State != models.TaskSessionStateCompleted || models.IsErrandSession(reloaded) {
+	if reloaded.State != models.TaskSessionStateCompleted {
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
@@ -1503,9 +1502,6 @@ func (h *MessageHandlers) enrichWorkspaceRecovery(
 }
 
 func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session dto.TaskSessionDTO) *ws.Message {
-	if session.State == models.TaskSessionStateCompleted && session.Role == models.SessionRoleErrand {
-		return nil
-	}
 	switch session.State {
 	case models.TaskSessionStateRunning:
 		if h.orchestrator != nil &&

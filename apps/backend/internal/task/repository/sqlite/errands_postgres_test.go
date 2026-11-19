@@ -25,11 +25,6 @@ func TestPostgresOwnedErrandSchemaReplays(t *testing.T) {
 	exerciseErrandSchemaReplay(t, newPostgresErrandRepo(t))
 }
 
-// @covers AC-TASKS-ERRANDS-001.1
-func TestPostgresSessionRoleSurvivesEveryReadAndFullRowWrite(t *testing.T) {
-	exerciseSessionRolePersistence(t, newPostgresErrandRepo(t))
-}
-
 func TestPostgresErrandRowRoundTripsWithVersionGuard(t *testing.T) {
 	exerciseErrandRoundTrip(t, newPostgresErrandRepo(t))
 }

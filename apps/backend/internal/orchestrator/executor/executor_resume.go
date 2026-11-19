@@ -3213,7 +3213,7 @@ func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, se
 	if err != nil {
 		return err
 	}
-	if session == nil || session.TaskID != taskID || models.IsErrandSession(session) || !isRuntimeWorkingSessionState(session.State) {
+	if session == nil || session.TaskID != taskID || !isRuntimeWorkingSessionState(session.State) {
 		state := ""
 		if session != nil {
 			state = string(session.State)
@@ -3235,7 +3235,7 @@ func (e *Executor) writeTaskFailedForRuntime(ctx context.Context, taskID, sessio
 	if err != nil {
 		return err
 	}
-	if session == nil || session.TaskID != taskID || session.State != models.TaskSessionStateFailed || models.IsErrandSession(session) {
+	if session == nil || session.TaskID != taskID || session.State != models.TaskSessionStateFailed {
 		return nil
 	}
 	return e.updateTaskState(ctx, taskID, v1.TaskStateFailed)

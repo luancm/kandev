@@ -32,9 +32,9 @@ func newSessionSummaryAuthorizationHandlers(t *testing.T, narrow bool) *TaskHand
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "private-session", TaskID: "private-task", State: models.TaskSessionStateCreated}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "private-errand", TaskID: "private-task", Role: models.SessionRoleErrand,
-		ParentSessionID: "private-session", State: models.TaskSessionStateCompleted,
+	if err := repo.CreateErrand(ctx, &models.Errand{
+		ID: "private-errand", TaskID: "private-task", ParentSessionID: "private-session",
+		Lifecycle: models.ErrandLifecycleQueued, ResultState: models.ErrandResultNone,
 	}); err != nil {
 		t.Fatal(err)
 	}

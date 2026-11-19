@@ -12,7 +12,6 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Drawer, DrawerContent, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskErrands } from "@/hooks/domains/session/use-task-errands";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -190,9 +189,7 @@ function ErrandsChipBody({ taskId, sessionId }: ErrandsChipBodyProps) {
     summaryStatus,
     retrySummary,
   } = useTaskErrands(taskId);
-  const parentId = useAppStore((state) =>
-    sessionId ? state.taskSessions.items[sessionId]?.parent_session_id || sessionId : null,
-  );
+  const parentId = sessionId ?? null;
   const errands = parentId
     ? outstanding.filter((errand) => errand.parent_session_id === parentId)
     : outstanding;

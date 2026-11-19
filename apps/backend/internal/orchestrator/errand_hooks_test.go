@@ -34,22 +34,8 @@ func (c *recordingErrandController) CascadeParent(parentSessionID string) bool {
 	return true
 }
 
-func (*recordingErrandController) OnErrandTurnSettled(context.Context, errands.TurnSettlement) error {
-	return nil
-}
-
-func (*recordingErrandController) OnErrandTurnCancelled(context.Context, string, string, string) error {
-	return nil
-}
-
 func (*recordingErrandController) OnParentTurnSettled(context.Context, string, errands.SettleCause) (bool, error) {
 	return false, nil
-}
-
-func (*recordingErrandController) RetryErrandCompletion(context.Context, string) error { return nil }
-
-func (*recordingErrandController) ReconcileTerminalDecisions(context.Context, string) error {
-	return nil
 }
 
 func (*recordingErrandController) ReconcileLifecycle(context.Context) error { return nil }

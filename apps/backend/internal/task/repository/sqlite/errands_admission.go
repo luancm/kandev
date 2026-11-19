@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -46,9 +45,6 @@ func (r *Repository) ReserveErrandParentAdmission(ctx context.Context, admission
 	}
 	var reservation models.ErrandAdmissionReservation
 	err := r.withErrandTask(ctx, admission.TaskID, func(tx *sqlx.Tx) error {
-		if err := db.RequireErrandTurnSettlements(ctx, tx, admission.ErrandID, admission.TurnID); err != nil {
-			return err
-		}
 		row, err := admissionErrand(ctx, tx, admission)
 		if err != nil {
 			return err

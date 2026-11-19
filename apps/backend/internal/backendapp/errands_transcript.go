@@ -15,8 +15,8 @@ import (
 // errandTranscriptRepo is the transcript read the errands service needs. The
 // task repository satisfies it.
 type errandTranscriptRepo interface {
-	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
-	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
+	GetErrandTurn(context.Context, string, string) (*models.Turn, error)
+	GetErrandLastAssistantMessage(context.Context, string, string) (*models.Message, error)
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	GetAgentDeliverySubmission(ctx context.Context, id string) (*models.AgentDeliverySubmission, error)
 }
@@ -28,70 +28,24 @@ type errandTranscript struct {
 	repo errandTranscriptRepo
 }
 
-type ownedErrandTranscriptRepo interface {
-	GetErrandTurn(context.Context, string, string) (*models.Turn, error)
-	ListErrandTurns(context.Context, string) ([]*models.Turn, error)
-	GetErrandLastAssistantMessage(context.Context, string, string) (*models.Message, error)
-}
-
 var (
 	_ errands.TurnReader  = errandTranscript{}
 	_ errands.DeliveryLog = errandTranscript{}
 )
 
-func (t errandTranscript) ReadTurn(ctx context.Context, sessionID, turnID string) (errands.TurnView, error) {
-	if repo, ok := t.repo.(ownedErrandTranscriptRepo); ok {
-		turn, err := repo.GetErrandTurn(ctx, sessionID, turnID)
-		if !errors.Is(err, sql.ErrNoRows) {
-			if err != nil {
-				return errands.TurnView{}, err
-			}
-			return readOwnedErrandTurnView(ctx, repo, sessionID, turn)
-		}
-	}
-	turns, err := t.repo.ListTurnsBySession(ctx, sessionID)
+func (t errandTranscript) ReadTurn(ctx context.Context, errandID, turnID string) (errands.TurnView, error) {
+	turn, err := t.repo.GetErrandTurn(ctx, errandID, turnID)
 	if err != nil {
 		return errands.TurnView{}, err
 	}
-	for _, turn := range turns {
-		if turn.ID == turnID {
-			return t.view(ctx, turn)
-		}
-	}
-	return errands.TurnView{}, nil
-}
-
-func (t errandTranscript) LatestTurn(ctx context.Context, sessionID string) (string, errands.TurnView, error) {
-	if repo, ok := t.repo.(ownedErrandTranscriptRepo); ok {
-		turns, err := repo.ListErrandTurns(ctx, sessionID)
-		if err != nil {
-			return "", errands.TurnView{}, err
-		}
-		if len(turns) != 0 {
-			latest := turns[len(turns)-1]
-			view, err := readOwnedErrandTurnView(ctx, repo, sessionID, latest)
-			return latest.ID, view, err
-		}
-	}
-	turns, err := t.repo.ListTurnsBySession(ctx, sessionID)
-	if err != nil || len(turns) == 0 {
-		return "", errands.TurnView{}, err
-	}
-	latest := turns[len(turns)-1]
-	view, err := t.view(ctx, latest)
-	return latest.ID, view, err
-}
-
-func readOwnedErrandTurnView(ctx context.Context, repo ownedErrandTranscriptRepo, errandID string, turn *models.Turn) (errands.TurnView, error) {
 	view := errands.TurnView{Completed: turn.CompletedAt != nil}
-	message, err := repo.GetErrandLastAssistantMessage(ctx, errandID, turn.ID)
+	message, err := t.repo.GetErrandLastAssistantMessage(ctx, errandID, turn.ID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return errands.TurnView{}, err
 	}
 	if message != nil {
 		view.LastAgentText = message.Content
 	}
-	view.EarliestUserSender, _ = turn.Metadata["sender_session_id"].(string)
 	return view, nil
 }
 
@@ -155,21 +109,4 @@ func (t errandTranscript) deliveryRetained(ctx context.Context, message *models.
 		return false, fmt.Errorf("%w: submission identity", errands.ErrInvalidSendNowDelivery)
 	}
 	return submission.State != models.DeliverySubmissionFailed && submission.State != models.DeliverySubmissionCancelled, nil
-}
-
-func (t errandTranscript) view(ctx context.Context, turn *models.Turn) (errands.TurnView, error) {
-	messages, err := t.repo.ListMessagesByTurnID(ctx, turn.ID)
-	if err != nil {
-		return errands.TurnView{}, err
-	}
-	view := errands.TurnView{Completed: turn.CompletedAt != nil}
-	for _, message := range messages {
-		if message.AuthorType == models.MessageAuthorUser && view.EarliestUserSender == "" {
-			view.EarliestUserSender, _ = message.Metadata["sender_session_id"].(string)
-		}
-		if message.AuthorType == models.MessageAuthorAgent && (message.Type == "" || message.Type == models.MessageTypeMessage) {
-			view.LastAgentText = message.Content
-		}
-	}
-	return view, nil
 }

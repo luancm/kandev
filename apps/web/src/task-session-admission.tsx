@@ -24,8 +24,7 @@ export async function assertRequestedSession(
   if (!sessionId) return undefined;
   if (
     identity.allSessionsResponse.sessions.some(
-      (session) =>
-        session.id === sessionId && session.task_id === taskId && session.role !== "errand",
+      (session) => session.id === sessionId && session.task_id === taskId,
     )
   ) {
     return undefined;

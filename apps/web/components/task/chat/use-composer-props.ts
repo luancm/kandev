@@ -193,5 +193,5 @@ export function useComposerProps(args: ComposerPropsArgs) {
 }
 
 function completedComposerProps(panelState: ChatPanelState) {
-  return { isCompleted: panelState.isCompleted, sessionRole: panelState.session?.role };
+  return { isCompleted: panelState.isCompleted };
 }

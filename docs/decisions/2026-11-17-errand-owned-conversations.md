@@ -94,3 +94,5 @@ improvement.
   established storage constraints without a demonstrated need.
 - Rebuild execution and transcript rendering exclusively for Errands. This
   duplicates existing capabilities; reuse their narrow interfaces instead.
+
+Session-backed Errands existed only on the unpublished branch. Ordinary session rows, summaries, queue paths and recovery carry no Errand-specific role or parent-link compatibility. The Errand record retains its real ordinary parent and owns its conversation facts.

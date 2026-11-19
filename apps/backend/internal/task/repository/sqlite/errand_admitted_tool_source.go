@@ -27,7 +27,7 @@ func (r *Repository) retainErrandAdmittedToolSourceTx(ctx context.Context, tx *s
 	if agent.ToolCallID == "" || proof.TurnID != turn {
 		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
-	source := admittedToolSource{unownedToolSource: unownedToolSource{Sequence: event.Sequence, ToolID: agent.ToolCallID, ParentID: agent.ParentToolCallID, PromptGeneration: proof.PromptGeneration, ProtocolID: agent.ProtocolMessageID, ControlTurnID: agent.ControlTurnID, TurnID: turn}, Admission: promptAdmission{ErrandGeneration: proof.Generation, NativeSessionID: proof.NativeSessionID, TaskID: taskID, SessionID: event.SessionID, ExecutionID: proof.ExecutionID, IncarnationID: proof.IncarnationID, HarnessGeneration: uint64(proof.HarnessGeneration), PromptGeneration: proof.PromptGeneration, StreamID: proof.StreamID, SubmissionID: proof.SubmissionID, TurnID: proof.TurnID}, NativeSessionID: agent.SessionID, PayloadHash: agentDeliveryEventHash(event)}
+	source := admittedToolSource{toolSource: toolSource{Sequence: event.Sequence, ToolID: agent.ToolCallID, ParentID: agent.ParentToolCallID, PromptGeneration: proof.PromptGeneration, ProtocolID: agent.ProtocolMessageID, ControlTurnID: agent.ControlTurnID, TurnID: turn}, Admission: promptAdmission{ErrandGeneration: proof.Generation, NativeSessionID: proof.NativeSessionID, TaskID: taskID, SessionID: event.SessionID, ExecutionID: proof.ExecutionID, IncarnationID: proof.IncarnationID, HarnessGeneration: uint64(proof.HarnessGeneration), PromptGeneration: proof.PromptGeneration, StreamID: proof.StreamID, SubmissionID: proof.SubmissionID, TurnID: proof.TurnID}, NativeSessionID: agent.SessionID, PayloadHash: agentDeliveryEventHash(event)}
 	return r.storeAdmittedToolSourceTx(ctx, tx, source)
 }
 

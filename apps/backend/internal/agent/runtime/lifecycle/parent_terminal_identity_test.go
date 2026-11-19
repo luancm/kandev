@@ -58,10 +58,10 @@ func TestParentTerminalIdentityResolvesSQLiteAdmissionThroughLifecycleIntake(t *
 		t.Fatalf("retained producer supplied turn %q, want it empty", producerPayload.TurnID)
 	}
 
-	resolved, errand, err := fixture.repo.ResolveAgentDeliveryEventTurn(t.Context(), fixture.retainedEvent())
-	if err != nil || errand || resolved != fixture.turnID {
-		t.Fatalf("SQLite admission resolution = turn %q, errand %t, error %v; want ordinary parent turn %q",
-			resolved, errand, err, fixture.turnID)
+	resolved, err := fixture.repo.ResolveAgentDeliveryEventTurn(t.Context(), fixture.retainedEvent())
+	if err != nil || resolved != fixture.turnID {
+		t.Fatalf("SQLite admission resolution = turn %q, error %v; want ordinary parent turn %q",
+			resolved, err, fixture.turnID)
 	}
 }
 

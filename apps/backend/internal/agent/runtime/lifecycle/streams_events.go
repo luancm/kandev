@@ -89,10 +89,8 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	// Capture the durable record before invoking lifecycle callbacks. Those
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
-	receivedEvent := event
 	durableEvent := durableAgentEvent(execution, event)
 	var origin *models.ErrandToolOrigin
-	var errand bool
 	switch {
 	case execution.Owner.Kind == ExecutionOwnerErrand && event.Type == streams.EventTypePermissionRequest:
 		permissionOrigin, originErr := resolveErrandPermissionOrigin(ctx, delivery, durableEvent)
@@ -111,15 +109,10 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 		event.DeliverySubmissionID = origin.SubmissionID
 		event.PromptGeneration = origin.PromptGeneration
 	default:
-		event, errand, err = prepareRetainedEventTurn(ctx, delivery, durableEvent, event)
+		event, err = resolveRetainedEventTurn(ctx, delivery, durableEvent, event)
 		if err != nil {
 			return preparedAgentEvent{}, err
 		}
-	}
-	if errand && receivedEvent.DeliverySubmissionID == "" && receivedEvent.TurnID == "" {
-		// Errand native activity owns a source-derived turn. Keep the
-		// lifecycle's current prompt turn out of its retained producer payload.
-		durableEvent = durableAgentEventWithoutPromptTurn(execution, receivedEvent)
 	}
 	// A replayed event keeps its own prompt-attempt identity. Do not let it
 	// overwrite the live execution's submission before completion claims run.
@@ -131,7 +124,7 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check for %q: %w", event.Type, err)
 	}
-	if event.DeliverySubmissionID != "" && !staleSubmission && !errand && execution.Owner.Kind != ExecutionOwnerErrand {
+	if event.DeliverySubmissionID != "" && !staleSubmission && execution.Owner.Kind != ExecutionOwnerErrand {
 		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	if !process {
@@ -139,11 +132,6 @@ func (sm *StreamManager) prepareAgentEventWithReceipt(
 			return preparedAgentEvent{}, err
 		}
 		return preparedAgentEvent{event: event, duplicate: true}, nil
-	}
-	historicalOwner := event.DeliverySubmissionID != "" && event.TurnID != execution.promptTurnIDSnapshot()
-	unownedNumberedTerminal := event.DeliverySubmissionID == "" && event.PromptGeneration != 0
-	if errand && durableEvent.Terminal && (historicalOwner || unownedNumberedTerminal) {
-		skipCallback = true
 	}
 	return preparedAgentEvent{
 		errandToolOrigin: origin,

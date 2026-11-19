@@ -19,7 +19,6 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
-import type { TaskSessionRole } from "./errands";
 import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
@@ -847,9 +846,7 @@ export type TaskSession = ActiveSubagentCountFields & {
   is_passthrough?: boolean;
   review_status?: WorkflowReviewStatus;
   /** Immutable; omitted for ordinary sessions. */
-  role?: TaskSessionRole;
   /** Immutable session that started this errand; omitted for ordinary sessions. */
-  parent_session_id?: SessionId;
   /** True while this parent session waits for input on outstanding errands. */
   waiting_on_errands?: boolean;
   // Server-resolved tool_call count, populated by ListTaskSessions.

@@ -356,7 +356,7 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 	taskID := newErrandTask(t, repo, "browser-history")
 	parentID := "browser-history-parent"
 	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: parentID, TaskID: taskID, Name: "Parent conversation", Role: "primary",
+		ID: parentID, TaskID: taskID, Name: "Parent conversation", IsPrimary: true,
 		State: models.TaskSessionStateWaitingForInput,
 	})
 	base := errandScenarioBase.Add(6 * time.Hour)

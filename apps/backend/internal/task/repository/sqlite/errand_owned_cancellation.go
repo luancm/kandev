@@ -13,7 +13,7 @@ import (
 // used by admission. An unbound generation may still acquire its first execution.
 func validateOwnedCancellationTarget(ctx context.Context, tx *sqlx.Tx, current, next *models.Errand) error {
 	intent := next.TeardownIntent
-	if intent == nil || intent.Purpose != models.ErrandTeardownPurposeCancellation || intent.Target.ErrandID == "" ||
+	if intent == nil || intent.Purpose != models.ErrandTeardownPurposeCancellation ||
 		(current.TeardownIntent != nil && current.TeardownIntent.ID == intent.ID) {
 		return nil
 	}

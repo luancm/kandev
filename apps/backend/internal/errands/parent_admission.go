@@ -8,17 +8,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ParentPromptSenderMetadataKey is written only after MCP sender verification.
-// Queue dispatch also requires agent provenance before reading it.
-const ParentPromptSenderMetadataKey = "errand_parent_sender_session_id"
-
 type parentPromptContextKey struct{}
 
-// ParentPromptOrigin carries authenticated server provenance across direct,
-// created-session and fallback dispatch. SubmissionID is allocated at intake.
+// ParentPromptOrigin carries authenticated server provenance for explicit Errand instructions.
 type ParentPromptOrigin struct {
 	SenderSessionID string
-	SubmissionID    string
 }
 
 // WithParentPromptOrigin binds a verified sender; it must never be derived from

@@ -24,18 +24,16 @@ const (
 )
 
 type ErrandTeardownTarget struct {
-	TaskID               string `json:"task_id"`
-	ErrandID             string `json:"errand_id,omitempty"`
-	OwnerGeneration      uint64 `json:"owner_generation,omitempty"`
-	SessionID            string `json:"session_id,omitempty"`
-	SessionIncarnation   string `json:"session_incarnation,omitempty"`
-	ExecutionID          string `json:"execution_id,omitempty"`
-	TurnID               string `json:"turn_id,omitempty"`
-	NoTurn               bool   `json:"no_turn,omitempty"`
-	SubmissionID         string `json:"submission_id,omitempty"`
-	FirstTurnID          string `json:"first_turn_id,omitempty"`
-	ReservedSubmissionID string `json:"reserved_submission_id,omitempty"`
-	PromptGeneration     uint64 `json:"prompt_generation,omitempty"`
+	TaskID          string `json:"task_id"`
+	ErrandID        string `json:"errand_id,omitempty"`
+	OwnerGeneration uint64 `json:"owner_generation,omitempty"`
+
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TurnID       string `json:"turn_id,omitempty"`
+	NoTurn       bool   `json:"no_turn,omitempty"`
+	SubmissionID string `json:"submission_id,omitempty"`
+
+	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 }
 
 func (t ErrandTeardownTarget) ParentAdmission(parentSessionID string) ErrandParentAdmission {
@@ -84,24 +82,7 @@ func (i *ErrandTeardownIntent) ValidateFor(errand *Errand) error {
 }
 
 func (target ErrandTeardownTarget) validateFor(errand *Errand) error {
-	if target.ErrandID != "" {
-		return target.validateOwnedTarget(errand)
-	}
-	if strings.TrimSpace(target.TaskID) == "" || target.TaskID != errand.TaskID ||
-		strings.TrimSpace(target.SessionID) == "" || target.SessionID != errand.ID || target.OwnerGeneration != 0 {
-		return invalidErrandTeardownTarget("does not match errand task and session")
-	}
-	if target.hasBlankIdentity() {
-		return invalidErrandTeardownTarget("contains a blank identity value")
-	}
-	if target.hasReservedLaunchIdentity() {
-		return target.validateReservedLaunch(errand)
-	}
-	return target.validateSessionTarget()
-}
-
-func (target ErrandTeardownTarget) validateOwnedTarget(errand *Errand) error {
-	if target.ErrandID != errand.ID || target.TaskID != errand.TaskID || target.hasLegacyIdentity() || target.hasBlankIdentity() {
+	if target.ErrandID != errand.ID || target.TaskID != errand.TaskID || target.hasBlankIdentity() {
 		return invalidErrandTeardownTarget("does not match the errand owner")
 	}
 	if target.OwnerGeneration == 0 && target.ExecutionID != "" {
@@ -119,51 +100,15 @@ func (target ErrandTeardownTarget) validateOwnedTarget(errand *Errand) error {
 	return nil
 }
 
-func (target ErrandTeardownTarget) hasLegacyIdentity() bool {
-	return target.SessionID != "" || target.SessionIncarnation != "" || target.hasReservedLaunchIdentity()
-}
-
-func (target ErrandTeardownTarget) hasReservedLaunchIdentity() bool {
-	return target.FirstTurnID != "" || target.ReservedSubmissionID != ""
-}
-
 func (target ErrandTeardownTarget) hasBlankIdentity() bool {
 	for _, value := range []string{
 		target.ExecutionID, target.TurnID, target.SubmissionID,
-		target.FirstTurnID, target.ReservedSubmissionID,
 	} {
 		if value != "" && strings.TrimSpace(value) == "" {
 			return true
 		}
 	}
 	return false
-}
-
-func (target ErrandTeardownTarget) validateReservedLaunch(errand *Errand) error {
-	if target.FirstTurnID == "" || target.ReservedSubmissionID == "" {
-		return invalidErrandTeardownTarget("reserved launch identity must be a complete pre-session tuple")
-	}
-	if target.FirstTurnID != errand.FirstTurnID || target.ReservedSubmissionID != errand.SubmissionID {
-		return invalidErrandTeardownTarget("reserved launch identity does not match errand")
-	}
-	if target.SessionIncarnation != "" || target.ExecutionID != "" || target.TurnID != "" ||
-		target.NoTurn || target.SubmissionID != "" || target.PromptGeneration != 0 {
-		return invalidErrandTeardownTarget("reserved launch identity must be a complete pre-session tuple")
-	}
-	return nil
-}
-
-func (target ErrandTeardownTarget) validateSessionTarget() error {
-	if strings.TrimSpace(target.SessionIncarnation) == "" {
-		return invalidErrandTeardownTarget("session incarnation is required")
-	}
-	if (target.TurnID == "") == !target.NoTurn {
-		return invalidErrandTeardownTarget("requires a turn id or an explicit no-turn witness")
-	}
-	if target.PromptGeneration != 0 && target.ExecutionID == "" {
-		return invalidErrandTeardownTarget("prompt generation requires an execution id")
-	}
-	return nil
 }
 
 func invalidErrandTeardownTarget(reason string) error {
@@ -173,12 +118,12 @@ func invalidErrandTeardownTarget(reason string) error {
 func (i *ErrandTeardownIntent) validatePurpose(errand *Errand) error {
 	invalid := func(reason string) error { return fmt.Errorf("%w: teardown intent %s", ErrInvalidErrand, reason) }
 	switch i.Purpose {
-	case "", ErrandTeardownPurposeCancellation:
+	case ErrandTeardownPurposeCancellation:
 		if errand.Lifecycle != ErrandLifecycleCancelled || errand.CancelSource == "" || i.State == ErrandTeardownIntentClosed {
-			return invalid("legacy cancellation requires a cancelled errand with a cancellation source")
+			return invalid("cancellation requires a cancelled errand with a cancellation source")
 		}
 	case ErrandTeardownPurposeCompletion:
-		if errand.Lifecycle == ErrandLifecycleCancelled || errand.CancelSource != "" || i.Target.TurnID == "" || i.Target.NoTurn || i.Target.FirstTurnID != "" {
+		if errand.Lifecycle == ErrandLifecycleCancelled || errand.CancelSource != "" || i.Target.TurnID == "" || i.Target.NoTurn {
 			return invalid("completion requires an uncancelled errand with an exact turn target")
 		}
 	default:

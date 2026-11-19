@@ -60,11 +60,10 @@ func markConformanceErrandCancelled(errand *taskmodels.Errand) {
 	errand.ResultText = "updated-" + errand.ID
 	errand.TeardownIntent = &taskmodels.ErrandTeardownIntent{
 		Version: taskmodels.ErrandTeardownIntentVersion, ID: "intent-" + errand.ID,
-		State:       taskmodels.ErrandTeardownIntentPending,
+		State: taskmodels.ErrandTeardownIntentPending, Purpose: taskmodels.ErrandTeardownPurposeCancellation,
 		RequestedAt: time.Date(2026, time.November, 1, 12, 30, 0, 0, time.UTC),
 		Target: taskmodels.ErrandTeardownTarget{
-			TaskID: errand.TaskID, SessionID: errand.ID,
-			FirstTurnID: errand.FirstTurnID, ReservedSubmissionID: errand.SubmissionID,
+			TaskID: errand.TaskID, ErrandID: errand.ID, NoTurn: true,
 		},
 	}
 }
@@ -78,8 +77,7 @@ func assertConformanceErrandTeardownIntent(before, after any, id string) error {
 	if current.ResultText != "updated-"+id || current.Version != previous.Version+1 ||
 		current.Lifecycle != taskmodels.ErrandLifecycleCancelled || current.CancelSource != taskmodels.ErrandCancelSourceUser ||
 		current.TeardownIntent == nil || current.TeardownIntent.State != taskmodels.ErrandTeardownIntentPending ||
-		current.TeardownIntent.Target.FirstTurnID != previous.FirstTurnID ||
-		current.TeardownIntent.Target.ReservedSubmissionID != previous.SubmissionID {
+		current.TeardownIntent.Target.ErrandID != previous.ID || !current.TeardownIntent.Target.NoTurn {
 		return fmt.Errorf("errand after update = (%+v, version %d), want cancelled with pending exact teardown intent at version %d", current, current.Version, previous.Version+1)
 	}
 	return nil

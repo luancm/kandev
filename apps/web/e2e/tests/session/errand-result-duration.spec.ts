@@ -5,7 +5,8 @@ import {
   recordedDurationSnapshot,
   recordedDurationSnapshotsForErrand,
   seedLongDurationHistory,
-  waitNewTurnSettled,
+  DURATION_FOLLOWUP_PROMPT,
+  waitErrandDurationFollowUp,
 } from "../../helpers/errand-result-duration";
 import {
   deliverySnapshots,
@@ -15,6 +16,8 @@ import {
   startErrands,
   waitDelivered,
   waitNewParentTurnSettled,
+  ownedErrandChat,
+  readOwnedMessages,
 } from "../../helpers/errands";
 import { mockTurnGate } from "../../helpers/mock-turn-gate";
 import { dwell } from "../../helpers/causal-waits";
@@ -119,7 +122,7 @@ test("desktop finished result duration is keyboard accessible and stays immutabl
     await expectNoHorizontalOverflow(page);
 
     await actualCard.getByTestId(`errand-open-${errand.errand_id}`).click();
-    const child = parentChat(page, errand.errand_id);
+    const child = ownedErrandChat(page, errand.errand_id);
     await expect(child.getByTestId("errand-header")).toBeVisible();
     await child.getByTestId("errand-back-to-parent").click();
     await expect(composer).toBeVisible();
@@ -127,30 +130,22 @@ test("desktop finished result duration is keyboard accessible and stays immutabl
     await expect(composer).toContainText("desktop duration composer remains usable");
     await composer.fill("");
 
-    // Inspecting the retained child must leave its completed runtime closed.
-    expect((await api.getTaskSession(errand.errand_id)).session.state).toBe("COMPLETED");
-    const childTurnsBeforeFollowup = (await api.listSessionTurns(errand.errand_id)).turns.map(
-      (turn) => turn.id,
-    );
+    expect((await api.listTaskSessions(taskId)).sessions.map((session) => session.id)).toEqual([
+      parentId,
+    ]);
     await actualCard.getByTestId(`errand-open-${errand.errand_id}`).click();
-    const childComposer = child.locator('.tiptap.ProseMirror[contenteditable="true"]');
+    const continuation = child.getByTestId("errand-continuation");
+    const childComposer = continuation.locator('.tiptap.ProseMirror[contenteditable="true"]');
     await expect(childComposer).toBeVisible();
-    await childComposer.fill('e2e:message("DURATION_FOLLOWUP_RESULT")');
-    await child.getByTestId("submit-message-button").click();
+    await childComposer.fill(DURATION_FOLLOWUP_PROMPT);
+    await continuation.getByRole("button", { name: "Send" }).click();
     try {
-      await waitNewTurnSettled(api, errand.errand_id, childTurnsBeforeFollowup);
-      await expect
-        .poll(async () => (await api.getTaskSession(errand.errand_id)).session.state, {
-          message: "Durable cleanup closes the completed child after its retry sweep",
-          timeout: 60_000,
-        })
-        .toBe("COMPLETED");
+      await waitErrandDurationFollowUp(api, taskId, errand.errand_id);
     } catch (error) {
       await testInfo.attach("child-followup-state", {
         body: JSON.stringify({
-          session: await api.getTaskSession(errand.errand_id),
-          turns: await api.listSessionTurns(errand.errand_id),
-          messages: await api.listSessionMessages(errand.errand_id),
+          errands: await listErrands(api, taskId),
+          messages: await readOwnedMessages(api, taskId, errand.errand_id),
         }),
         contentType: "application/json",
       });

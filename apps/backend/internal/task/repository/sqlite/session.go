@@ -61,9 +61,6 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 		}
 	}()
 
-	if err := r.guardErrandTurnReservation(ctx, tx, turn.TaskSessionID, turn.ID); err != nil {
-		return false, err
-	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
 		return false, err
 	}
@@ -172,9 +169,6 @@ func (r *Repository) insertTurnWithSessionLock(ctx context.Context, turn *models
 		return fmt.Errorf("begin turn creation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.guardErrandTurnReservation(ctx, tx, turn.TaskSessionID, turn.ID); err != nil {
-		return err
-	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), turn.TaskSessionID); err != nil {
 		return err
 	}
@@ -581,8 +575,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id,
-	ts.role, ts.parent_session_id`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -1511,9 +1504,6 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
-	if models.IsErrandSession(session) {
-		session.IsPrimary = false
-	}
 	if tx, ok := exec.(*sqlx.Tx); ok {
 		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{session.ID}, nil); err != nil {
 			return fmt.Errorf("lock agent delivery identity before session creation: %w", err)
@@ -1600,13 +1590,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id,
-			role, parent_session_id
+			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?, ?, ?, ?
+			?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1615,8 +1604,7 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID,
-		string(session.Role), session.ParentSessionID)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID)
 
 	if err != nil {
 		return err
@@ -1884,7 +1872,6 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
-		&session.Role, &session.ParentSessionID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -2015,9 +2002,6 @@ func (r *Repository) claimPromptableTaskSessionIfActive(
 		return models.PromptableTaskSessionClaim{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.guardErrandTurnReservation(ctx, tx, id, ""); err != nil {
-		return models.PromptableTaskSessionClaim{}, err
-	}
 
 	var state models.TaskSessionState
 	var active bool
@@ -2127,15 +2111,12 @@ func (r *Repository) GetTaskSessionByTaskID(ctx context.Context, taskID string) 
 }
 
 // GetActiveTaskSessionByTaskID retrieves the active (running/waiting) agent session for a task.
-// An errand is never the task's active session; ListActiveTaskSessionsByTaskID
-// still returns errands so task-wide stops reach them.
 func (r *Repository) GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
 		`SELECT `+taskSessionSelectCols+` `+taskSessionFromClause+`
 		 WHERE ts.task_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
-		   AND ts.role <> ?
 		 ORDER BY ts.started_at DESC LIMIT 1`,
-	), taskID, string(models.SessionRoleErrand))
+	), taskID)
 	return r.scanTaskSession(ctx, row, fmt.Sprintf("no active agent session for task: %s", taskID))
 }
 
@@ -4916,7 +4897,6 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
-		&session.Role, &session.ParentSessionID,
 	)
 	if err != nil {
 		return nil, err
@@ -5619,17 +5599,14 @@ func (r *Repository) setSessionPrimary(
 	// First, get the task_id for this session. Do not lock the target row here:
 	// every primary promotion must take the owning task lock first so concurrent
 	// promotions keep one lock order.
-	var taskID, role string
-	query := `SELECT task_id, role FROM task_sessions WHERE id = ?`
-	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID, &role)
+	var taskID string
+	query := `SELECT task_id FROM task_sessions WHERE id = ?`
+	err = tx.QueryRowContext(ctx, r.db.Rebind(query), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
 		return primarySessionNotPromoted(sessionID, requireNonterminal)
 	}
 	if err != nil {
 		return false, err
-	}
-	if models.SessionRole(role) == models.SessionRoleErrand {
-		return false, fmt.Errorf("%w: %s", models.ErrErrandSessionPrimary, sessionID)
 	}
 
 	// Serialize concurrent promotions for the same task across Postgres

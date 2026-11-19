@@ -583,7 +583,7 @@ func previewCurrentSession(sessions []*models.TaskSession) *models.TaskSession {
 	}
 	var latest *models.TaskSession
 	for _, session := range sessions {
-		if session == nil || models.IsErrandSession(session) || !isPreviewActiveSession(session.State) {
+		if session == nil || !isPreviewActiveSession(session.State) {
 			continue
 		}
 		if latest == nil || session.StartedAt.After(latest.StartedAt) ||

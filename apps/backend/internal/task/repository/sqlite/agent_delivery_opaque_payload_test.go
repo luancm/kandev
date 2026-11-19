@@ -8,18 +8,14 @@ import (
 
 func TestDeliveryRetentionOpaquePayloadAdmission(t *testing.T) {
 	for _, tc := range []struct {
-		name                  string
-		bound, errand, accept bool
+		name          string
+		bound, accept bool
 	}{
-		{name: "ordinary unbound", accept: true}, {name: "ordinary bound", bound: true}, {name: "errand", errand: true},
+		{name: "ordinary unbound", accept: true}, {name: "ordinary bound", bound: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := newRepoForSessionTests(t)
 			seedAgentDeliveryTestSession(t, repo, "opaque-session", "opaque-incarnation")
-			if tc.errand {
-				_, err := repo.db.Exec(`UPDATE task_sessions SET role='errand' WHERE id='opaque-session'`)
-				require.NoError(t, err)
-			}
 			if tc.bound {
 				_, err := repo.db.Exec(`INSERT INTO agent_delivery_effects (effect_key,stream_id,sequence,effect_type,state,outcome,created_at) VALUES (?, 'opaque-stream',0,?,'pending','{}',CURRENT_TIMESTAMP)`, promptAdmissionEffect+":opaque-submission", promptAdmissionEffect)
 				require.NoError(t, err)

@@ -626,10 +626,6 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	return durableAgentEventWithPromptTurn(execution, event, true)
 }
 
-func durableAgentEventWithoutPromptTurn(execution *AgentExecution, event agentctl.AgentEvent) *models.AgentDeliveryEvent {
-	return durableAgentEventWithPromptTurn(execution, event, false)
-}
-
 func deliveryTransportSessionID(execution *AgentExecution) string {
 	if execution.Owner.Kind == ExecutionOwnerErrand {
 		return models.ErrandExecutionIdentity(execution.Owner.ErrandID)

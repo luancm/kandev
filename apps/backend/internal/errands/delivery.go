@@ -107,9 +107,9 @@ func (s *Service) hasPendingResult(ctx context.Context, parentSessionID string) 
 // SweepDelivery retries delivery for every parent holding a pending result.
 // The ceiling sweep calls it so a refused notification is not stranded.
 func (s *Service) SweepDelivery(ctx context.Context) (err error) {
+	recoveryErr := s.recoverInterruptions(ctx)
 	settlementErr := s.reconcileOwnedErrandResults(ctx)
 	teardownErr := s.retryPendingTeardowns(ctx)
-	recoveryErr := s.retryInterruptedDelegations(ctx)
 	defer func() { err = errors.Join(settlementErr, teardownErr, recoveryErr, err) }()
 	if !s.featureEnabled() {
 		return nil
