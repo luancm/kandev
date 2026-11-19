@@ -125,8 +125,10 @@ func exerciseActiveSessionLookupSkipsErrands(t *testing.T, repo *Repository) {
 // is never claimed by an errand, and an ordinary session still claims it.
 func exerciseErrandNeverClaimsTaskTitle(t *testing.T, repo *Repository) {
 	t.Helper()
-	ctx := context.Background()
-	taskID, parentID, errandID := newErrandIsolationTask(t, repo, "title")
+	ctx := t.Context()
+	taskID := newErrandTask(t, repo, "title")
+	parentID, errandID := "ordinary-first-turn", "owned-errand"
+	mustCreateErrand(t, repo, sampleErrand(errandID, taskID, parentID, errandScenarioBase))
 	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE tasks SET metadata = ? WHERE id = ?`),
 		`{"agent_title_pending":true}`, taskID); err != nil {
 		t.Fatalf("seed pending title marker: %v", err)
@@ -144,6 +146,6 @@ func exerciseErrandNeverClaimsTaskTitle(t *testing.T, repo *Repository) {
 	}
 	owned, newlyClaimed, err = repo.ClaimTaskTitleSession(ctx, taskID, parentID)
 	if err != nil || !owned || !newlyClaimed {
-		t.Fatalf("ordinary title claim = (%v, %v, %v), want (true, true, nil)", owned, newlyClaimed, err)
+		t.Fatalf("provisional ordinary title claim = (%v, %v, %v), want (true, true, nil)", owned, newlyClaimed, err)
 	}
 }
