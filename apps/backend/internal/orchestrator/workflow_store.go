@@ -1081,23 +1081,21 @@ func (s *workflowStore) feederCandidateBlocked(ctx context.Context, taskID strin
 	return s.feederCandidateHasWorkingErrand(ctx, taskID)
 }
 
-// feederCandidateHasWorkingErrand keeps a running errand blocking the move,
-// because it writes to the task's shared workspace. The task's active session
-// lookup never returns errands, so they are checked separately; a failed
-// lookup fails closed.
+// Owned Errand work holds the same workspace move guard as a running session.
 func (s *workflowStore) feederCandidateHasWorkingErrand(ctx context.Context, taskID string) bool {
-	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	reader, ok := s.repo.(interface {
+		HasWorkingErrands(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false
+	}
+	working, err := reader.HasWorkingErrands(ctx, taskID)
 	if err != nil {
-		s.logger.Warn("skipping feeder task after errand session lookup failed",
+		s.logger.Warn("skipping feeder task after errand activity lookup failed",
 			zap.String("task_id", taskID), zap.Error(err))
 		return true
 	}
-	for _, session := range sessions {
-		if models.IsErrandSession(session) && isFeederMoveBlockingState(session.State) {
-			return true
-		}
-	}
-	return false
+	return working
 }
 
 func isFeederMoveBlockingState(state models.TaskSessionState) bool {

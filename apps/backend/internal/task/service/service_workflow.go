@@ -1343,12 +1343,10 @@ func (s *Service) feederCandidateSession(ctx context.Context, taskID string) (*m
 		if session == nil {
 			continue
 		}
-		// A running errand still blocks the move, but an errand is never the
-		// session the promotion is attributed to.
 		if isSessionMoveBlocked(session.State) {
 			return nil, true
 		}
-		if !isSessionActive(session.State) || models.IsErrandSession(session) {
+		if !isSessionActive(session.State) {
 			continue
 		}
 		if session.IsPrimary && primary == nil {
@@ -1357,6 +1355,13 @@ func (s *Service) feederCandidateSession(ctx context.Context, taskID string) (*m
 		if !session.IsPrimary && fallback == nil {
 			fallback = session
 		}
+	}
+	working, err := s.hasWorkingErrands(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("skipping feeder task after errand activity lookup failed", zap.String("task_id", taskID), zap.Error(err))
+	}
+	if working || err != nil {
+		return nil, true
 	}
 	if primary != nil {
 		return primary, false
@@ -1695,7 +1700,24 @@ func (s *Service) validateMoveSessions(ctx context.Context, taskID string, opts 
 			return fmt.Errorf("%w (%s)", ErrTaskMoveActiveSession, session.State)
 		}
 	}
+	working, err := s.hasWorkingErrands(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if working {
+		return fmt.Errorf("%w (active errand)", ErrTaskMoveActiveSession)
+	}
 	return nil
+}
+
+func (s *Service) hasWorkingErrands(ctx context.Context, taskID string) (bool, error) {
+	reader, ok := s.tasks.(interface {
+		HasWorkingErrands(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	return reader.HasWorkingErrands(ctx, taskID)
 }
 
 func isSessionMoveBlocked(state models.TaskSessionState) bool {

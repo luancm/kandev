@@ -5,27 +5,66 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// seedErrandParentAndErrand inserts an ordinary parent session and a newer
-// errand of it on taskID.
 func seedErrandParentAndErrand(
 	t *testing.T, repo *sqliterepo.Repository, taskID string, parentPrimary bool, errandState models.TaskSessionState,
 ) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Now().UTC()
 	must(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "parent", TaskID: taskID, State: models.TaskSessionStateWaitingForInput, IsPrimary: parentPrimary,
 		StartedAt: now, UpdatedAt: now,
 	}))
-	must(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "errand", TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: "parent",
-		State: errandState, StartedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
-	}))
+	row := &models.Errand{
+		ID: "errand", TaskID: taskID, ParentSessionID: "parent", Objective: "Inspect the workspace",
+		FirstTurnID: "errand-turn", SubmissionID: "errand-submission", AgentProfileID: "errand-profile",
+		Lifecycle: models.ErrandLifecycleLaunched, ResultState: models.ErrandResultNone,
+		CreatedAt: now.Add(time.Minute),
+	}
+	switch errandState {
+	case models.TaskSessionStateStarting:
+		row.Lifecycle = models.ErrandLifecycleQueued
+		row.AwaitingResult = true
+	case models.TaskSessionStateRunning:
+		row.AwaitingResult = true
+	default:
+		row.LastOutcome = models.ErrandOutcomeDone
+		row.LatestSettledTurnID = row.FirstTurnID
+	}
+	must(t, repo.CreateErrand(ctx, row))
+	if errandState == models.TaskSessionStateWaitingForInput {
+		return
+	}
+	descriptor, err := repo.ReserveErrandExecutionGeneration(ctx, row.ID, 0)
+	must(t, err)
+	if errandState == models.TaskSessionStateStarting {
+		return
+	}
+	bound, err := repo.BindErrandExecution(ctx, row.ID, descriptor.Generation, "errand-execution")
+	must(t, err)
+	require.True(t, bound)
+	must(t, repo.CreateErrandTurn(ctx, row.ID, &models.Turn{ID: row.FirstTurnID, TaskID: taskID}))
+	binding := &models.ErrandHarnessBinding{
+		ErrandID: row.ID, Generation: descriptor.Generation, ExecutionID: "errand-execution",
+		IncarnationID: "errand-incarnation", HarnessGeneration: 1, StreamID: "errand-stream", NativeSessionID: "native-errand",
+	}
+	must(t, repo.AppendErrandHarnessBinding(ctx, binding, 0))
+	payload := []byte("Inspect the workspace")
+	_, err = repo.PrepareErrandDeliverySubmission(ctx, &models.ErrandDeliveryAdmission{
+		ErrandID: row.ID, Generation: binding.Generation, ExecutionID: binding.ExecutionID,
+		IncarnationID: binding.IncarnationID, HarnessGeneration: binding.HarnessGeneration, StreamID: binding.StreamID,
+		NativeSessionID: binding.NativeSessionID, PromptGeneration: 1, TurnID: row.FirstTurnID,
+		Submission: &models.AgentDeliverySubmission{ID: row.SubmissionID, PayloadHash: journal.SubmissionHash(payload), Payload: payload},
+	})
+	must(t, err)
 }
 
 func promotedTaskMovedSessionID(t *testing.T, eventBus *MockEventBus, taskID string) (string, bool) {

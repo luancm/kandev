@@ -185,9 +185,12 @@ func TestErrandSkippedByChildCompletionParentPrompt(t *testing.T) {
 }
 
 // @covers AC-TASKS-ERRANDS-005.4
-func TestErrandRunningStillBlocksFeederPromotion(t *testing.T) {
-	for _, errandState := range []models.TaskSessionState{models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput} {
-		t.Run(string(errandState), func(t *testing.T) {
+func TestOwnedErrandActivityBlocksFeederPromotion(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		working bool
+	}{{"active", true}, {"settled", false}} {
+		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "s1", "step-limited")
@@ -197,7 +200,21 @@ func TestErrandRunningStillBlocksFeederPromotion(t *testing.T) {
 				}))
 			}
 			seedOrdinarySession(t, repo, "task-first", "first-parent", models.TaskSessionStateWaitingForInput, 0)
-			seedErrandSession(t, repo, "task-first", "first-parent", "first-errand", errandState)
+			row := &models.Errand{
+				ID: "first-errand", TaskID: "task-first", ParentSessionID: "first-parent",
+				FirstTurnID: "first-turn", SubmissionID: "first-submission",
+				Lifecycle: models.ErrandLifecycleLaunched, ResultState: models.ErrandResultNone,
+				AwaitingResult: test.working,
+			}
+			if !test.working {
+				row.LastOutcome = models.ErrandOutcomeDone
+				row.LatestSettledTurnID = row.FirstTurnID
+			}
+			require.NoError(t, repo.CreateErrand(ctx, row))
+			if test.working {
+				_, err := repo.ReserveErrandExecutionGeneration(ctx, row.ID, 0)
+				require.NoError(t, err)
+			}
 			stepGetter := newMockStepGetter()
 			stepGetter.steps["step-limited"] = &wfmodels.WorkflowStep{
 				ID: "step-limited", WorkflowID: "wf1", Name: "Limited", Position: 0, WIPLimit: 1, PullFromStepID: "step-feeder",
@@ -210,7 +227,7 @@ func TestErrandRunningStillBlocksFeederPromotion(t *testing.T) {
 			require.NoError(t, store.ApplyTransition(ctx, "t1", "s1", "step-limited", "step-next", "on_turn_complete"))
 
 			want := "task-first"
-			if errandState == models.TaskSessionStateRunning {
+			if test.working {
 				want = "task-second"
 			}
 			require.Equal(t, want, movedTaskID)

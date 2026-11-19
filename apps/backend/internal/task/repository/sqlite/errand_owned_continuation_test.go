@@ -171,10 +171,13 @@ func exerciseOwnedErrandContinuation(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := t.Context()
 	row := seedOwnedErrandCompletion(t, repo)
+	working, err := repo.HasWorkingErrands(ctx, row.TaskID)
+	require.NoError(t, err)
+	require.False(t, working, "projected terminal work no longer holds the workspace move guard")
 	request := models.ErrandContinuation{
 		TaskID: row.TaskID, ErrandID: row.ID, TurnID: "follow-up", SubmissionID: "prompt:errand:next-submission", AuthorID: "reader", Content: "Review the output",
 	}
-	_, err := repo.PrepareErrandContinuation(ctx, request)
+	_, err = repo.PrepareErrandContinuation(ctx, request)
 	require.ErrorIs(t, err, db.ErrErrandSettlementPending)
 	_, err = repo.GetErrandTurn(ctx, row.ID, request.TurnID)
 	require.ErrorIs(t, err, sql.ErrNoRows)
@@ -189,6 +192,9 @@ func exerciseOwnedErrandContinuation(t *testing.T, repo *Repository) {
 	require.Equal(t, &models.PreparedErrandContinuation{
 		Generation: 2, NativeID: "native", Predecessor: row.TeardownIntent.Target,
 	}, prepared)
+	working, err = repo.HasWorkingErrands(ctx, row.TaskID)
+	require.NoError(t, err)
+	require.True(t, working, "a reserved successor can allocate the workspace before prompt dispatch")
 	again, err := repo.PrepareErrandContinuation(ctx, request)
 	require.NoError(t, err)
 	require.Equal(t, prepared, again)
@@ -205,6 +211,9 @@ func exerciseOwnedErrandContinuation(t *testing.T, repo *Repository) {
 	require.Equal(t, request.Content, message.Content)
 	require.Empty(t, message.TaskSessionID)
 	bindAcceptedErrandContinuation(t, repo, request, prepared)
+	working, err = repo.HasWorkingErrands(ctx, row.TaskID)
+	require.NoError(t, err)
+	require.True(t, working, "an admitted successor holds the workspace move guard")
 	require.NoError(t, repo.DiscardUnallocatedErrandContinuation(ctx, request, prepared.Generation))
 	accepted, err := repo.PrepareErrandContinuation(ctx, request)
 	require.NoError(t, err)

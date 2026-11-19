@@ -78,6 +78,19 @@ func liveErrandPredicate(driver string) string {
  AND (s.state IN ('STARTING', 'RUNNING') OR e.last_outcome = '' OR ` + recoveryAttentionPredicate(driver) + `)))))`
 }
 
+// HasWorkingErrands reports owned allocations and admitted work that can still use the task workspace.
+func (r *Repository) HasWorkingErrands(ctx context.Context, taskID string) (bool, error) {
+	var working bool
+	err := r.ro.GetContext(ctx, &working, r.ro.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM task_session_errands e WHERE e.task_id=?
+		 AND e.lifecycle IN ('queued','launched') AND `+ownedErrandExists+` AND `+ownedErrandWorking(r.ro.DriverName())+`
+	)`), taskID)
+	if err != nil {
+		return false, fmt.Errorf("read errand workspace activity: %w", err)
+	}
+	return working, nil
+}
+
 const ownedErrandExists = `EXISTS (SELECT 1 FROM errand_execution_generations owner WHERE owner.errand_id=e.id)`
 
 func ownedErrandWorking(driver string) string {
