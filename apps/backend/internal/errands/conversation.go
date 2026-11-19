@@ -29,3 +29,21 @@ func (s *Service) ReadErrandMessages(ctx context.Context, taskID, errandID, befo
 	}
 	return messages, more, err
 }
+
+// MarkErrandRead acknowledges a message the browser has observed in the conversation.
+func (s *Service) MarkErrandRead(ctx context.Context, taskID, errandID, messageID string) error {
+	writer, ok := s.store.(interface {
+		AdvanceErrandReadCursor(context.Context, string, string, string) (bool, error)
+	})
+	if !ok {
+		return errors.New("errand conversation storage is unavailable")
+	}
+	changed, err := writer.AdvanceErrandReadCursor(ctx, taskID, errandID, messageID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		s.publishOwnedSnapshot(ctx, taskID, errandID, false)
+	}
+	return nil
+}

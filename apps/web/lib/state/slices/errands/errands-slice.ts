@@ -20,7 +20,6 @@ export const defaultErrandsState: ErrandsSliceState = {
     browserSummaryByTaskId: {},
     browserSummaryReadByTaskId: {},
     browserRevisionByTaskId: {},
-    unreadSignatureByTaskId: {},
     historyByOwnerId: {},
     detailBySessionId: {},
     detailOwnersBySessionId: {},
@@ -39,7 +38,6 @@ export function mergeErrandsHydrationState(
     browserSummaryByTaskId: {},
     browserSummaryReadByTaskId: {},
     browserRevisionByTaskId: {},
-    unreadSignatureByTaskId: {},
     historyByOwnerId: {},
     detailBySessionId: {},
     detailOwnersBySessionId: {},
@@ -239,7 +237,6 @@ function createOperationalErrandActions(
         delete draft.errands.browserSummaryByTaskId[taskId];
         delete draft.errands.browserSummaryReadByTaskId[taskId];
         delete draft.errands.browserRevisionByTaskId[taskId];
-        delete draft.errands.unreadSignatureByTaskId[taskId];
         for (const [ownerId, chain] of Object.entries(draft.errands.historyByOwnerId)) {
           if (chain.taskId === taskId) delete draft.errands.historyByOwnerId[ownerId];
         }
@@ -448,30 +445,8 @@ function createErrandHistoryPageAction(set: ImmerSet): Pick<ErrandsSlice, "setEr
 
 function createErrandBrowserInvalidationActions(
   set: ImmerSet,
-): Pick<
-  ErrandsSlice,
-  "markErrandBrowserUnread" | "advanceErrandBrowserRevision" | "removeErrandBrowserSession"
-> {
+): Pick<ErrandsSlice, "advanceErrandBrowserRevision" | "removeErrandBrowserSession"> {
   return {
-    markErrandBrowserUnread: (taskId, unreadSessionIds) =>
-      set((draft) => {
-        const signature = unreadSessionIds.slice().sort().join("\u0000");
-        if (draft.errands.unreadSignatureByTaskId[taskId] === signature) return;
-        draft.errands.unreadSignatureByTaskId[taskId] = signature;
-        const unreadIds = new Set(unreadSessionIds);
-        const summary = draft.errands.browserSummaryByTaskId[taskId];
-        if (summary) {
-          for (const row of summary.errands) row.unread = unreadIds.has(row.errand_id);
-        }
-        for (const chain of Object.values(draft.errands.historyByOwnerId)) {
-          if (chain.taskId !== taskId) continue;
-          for (const page of chain.pages) {
-            for (const row of page.errands) row.unread = unreadIds.has(row.errand_id);
-          }
-        }
-        nextBrowserRevision(draft, taskId);
-      }),
-
     advanceErrandBrowserRevision: (taskId) =>
       set((draft) => {
         nextBrowserRevision(draft, taskId);

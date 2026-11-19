@@ -58,9 +58,9 @@ func (r *Repository) persistErrandToolEventTx(ctx context.Context, tx *sqlx.Tx, 
 		return err
 	}
 	if exists {
-		_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_messages SET payload=?,updated_at=? WHERE errand_id=? AND id=? AND turn_id=?`), string(encoded), now, errandID, id, turn)
+		_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_messages SET payload=?,unread_candidate=?,updated_at=? WHERE errand_id=? AND id=? AND turn_id=?`), string(encoded), errandMessageUnreadCandidate(&message), now, errandID, id, turn)
 	} else {
-		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages (id,errand_id,turn_id,payload,created_at,updated_at) VALUES (?,?,?,?,?,?)`), id, errandID, turn, string(encoded), now, now)
+		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages (id,errand_id,turn_id,payload,unread_candidate,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`), id, errandID, turn, string(encoded), errandMessageUnreadCandidate(&message), now, now)
 	}
 	return err
 }

@@ -14,6 +14,7 @@ import {
 } from "@/lib/state/slices/errands/errands.test-helpers";
 import { registerWsHandlers } from "@/lib/ws/router";
 import { registerErrandsHandlers } from "./errands";
+import { registerTasksHandlers } from "./tasks";
 
 function withDeliveryState(errand: Errand, deliveryState: "received" | "uncertain"): Errand {
   return { ...errand, delivery_state: deliveryState };
@@ -221,4 +222,46 @@ it("applies committed context samples and clears to the existing passive row", (
     );
   expect(contextRow()).toEqual({ ...current, metadata: cleared.metadata });
   expect(rows()?.find((row) => row.errand_id === sibling.errand_id)).toEqual(sibling);
+});
+
+it("leaves owned unread rows and counts alone on ordinary session unread updates", () => {
+  const store = createAppStore();
+  store.getState().setConnectionStatus("connected");
+  const observation = {
+    connectionGeneration: store.getState().connection.generation ?? 0,
+    readScopeIdentity: stateReadScopeIdentity(store.getState()),
+    taskResetEpoch: 0,
+    observationRevision: 0,
+  };
+  const row = makeBrowserErrandRow({
+    status: "running",
+    live: true,
+    outstanding: true,
+    unread: true,
+  });
+  store.getState().beginErrandBrowserSummaryRead(ERRAND_TASK_ID, observation, "summary");
+  store
+    .getState()
+    .setErrandBrowserSummary(
+      ERRAND_TASK_ID,
+      makeBrowserSummary([row], { unread: 1 }),
+      observation,
+      "summary",
+    );
+
+  registerTasksHandlers(store)["task.status_summary.updated"]!({
+    id: "ordinary-unread",
+    type: "notification",
+    action: "task.status_summary.updated",
+    payload: {
+      task_id: ERRAND_TASK_ID,
+      workspace_id: "workspace",
+      status_summary: { unread_session_ids: [] },
+    },
+  } as never);
+
+  expect(selectErrandBrowserSummary(store.getState(), ERRAND_TASK_ID)).toEqual(
+    makeBrowserSummary([row], { unread: 1 }),
+  );
+  expect(store.getState().errands.browserRevisionByTaskId[ERRAND_TASK_ID] ?? 0).toBe(0);
 });

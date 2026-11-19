@@ -62,6 +62,21 @@ export async function getErrandMessages(
   return page;
 }
 
+/** Acknowledges an exact message from the owned transcript. */
+export async function markErrandRead(
+  taskId: string,
+  errandId: string,
+  messageId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await requireClient().request(
+    "errand.mark_read",
+    { task_id: taskId, errand_id: errandId, message_id: messageId },
+    undefined,
+    signal,
+  );
+}
+
 /** Every errand of a task, as the backend projects them. */
 export async function listErrands(taskId: string): Promise<Errand[]> {
   const response = await requireClient().request<ErrandListResponse>("errand.list", {

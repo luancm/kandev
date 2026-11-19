@@ -22,6 +22,7 @@ type ErrandService interface {
 	HistoryPage(ctx context.Context, request models.ErrandHistoryPageRequest, cursor string) (models.ErrandHistoryPage, string, error)
 	Inspect(ctx context.Context, taskID, childSessionID string) (models.ErrandBrowserInspection, error)
 	ReadErrandMessages(ctx context.Context, taskID, errandID, beforeMessageID string, limit int) ([]*models.Message, bool, error)
+	MarkErrandRead(ctx context.Context, taskID, errandID, messageID string) error
 	Lookup(ctx context.Context, errandID string) (*models.Errand, error)
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	CancelAll(ctx context.Context, taskID string) (int, error)
@@ -50,6 +51,7 @@ func (h *TaskHandlers) registerErrandWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionErrandHistoryPage, h.wsErrandHistoryPage)
 	dispatcher.RegisterFunc(ws.ActionErrandInspect, h.wsErrandInspect)
 	dispatcher.RegisterFunc(ws.ActionErrandMessages, h.wsErrandMessages)
+	dispatcher.RegisterFunc(ws.ActionErrandMarkRead, h.wsMarkErrandRead)
 	dispatcher.RegisterFunc(ws.ActionErrandContinue, h.wsContinueErrand)
 	dispatcher.RegisterFunc(ws.ActionErrandPermissionRespond, h.wsRespondToErrandPermission)
 	dispatcher.RegisterFunc(ws.ActionErrandCancel, h.wsCancelErrand)

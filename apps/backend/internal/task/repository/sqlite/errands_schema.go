@@ -33,6 +33,7 @@ var errandsSchemaStatements = []struct{ name, sql string }{
 			delivery_token TEXT NOT NULL DEFAULT '',
 			delivered_at TIMESTAMP,
 			latest_settled_turn_id TEXT NOT NULL DEFAULT '',
+			last_read_message_id TEXT NOT NULL DEFAULT '',
 			version BIGINT NOT NULL DEFAULT 1,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,

@@ -440,10 +440,6 @@ function handleTaskStatusSummaryUpdated(
   message: TaskStatusSummaryMessage,
 ): void {
   const { task_id: taskId, status_summary: summary, workspace_id: workspaceId } = message.payload;
-  const unreadSessionIds = summary.unread_session_ids;
-  if (Array.isArray(unreadSessionIds)) {
-    store.getState().markErrandBrowserUnread(taskId, unreadSessionIds);
-  }
   store.setState((state) =>
     updateTaskStatusSummaryInBothKanbans(
       applyTaskOverviewPatch(state, taskId, { id: taskId, statusSummary: summary }, workspaceId),

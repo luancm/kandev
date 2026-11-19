@@ -100,12 +100,18 @@ func exerciseErrandBrowserSummaryOracle(t *testing.T, repo *sqlite.Repository) {
 
 	unreadRow := seedBrowserOracleErrand(t, repo, taskID, parentID, base.Add(3*time.Minute), browserOracleRow{
 		id: "unread-history", lifecycle: models.ErrandLifecycleLaunched, outcome: models.ErrandOutcomeDone,
-		result: models.ErrandResultDelivered, state: models.TaskSessionStateCompleted,
+		result: models.ErrandResultDelivered,
 	})
 	unreadTurn := "turn-unread-" + suffix
-	createBrowserOracleTurn(t, repo, taskID, unreadRow.ID, unreadTurn, base)
-	createBrowserOracleMessage(t, repo, taskID, unreadRow.ID, unreadTurn, "unread-message-"+suffix,
-		models.MessageTypeMessage, nil, base.Add(4*time.Minute))
+	if err := repo.CreateErrandTurn(ctx, unreadRow.ID, &models.Turn{ID: unreadTurn}); err != nil {
+		t.Fatalf("create unread Errand turn: %v", err)
+	}
+	if err := repo.CreateErrandMessage(ctx, unreadRow.ID, &models.Message{
+		ID: "unread-message-" + suffix, TurnID: unreadTurn, AuthorType: models.MessageAuthorAgent,
+		Content: "output", CreatedAt: base.Add(4 * time.Minute),
+	}); err != nil {
+		t.Fatalf("create unread Errand output: %v", err)
+	}
 
 	recovery := seedBrowserOracleRecovery(t, repo, taskID, parentID, suffix, base.Add(5*time.Minute))
 
@@ -143,14 +149,6 @@ func exerciseErrandBrowserSummaryOracle(t *testing.T, repo *sqlite.Repository) {
 	if err != nil {
 		t.Fatalf("read current pending actions: %v", err)
 	}
-	ids := make([]string, 0, len(sessions))
-	for id := range sessions {
-		ids = append(ids, id)
-	}
-	unreadStates, err := repo.ListSessionUnreadState(ctx, ids)
-	if err != nil {
-		t.Fatalf("read authoritative unread state: %v", err)
-	}
 	want := models.ErrandBrowserCounts{}
 	for _, row := range complete {
 		session := sessions[row.ID]
@@ -164,8 +162,7 @@ func exerciseErrandBrowserSummaryOracle(t *testing.T, repo *sqlite.Repository) {
 		}
 		status := ProjectStatus(row, session, permissionPending, recoveryAttention)
 		live, outstanding := IsLive(status), IsOutstanding(row, recoveryAttention)
-		unreadState, hasUnread := unreadStates[row.ID]
-		isUnread := hasUnread && unreadState.Newest.After(unreadState.Read)
+		isUnread := row.ID == unreadRow.ID
 		actual := observed[row.ID]
 		if live || outstanding {
 			want := expectedErrandBrowserObservation(status, live, outstanding, isUnread, permissionPending, recoveryAttention)

@@ -130,7 +130,7 @@ func (r *Repository) persistErrandCanonicalMessageTx(ctx context.Context, tx *sq
 	if appended {
 		_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_messages SET payload=?,updated_at=? WHERE errand_id=? AND id=? AND turn_id=?`), string(encoded), now, errandID, id, turn)
 	} else {
-		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages (id,errand_id,turn_id,payload,created_at,updated_at) VALUES (?,?,?,?,?,?)`), id, errandID, turn, string(encoded), now, now)
+		_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages (id,errand_id,turn_id,payload,unread_candidate,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`), id, errandID, turn, string(encoded), errandMessageUnreadCandidate(&message), now, now)
 	}
 	return appended, err
 }

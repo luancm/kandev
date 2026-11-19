@@ -33,7 +33,6 @@ describe("errands slice", () => {
       browserSummaryByTaskId: {},
       browserSummaryReadByTaskId: {},
       browserRevisionByTaskId: {},
-      unreadSignatureByTaskId: {},
       historyByOwnerId: {},
       detailBySessionId: {},
       detailOwnersBySessionId: {},

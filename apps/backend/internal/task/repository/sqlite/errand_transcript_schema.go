@@ -26,10 +26,14 @@ func (r *Repository) initErrandTranscriptSchema() error {
 		{"errand_messages.table", `CREATE TABLE IF NOT EXISTS errand_messages (
  id TEXT PRIMARY KEY, errand_id TEXT NOT NULL, turn_id TEXT NOT NULL, payload TEXT NOT NULL,
  payload_digest TEXT NOT NULL DEFAULT '', payload_size BIGINT NOT NULL DEFAULT 0,
+ unread_candidate BOOLEAN NOT NULL DEFAULT FALSE,
  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
  FOREIGN KEY(errand_id) REFERENCES task_session_errands(id) ON DELETE CASCADE,
  FOREIGN KEY(errand_id,turn_id) REFERENCES errand_turns(errand_id,id) ON DELETE CASCADE)`},
-		{"errand_messages.order", `CREATE INDEX IF NOT EXISTS idx_errand_messages_order ON errand_messages(errand_id,created_at,id)`},
+		{"errand_messages.order", `CREATE INDEX IF NOT EXISTS idx_errand_messages_order
+ ON errand_messages(errand_id,created_at,` + dialect.ByteOrderedText(r.db.DriverName(), "id") + `)`},
+		{"errand_messages.unread", `CREATE INDEX IF NOT EXISTS idx_errand_messages_unread
+ ON errand_messages(errand_id,created_at DESC,` + dialect.ByteOrderedText(r.db.DriverName(), "id") + ` DESC) WHERE unread_candidate`},
 		{"errand_messages.turn", `CREATE INDEX IF NOT EXISTS idx_errand_messages_turn ON errand_messages(errand_id,turn_id,created_at,id)`},
 		{"errand_messages.payload_digest", `CREATE INDEX IF NOT EXISTS idx_errand_messages_payload_digest ON errand_messages(payload_digest)`},
 		{"errand_message_shell_output.table", `CREATE TABLE IF NOT EXISTS errand_message_shell_output (

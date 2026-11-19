@@ -60,6 +60,10 @@ func (f *fakeErrandService) ReadErrandMessages(context.Context, string, string, 
 	return nil, false, f.browserErr
 }
 
+func (f *fakeErrandService) MarkErrandRead(context.Context, string, string, string) error {
+	return f.browserErr
+}
+
 func (f *fakeErrandService) Lookup(_ context.Context, id string) (*models.Errand, error) {
 	if f.errand == nil || f.errand.ID != id {
 		return nil, errors.New("errand_not_found: " + id)

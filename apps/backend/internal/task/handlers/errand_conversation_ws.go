@@ -44,3 +44,26 @@ func (h *TaskHandlers) wsErrandMessages(ctx context.Context, msg *ws.Message) (*
 		TaskID: req.TaskID, ErrandID: req.ErrandID, Messages: messagesToAPI(messages), HasMore: more,
 	})
 }
+
+func (h *TaskHandlers) wsMarkErrandRead(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if refused := h.errandGuard(msg); refused != nil {
+		return refused, nil
+	}
+	var req struct {
+		TaskID    string `json:"task_id"`
+		ErrandID  string `json:"errand_id"`
+		MessageID string `json:"message_id"`
+	}
+	if err := msg.ParsePayload(&req); err != nil || req.TaskID == "" || req.ErrandID == "" || req.MessageID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, errand_id and message_id are required", nil)
+	}
+	if err := h.authorizeErrandTask(ctx, req.TaskID, authz.ScopeTaskWrite); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, errandTaskNotFound, nil)
+	}
+	if err := h.errands.MarkErrandRead(ctx, req.TaskID, req.ErrandID, req.MessageID); err != nil {
+		return h.errandFailure(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, struct {
+		Success bool `json:"success"`
+	}{Success: true})
+}

@@ -48,7 +48,6 @@ export type ErrandsSliceState = {
     browserSummaryByTaskId: Record<string, ErrandBrowserSummary>;
     browserSummaryReadByTaskId: Record<string, ErrandBrowserReadState>;
     browserRevisionByTaskId: Record<string, number>;
-    unreadSignatureByTaskId: Record<string, string>;
     historyByOwnerId: Record<string, ErrandHistoryChain>;
     /** Compact detail is retained only while a visible child reader owns it. */
     detailObservationRevisionBySessionId?: Record<string, number>;
@@ -98,7 +97,6 @@ export type ErrandsSliceActions = {
   failErrandHistoryRead: (ownerId: string, attemptId: string, error: unknown) => void;
   closeErrandHistory: (ownerId: string) => void;
   markErrandHistoryStale: (taskId: string, parentSessionId?: string) => void;
-  markErrandBrowserUnread: (taskId: string, unreadSessionIds: string[]) => void;
   advanceErrandBrowserRevision: (taskId: string, sessionId?: string) => void;
   removeErrandBrowserSession: (taskId: string, sessionId: string) => void;
   retainErrandDetail: (ownerId: string, sessionId: string) => void;

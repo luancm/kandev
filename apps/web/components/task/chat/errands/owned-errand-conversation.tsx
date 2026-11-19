@@ -9,6 +9,7 @@ import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import { selectErrandBrowserRowBySessionId } from "@/lib/state/slices/errands/selectors";
 import { isLiveErrand } from "@/lib/types/errands";
 import { MessageList } from "../message-list";
+import { usePageVisible } from "../use-session-read-tracking";
 import { ErrandHeader } from "./errand-header";
 import { ErrandStatusAnnouncer } from "./errand-status-announcer";
 import { OwnedErrandPermissionContext } from "./owned-errand-permission-context";
@@ -24,6 +25,8 @@ export function OwnedErrandConversation({
   onClose?: () => void;
 }) {
   const readScope = useAppStore(stateReadScopeIdentity);
+  const pageVisible = usePageVisible();
+  const errandsEnabled = useAppStore((state) => state.features.errands);
   const connected = useAppStore((state) => state.connection.status === "connected");
   const generation = useAppStore((state) => state.connection.generation ?? 0);
   const errand = useAppStore((state) => selectErrandBrowserRowBySessionId(state, taskId, errandId));
@@ -33,6 +36,7 @@ export function OwnedErrandConversation({
     errandId,
     readScope,
     connected,
+    acknowledgeVisible: pageVisible && errandsEnabled,
     revision: `${generation}:${transcriptRevision}:${errand?.updated_at ?? ""}`,
   });
   const processed = useProcessedMessages(transcript.messages, taskId, null, null, {

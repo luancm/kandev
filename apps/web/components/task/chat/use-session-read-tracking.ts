@@ -14,7 +14,7 @@ function subscribePageVisibility(onChange: () => void): () => void {
 }
 
 /** A background tab or minimized window is not reading its transcript. */
-function usePageVisible(): boolean {
+export function usePageVisible(): boolean {
   return useSyncExternalStore(
     subscribePageVisibility,
     () => document.visibilityState === "visible",

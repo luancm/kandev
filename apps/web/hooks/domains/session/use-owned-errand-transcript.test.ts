@@ -4,7 +4,11 @@ import { getErrandMessages } from "@/lib/api/domains/errand-api";
 import { sessionId, taskId as asTaskId } from "@/lib/types/http";
 import { useOwnedErrandTranscript } from "./use-owned-errand-transcript";
 
-vi.mock("@/lib/api/domains/errand-api", () => ({ getErrandMessages: vi.fn() }));
+const acknowledge = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/domains/errand-api", () => ({
+  getErrandMessages: vi.fn(),
+  markErrandRead: acknowledge,
+}));
 
 const read = vi.mocked(getErrandMessages);
 type Page = Awaited<ReturnType<typeof getErrandMessages>>;
@@ -29,7 +33,10 @@ function page(errandId: string, id: string, content: string, hasMore = false): P
   };
 }
 
-afterEach(() => read.mockReset());
+afterEach(() => {
+  read.mockReset();
+  acknowledge.mockReset();
+});
 
 it("loads an older owned page and refreshes the latest messages without losing history", async () => {
   read
@@ -89,4 +96,32 @@ it("aborts reads from the previous identity and never shows their results", asyn
   await waitFor(() =>
     expect(result.current.messages.map((m) => m.content)).toEqual(["current answer"]),
   );
+});
+
+it("acknowledges the newest loaded message only while the conversation is visible", async () => {
+  read.mockResolvedValueOnce(page("errand-1", "latest", "answer"));
+  acknowledge.mockResolvedValue(undefined);
+  const { result, rerender } = renderHook(
+    (visible) => {
+      const visibility = { acknowledgeVisible: visible };
+      return useOwnedErrandTranscript({
+        ...visibility,
+        taskId,
+        errandId: "errand-1",
+        readScope: "user-1",
+        revision: 1,
+        connected: true,
+      });
+    },
+    { initialProps: false },
+  );
+  await waitFor(() => expect(result.current.status).toBe("ready"));
+  expect(acknowledge).not.toHaveBeenCalled();
+  rerender(true);
+  await waitFor(() =>
+    expect(acknowledge).toHaveBeenCalledWith(taskId, "errand-1", "latest", expect.any(AbortSignal)),
+  );
+  rerender(false);
+  rerender(true);
+  expect(acknowledge).toHaveBeenCalledTimes(1);
 });

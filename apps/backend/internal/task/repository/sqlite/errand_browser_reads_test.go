@@ -247,69 +247,6 @@ func markErrandFinished(item *models.Errand) {
 	item.ResultState = models.ErrandResultDelivered
 }
 
-func TestErrandBrowserUnreadMatchesCanonicalMicrosecondRank(t *testing.T) {
-	exerciseErrandBrowserUnreadMatchesCanonicalMicrosecondRank(t, newRepoForSessionTests(t))
-}
-
-func TestPostgresErrandBrowserUnreadMatchesCanonicalMicrosecondRank(t *testing.T) {
-	exerciseErrandBrowserUnreadMatchesCanonicalMicrosecondRank(t, newPostgresErrandRepo(t))
-}
-
-func exerciseErrandBrowserUnreadMatchesCanonicalMicrosecondRank(t *testing.T, repo *Repository) {
-	t.Helper()
-	ctx := t.Context()
-	taskID := newErrandTask(t, repo, "browser-unread-microsecond")
-	const (
-		parentID = "browser-unread-parent"
-		childID  = "browser-unread-child"
-		turnID   = "browser-unread-turn"
-	)
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: parentID, TaskID: taskID, Role: "primary",
-		State: models.TaskSessionStateWaitingForInput,
-	})
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: childID, TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: parentID,
-		State: models.TaskSessionStateRunning,
-	})
-	item := sampleErrand(childID, taskID, parentID, errandScenarioBase)
-	item.Lifecycle = models.ErrandLifecycleLaunched
-	item.AwaitingResult = false
-	mustCreateErrand(t, repo, item)
-	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`), turnID, childID, taskID, errandScenarioBase, errandScenarioBase, errandScenarioBase)
-	require.NoError(t, err)
-	for _, message := range []struct {
-		id        string
-		createdAt time.Time
-	}{
-		{id: "z-read-cursor", createdAt: time.Date(2026, 11, 12, 9, 0, 0, 123456100, time.UTC)},
-		{id: "a-same-microsecond", createdAt: time.Date(2026, 11, 12, 9, 0, 0, 123456900, time.UTC)},
-	} {
-		_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
-			INSERT INTO task_session_messages
-				(id, task_session_id, task_id, turn_id, author_type, author_id, content,
-				 requests_input, type, metadata, created_at)
-			VALUES (?, ?, ?, ?, 'agent', '', '', 0, 'message', '{}', ?)
-		`), message.id, childID, taskID, turnID, message.createdAt)
-		require.NoError(t, err)
-	}
-	_, err = repo.db.ExecContext(ctx, repo.db.Rebind(
-		`UPDATE task_sessions SET last_read_message_id = ? WHERE id = ?`,
-	), "z-read-cursor", childID)
-	require.NoError(t, err)
-
-	authority, err := repo.ListSessionUnreadState(ctx, []string{childID})
-	require.NoError(t, err)
-	require.False(t, authority[childID].Unread(), "same-microsecond lower ID is not after the read cursor")
-	summary, err := repo.GetErrandBrowserSummary(ctx, taskID)
-	require.NoError(t, err)
-	require.Len(t, summary.Errands, 1)
-	require.Equal(t, authority[childID].Unread(), summary.Errands[0].Unread)
-}
-
 func TestPostgresErrandHistoryAcceptsZeroTimestampCursor(t *testing.T) {
 	repo := newPostgresErrandRepo(t)
 	taskID := newErrandTask(t, repo, "browser-history-zero-cursor")
@@ -606,6 +543,7 @@ func exerciseErrandBrowserHistoryIndex(t *testing.T, repo *Repository) {
 		t.Logf("production history plan (driver=%s, continuation=%t):\n%s",
 			repo.ro.DriverName(), current.Cursor != nil, plan)
 		require.Contains(t, plan, errBrowserHistoryIndexName, "production history query plan: %s", plan)
+		require.Contains(t, plan, "idx_errand_messages_unread", "find the latest unread candidate by indexed owner and rank")
 		if dialect.IsPostgres(repo.ro.DriverName()) {
 			if strings.Contains(plan, "Sort Key: e.created_at") {
 				require.Contains(t, plan, `Sort Key: e.created_at DESC, e.id COLLATE "C"`, "production history query plan: %s", plan)

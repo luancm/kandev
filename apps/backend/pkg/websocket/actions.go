@@ -418,6 +418,7 @@ const (
 	ActionErrandHistoryPage       = "errand.history_page"
 	ActionErrandInspect           = "errand.inspect"
 	ActionErrandMessages          = "errand.messages"
+	ActionErrandMarkRead          = "errand.mark_read"
 	ActionErrandContinue          = "errand.continue"
 	ActionErrandPermissionRespond = "errand.permission.respond"
 	ActionErrandTranscriptChanged = "errand.transcript_changed"

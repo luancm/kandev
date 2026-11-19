@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 // CreateErrandMessage stores large shell output separately from its summary.
@@ -61,8 +62,12 @@ func insertErrandMessageTx(ctx context.Context, tx *sqlx.Tx, errandID string, ro
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages(id,errand_id,turn_id,payload,payload_digest,payload_size,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`), row.ID, errandID, row.TurnID, string(encoded), row.PayloadDigest, row.PayloadSize, row.CreatedAt, row.UpdatedAt)
+	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO errand_messages(id,errand_id,turn_id,payload,payload_digest,payload_size,unread_candidate,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`), row.ID, errandID, row.TurnID, string(encoded), row.PayloadDigest, row.PayloadSize, errandMessageUnreadCandidate(row), row.CreatedAt, row.UpdatedAt)
 	return err
+}
+
+func errandMessageUnreadCandidate(message *models.Message) bool {
+	return statussummary.IsUnreadQualifyingMessage(string(message.AuthorType), string(message.Type), message.Content, message.Metadata)
 }
 
 const errandMessageColumns = `m.id, e.task_id, m.turn_id, m.payload, m.payload_digest, m.payload_size, m.created_at, m.updated_at`
@@ -142,7 +147,7 @@ func (r *Repository) updateErrandMessageTx(ctx context.Context, tx *sqlx.Tx, err
 	if err != nil {
 		return models.Message{}, err
 	}
-	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_messages SET payload=?,payload_digest=?,payload_size=?,updated_at=? WHERE errand_id=? AND id=? AND turn_id=?`), string(encoded), row.PayloadDigest, row.PayloadSize, row.UpdatedAt, errandID, row.ID, row.TurnID)
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE errand_messages SET payload=?,payload_digest=?,payload_size=?,unread_candidate=?,updated_at=? WHERE errand_id=? AND id=? AND turn_id=?`), string(encoded), row.PayloadDigest, row.PayloadSize, errandMessageUnreadCandidate(&row), row.UpdatedAt, errandID, row.ID, row.TurnID)
 	if err != nil {
 		return models.Message{}, err
 	}
@@ -205,16 +210,17 @@ func (r *Repository) ListErrandMessages(ctx context.Context, errandID, beforeMes
 		limit = 500
 	}
 	query := `SELECT ` + errandMessageColumns + ` FROM errand_messages m JOIN task_session_errands e ON e.id=m.errand_id WHERE m.errand_id=?`
+	orderedID := dialect.ByteOrderedText(r.ro.DriverName(), "m.id")
 	args := []any{errandID}
 	if beforeMessageID != "" {
 		cursor, err := r.GetErrandMessage(ctx, errandID, beforeMessageID)
 		if err != nil {
 			return nil, false, err
 		}
-		query += ` AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))`
+		query += ` AND (m.created_at < ? OR (m.created_at = ? AND ` + orderedID + ` < ?))`
 		args = append(args, cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 	}
-	query += ` ORDER BY m.created_at DESC,m.id DESC LIMIT ?`
+	query += ` ORDER BY m.created_at DESC,` + orderedID + ` DESC LIMIT ?`
 	args = append(args, limit+1)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {

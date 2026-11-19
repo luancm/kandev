@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getErrandMessages } from "@/lib/api/domains/errand-api";
+import { getErrandMessages, markErrandRead } from "@/lib/api/domains/errand-api";
 import type { Message } from "@/lib/types/http";
 import type { MessageHistoryStatus } from "./use-message-fetch-state";
 
@@ -28,6 +28,27 @@ function refreshTranscript(previous: Transcript, key: string, page: MessagePage)
   return { key, messages: page.messages, hasMore: page.has_more, status: "ready" };
 }
 
+function useOwnedErrandReadCursor(
+  visible: boolean,
+  key: string,
+  taskId: string,
+  errandId: string,
+  messageId: string | undefined,
+) {
+  const acknowledged = useRef<{ key: string; messageId: string } | null>(null);
+  useEffect(() => {
+    if (!visible || !messageId) return;
+    if (acknowledged.current?.key === key && acknowledged.current.messageId === messageId) return;
+    const controller = new AbortController();
+    void markErrandRead(taskId, errandId, messageId, controller.signal)
+      .then(() => {
+        if (!controller.signal.aborted) acknowledged.current = { key, messageId };
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [errandId, key, messageId, taskId, visible]);
+}
+
 /** Observes a visible Errand without hydrating an ordinary conversation. */
 export function useOwnedErrandTranscript({
   taskId,
@@ -35,12 +56,14 @@ export function useOwnedErrandTranscript({
   readScope,
   revision,
   connected,
+  acknowledgeVisible = false,
 }: {
   taskId: string;
   errandId: string;
   readScope: string;
   revision: string | number;
   connected: boolean;
+  acknowledgeVisible?: boolean;
 }) {
   const key = JSON.stringify([readScope, taskId, errandId]);
   const [snapshot, setSnapshot] = useState(emptyTranscript);
@@ -51,6 +74,13 @@ export function useOwnedErrandTranscript({
     controller: AbortController;
   } | null>(null);
   const transcript = snapshot.key === key ? snapshot : emptyTranscript;
+  useOwnedErrandReadCursor(
+    connected && acknowledgeVisible,
+    key,
+    taskId,
+    errandId,
+    transcript.status === "ready" ? transcript.messages.at(-1)?.id : undefined,
+  );
 
   useEffect(() => {
     if (!connected) return;

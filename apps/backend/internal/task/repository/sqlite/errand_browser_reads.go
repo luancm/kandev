@@ -5,14 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 const (
@@ -444,33 +442,6 @@ func errandBrowserPermissionPredicate(driver string) string {
 			WHERE clarification.task_session_id = s.id AND clarification.type = 'clarification_request'
 			AND clarification.turn_id = ` + currentTurn + `
 			AND COALESCE(` + clarificationStatus + `, '') IN ('', 'pending')))`
-}
-
-func errandBrowserUnreadPredicate(driver string) string {
-	types := make([]string, 0)
-	for _, messageType := range statussummary.UnreadCandidateMessageTypes() {
-		types = append(types, "'"+strings.ReplaceAll(messageType, "'", "''")+"'")
-	}
-	messageTypes := strings.Join(types, ", ")
-	scriptType := dialect.JSONExtract(driver, "m.metadata", "script_type")
-	parentToolCall := dialect.JSONExtract(driver, "m.metadata", "parent_tool_call_id")
-	recoveryActions := dialect.ExcludeTruthyMetadataPredicate(driver, "m.metadata", "recovery_actions")
-	actionsType := dialect.JSONType(driver, "m.metadata", "actions")
-	messageCreatedAt := dialect.NormalizedMicrosecond(driver, "m.created_at")
-	cursorCreatedAt := dialect.NormalizedMicrosecond(driver, "cursor_message.created_at")
-	messageID := dialect.ByteOrderedText(driver, "m.id")
-	cursorMessageID := dialect.ByteOrderedText(driver, "cursor_message.id")
-	return `EXISTS (SELECT 1 FROM task_session_messages m
-		LEFT JOIN task_session_messages cursor_message ON cursor_message.id = s.last_read_message_id
-		WHERE m.task_session_id = e.id AND m.author_type <> 'user'
-		AND m.type IN (` + messageTypes + `)
-		AND (s.last_read_message_id IS NULL OR cursor_message.id IS NULL
-			OR ` + messageCreatedAt + ` > ` + cursorCreatedAt + ` OR (` + messageCreatedAt + ` = ` + cursorCreatedAt + ` AND ` + messageID + ` > ` + cursorMessageID + `))
-		AND NOT (m.type = 'script_execution' AND COALESCE(` + scriptType + `, '') = 'setup')
-		AND COALESCE(` + parentToolCall + `, '') = ''
-		AND NOT (m.type = 'status' AND m.content IN ('New session started', 'Session resumed'))
-		AND ` + recoveryActions + `
-		AND COALESCE(` + actionsType + `, '') <> 'array')`
 }
 
 func errandAwaitProjectionFor(alias string) string {

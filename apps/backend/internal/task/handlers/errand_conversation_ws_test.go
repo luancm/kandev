@@ -12,7 +12,13 @@ import (
 
 type ownedConversationService struct {
 	*fakeErrandService
-	requests int
+	requests     int
+	acknowledged [][3]string
+}
+
+func (s *ownedConversationService) MarkErrandRead(_ context.Context, taskID, errandID, messageID string) error {
+	s.acknowledged = append(s.acknowledged, [3]string{taskID, errandID, messageID})
+	return nil
 }
 
 func (s *ownedConversationService) ReadErrandMessages(_ context.Context, taskID, errandID, before string, limit int) ([]*models.Message, bool, error) {
@@ -55,4 +61,21 @@ func TestErrandConversationRouteIsTaskScoped(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
 	require.Equal(t, 1, svc.requests, "foreign requests must be refused before reading the transcript")
+}
+
+func TestErrandMarkReadRouteRequiresTaskWriteAccess(t *testing.T) {
+	svc := &ownedConversationService{fakeErrandService: &fakeErrandService{errand: sampleErrand()}}
+	dispatcher := ws.NewDispatcher()
+	errandHandlers(t, svc, true).registerErrandWS(dispatcher)
+	message := errandMessage(t, "errand.mark_read", map[string]any{
+		"task_id": "task-b", "errand_id": "errand-1", "message_id": "observed-output",
+	})
+	response, err := dispatcher.Dispatch(errandCallerAs("user-b"), message)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+
+	response, err = dispatcher.Dispatch(errandCallerAs("user-a"), message)
+	require.NoError(t, err)
+	require.Equal(t, ws.ErrorCodeNotFound, decodeError(t, response).Code)
+	require.Equal(t, [][3]string{{"task-b", "errand-1", "observed-output"}}, svc.acknowledged)
 }
