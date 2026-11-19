@@ -18,14 +18,14 @@ Show enough context-window information in the task-wide Errands panel to identif
 
 #### Acceptance criteria
 
-- **AC-TASKS-ERRANDS-CONTEXT-001.1:** When an errand has a usable context-window reading, its row in the desktop Errands panel and phone drawer shall show compact localized used-token and window-capacity counts plus a passive usage bar for that child. Each row shall use its own child session's reading, including retained completed errands; context occupancy shall not be derived from the parent's context or cumulative token accounting.
+- **AC-TASKS-ERRANDS-CONTEXT-001.1:** When an errand has a usable context-window reading, its row in the desktop Errands panel and phone drawer shall show compact localized used-token and window-capacity counts plus a passive usage bar. Each row shall use its own Errand conversation’s reading, including retained completed Errands. Context occupancy depends on the reported window and its usage.
 - **AC-TASKS-ERRANDS-CONTEXT-001.2:** The readout shall follow the existing context-display semantics: unavailable or impossible reports are omitted, a known window with zero reported usage is explicitly unmeasured rather than numeric zero, and an exactly full window displays 100%. A newer sample shall update the row without opening the child. An explicit clear shall remove the old reading until a fresh sample; retained metadata shall restore the same information after reload.
 - **AC-TASKS-ERRANDS-CONTEXT-001.3:** Showing context information shall remain passive: opening the Errands panel shall not open child chats, start or resume agents, create child-detail subscriptions, or introduce additional context requests or polling. Context occupancy shall not alter errand status, attention/live counts, cancellation or workflow ownership.
 - **AC-TASKS-ERRANDS-CONTEXT-001.4:** Phone and coarse-pointer rows shall retain one Open target of at least 44px with readable context information and no nested interactive controls. Desktop keyboard access, narrow fine-pointer phone layouts, grouped list scrolling, the fixed bulk-action footer and viewport containment shall remain intact. Context information shall be accessible without hover; Open shall retain the existing full child view and Back path.
 
 ## Exclusions
 
-No aggregate context counter, extra pill, context indicator in historical start/finished cards, new row action, automatic reset, warning notification, context-limit inference or new provider telemetry contract is introduced. Existing persisted telemetry may be included in the compact session summary needed for reload. Source and compaction details remain in the opened child's existing context display. Provider/executor support is inherited from existing session context reporting; missing telemetry remains unavailable.
+No aggregate context counter, extra pill, context indicator in historical start/finished cards, new row action, automatic reset, warning notification, context-limit inference or new provider telemetry contract is introduced. The compact Errand summary carries persisted context telemetry for reload. Source and compaction details remain in the opened conversation’s context display. Provider and executor support follows existing context reporting.
 
 ## Presentation refinement, 2026-10-30
 

@@ -82,10 +82,19 @@ func TestBusPublisherRoutesByWorkspaceAndSkipsUnresolvedWorkspaces(t *testing.T)
 		t.Fatal("payload lacks can_send_result")
 	}
 
-	(&Service{events: publisher}).publishSnapshot(context.Background(), Snapshot{Errand: errand, Status: models.ErrandStatusNeedsAttention, AttentionReason: models.ErrandAttentionRecoveryUnresolved})
+	(&Service{events: publisher}).publishSnapshot(context.Background(), Snapshot{
+		Errand: errand, Status: models.ErrandStatusNeedsAttention, AttentionReason: models.ErrandAttentionRecoveryUnresolved,
+		ContextMetadata: map[string]any{models.SessionMetaKeyContextWindow: nil},
+		ContextOnly:     true,
+	})
 	payload = <-received
 	if payload["attention_reason"] != "recovery_unresolved" {
 		t.Fatalf("lost recovery reason: %v", payload)
+	}
+	metadata, ok := payload["metadata"].(map[string]any)
+	clear, exists := metadata[models.SessionMetaKeyContextWindow]
+	if !ok || !exists || clear != nil || payload["context_only"] != true {
+		t.Fatalf("lost authoritative context clear: %v", payload)
 	}
 	publisher.PublishErrandUpdated(context.Background(), &models.Errand{ID: "e2", TaskID: "orphan"}, models.ErrandStatusQueued)
 	select {

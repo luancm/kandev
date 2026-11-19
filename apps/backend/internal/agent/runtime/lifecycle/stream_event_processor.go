@@ -317,14 +317,15 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		}
 		return nil
 	}
-	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && prepared.durableEvent != nil && prepared.event.Type == streams.EventTypePermissionRequest {
+	if execution != nil && execution.Owner.Kind == ExecutionOwnerErrand && prepared.durableEvent != nil &&
+		(prepared.event.Type == streams.EventTypePermissionRequest || prepared.event.Type == streams.EventTypeContextWindow) {
 		if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, prepared.durableEvent, delivery, prepared.deliveryEffect); err != nil {
 			return err
 		}
 		if !prepared.skipAcknowledgement {
 			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
 		}
-		if !prepared.skipCallback && execution.errandPermissionCurrent(prepared.event) {
+		if !prepared.skipCallback && (prepared.event.Type == streams.EventTypeContextWindow || execution.errandPermissionCurrent(prepared.event)) {
 			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
 		}
 		return nil

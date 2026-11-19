@@ -22,6 +22,28 @@ func (m *Manager) SetErrandRecoveryRefresh(refresh func(context.Context, string,
 	m.streamManager.deliveryMu.Unlock()
 }
 
+// SetErrandContextRefresh connects committed context updates to the browser publisher.
+func (m *Manager) SetErrandContextRefresh(refresh func(context.Context, string, string)) {
+	if m.streamManager == nil {
+		return
+	}
+	m.streamManager.deliveryMu.Lock()
+	m.streamManager.errandContextRefresh = refresh
+	m.streamManager.deliveryMu.Unlock()
+}
+
+func (sm *StreamManager) refreshErrandContext(owner ExecutionOwner) {
+	sm.deliveryMu.RLock()
+	refresh := sm.errandContextRefresh
+	sm.deliveryMu.RUnlock()
+	if refresh == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	refresh(ctx, owner.TaskID, owner.ErrandID)
+}
+
 func (sm *StreamManager) projectErrandRecovery(ctx context.Context, identity DeliveryReconciliationIdentity, phase DeliveryReconciliationPhase) {
 	if sm == nil || (phase != DeliveryReconciliationPhaseUncertain && phase != DeliveryReconciliationPhaseRecovered) {
 		return

@@ -22,7 +22,6 @@ export type ErrandDeliveryState = "received" | "uncertain";
 
 /** Browser projection of one errand, mirroring the backend `ErrandDTO`. */
 export type Errand = {
-  /** Equals the errand's session ID; a queued errand has no session row yet. */
   errand_id: string;
   task_id: string;
   parent_session_id: string;
@@ -41,6 +40,8 @@ export type Errand = {
   created_at: string;
   updated_at: string;
   settled_at: string | null;
+  metadata?: ErrandBrowserContextMetadata;
+  context_only?: boolean;
   /**
    * Server-computed eligibility for **Send result to parent**: the errand is
    * done or failed and its latest settled turn is not yet a result.

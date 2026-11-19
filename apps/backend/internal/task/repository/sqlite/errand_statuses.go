@@ -2,13 +2,18 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 func (r *Repository) ReadErrandStatuses(ctx context.Context, taskID, errandID string) (map[string]models.ErrandBrowserObservation, error) {
 	driver := r.ro.DriverName()
-	query := `SELECT e.id,` + errandBrowserStatusExpression(driver) + `,` + errandBrowserAttentionExpression(driver) + `
+	contextColumn := "NULL"
+	if errandID != "" {
+		contextColumn = errandContextMetadataColumn
+	}
+	query := `SELECT e.id,` + errandBrowserStatusExpression(driver) + `,` + errandBrowserAttentionExpression(driver) + `,` + contextColumn + `
 		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id=e.id
 		WHERE e.task_id=? AND ` + validErrandBrowserIdentity()
 	args := []any{taskID}
@@ -24,8 +29,18 @@ func (r *Repository) ReadErrandStatuses(ctx context.Context, taskID, errandID st
 	statuses := make(map[string]models.ErrandBrowserObservation)
 	for rows.Next() {
 		var item models.ErrandBrowserObservation
-		if err := rows.Scan(&item.ID, &item.Status, &item.AttentionReason); err != nil {
+		var contextMetadata sql.NullString
+		if err := rows.Scan(&item.ID, &item.Status, &item.AttentionReason, &contextMetadata); err != nil {
 			return nil, err
+		}
+		if errandID != "" {
+			item.ContextMetadata, err = decodeErrandContextMetadata(contextMetadata.String)
+			if err != nil {
+				return nil, err
+			}
+			if item.ContextMetadata == nil {
+				item.ContextMetadata = map[string]any{models.SessionMetaKeyContextWindow: nil}
+			}
 		}
 		item.AttentionReason = models.ProjectErrandAttentionReason(item.Status, item.AttentionReason)
 		statuses[item.ID] = item

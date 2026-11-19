@@ -88,16 +88,27 @@ function markHistoryChainsStale(
   }
 }
 
-function nextBrowserRevision(state: AppState, taskId: string): number {
-  const next = (state.errands.browserRevisionByTaskId[taskId] ?? 0) + 1;
+function nextBrowserRevision(state: AppState, taskId: string, contextOnly = false): number {
+  const previous = state.errands.browserRevisionByTaskId[taskId] ?? 0;
+  const next = previous + 1;
   state.errands.browserRevisionByTaskId[taskId] = next;
-  markHistoryChainsStale(state.errands.historyByOwnerId, taskId);
+  if (contextOnly) {
+    const read = state.errands.browserSummaryReadByTaskId[taskId];
+    if (read?.status === "loaded" && read.observationRevision === previous) {
+      read.observationRevision = next;
+    }
+  } else {
+    markHistoryChainsStale(state.errands.historyByOwnerId, taskId);
+  }
   return next;
 }
 
 function compactFromEvent(existing: ErrandBrowserRow, incoming: Errand): ErrandBrowserRow {
+  const metadata = incoming.metadata && { ...existing.metadata, ...incoming.metadata };
+  if (incoming.context_only) return metadata ? { ...existing, metadata } : existing;
   return {
     ...existing,
+    ...(metadata && { metadata }),
     title: incoming.title,
     agent_profile_id: incoming.agent_profile_id,
     status: incoming.status,
@@ -116,28 +127,31 @@ function compactFromEvent(existing: ErrandBrowserRow, incoming: Errand): ErrandB
   };
 }
 
+function updateCompactRow(
+  rows: ErrandBrowserRow[],
+  incoming: Errand,
+  section: "summary" | "history",
+): void {
+  const index = rows.findIndex((row) => row.errand_id === incoming.errand_id);
+  if (index < 0) return;
+  const updated = compactFromEvent(rows[index], incoming);
+  const belongs =
+    section === "summary" ? updated.outstanding : !updated.live && !updated.outstanding;
+  if (incoming.context_only || belongs) rows[index] = updated;
+  else rows.splice(index, 1);
+}
+
 function updateKnownBrowserRows(state: AppState, incoming: Errand): void {
   const inspection = state.errands.detailBySessionId[incoming.errand_id];
   if (inspection?.scope.task_id === incoming.task_id) {
     inspection.errand = compactFromEvent(inspection.errand, incoming);
   }
   const summary = state.errands.browserSummaryByTaskId[incoming.task_id];
-  if (summary) {
-    const index = summary.errands.findIndex((row) => row.errand_id === incoming.errand_id);
-    if (index >= 0) {
-      const updated = compactFromEvent(summary.errands[index], incoming);
-      if (!updated.outstanding) summary.errands.splice(index, 1);
-      else summary.errands[index] = updated;
-    }
-  }
+  if (summary) updateCompactRow(summary.errands, incoming, "summary");
   for (const chain of Object.values(state.errands.historyByOwnerId)) {
     if (chain.taskId !== incoming.task_id) continue;
     for (const page of chain.pages) {
-      const index = page.errands.findIndex((row) => row.errand_id === incoming.errand_id);
-      if (index < 0) continue;
-      const updated = compactFromEvent(page.errands[index], incoming);
-      if (updated.live || updated.outstanding) page.errands.splice(index, 1);
-      else page.errands[index] = updated;
+      updateCompactRow(page.errands, incoming, "history");
     }
   }
 }
@@ -186,6 +200,12 @@ function applyOperationalErrand(state: AppState, snapshot: Errand): boolean {
   const errands = state.errands.byTaskId[taskId];
   const existing = newestKnownErrand(state, taskId, snapshot.errand_id);
   if (isOlderErrand(snapshot, existing)) return false;
+  if (snapshot.context_only) {
+    if (!snapshot.metadata) return false;
+    const current = errands?.[snapshot.errand_id];
+    if (current) current.metadata = { ...current.metadata, ...snapshot.metadata };
+    return true;
+  }
   if (isLiveErrand(snapshot))
     (state.errands.byTaskId[taskId] ??= {})[snapshot.errand_id] = snapshot;
   else if (errands) delete errands[snapshot.errand_id];
@@ -203,7 +223,7 @@ function createOperationalErrandActions(
         if (draft.errands.removedSessionIdsByTaskId[taskId]?.[snapshot.errand_id]) return;
         if (!applyOperationalErrand(draft, snapshot)) return;
         updateKnownBrowserRows(draft, snapshot);
-        const browserRevision = nextBrowserRevision(draft, taskId);
+        const browserRevision = nextBrowserRevision(draft, taskId, snapshot.context_only);
         if (draft.errands.detailBySessionId[snapshot.errand_id]) {
           (draft.errands.detailObservationRevisionBySessionId ??= {})[snapshot.errand_id] =
             browserRevision;

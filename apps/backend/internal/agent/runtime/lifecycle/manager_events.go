@@ -791,6 +791,12 @@ func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.Age
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
 // Returns true because no further stream publishing is needed.
 func (m *Manager) handleContextWindowEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if execution.Owner.Kind == ExecutionOwnerErrand {
+		if m.streamManager != nil && event.DeliverySequence > 0 {
+			m.streamManager.refreshErrandContext(execution.Owner)
+		}
+		return
+	}
 	m.logger.Debug("context window update received",
 		zap.String("execution_id", execution.ID),
 		zap.Int64("size", event.ContextWindowSize),

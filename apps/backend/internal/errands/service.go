@@ -60,6 +60,8 @@ type Snapshot struct {
 	Errand          *models.Errand
 	Status          models.ErrandStatus
 	AttentionReason models.ErrandAttentionReason
+	ContextMetadata map[string]any
+	ContextOnly     bool
 }
 
 // New builds a Service. It does not start its cascade worker; call
@@ -171,6 +173,10 @@ func (s *Service) ProjectSnapshot(ctx context.Context, errand *models.Errand) (S
 // publish emits errand.updated for a durable change. The status is projected
 // from current state; a projection failure is logged and publishes nothing.
 func (s *Service) publish(ctx context.Context, errand *models.Errand) {
+	s.publishErrandUpdate(ctx, errand, false)
+}
+
+func (s *Service) publishErrandUpdate(ctx context.Context, errand *models.Errand, contextOnly bool) {
 	if errand.DeliveredRoute == models.ErrandDeliveryAwait || errand.DeliveryState != "" {
 		current, err := s.store.GetErrand(ctx, errand.ID)
 		if err != nil {
@@ -185,6 +191,7 @@ func (s *Service) publish(ctx context.Context, errand *models.Errand) {
 			zap.String("errand_id", errand.ID), zap.Error(err))
 		return
 	}
+	snapshot.ContextOnly = contextOnly
 	s.publishSnapshot(ctx, snapshot)
 }
 

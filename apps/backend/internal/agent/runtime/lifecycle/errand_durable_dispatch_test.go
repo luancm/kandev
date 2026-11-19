@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -144,6 +145,29 @@ func TestErrandDurableEventUsesOwnerTransportIdentity(t *testing.T) {
 	require.Equal(t, "task", event.TaskID)
 	require.Equal(t, "execution", event.ExecutionID)
 	require.Equal(t, "stream", event.ExpectedStreamID)
+}
+
+func TestOwnedErrandContextNotifiesAfterProjection(t *testing.T) {
+	execution := &AgentExecution{ID: "execution", Owner: ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "task", ErrandID: "child", Generation: 1,
+	}}
+	event := agentctl.AgentEvent{Type: streams.EventTypeContextWindow, DeliveryStreamID: "stream", DeliverySequence: 1}
+	prepared := preparedAgentEvent{event: event, durableEvent: durableAgentEvent(execution, event), skipAcknowledgement: true}
+	repo := &recordingAgentDeliveryRepository{}
+	var projectedAtCallback int
+	var callbacks int
+	manager := &StreamManager{callbacks: StreamCallbacks{OnAgentEvent: func(_ *AgentExecution, _ agentctl.AgentEvent) {
+		callbacks++
+		projectedAtCallback = len(repo.projected)
+	}}}
+
+	require.NoError(t, manager.processPreparedAgentEvent(t.Context(), execution, nil, repo, prepared, 0))
+	require.Equal(t, 1, callbacks)
+	require.Equal(t, 1, projectedAtCallback, "the passive row must read committed context")
+
+	repo.projectErr = errors.New("context projection unavailable")
+	require.ErrorIs(t, manager.processPreparedAgentEvent(t.Context(), execution, nil, repo, prepared, 0), repo.projectErr)
+	require.Equal(t, 1, callbacks, "failed projection must leave the existing browser row unchanged")
 }
 
 func TestErrandInitialSubmissionUsesDurableHandoff(t *testing.T) {

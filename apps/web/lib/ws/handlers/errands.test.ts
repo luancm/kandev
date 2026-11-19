@@ -162,3 +162,63 @@ describe("errand.updated attention reason", () => {
     });
   });
 });
+
+it("applies committed context samples and clears to the existing passive row", () => {
+  const store = createAppStore();
+  const handle = registerErrandsHandlers(store)["errand.updated"]!;
+  store.getState().setConnectionStatus("connected");
+  const observation = {
+    connectionGeneration: store.getState().connection.generation ?? 0,
+    readScopeIdentity: stateReadScopeIdentity(store.getState()),
+    taskResetEpoch: 0,
+    observationRevision: 0,
+  };
+  const current = makeBrowserErrandRow({ status: "running", live: true, outstanding: true });
+  const sibling = makeBrowserErrandRow({
+    errand_id: "errand-sibling",
+    metadata: { context_window: { size: 4096, used: 1000 } },
+  });
+  store.getState().beginErrandBrowserSummaryRead(ERRAND_TASK_ID, observation, "summary");
+  store
+    .getState()
+    .setErrandBrowserSummary(
+      ERRAND_TASK_ID,
+      makeBrowserSummary([current, sibling]),
+      observation,
+      "summary",
+    );
+  const rows = () => selectErrandBrowserSummary(store.getState(), ERRAND_TASK_ID)?.errands;
+  const contextRow = () => rows()?.find((row) => row.errand_id === current.errand_id);
+  const sample = {
+    ...makeErrand(),
+    context_only: true,
+    metadata: { context_window: { size: 1024, used: 0 } },
+  };
+  handle(errandUpdated(sample));
+  expect(contextRow()).toEqual({ ...current, metadata: sample.metadata });
+  const revision = store.getState().errands.browserRevisionByTaskId[ERRAND_TASK_ID];
+  expect(store.getState().errands.browserSummaryReadByTaskId[ERRAND_TASK_ID]).toMatchObject({
+    status: "loaded",
+    observationRevision: revision,
+  });
+
+  const pending = { ...observation, observationRevision: revision };
+  store.getState().beginErrandBrowserSummaryRead(ERRAND_TASK_ID, pending, "delayed");
+  const stale = { ...current, metadata: sample.metadata };
+  const cleared = makeErrand({
+    context_only: true,
+    status: "done",
+    metadata: { context_window: null },
+  });
+  handle(errandUpdated(cleared));
+  store
+    .getState()
+    .setErrandBrowserSummary(
+      ERRAND_TASK_ID,
+      makeBrowserSummary([stale, sibling]),
+      pending,
+      "delayed",
+    );
+  expect(contextRow()).toEqual({ ...current, metadata: cleared.metadata });
+  expect(rows()?.find((row) => row.errand_id === sibling.errand_id)).toEqual(sibling);
+});

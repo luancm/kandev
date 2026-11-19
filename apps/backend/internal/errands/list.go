@@ -13,7 +13,10 @@ type errandStatusReader interface {
 }
 
 func observeErrand(row *models.Errand, observation models.ErrandBrowserObservation) Snapshot {
-	return Snapshot{Errand: row, Status: observation.Status, AttentionReason: observation.AttentionReason}
+	return Snapshot{
+		Errand: row, Status: observation.Status, AttentionReason: observation.AttentionReason,
+		ContextMetadata: observation.ContextMetadata,
+	}
 }
 
 // List returns a task's errands in creation order with their projected status.

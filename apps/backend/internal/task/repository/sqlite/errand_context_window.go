@@ -20,6 +20,17 @@ const errandContextMetadataColumn = `(SELECT b.context_metadata FROM errand_harn
 	)
 	ORDER BY b.binding_sequence DESC LIMIT 1)`
 
+func decodeErrandContextMetadata(raw string) (map[string]any, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil, fmt.Errorf("decode stored errand context: %w", err)
+	}
+	return models.ProjectSessionContextMetadata(metadata), nil
+}
+
 func persistErrandContextWindowTx(ctx context.Context, tx *sqlx.Tx, errandID string, event *models.AgentDeliveryEvent) error {
 	var sample streams.AgentEvent
 	if err := json.Unmarshal(event.Payload, &sample); err != nil {

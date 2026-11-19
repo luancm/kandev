@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -544,14 +543,9 @@ func scanErrandBrowserProjection(row errandRowScanner, extra ...interface{}) (*m
 	item.CanSendResult = (&models.Errand{
 		LatestSettledTurnID: latestSettled, ResultTurnID: resultTurn, ResultState: item.ResultState,
 	}).CanSendResult(item.Status)
-	if contextMetadata.String != "" {
-		var metadata map[string]interface{}
-		if err := json.Unmarshal([]byte(contextMetadata.String), &metadata); err != nil {
-			return nil, fmt.Errorf("decode stored errand context: %w", err)
-		}
-		item.ContextMetadata = models.ProjectSessionContextMetadata(metadata)
-	}
-	return item, nil
+	var err error
+	item.ContextMetadata, err = decodeErrandContextMetadata(contextMetadata.String)
+	return item, err
 }
 
 func normalizeErrandBrowserCreatedAt(value interface{}) time.Time {

@@ -82,7 +82,9 @@ func errandResultPreview(text string) string {
 // workspace that routes it to the right clients.
 type ErrandUpdatedEvent struct {
 	ErrandDTO
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID string         `json:"workspace_id"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	ContextOnly bool           `json:"context_only,omitempty"`
 }
 
 // GetWorkspaceID lets the WebSocket gateway route an in-process payload, which

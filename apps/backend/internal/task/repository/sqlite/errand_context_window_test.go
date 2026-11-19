@@ -47,6 +47,9 @@ func exerciseOwnedErrandContextWindow(t *testing.T, repo *Repository) {
 	require.NoError(t, err)
 	require.Contains(t, cleared.Errand.ContextMetadata, models.SessionMetaKeyContextWindow)
 	require.Nil(t, cleared.Errand.ContextMetadata[models.SessionMetaKeyContextWindow])
+	statuses, err := repo.ReadErrandStatuses(ctx, row.TaskID, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, cleared.Errand.ContextMetadata, statuses[row.ID].ContextMetadata)
 
 	replacement := binding
 	replacement.HarnessGeneration++
