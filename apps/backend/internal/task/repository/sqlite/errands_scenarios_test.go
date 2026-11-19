@@ -86,24 +86,22 @@ func assertErrandFields(t *testing.T, got, want *models.Errand) {
 
 func assertErrandSchema(t *testing.T, repo *Repository) {
 	t.Helper()
-	ctx := context.Background()
-	for _, column := range []string{"role", "parent_session_id"} {
-		exists, err := db.ColumnExistsContext(ctx, repo.db, "task_sessions", column)
-		if err != nil || !exists {
-			t.Fatalf("task_sessions.%s exists = %v, err = %v", column, exists, err)
+	ctx := t.Context()
+	for _, table := range []string{"task_session_errands", "errand_turns", "errand_messages", "errand_execution_generations"} {
+		if exists, err := db.TableExistsContext(ctx, repo.db, table); err != nil || !exists {
+			t.Fatalf("table %s exists = %v, err = %v", table, exists, err)
 		}
 	}
-	if exists, err := db.TableExistsContext(ctx, repo.db, "task_session_errands"); err != nil || !exists {
-		t.Fatalf("task_session_errands exists = %v, err = %v", exists, err)
-	}
-	if exists, err := db.ColumnExistsContext(ctx, repo.db, "task_session_errands", "teardown_intent"); err != nil || !exists {
-		t.Fatalf("task_session_errands.teardown_intent exists = %v, err = %v", exists, err)
+	for _, column := range []string{"teardown_intent", "last_read_message_id"} {
+		if exists, err := db.ColumnExistsContext(ctx, repo.db, "task_session_errands", column); err != nil || !exists {
+			t.Fatalf("Errand column %s exists = %v, err = %v", column, exists, err)
+		}
 	}
 	for _, index := range []string{
-		"idx_task_sessions_parent_session_id",
 		"idx_task_session_errands_task_lifecycle",
 		"idx_task_session_errands_parent",
 		errBrowserHistoryIndexName,
+		"idx_errand_messages_unread",
 	} {
 		if exists, err := db.IndexExistsContext(ctx, repo.db, index); err != nil || !exists {
 			t.Fatalf("index %s exists = %v, err = %v", index, exists, err)
@@ -111,49 +109,32 @@ func assertErrandSchema(t *testing.T, repo *Repository) {
 	}
 }
 
-// exerciseErrandSchemaReplay proves that the columns, index, and table are
-// created on a fresh database, survive a same-database replay with their
-// data, and are restored on a database that predates them.
-func exerciseErrandSchemaReplay(t *testing.T, repo *Repository, reopen func() error) {
+func exerciseErrandSchemaReplay(t *testing.T, repo *Repository) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	assertErrandSchema(t, repo)
 	taskID := newErrandTask(t, repo, "schema")
-	createErrandScenarioSession(t, repo, &models.TaskSession{ID: "parent-schema", TaskID: taskID})
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: "errand-schema", TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: "parent-schema",
-	})
-	mustCreateErrand(t, repo, sampleErrand("errand-schema", taskID, "parent-schema", errandScenarioBase))
+	parent := &models.TaskSession{ID: "parent-schema", TaskID: taskID, Name: "Original parent"}
+	createErrandScenarioSession(t, repo, parent)
+	row := sampleErrand("errand-schema", taskID, parent.ID, errandScenarioBase)
+	mustCreateErrand(t, repo, row)
 
-	if err := reopen(); err != nil {
-		t.Fatalf("same-database replay: %v", err)
+	reopened, err := NewWithDB(repo.db, repo.ro, nil)
+	if err != nil {
+		t.Fatalf("replay Errand schema: %v", err)
 	}
-	assertErrandSchema(t, repo)
-	session, err := repo.GetTaskSession(ctx, "errand-schema")
-	if err != nil || session.Role != models.SessionRoleErrand || session.ParentSessionID != "parent-schema" {
-		t.Fatalf("errand session after replay = %+v, err = %v", session, err)
+	assertErrandSchema(t, reopened)
+	got, err := reopened.GetErrand(ctx, row.ID)
+	if err != nil {
+		t.Fatalf("read replayed Errand: %v", err)
 	}
-	if _, err := repo.GetErrand(ctx, "errand-schema"); err != nil {
-		t.Fatalf("errand row after replay: %v", err)
+	assertErrandFields(t, got, row)
+	ordinary, err := reopened.GetTaskSession(ctx, parent.ID)
+	if err != nil || ordinary.Name != parent.Name || ordinary.TaskID != taskID {
+		t.Fatalf("ordinary parent after replay = %+v, err = %v", ordinary, err)
 	}
-
-	for _, statement := range []string{
-		`DROP INDEX idx_task_sessions_parent_session_id`,
-		`ALTER TABLE task_sessions DROP COLUMN parent_session_id`,
-		`ALTER TABLE task_sessions DROP COLUMN role`,
-		`DROP TABLE task_session_errands`,
-	} {
-		if _, err := repo.db.ExecContext(ctx, statement); err != nil {
-			t.Fatalf("build legacy schema with %q: %v", statement, err)
-		}
-	}
-	if err := reopen(); err != nil {
-		t.Fatalf("legacy database replay: %v", err)
-	}
-	assertErrandSchema(t, repo)
-	session, err = repo.GetTaskSession(ctx, "errand-schema")
-	if err != nil || session.Role != "" || session.ParentSessionID != "" {
-		t.Fatalf("legacy session after upgrade = %+v, err = %v; want an ordinary session", session, err)
+	if _, err := reopened.GetTaskSession(ctx, row.ID); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("Errand identity resolved as a session: %v", err)
 	}
 }
 

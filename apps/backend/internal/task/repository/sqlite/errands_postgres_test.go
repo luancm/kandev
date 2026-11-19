@@ -21,12 +21,8 @@ func newPostgresErrandRepo(t *testing.T) *Repository {
 	return repo
 }
 
-func TestPostgresErrandSchemaReplaysOnFreshAndLegacyDatabases(t *testing.T) {
-	repo := newPostgresErrandRepo(t)
-	exerciseErrandSchemaReplay(t, repo, func() error {
-		_, err := NewWithDB(repo.db, repo.ro, nil)
-		return err
-	})
+func TestPostgresOwnedErrandSchemaReplays(t *testing.T) {
+	exerciseErrandSchemaReplay(t, newPostgresErrandRepo(t))
 }
 
 // @covers AC-TASKS-ERRANDS-001.1

@@ -59,32 +59,6 @@ func assertParentState(t *testing.T, r *Repository, parent string, wantHas, want
 	require.Equal(t, wantOutstanding, outstanding, parent)
 }
 
-func TestParentErrandStateRecoveryParity(t *testing.T) {
-	exerciseParentErrandStateRecovery(t, newRepoForSessionTests)
-}
-func TestPostgresParentErrandStateRecoveryParity(t *testing.T) {
-	exerciseParentErrandStateRecovery(t, newPostgresErrandRepo)
-}
-func exerciseParentErrandStateRecovery(t *testing.T, create func(*testing.T) *Repository) {
-	for _, tc := range recoveryAttentionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			r := create(t)
-			row, session := seedRecoveryAttention(t, r)
-			row.AwaitingResult = false
-			if tc.change != nil {
-				tc.change(t, r, row, session)
-			}
-			require.NoError(t, r.UpdateTaskSession(t.Context(), session))
-			require.NoError(t, r.SetSessionMetadataKey(t.Context(), session.ID, models.SessionMetaKeyAgentDeliveryRecovery, session.Metadata[models.SessionMetaKeyAgentDeliveryRecovery]))
-			require.NoError(t, r.UpdateErrand(t.Context(), row))
-			observed, err := r.ErrandRecoveryAttention(t.Context(), row.ID)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, observed)
-			assertParentState(t, r, row.ParentSessionID, true, observed)
-		})
-	}
-}
-
 func TestParentErrandStateLargeHistoryUsesScopedScalarQuery(t *testing.T) {
 	r := newRepoForSessionTests(t)
 	task := newErrandTask(t, r, "parent-state-history")

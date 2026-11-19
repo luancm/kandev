@@ -133,7 +133,6 @@ type liveErrandCounter interface {
 func countLiveErrandsByTask(ctx context.Context, reader liveErrandCounter, taskID string) (int, error) {
 	var count int
 	err := reader.GetContext(ctx, &count, reader.Rebind(`SELECT COUNT(*) FROM task_session_errands e
-		LEFT JOIN task_sessions s ON s.id = e.id
 		WHERE e.task_id = ? AND `+liveErrandPredicate(reader.DriverName())), taskID)
 	if err != nil {
 		return 0, fmt.Errorf("count live errands for task %s: %w", taskID, err)
@@ -155,21 +154,19 @@ func checkLiveErrandCapacity(ctx context.Context, tx *sqlx.Tx, taskID string) er
 // outstandingErrandPredicate mirrors errands.IsOutstanding: a queued errand,
 // one awaiting a parent-initiated turn, or one holding a pending result.
 func outstandingErrandPredicate(driver string) string {
-	return `(e.lifecycle = 'queued' OR e.awaiting_result OR e.result_state = 'pending' OR ` + recoveryAttentionPredicate(driver) + `)`
+	return `(e.lifecycle = 'queued' OR e.awaiting_result OR e.result_state = 'pending' OR ` + ownedErrandRecoveryAttention(driver) + `)`
 }
 
 // ErrandsSummaryByTask returns the bounded errand projection for one task. It
-// is a single aggregate over the task's errand rows, joined by primary key to
-// each errand's session and parent, so its size does not depend on how many
-// errands the task has. Waiting is true when an idle parent owes an outcome.
+// is a single aggregate over the task's Errands and their ordinary parents.
+// Waiting is true when an idle parent owes an outcome.
 func (r *Repository) ErrandsSummaryByTask(ctx context.Context, taskID string) (statussummary.ErrandsSummary, error) {
 	var live, waiting int64
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT
 		COALESCE(SUM(CASE WHEN `+liveErrandPredicate(r.ro.DriverName())+` THEN 1 ELSE 0 END), 0),
 		COALESCE(MAX(CASE WHEN ps.state = ? AND `+outstandingErrandPredicate(r.ro.DriverName())+` THEN 1 ELSE 0 END), 0)
 		FROM task_session_errands e
-		LEFT JOIN task_sessions s ON s.id = e.id
-		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id
+		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id AND ps.task_id = e.task_id
 		WHERE e.task_id = ?`), string(models.TaskSessionStateWaitingForInput), taskID).Scan(&live, &waiting)
 	if err != nil {
 		return statussummary.ErrandsSummary{}, fmt.Errorf("summarize errands for task %s: %w", taskID, err)

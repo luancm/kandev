@@ -14,8 +14,8 @@ func (r *Repository) ReadErrandStatuses(ctx context.Context, taskID, errandID st
 		contextColumn = errandContextMetadataColumn
 	}
 	query := `SELECT e.id,` + errandBrowserStatusExpression(driver) + `,` + errandBrowserAttentionExpression(driver) + `,` + contextColumn + `
-		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id=e.id
-		WHERE e.task_id=? AND ` + validErrandBrowserIdentity()
+		FROM task_session_errands e
+		WHERE e.task_id=?`
 	args := []any{taskID}
 	if errandID != "" {
 		query += ` AND e.id=?`

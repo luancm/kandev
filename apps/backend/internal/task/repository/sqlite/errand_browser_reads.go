@@ -55,8 +55,7 @@ func readErrandBrowserSummaryRows(ctx context.Context, tx *sqlx.Tx, driver, task
 	orderedID := dialect.ByteOrderedText(driver, "e.id")
 	rows, err := tx.QueryContext(ctx, tx.Rebind(`SELECT `+errandBrowserColumns(driver)+`
 		FROM task_session_errands e
-		LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND `+validErrandBrowserIdentity()+` AND `+errandBrowserSummaryMembershipPredicate(driver)+`
+		WHERE e.task_id = ? AND `+errandBrowserSummaryMembershipPredicate(driver)+`
 		ORDER BY `+createdAtKey+` ASC, `+orderedID+` ASC`), taskID)
 	if err != nil {
 		return nil, fmt.Errorf("query errand browser summary rows: %w", err)
@@ -116,8 +115,7 @@ func validateErrandBrowserHistoryRequest(request models.ErrandHistoryPageRequest
 
 func countFinishedErrandHistory(ctx context.Context, tx *sqlx.Tx, driver string, request models.ErrandHistoryPageRequest) (int, error) {
 	query := `SELECT COUNT(*) FROM task_session_errands e
-		LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND e.parent_session_id = ? AND ` + validErrandBrowserIdentity() + ` AND ` + errandBrowserFinishedPredicate(driver)
+		WHERE e.task_id = ? AND e.parent_session_id = ? AND ` + errandBrowserFinishedPredicate(driver)
 	var total int
 	if err := tx.QueryRowContext(ctx, tx.Rebind(query), request.TaskID, request.ParentSessionID).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count finished errand history: %w", err)
@@ -155,8 +153,8 @@ func errandBrowserHistoryPageQuery(driver string, request models.ErrandHistoryPa
 	createdAtKey := errandBrowserCreatedAtKey(driver, "e.created_at")
 	orderedID := dialect.ByteOrderedText(driver, "e.id")
 	query := `SELECT ` + errandBrowserColumns(driver) + `
-		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND e.parent_session_id = ? AND ` + validErrandBrowserIdentity() + ` AND ` + errandBrowserFinishedPredicate(driver)
+		FROM task_session_errands e
+		WHERE e.task_id = ? AND e.parent_session_id = ? AND ` + errandBrowserFinishedPredicate(driver)
 	args := []interface{}{request.TaskID, request.ParentSessionID}
 	if request.Cursor != nil {
 		cursorKey := errandBrowserHistoryCursorKey(driver, request.Cursor.CreatedAt)
@@ -257,8 +255,8 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 	defer func() { _ = tx.Rollback() }()
 	query := `SELECT ` + errandBrowserColumns(r.ro.DriverName()) + `,
 		CASE WHEN ` + ownedErrandExists + ` THEN 1 ELSE 0 END
-		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND e.id = ? AND ` + validErrandBrowserIdentity()
+		FROM task_session_errands e
+		WHERE e.task_id = ? AND e.id = ?`
 	row := tx.QueryRowContext(ctx, tx.Rebind(query), taskID, childSessionID)
 	var ownsConversation int
 	projection, err := scanErrandBrowserProjection(row, &ownsConversation)
@@ -294,7 +292,7 @@ func (r *Repository) GetErrandInspection(ctx context.Context, taskID, childSessi
 func readErrandBrowserCounts(ctx context.Context, tx *sqlx.Tx, driver, scope string, args ...interface{}) (models.ErrandBrowserCounts, error) {
 	live := liveErrandPredicate(driver)
 	queued := `e.lifecycle = 'queued'`
-	outstanding := errandBrowserOutstandingPredicate(driver)
+	outstanding := outstandingErrandPredicate(driver)
 	finished := errandBrowserFinishedPredicate(driver)
 	pending := `e.result_state = 'pending'`
 	unread := errandBrowserUnreadPredicate(driver)
@@ -305,8 +303,8 @@ func readErrandBrowserCounts(ctx context.Context, tx *sqlx.Tx, driver, scope str
 		COALESCE(SUM(CASE WHEN ` + finished + ` THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN ` + pending + ` THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN ` + unread + ` THEN 1 ELSE 0 END), 0)
-		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE ` + scope + ` AND ` + validErrandBrowserIdentity()
+		FROM task_session_errands e
+		WHERE ` + scope
 	var counts models.ErrandBrowserCounts
 	err := tx.QueryRowContext(ctx, tx.Rebind(query), args...).Scan(
 		&counts.Live, &counts.Queued, &counts.Outstanding, &counts.Finished,
@@ -322,12 +320,12 @@ func readErrandParentBrowserCounts(ctx context.Context, tx *sqlx.Tx, driver, tas
 	query := `SELECT e.parent_session_id,
 		COALESCE(SUM(CASE WHEN ` + liveErrandPredicate(driver) + ` THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN e.lifecycle = 'queued' THEN 1 ELSE 0 END), 0),
-		COALESCE(SUM(CASE WHEN ` + errandBrowserOutstandingPredicate(driver) + ` THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN ` + outstandingErrandPredicate(driver) + ` THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN ` + errandBrowserFinishedPredicate(driver) + ` THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN e.result_state = 'pending' THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN ` + errandBrowserUnreadPredicate(driver) + ` THEN 1 ELSE 0 END), 0)
-		FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
-		WHERE e.task_id = ? AND ` + validErrandBrowserIdentity() + `
+		FROM task_session_errands e
+		WHERE e.task_id = ?
 		GROUP BY e.parent_session_id ORDER BY e.parent_session_id`
 	rows, err := tx.QueryContext(ctx, tx.Rebind(query), taskID)
 	if err != nil {
@@ -352,20 +350,12 @@ func readErrandParentBrowserCounts(ctx context.Context, tx *sqlx.Tx, driver, tas
 	return counts, nil
 }
 
-func errandBrowserOutstandingPredicate(driver string) string {
-	return `(e.lifecycle = 'queued' OR e.awaiting_result OR e.result_state = 'pending' OR COALESCE((` + recoveryAttentionPredicate(driver) + `), FALSE))`
-}
-
 func errandBrowserSummaryMembershipPredicate(driver string) string {
-	return `(` + liveErrandPredicate(driver) + ` OR ` + errandBrowserOutstandingPredicate(driver) + `)`
+	return `(` + liveErrandPredicate(driver) + ` OR ` + outstandingErrandPredicate(driver) + `)`
 }
 
 func errandBrowserFinishedPredicate(driver string) string {
-	return `(NOT (` + liveErrandPredicate(driver) + `) AND NOT (` + errandBrowserOutstandingPredicate(driver) + `))`
-}
-
-func validErrandBrowserIdentity() string {
-	return `(s.id IS NULL OR (s.task_id = e.task_id AND s.role = 'errand' AND s.parent_session_id = e.parent_session_id))`
+	return `(NOT (` + liveErrandPredicate(driver) + `) AND NOT (` + outstandingErrandPredicate(driver) + `))`
 }
 
 func errandBrowserColumns(driver string) string {
@@ -376,37 +366,28 @@ func errandBrowserColumns(driver string) string {
 		e.result_state, ` + errandAwaitProjectionFor("e") + `, e.result_truncated,
 		` + createdAtKey + ` AS created_at, e.updated_at, e.settled_at, e.version,
 	` + liveErrandPredicate(driver) + `,
-	` + errandBrowserOutstandingPredicate(driver) + `,
+	` + outstandingErrandPredicate(driver) + `,
 	` + errandBrowserUnreadPredicate(driver) + `,
 	e.latest_settled_turn_id, e.result_turn_id,
 	` + errandContextMetadataColumn
 }
 
 func errandBrowserStatusExpression(driver string) string {
-	permission := errandBrowserPermissionPredicate(driver)
-	recovery := recoveryAttentionPredicate(driver)
+	working := ownedErrandWorking(driver)
 	return `CASE
 		WHEN e.lifecycle = 'cancelled' THEN 'cancelled'
 		WHEN e.lifecycle = 'queued' THEN 'queued'
-		WHEN ` + ownedErrandExists + ` THEN CASE
-			WHEN ` + ownedErrandWorking(driver) + ` AND ` + ownedErrandPermission(driver) + ` THEN 'needs_attention'
-			WHEN ` + ownedErrandRecoveryAttention(driver) + ` THEN 'needs_attention'
-			WHEN ` + ownedErrandWorking(driver) + ` THEN 'running'
-			ELSE e.last_outcome END
-		WHEN s.id IS NULL OR s.state = 'FAILED' THEN 'failed'
-		WHEN s.state IN ('STARTING', 'RUNNING') AND ` + permission + ` THEN 'needs_attention'
-		WHEN s.state IN ('STARTING', 'RUNNING') THEN 'running'
-		WHEN ` + recovery + ` THEN 'needs_attention'
+		WHEN ` + working + ` AND ` + ownedErrandPermission(driver) + ` THEN 'needs_attention'
+		WHEN ` + ownedErrandRecoveryAttention(driver) + ` THEN 'needs_attention'
+		WHEN ` + working + ` THEN 'running'
 		WHEN e.last_outcome = 'done' THEN 'done'
-		WHEN e.last_outcome = 'failed' THEN 'failed'
-		ELSE 'running' END`
+		ELSE 'failed' END`
 }
 
 func errandBrowserAttentionExpression(driver string) string {
 	return `CASE
 		WHEN ` + ownedErrandWorking(driver) + ` AND ` + ownedErrandPermission(driver) + ` THEN 'permission'
-		WHEN s.state IN ('STARTING', 'RUNNING') AND ` + errandBrowserPermissionPredicate(driver) + ` THEN 'permission'
-		WHEN ` + recoveryAttentionPredicate(driver) + ` THEN 'recovery_unresolved' ELSE '' END`
+		WHEN ` + ownedErrandRecoveryAttention(driver) + ` THEN 'recovery_unresolved' ELSE '' END`
 }
 
 func ownedErrandPermission(driver string) string {
@@ -418,29 +399,6 @@ func ownedErrandPermission(driver string) string {
 		AND ` + field("author_id") + `=g.active_submission_id AND ` + field("type") + `='permission_request'
 		AND COALESCE(` + field("metadata", "status") + `,'') IN ('','pending')
 		AND COALESCE(` + field("metadata", models.PermissionPresentationMetadataKey) + `,'') NOT IN ('automatic','unavailable'))`
-}
-
-func errandBrowserPermissionPredicate(driver string) string {
-	turnPredicate, turnOrder := currentTurnAuthority(driver, "turn_row")
-	status := dialect.JSONExtract(driver, "m.metadata", "status")
-	presentation := dialect.JSONExtract(driver, "m.metadata", models.PermissionPresentationMetadataKey)
-	permissionOrder := pendingActionMessageOrder(driver, "pm")
-	clarificationStatus := dialect.JSONExtract(driver, "clarification.metadata", "status")
-	currentTurn := `(SELECT turn_row.id FROM task_session_turns turn_row
-		WHERE turn_row.task_session_id = s.id AND ` + turnPredicate + `
-		AND ` + nonTerminalSessionPredicate("turn_row") + ` ORDER BY ` + turnOrder + ` LIMIT 1)`
-	return `EXISTS (SELECT 1 FROM task_session_messages m
-		WHERE m.task_session_id = s.id AND m.type = 'permission_request'
-		AND m.turn_id = ` + currentTurn + `
-		AND m.id = (SELECT pm.id FROM task_session_messages pm
-			WHERE pm.task_session_id = s.id AND pm.turn_id = m.turn_id AND pm.type = 'permission_request'
-			ORDER BY pm.created_at DESC, ` + permissionOrder + ` DESC LIMIT 1)
-		AND COALESCE(` + status + `, '') IN ('', 'pending')
-		AND COALESCE(` + presentation + `, '') NOT IN ('automatic', 'unavailable')
-		AND NOT EXISTS (SELECT 1 FROM task_session_messages clarification
-			WHERE clarification.task_session_id = s.id AND clarification.type = 'clarification_request'
-			AND clarification.turn_id = ` + currentTurn + `
-			AND COALESCE(` + clarificationStatus + `, '') IN ('', 'pending')))`
 }
 
 func errandAwaitProjectionFor(alias string) string {

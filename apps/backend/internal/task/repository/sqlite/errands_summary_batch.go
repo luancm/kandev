@@ -33,8 +33,7 @@ func (r *Repository) BatchErrandsSummariesByTaskIDs(ctx context.Context, taskIDs
 		COALESCE(SUM(CASE WHEN ` + liveErrandPredicate(r.ro.DriverName()) + ` THEN 1 ELSE 0 END), 0),
 		COALESCE(MAX(CASE WHEN ps.state = ? AND ` + outstandingErrandPredicate(r.ro.DriverName()) + ` THEN 1 ELSE 0 END), 0)
 		FROM task_session_errands e
-		LEFT JOIN task_sessions s ON s.id = e.id
-		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id
+		LEFT JOIN task_sessions ps ON ps.id = e.parent_session_id AND ps.task_id = e.task_id
 		WHERE e.task_id IN (%s)
 		GROUP BY e.task_id`
 	for _, chunk := range chunkIDs(uniqueTaskIDs, sqliteMaxHostParams-1) {

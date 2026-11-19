@@ -31,7 +31,7 @@ func exerciseBatchErrandsSummaries(t *testing.T, repo *Repository) {
 		{
 			id: "batch-child-running", parentID: "batch-parent-running",
 			lifecycle: models.ErrandLifecycleLaunched, resultState: models.ErrandResultNone,
-			sessionState: models.TaskSessionStateRunning,
+			allocated: true,
 		},
 		{
 			id: "batch-child-queued", parentID: "batch-parent-running",
@@ -40,7 +40,7 @@ func exerciseBatchErrandsSummaries(t *testing.T, repo *Repository) {
 		{
 			id: "batch-child-failed", parentID: "batch-parent-running",
 			lifecycle: models.ErrandLifecycleLaunched, outcome: models.ErrandOutcomeFailed,
-			resultState: models.ErrandResultNone, sessionState: models.TaskSessionStateFailed,
+			resultState: models.ErrandResultNone,
 		},
 		{
 			id: "batch-child-missing", parentID: "batch-parent-running",
@@ -50,7 +50,6 @@ func exerciseBatchErrandsSummaries(t *testing.T, repo *Repository) {
 			id: "batch-child-pending-result", parentID: "batch-parent-idle",
 			lifecycle: models.ErrandLifecycleLaunched, outcome: models.ErrandOutcomeDone,
 			awaitingResult: true, resultState: models.ErrandResultPending,
-			sessionState: models.TaskSessionStateWaitingForInput,
 		},
 	}
 	for index, row := range rows {

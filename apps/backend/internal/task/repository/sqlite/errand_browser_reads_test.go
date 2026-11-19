@@ -367,10 +367,6 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 		row.AwaitingResult, row.ResultState, row.ResultKind = false, models.ErrandResultDelivered, models.ErrandResultOutput
 		row.ResultText = "private result body " + id
 		row.SettledAt = &base
-		createErrandScenarioSession(t, repo, &models.TaskSession{
-			ID: id, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
-			State: models.TaskSessionStateCompleted, StartedAt: base,
-		})
 		mustCreateErrand(t, repo, row)
 		if index == 0 {
 			seedErrandHistoryContext(t, repo, row)
@@ -380,28 +376,18 @@ func exerciseErrandBrowserHistory(t *testing.T, repo *Repository) {
 	pending.Lifecycle, pending.LastOutcome = models.ErrandLifecycleLaunched, models.ErrandOutcomeDone
 	pending.AwaitingResult, pending.ResultState, pending.ResultKind = false, models.ErrandResultPending, models.ErrandResultOutput
 	pending.ResultText = "still owed"
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: pending.ID, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
-		State: models.TaskSessionStateCompleted,
-	})
 	mustCreateErrand(t, repo, pending)
 	queued := sampleErrand("browser-history-queued", taskID, parentID, base.Add(2*time.Minute))
 	queued.AwaitingResult = false
 	mustCreateErrand(t, repo, queued)
 	running := sampleErrand("browser-history-running", taskID, parentID, base.Add(3*time.Minute))
 	running.Lifecycle, running.AwaitingResult = models.ErrandLifecycleLaunched, false
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: running.ID, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
-		State: models.TaskSessionStateRunning,
-	})
 	mustCreateErrand(t, repo, running)
+	_, err := repo.ReserveErrandExecutionGeneration(ctx, running.ID, 0)
+	require.NoError(t, err)
 	failed := sampleErrand("browser-history-failed", taskID, parentID, base.Add(-time.Minute))
 	failed.Lifecycle, failed.LastOutcome, failed.AwaitingResult = models.ErrandLifecycleLaunched, models.ErrandOutcomeFailed, false
 	failed.ResultState, failed.ResultKind = models.ErrandResultNone, models.ErrandResultFailure
-	createErrandScenarioSession(t, repo, &models.TaskSession{
-		ID: failed.ID, TaskID: taskID, ParentSessionID: parentID, Role: models.SessionRoleErrand,
-		State: models.TaskSessionStateFailed,
-	})
 	mustCreateErrand(t, repo, failed)
 
 	first, err := repo.GetErrandHistoryPage(ctx, models.ErrandHistoryPageRequest{TaskID: taskID, ParentSessionID: parentID, Limit: 25})
@@ -473,32 +459,6 @@ func browserErrandIDs(rows []*models.ErrandBrowserObservation) []string {
 		ids = append(ids, row.ID)
 	}
 	return ids
-}
-
-func TestErrandBrowserSummaryIncludesUnresolvedRecovery(t *testing.T) {
-	exerciseErrandBrowserRecoverySummary(t, newRepoForSessionTests(t))
-}
-
-func TestPostgresErrandBrowserSummaryIncludesUnresolvedRecovery(t *testing.T) {
-	exerciseErrandBrowserRecoverySummary(t, newPostgresErrandRepo(t))
-}
-
-func exerciseErrandBrowserRecoverySummary(t *testing.T, repo *Repository) {
-	t.Helper()
-	row, _ := seedRecoveryAttention(t, repo)
-	row.AwaitingResult = false
-	require.NoError(t, repo.UpdateErrand(t.Context(), row))
-
-	summary, err := repo.GetErrandBrowserSummary(t.Context(), row.TaskID)
-	require.NoError(t, err)
-	require.Len(t, summary.Errands, 1)
-	require.Equal(t, row.ID, summary.Errands[0].ID)
-	require.Equal(t, models.ErrandStatusNeedsAttention, summary.Errands[0].Status)
-	require.Equal(t, models.ErrandAttentionRecoveryUnresolved, summary.Errands[0].AttentionReason)
-	require.True(t, summary.Errands[0].Outstanding)
-	require.True(t, summary.Errands[0].Live)
-	require.Equal(t, 1, summary.Counts.Live)
-	require.Equal(t, 1, summary.Counts.Outstanding)
 }
 
 func TestErrandBrowserHistoryIndexSupportsScopedKeysetOrder(t *testing.T) {

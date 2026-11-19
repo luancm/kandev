@@ -9,8 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
-// errandSummaryRow is one errand in the summary scenario. A session state
-// empty means the errand has no session row yet.
+// errandSummaryRow is one Errand in the summary scenario.
 type errandSummaryRow struct {
 	id             string
 	parentID       string
@@ -18,7 +17,7 @@ type errandSummaryRow struct {
 	outcome        models.ErrandOutcome
 	awaitingResult bool
 	resultState    models.ErrandResultState
-	sessionState   models.TaskSessionState
+	allocated      bool
 }
 
 // exerciseErrandsSummary proves the bounded task projection: the live count
@@ -31,14 +30,14 @@ func exerciseErrandsSummary(t *testing.T, repo *Repository) {
 	createErrandScenarioSession(t, repo, &models.TaskSession{ID: "sum-busy", TaskID: waiting, State: models.TaskSessionStateRunning})
 	rows := []errandSummaryRow{
 		// Settled and owed to the idle parent: not live, but waiting.
-		{"sum-done", "sum-idle", models.ErrandLifecycleLaunched, models.ErrandOutcomeDone, true, models.ErrandResultPending, models.TaskSessionStateWaitingForInput},
+		{"sum-done", "sum-idle", models.ErrandLifecycleLaunched, models.ErrandOutcomeDone, true, models.ErrandResultPending, false},
 		// Running under the busy parent: live, and the parent is not idle.
-		{"sum-running", "sum-busy", models.ErrandLifecycleLaunched, "", false, models.ErrandResultNone, models.TaskSessionStateRunning},
+		{"sum-running", "sum-busy", models.ErrandLifecycleLaunched, "", false, models.ErrandResultNone, true},
 		// Queued under the busy parent: live.
-		{"sum-queued", "sum-busy", models.ErrandLifecycleQueued, "", true, models.ErrandResultNone, ""},
+		{"sum-queued", "sum-busy", models.ErrandLifecycleQueued, "", true, models.ErrandResultNone, false},
 		// Cancelled and failed rows never count as live.
-		{"sum-cancelled", "sum-busy", models.ErrandLifecycleCancelled, "", false, models.ErrandResultNone, models.TaskSessionStateCancelled},
-		{"sum-failed", "sum-busy", models.ErrandLifecycleLaunched, models.ErrandOutcomeFailed, false, models.ErrandResultNone, models.TaskSessionStateFailed},
+		{"sum-cancelled", "sum-busy", models.ErrandLifecycleCancelled, "", false, models.ErrandResultNone, false},
+		{"sum-failed", "sum-busy", models.ErrandLifecycleLaunched, models.ErrandOutcomeFailed, false, models.ErrandResultNone, false},
 	}
 	for index, row := range rows {
 		createErrandSummaryRow(t, repo, waiting, row, index)
@@ -54,7 +53,7 @@ func exerciseErrandsSummary(t *testing.T, repo *Repository) {
 	createErrandScenarioSession(t, repo, &models.TaskSession{ID: "sum-quiet-parent", TaskID: quiet, State: models.TaskSessionStateWaitingForInput})
 	createErrandSummaryRow(t, repo, quiet, errandSummaryRow{
 		id: "sum-quiet-running", parentID: "sum-quiet-parent", lifecycle: models.ErrandLifecycleLaunched,
-		awaitingResult: false, resultState: models.ErrandResultNone, sessionState: models.TaskSessionStateRunning,
+		awaitingResult: false, resultState: models.ErrandResultNone, allocated: true,
 	}, 0)
 	assertErrandsSummary(t, repo, quiet, statussummary.ErrandsSummary{Live: 1, Waiting: false})
 
@@ -63,18 +62,17 @@ func exerciseErrandsSummary(t *testing.T, repo *Repository) {
 
 func createErrandSummaryRow(t *testing.T, repo *Repository, taskID string, row errandSummaryRow, index int) {
 	t.Helper()
-	if row.sessionState != "" {
-		createErrandScenarioSession(t, repo, &models.TaskSession{
-			ID: row.id, TaskID: taskID, State: row.sessionState,
-			Role: models.SessionRoleErrand, ParentSessionID: row.parentID,
-		})
-	}
 	errand := sampleErrand(row.id, taskID, row.parentID, errandScenarioBase.Add(time.Duration(index)*time.Minute))
 	errand.Lifecycle = row.lifecycle
 	errand.LastOutcome = row.outcome
 	errand.AwaitingResult = row.awaitingResult
 	errand.ResultState = row.resultState
 	mustCreateErrand(t, repo, errand)
+	if row.allocated {
+		if _, err := repo.ReserveErrandExecutionGeneration(t.Context(), errand.ID, 0); err != nil {
+			t.Fatalf("reserve Errand execution %s: %v", errand.ID, err)
+		}
+	}
 }
 
 func settleErrandSummaryRow(t *testing.T, repo *Repository, id string, awaiting bool, state models.ErrandResultState) {

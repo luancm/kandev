@@ -2,12 +2,8 @@ package sqlite
 
 import "testing"
 
-func TestErrandSchemaReplaysOnFreshAndLegacySQLite(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	exerciseErrandSchemaReplay(t, repo, func() error {
-		_, err := NewWithDB(repo.db, repo.ro, nil)
-		return err
-	})
+func TestOwnedErrandSchemaReplaysSQLite(t *testing.T) {
+	exerciseErrandSchemaReplay(t, newRepoForSessionTests(t))
 }
 
 // @covers AC-TASKS-ERRANDS-001.1

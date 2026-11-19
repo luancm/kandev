@@ -18,6 +18,6 @@ func (r *Repository) GetParentErrandState(ctx context.Context, parentID string) 
 func parentErrandStateQuery(driver string) string {
 	return `SELECT
  EXISTS (SELECT 1 FROM task_session_errands WHERE parent_session_id = ?),
- EXISTS (SELECT 1 FROM task_session_errands e LEFT JOIN task_sessions s ON s.id = e.id
- WHERE e.parent_session_id = ? AND ` + errandBrowserOutstandingPredicate(driver) + `)`
+ EXISTS (SELECT 1 FROM task_session_errands e
+ WHERE e.parent_session_id = ? AND ` + outstandingErrandPredicate(driver) + `)`
 }

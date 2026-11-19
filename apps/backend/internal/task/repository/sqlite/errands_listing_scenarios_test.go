@@ -11,12 +11,12 @@ import (
 )
 
 type liveCountRow struct {
-	id           string
-	taskID       string
-	parentID     string
-	lifecycle    models.ErrandLifecycle
-	outcome      models.ErrandOutcome
-	sessionState models.TaskSessionState
+	id        string
+	taskID    string
+	parentID  string
+	lifecycle models.ErrandLifecycle
+	outcome   models.ErrandOutcome
+	allocated bool
 }
 
 // exerciseErrandListingAndLiveCount proves list ordering and that the live
@@ -32,26 +32,25 @@ func exerciseErrandListingAndLiveCount(t *testing.T, repo *Repository) {
 		createErrandScenarioSession(t, repo, &models.TaskSession{ID: parent.id, TaskID: parent.taskID})
 	}
 	rows := []liveCountRow{
-		{"e-queued", taskA, "parent-a", models.ErrandLifecycleQueued, "", ""},
-		{"e-running", taskA, "parent-a", models.ErrandLifecycleLaunched, "", models.TaskSessionStateRunning},
-		{"e-follow-up", taskA, "parent-a2", models.ErrandLifecycleLaunched, models.ErrandOutcomeDone, models.TaskSessionStateStarting},
-		{"e-unsettled", taskA, "parent-a2", models.ErrandLifecycleLaunched, "", models.TaskSessionStateWaitingForInput},
-		{"e-done", taskA, "parent-a", models.ErrandLifecycleLaunched, models.ErrandOutcomeDone, models.TaskSessionStateWaitingForInput},
-		{"e-session-failed", taskA, "parent-a", models.ErrandLifecycleLaunched, "", models.TaskSessionStateFailed},
-		{"e-session-missing", taskA, "parent-a", models.ErrandLifecycleLaunched, "", ""},
-		{"e-cancelled", taskA, "parent-a", models.ErrandLifecycleCancelled, "", models.TaskSessionStateCancelled},
-		{"e-queued-b", taskB, "parent-b", models.ErrandLifecycleQueued, "", ""},
+		{"e-queued", taskA, "parent-a", models.ErrandLifecycleQueued, "", false},
+		{"e-running", taskA, "parent-a", models.ErrandLifecycleLaunched, "", true},
+		{"e-allocated", taskA, "parent-a2", models.ErrandLifecycleLaunched, "", true},
+		{"e-unsettled", taskA, "parent-a2", models.ErrandLifecycleLaunched, "", true},
+		{"e-done", taskA, "parent-a", models.ErrandLifecycleLaunched, models.ErrandOutcomeDone, false},
+		{"e-failed", taskA, "parent-a", models.ErrandLifecycleLaunched, models.ErrandOutcomeFailed, false},
+		{"e-unallocated", taskA, "parent-a", models.ErrandLifecycleLaunched, "", false},
+		{"e-cancelled", taskA, "parent-a", models.ErrandLifecycleCancelled, "", false},
+		{"e-queued-b", taskB, "parent-b", models.ErrandLifecycleQueued, "", false},
 	}
 	for index, row := range rows {
-		if row.sessionState != "" {
-			createErrandScenarioSession(t, repo, &models.TaskSession{
-				ID: row.id, TaskID: row.taskID, State: row.sessionState,
-				Role: models.SessionRoleErrand, ParentSessionID: row.parentID,
-			})
-		}
 		errand := sampleErrand(row.id, row.taskID, row.parentID, errandScenarioBase.Add(time.Duration(index)*time.Minute))
 		errand.Lifecycle, errand.LastOutcome = row.lifecycle, row.outcome
 		mustCreateErrand(t, repo, errand)
+		if row.allocated {
+			if _, err := repo.ReserveErrandExecutionGeneration(ctx, errand.ID, 0); err != nil {
+				t.Fatalf("reserve Errand execution %s: %v", errand.ID, err)
+			}
+		}
 	}
 
 	for taskID, want := range map[string]int{taskA: 4, taskB: 1, "task-without-errands": 0} {
@@ -60,9 +59,9 @@ func exerciseErrandListingAndLiveCount(t *testing.T, repo *Repository) {
 		}
 	}
 	assertErrandList(t, "by task", func() ([]*models.Errand, error) { return repo.ListErrandsByTask(ctx, taskA) },
-		"e-queued", "e-running", "e-follow-up", "e-unsettled", "e-done", "e-session-failed", "e-session-missing", "e-cancelled")
+		"e-queued", "e-running", "e-allocated", "e-unsettled", "e-done", "e-failed", "e-unallocated", "e-cancelled")
 	assertErrandList(t, "by parent", func() ([]*models.Errand, error) { return repo.ListErrandsByParent(ctx, "parent-a2") },
-		"e-follow-up", "e-unsettled")
+		"e-allocated", "e-unsettled")
 	assertErrandList(t, "queued", func() ([]*models.Errand, error) { return repo.ListQueuedErrands(ctx) },
 		"e-queued", "e-queued-b")
 	assertErrandList(t, "empty task", func() ([]*models.Errand, error) { return repo.ListErrandsByTask(ctx, "task-without-errands") })
