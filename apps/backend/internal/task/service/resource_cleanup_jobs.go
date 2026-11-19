@@ -1808,6 +1808,11 @@ func (s *Service) PrepareTaskResourceCleanupWithDeleteOptions(ctx context.Contex
 	if err := s.capturePreparedTaskCleanup(ctx, job, deleteEnvironmentRow, options); err != nil {
 		return cancelPrepared(err)
 	}
+	if trigger == models.TaskResourceCleanupTriggerCascadeDelete {
+		if err := s.stopTaskErrandsForDeletion(ctx, taskID); err != nil {
+			return cancelPrepared(err)
+		}
+	}
 	return nil
 }
 

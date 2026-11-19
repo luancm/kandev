@@ -2663,7 +2663,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// 3a. Errands are cancelled with the archived task: their rows, queued ones
 	// included, never outlive it as live work.
 	if s.taskErrandCanceller != nil {
-		s.taskErrandCanceller.CancelErrandsForTask(finalizeCtx, id)
+		s.taskErrandCanceller.CascadeTask(id)
 	}
 
 	// 3b. Finalize active sessions in the DB and publish their cancellation
@@ -3322,7 +3322,7 @@ func (s *Service) deleteTaskWithManagedClaim(
 		return false, err
 	}
 
-	deleted, err := s.commitTaskDeletion(operationCtx, id, deleteFromDB, cleanupJob, claim)
+	deleted, err := s.commitTaskDeletion(operationCtx, id, trigger, deleteFromDB, cleanupJob, claim)
 	if err != nil || !deleted {
 		return deleted, err
 	}
@@ -3412,8 +3412,22 @@ func (s *Service) prepareTaskDeletionResources(ctx, operationCtx context.Context
 	return nil
 }
 
-func (s *Service) commitTaskDeletion(ctx context.Context, id string, deleteFromDB func(context.Context, string) (bool, error), cleanupJob *models.TaskResourceCleanupJob, claim *managed.DeleteClaim) (bool, error) {
-	deleted, err := deleteFromDB(ctx, id)
+func (s *Service) commitTaskDeletion(
+	ctx context.Context,
+	id string,
+	trigger models.TaskResourceCleanupTrigger,
+	deleteFromDB func(context.Context, string) (bool, error),
+	cleanupJob *models.TaskResourceCleanupJob,
+	claim *managed.DeleteClaim,
+) (bool, error) {
+	var deleted bool
+	var err error
+	if trigger != models.TaskResourceCleanupTriggerQuickChatExpire {
+		err = s.stopTaskErrandsForDeletion(ctx, id)
+	}
+	if err == nil {
+		deleted, err = deleteFromDB(ctx, id)
+	}
 	if err != nil {
 		if claim == nil {
 			s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
@@ -3425,6 +3439,17 @@ func (s *Service) commitTaskDeletion(ctx context.Context, id string, deleteFromD
 		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 	}
 	return deleted, nil
+}
+
+func (s *Service) stopTaskErrandsForDeletion(ctx context.Context, taskID string) error {
+	if s.taskErrandCanceller == nil {
+		return nil
+	}
+	_, err := s.taskErrandCanceller.CancelForTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("stop errands before deleting task %s: %w", taskID, err)
+	}
+	return nil
 }
 
 func (s *Service) completeTaskDeletion(ctx context.Context, id string, task *models.Task, reason string, start time.Time, cleanupJob *models.TaskResourceCleanupJob, sessions []*models.TaskSession, worktrees []*worktree.Worktree, stopTargets []taskStopTarget, envCleanup taskEnvironmentCleanup) {

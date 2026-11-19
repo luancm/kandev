@@ -1001,13 +1001,13 @@ func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCance
 	s.clarificationCanceller = canceller
 }
 
-// TaskErrandCanceller cancels every errand of a task, queued ones included, when
-// the task is archived. Errand runtimes are stopped asynchronously.
+// TaskErrandCanceller schedules archive cancellation and confirms deletion teardown.
 type TaskErrandCanceller interface {
-	CancelErrandsForTask(ctx context.Context, taskID string)
+	CascadeTask(taskID string) bool
+	CancelForTask(ctx context.Context, taskID string) (int, error)
 }
 
-// SetTaskErrandCanceller wires errand cancellation for task archive.
+// SetTaskErrandCanceller wires errand cancellation for task archive and deletion.
 func (s *Service) SetTaskErrandCanceller(canceller TaskErrandCanceller) {
 	s.taskErrandCanceller = canceller
 }

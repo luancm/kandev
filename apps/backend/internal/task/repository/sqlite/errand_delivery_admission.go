@@ -27,7 +27,7 @@ func (r *Repository) PrepareErrandDeliverySubmission(ctx context.Context, a *mod
 	if err = tx.GetContext(ctx, &taskID, tx.Rebind(`SELECT task_id FROM task_session_errands WHERE id=?`), a.ErrandID); err != nil {
 		return false, err
 	}
-	if err = r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+	if err = r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return false, err
 	}
 	if err = validateErrandNewWorkTx(ctx, tx, a.ErrandID); err != nil {

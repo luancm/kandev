@@ -29,9 +29,12 @@ func (r *Repository) taskCleanupBarrierLocked(ctx context.Context, tx *sqlx.Tx, 
 			return fmt.Errorf("lock task for creation barrier: %w", err)
 		}
 	}
+	return checkTaskCleanupBarrierTx(ctx, tx, taskID)
+}
 
+func checkTaskCleanupBarrierTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
 	var active bool
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`
 		SELECT EXISTS (
 			SELECT 1 FROM task_resource_cleanup_jobs
 			WHERE task_id = ? AND state IN (?, ?, ?, ?, ?)

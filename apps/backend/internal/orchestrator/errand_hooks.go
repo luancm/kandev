@@ -1,10 +1,6 @@
 package orchestrator
 
-import (
-	"context"
-
-	"github.com/kandev/kandev/internal/task/models"
-)
+import "github.com/kandev/kandev/internal/task/models"
 
 // ParentAwaitEnder ends every in-flight await of a parent session without
 // cancelling its errands.
@@ -31,15 +27,6 @@ func (s *Service) endParentAwaits(sessionID string) {
 func (s *Service) cascadeErrandsOfParent(sessionID string) {
 	if s.errands != nil {
 		s.errands.CascadeParent(sessionID)
-	}
-}
-
-// CancelErrandsForTask cancels every errand of an archived task, queued ones
-// included, off the calling archive. It implements the task service's
-// TaskErrandCanceller.
-func (s *Service) CancelErrandsForTask(_ context.Context, taskID string) {
-	if s.errands != nil {
-		s.errands.CascadeTask(taskID)
 	}
 }
 

@@ -34,11 +34,6 @@ func (c *recordingErrandController) CascadeParent(parentSessionID string) bool {
 	return true
 }
 
-func (c *recordingErrandController) CascadeTask(taskID string) bool {
-	c.record("cascade-task:" + taskID)
-	return true
-}
-
 func (*recordingErrandController) OnErrandTurnSettled(context.Context, errands.TurnSettlement) error {
 	return nil
 }
@@ -129,17 +124,6 @@ func TestDeleteSessionRecordsTheDeletionAndCascadesToItsErrands(t *testing.T) {
 
 	require.NoError(t, f.svc.DeleteSession(ctx, "s1"))
 	require.Equal(t, []string{"cascade-parent:s1"}, controller.seen())
-}
-
-func TestCancelErrandsForTaskQueuesTheTaskCascade(t *testing.T) {
-	svc, _ := newServiceWithRealRepo(t)
-	controller := &recordingErrandController{}
-	svc.SetErrandController(controller)
-	svc.CancelErrandsForTask(context.Background(), "task-1")
-	require.Equal(t, []string{"cascade-task:task-1"}, controller.seen())
-
-	svc.SetErrandController(nil)
-	require.NotPanics(t, func() { svc.CancelErrandsForTask(context.Background(), "task-1") })
 }
 
 // @covers AC-TASKS-ERRANDS-007.5

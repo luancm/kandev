@@ -373,6 +373,11 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		return errors.Join(err, cancelErr)
 	}
 	cleanups = append(cleanups, taskCleanups...)
+	for _, cleanup := range taskCleanups {
+		if err := s.stopTaskErrandsForDeletion(ctx, cleanup.task.ID); err != nil {
+			return errors.Join(err, s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
+		}
+	}
 
 	// Record canvas artifact cleanup before the workspace cascade removes its
 	// task and workspace rows. This keeps the release ownership boundary

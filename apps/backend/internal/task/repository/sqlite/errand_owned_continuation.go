@@ -39,7 +39,27 @@ func (r *Repository) PrepareErrandContinuation(ctx context.Context, request mode
 		return nil, err
 	}
 	if prepared, err := readPreparedErrandContinuation(ctx, tx, row, request); !errors.Is(err, sql.ErrNoRows) {
-		return prepared, err
+		if err != nil || prepared.ExecutionID != "" {
+			return prepared, err
+		}
+		if err := checkTaskCleanupBarrierTx(ctx, tx, request.TaskID); err != nil {
+			return nil, err
+		}
+		return prepared, nil
+	}
+	prepared, err := r.reserveErrandContinuation(ctx, tx, row, request)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return prepared, nil
+}
+
+func (r *Repository) reserveErrandContinuation(ctx context.Context, tx *sqlx.Tx, row *models.Errand, request models.ErrandContinuation) (*models.PreparedErrandContinuation, error) {
+	if err := checkTaskCleanupBarrierTx(ctx, tx, request.TaskID); err != nil {
+		return nil, err
 	}
 	prior, err := readErrandContinuationPredecessor(ctx, tx, row)
 	if err != nil {
@@ -52,9 +72,6 @@ func (r *Repository) PrepareErrandContinuation(ctx context.Context, request mode
 		return nil, err
 	}
 	if err = r.reserveOwnedErrandParentInstruction(ctx, tx, row, request); err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &models.PreparedErrandContinuation{

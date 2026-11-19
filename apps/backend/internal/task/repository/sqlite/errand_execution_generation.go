@@ -24,7 +24,7 @@ func (r *Repository) ReserveErrandExecutionGeneration(ctx context.Context, erran
 	if err = tx.GetContext(ctx, &taskID, tx.Rebind(`SELECT task_id FROM task_session_errands WHERE id=?`), errandID); err != nil {
 		return nil, err
 	}
-	if err = r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+	if err = r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return nil, err
 	}
 	if err = validateErrandNewWorkTx(ctx, tx, errandID); err != nil {

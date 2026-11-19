@@ -293,6 +293,9 @@ func (r *Repository) deleteWorkspaceCascade(
 			return nil, nil, err
 		}
 	}
+	if err := requireWorkspaceErrandsStopped(ctx, tx, id); err != nil {
+		return nil, nil, err
+	}
 
 	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
 		return nil, nil, err

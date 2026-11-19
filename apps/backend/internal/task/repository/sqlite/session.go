@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type taskSessionExecutor interface {
@@ -4803,6 +4804,12 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 			continue
 		}
 		if err := lockErrandTask(ctx, tx, taskID); err != nil {
+			return 0, err
+		}
+		if err := requireTaskErrandsStopped(ctx, tx, taskID); err != nil {
+			if errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+				continue
+			}
 			return 0, err
 		}
 		sessions, err := r.taskQueueSessionsInTx(ctx, tx, taskID)

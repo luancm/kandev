@@ -28,7 +28,7 @@ var (
 	_ orchestrator.ErrandController   = (*errands.Service)(nil)
 	_ taskhandlers.ErrandService      = (*errands.Service)(nil)
 	_ orchestrator.MCPSelectionReader = (*mcpconfig.SelectionService)(nil)
-	_ taskservice.TaskErrandCanceller = (*orchestrator.Service)(nil)
+	_ taskservice.TaskErrandCanceller = (*errands.Service)(nil)
 	_ errandExecutorValidator         = (*taskservice.Service)(nil)
 )
 

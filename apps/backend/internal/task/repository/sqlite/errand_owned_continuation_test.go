@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,6 +20,52 @@ func TestOwnedErrandContinuationRequiresConfirmedClose(t *testing.T) {
 
 func TestPostgresOwnedErrandContinuationRequiresConfirmedClose(t *testing.T) {
 	exerciseOwnedErrandContinuation(t, newPostgresErrandRepo(t))
+}
+
+func TestOwnedErrandContinuationRespectsTaskCleanupBarrier(t *testing.T) {
+	exerciseOwnedErrandContinuationCleanupBarrier(t, newRepoForSessionTests)
+}
+
+func TestPostgresOwnedErrandContinuationRespectsTaskCleanupBarrier(t *testing.T) {
+	exerciseOwnedErrandContinuationCleanupBarrier(t, newPostgresErrandRepo)
+}
+
+func exerciseOwnedErrandContinuationCleanupBarrier(t *testing.T, newRepo func(*testing.T) *Repository) {
+	t.Helper()
+	for _, stage := range []string{"new", "reserved", "accepted"} {
+		t.Run(stage, func(t *testing.T) {
+			ctx := t.Context()
+			repo := newRepo(t)
+			row := seedOwnedErrandCompletion(t, repo)
+			_, err := repo.TransitionErrandTeardownIntent(ctx, row.ID, row.TeardownIntent.ID, row.Version, models.ErrandTeardownIntentCompleted)
+			require.NoError(t, err)
+			request := models.ErrandContinuation{
+				TaskID: row.TaskID, ErrandID: row.ID, TurnID: "follow-up", SubmissionID: "prompt:errand:next-submission",
+				AuthorID: "reader", Content: "Review the output",
+			}
+			if stage != "new" {
+				prepared, err := repo.PrepareErrandContinuation(ctx, request)
+				require.NoError(t, err)
+				if stage == "accepted" {
+					bindAcceptedErrandContinuation(t, repo, request, prepared)
+				}
+			}
+			reserveBarrier(t, repo, row.TaskID, "delete:continuation-fence")
+			before, err := repo.GetErrandExecutionDescriptor(ctx, row.ID)
+			require.NoError(t, err)
+			prepared, err := repo.PrepareErrandContinuation(ctx, request)
+			if stage == "accepted" {
+				require.NoError(t, err)
+				require.True(t, prepared.Accepted)
+			} else {
+				require.ErrorIs(t, err, repoerrors.ErrTaskCleanupInProgress)
+				require.Nil(t, prepared)
+			}
+			after, err := repo.GetErrandExecutionDescriptor(ctx, row.ID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+		})
+	}
 }
 
 func TestOwnedErrandContinuationCountsReservedWorkAgainstCapacity(t *testing.T) {

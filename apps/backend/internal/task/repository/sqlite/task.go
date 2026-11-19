@@ -3936,6 +3936,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := lockErrandTask(ctx, tx, id); err != nil {
 		return "", err
 	}
+	if err := requireTaskErrandsStopped(ctx, tx, id); err != nil {
+		return "", err
+	}
 	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
 	}
@@ -5794,6 +5797,12 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 			return false, err
 		}
 		return false, nil
+	}
+	if err := requireTaskErrandsStopped(ctx, tx, id); err != nil {
+		if errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+			return false, tx.Commit()
+		}
+		return false, err
 	}
 
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)

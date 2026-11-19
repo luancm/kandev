@@ -12,7 +12,6 @@ import (
 type ErrandController interface {
 	DrainQueued(ctx context.Context)
 	CascadeParent(parentSessionID string) bool
-	CascadeTask(taskID string) bool
 	OnErrandTurnSettled(ctx context.Context, settlement errands.TurnSettlement) error
 	OnErrandTurnCancelled(ctx context.Context, sessionID, turnID, submissionID string) error
 	OnParentTurnSettled(ctx context.Context, parentSessionID string, cause errands.SettleCause) (bool, error)
