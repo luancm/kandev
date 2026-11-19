@@ -184,7 +184,8 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 		return DeliveryReconciliationIdentity{}, ErrExecutionNotFound
 	}
 	submissionID := currentDeliverySubmissionID(execution)
-	if execution.ID == "" || execution.SessionID == "" || execution.DeliveryMode != DurableDeliveryV1 ||
+	sessionID := deliveryTransportSessionID(execution)
+	if execution.ID == "" || sessionID == "" || execution.DeliveryMode != DurableDeliveryV1 ||
 		execution.DeliveryIncarnationID == "" || execution.DeliveryHarnessGeneration == 0 ||
 		execution.DeliveryStreamID == "" || submissionID == "" {
 		return DeliveryReconciliationIdentity{}, fmt.Errorf("durable delivery reconciliation identity is incomplete")
@@ -193,7 +194,7 @@ func captureDeliveryReconciliationIdentityWithClient(execution *AgentExecution, 
 	return DeliveryReconciliationIdentity{
 		OriginalRuntime: originalRuntime,
 		TurnID:          execution.promptTurnIDSnapshot(), NativeSessionID: execution.ACPSessionID,
-		SessionID: execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
+		SessionID: sessionID, ExecutionID: execution.ID, Owner: execution.Owner,
 		IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: execution.DeliveryHarnessGeneration,
 		StreamID: execution.DeliveryStreamID, SubmissionID: submissionID, RuntimeEpoch: execution.runtimeEpoch,
 		StartupGeneration: execution.startupAttemptSnapshot(), PromptGeneration: execution.promptGenerationSnapshot(),
@@ -545,7 +546,7 @@ func (sm *StreamManager) deliveryReconciliationCurrent(
 	execution *AgentExecution,
 	identity DeliveryReconciliationIdentity,
 ) bool {
-	if execution == nil || execution.ID != identity.ExecutionID || execution.SessionID != identity.SessionID ||
+	if execution == nil || execution.ID != identity.ExecutionID || deliveryTransportSessionID(execution) != identity.SessionID ||
 		execution.Owner != identity.Owner || execution.DeliveryIncarnationID != identity.IncarnationID ||
 		execution.DeliveryHarnessGeneration != identity.HarnessGeneration || execution.DeliveryStreamID != identity.StreamID ||
 		execution.runtimeEpoch != identity.RuntimeEpoch || execution.startupAttemptSnapshot() != identity.StartupGeneration ||

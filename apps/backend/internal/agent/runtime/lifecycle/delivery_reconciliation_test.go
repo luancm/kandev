@@ -10,6 +10,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type reconciliationTestClock struct {
@@ -353,6 +354,66 @@ func TestDeliveryReconcileLivePeer(t *testing.T) {
 		t.Fatalf("attach calls = %d, want one", attachCalls)
 	}
 	sm.Wait()
+}
+
+func TestDeliveryReconcileOwnedErrandLivePeer(t *testing.T) {
+	sm := newDeliveryReconciliationTestManager(newReconciliationTestClock())
+	defer sm.Wait()
+	manager, eventBus := createTestManagerWithTracking()
+	t.Cleanup(func() { _ = manager.Stop() })
+	execution := newDeliveryReconciliationTestExecution()
+	execution.SessionID = ""
+	execution.Owner = ExecutionOwner{
+		Kind: ExecutionOwnerErrand, TaskID: "task-1", WorkspaceID: "workspace-1",
+		ErrandID: "errand-1", Generation: 1,
+	}
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+	peer := newDeliveryReconciliationTestPeer()
+	transportID := models.ErrandExecutionIdentity(execution.Owner.ErrandID)
+	descriptor := peer.descriptor
+	peer.descriptor = func(ctx context.Context, call int) (*agentctl.DeliveryStatus, error) {
+		status, err := descriptor(ctx, call)
+		status.SessionID = transportID
+		return status, err
+	}
+	submission := peer.submission
+	peer.submission = func(ctx context.Context, call int) (*journal.Submission, error) {
+		stored, err := submission(ctx, call)
+		stored.SessionID = transportID
+		return stored, err
+	}
+	var phases []DeliveryReconciliationPhase
+	sm.onDeliveryReconciliationPhase = func(_ *AgentExecution, identity DeliveryReconciliationIdentity, phase DeliveryReconciliationPhase) {
+		if identity.Owner != execution.Owner || identity.SessionID != transportID {
+			t.Fatalf("mismatched Errand recovery identity: %+v", identity)
+		}
+		phases = append(phases, phase)
+		manager.recordDeliveryReconciliationPhase(execution, identity, phase)
+	}
+
+	result := sm.reconcileDeliveryWithPeer(t.Context(), execution, peer)
+	if result.Outcome != DeliveryReconciliationRunningAttached || !peer.HasAgentStream() {
+		t.Fatalf("owned Errand recovery outcome = %q, error = %v; want a reattached stream", result.Outcome, result.Err)
+	}
+	if len(phases) != 2 || phases[0] != DeliveryReconciliationPhaseReconnecting || phases[1] != DeliveryReconciliationPhaseRecovered {
+		t.Fatalf("owned Errand recovery phases = %v", phases)
+	}
+	if execution.TaskID != "" || execution.SessionID != "" || execution.promptCompletionGeneration == execution.promptGeneration {
+		t.Fatal("reattachment modified the Errand's runtime or active turn ownership")
+	}
+	if len(eventBus.PublishedEvents) != len(phases) {
+		t.Fatalf("published %d recovery events, want %d", len(eventBus.PublishedEvents), len(phases))
+	}
+	for i, published := range eventBus.PublishedEvents {
+		payload, ok := published.Event.Data.(AgentctlEventPayload)
+		if !ok || payload.OwnerKind != ExecutionOwnerErrand || payload.ErrandID != execution.Owner.ErrandID ||
+			payload.ErrandGeneration != execution.Owner.Generation || payload.TaskID != "" || payload.SessionID != "" ||
+			payload.DeliveryRecoveryPhase != string(phases[i]) {
+			t.Fatalf("mismatched Errand recovery event: %+v", payload)
+		}
+	}
 }
 
 func equalDurations(got, want []time.Duration) bool {

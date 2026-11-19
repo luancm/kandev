@@ -1342,7 +1342,7 @@ func matchesDeliveryReconciliationExecution(
 	identity DeliveryReconciliationIdentity,
 	submissionID string,
 ) bool {
-	return current == expected && current.SessionID == identity.SessionID && current.Owner == identity.Owner &&
+	return current == expected && deliveryTransportSessionID(current) == identity.SessionID && current.Owner == identity.Owner &&
 		current.DeliveryIncarnationID == identity.IncarnationID &&
 		current.DeliveryHarnessGeneration == identity.HarnessGeneration && current.DeliveryStreamID == identity.StreamID &&
 		submissionID == identity.SubmissionID && current.runtimeEpoch == identity.RuntimeEpoch &&
