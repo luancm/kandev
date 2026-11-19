@@ -94,15 +94,15 @@ func TestErrandTranscriptSubmissionPolicyAfterReload(t *testing.T) {
 		{"no_submission_id", "", true},
 		{"missing_submission", "", true},
 	}
-	for _, format := range []string{"legacy", "structured"} {
+	for _, format := range []string{"scalar", "structured"} {
 		for _, tc := range cases {
 			id := format + "-" + tc.name
 			metadata := map[string]interface{}{orchestrator.ErrandDeliveryTokenMetadataKey: id + "-A"}
 			if format == "structured" {
 				snapshot := transcriptSendNowMetadata(session)
 				snapshot["receipts"] = []map[string]interface{}{
-					transcriptSendNowReceipt("source-A", id+"-A", id+"-errand-A", id+"-revision-A"),
-					transcriptSendNowReceipt("source-B", id+"-B", id+"-errand-B", id+"-revision-B"),
+					transcriptSendNowReceipt(id+"-A", id+"-errand-A", id+"-revision-A"),
+					transcriptSendNowReceipt(id+"-B", id+"-errand-B", id+"-revision-B"),
 				}
 				metadata[errands.SendNowDeliveryMetadataKey] = snapshot
 			}
@@ -125,7 +125,7 @@ func TestErrandTranscriptSubmissionPolicyAfterReload(t *testing.T) {
 	closeErrandTranscriptRepo(t, writer, reader, repo)
 	_, _, repo = openErrandTranscriptRepo(t, path)
 	transcript := errandTranscript{repo: repo}
-	for _, format := range []string{"legacy", "structured"} {
+	for _, format := range []string{"scalar", "structured"} {
 		for _, tc := range cases {
 			t.Run(format+"/"+tc.name, func(t *testing.T) {
 				tokens := []string{format + "-" + tc.name + "-A"}
@@ -260,20 +260,19 @@ func transcriptSendNowMetadata(session *models.TaskSession) map[string]interface
 		"operation_generation":   0, "queue_generation": 0,
 		"source_ids": []string{"source-A", "source-B"},
 		"sources": []map[string]interface{}{
-			{"id": "source-A", "queue_generation": 0, "kind": "prepared", "queued_by": "server", "provenance": "errands", "content": "", "prepared_block": "result A"},
-			{"id": "source-B", "queue_generation": 0, "kind": "prepared", "queued_by": "server", "provenance": "errands", "content": "", "prepared_block": "result B"},
+			{"id": "source-A", "queue_generation": 0, "kind": errands.SendNowSourceNotification, "queued_by": "server", "provenance": errands.SendNowErrandProvenance, "content": ""},
+			{"id": "source-B", "queue_generation": 0, "kind": errands.SendNowSourceNotification, "queued_by": "server", "provenance": errands.SendNowErrandProvenance, "content": ""},
 		},
 		"effective_prompt": "result A\n\nresult B",
 		"receipts": []map[string]interface{}{
-			transcriptSendNowReceipt("source-A", "delivery-token", "errand-1", "revision-A"),
-			transcriptSendNowReceipt("source-B", "second-token", "errand-2", "revision-B"),
+			transcriptSendNowReceipt("delivery-token", "errand-1", "revision-A"),
+			transcriptSendNowReceipt("second-token", "errand-2", "revision-B"),
 		},
 	}
 }
 
-func transcriptSendNowReceipt(sourceID, token, errandID, revision string) map[string]interface{} {
+func transcriptSendNowReceipt(token, errandID, revision string) map[string]interface{} {
 	return map[string]interface{}{
-		"source_id": sourceID,
 		"envelope": errands.DeliveryEnvelope{Token: token, Route: models.ErrandDeliveryNotification,
 			Items: []errands.DeliveryItem{{ErrandID: errandID, Title: "Review API", Status: models.ErrandStatusCancelled, Preview: "cancelled"}}},
 		"claims": []models.ErrandResultClaim{{ErrandID: errandID, ResultRevision: revision,

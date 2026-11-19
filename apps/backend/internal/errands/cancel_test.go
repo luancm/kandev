@@ -132,7 +132,7 @@ func TestCancelledStartingErrandCannotBecomeRunnable(t *testing.T) {
 	if result.Status != models.ErrandStatusCancelled || result.Errand.Lifecycle != models.ErrandLifecycleCancelled {
 		t.Fatalf("result = %s/%s, want the cancel to win over the launch", result.Status, result.Errand.Lifecycle)
 	}
-	if session, _ := h.store.GetTaskSession(context.Background(), result.Errand.ID); session != nil {
+	if h.store.hasErrandAllocation(result.Errand.ID) {
 		t.Fatal("a cancelled reservation became runnable")
 	}
 }
@@ -142,7 +142,7 @@ func TestCancelAllCancelsLiveErrandsAndDeliversOncePerParent(t *testing.T) {
 	h := newHarness(t)
 	first, second := h.mustStart("first").Errand, h.mustStart("second").Errand
 	done := h.mustStart("done").Errand
-	h.store.setSessionState(done.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(done.ID, false)
 	if _, _, err := h.service.update(context.Background(), done.ID, func(e *models.Errand) bool {
 		e.LastOutcome, e.AwaitingResult = models.ErrandOutcomeDone, false
 		return true
@@ -185,7 +185,7 @@ func TestCascadeCancelsLiveErrandsAndDiscardsUndeliveredResults(t *testing.T) {
 	h := newHarness(t)
 	live := h.mustStart("live").Errand
 	settled := h.mustStart("settled").Errand
-	h.store.setSessionState(settled.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(settled.ID, false)
 	if _, _, err := h.service.update(context.Background(), settled.ID, func(e *models.Errand) bool {
 		e.LastOutcome, e.AwaitingResult = models.ErrandOutcomeDone, false
 		e.ResultKind, e.ResultState = models.ErrandResultOutput, models.ErrandResultPending

@@ -145,7 +145,7 @@ func seedBrowserScenario(t *testing.T, repo *sqlite.Repository, taskID, parentID
 	if scenario.attention == "" {
 		return
 	}
-	binding := admitBrowserScenario(t, repo, row)
+	binding := admitOwnedErrandFixture(t, repo, row)
 	if scenario.attention == models.ErrandAttentionPermission {
 		projectBrowserPermission(t, repo, row, binding)
 		return
@@ -158,7 +158,7 @@ func seedBrowserScenario(t *testing.T, repo *sqlite.Repository, taskID, parentID
 	require.True(t, changed)
 }
 
-func admitBrowserScenario(t *testing.T, repo *sqlite.Repository, row *models.Errand) models.ErrandHarnessBinding {
+func admitOwnedErrandFixture(t *testing.T, repo *sqlite.Repository, row *models.Errand) models.ErrandHarnessBinding {
 	t.Helper()
 	ctx := t.Context()
 	binding := models.ErrandHarnessBinding{

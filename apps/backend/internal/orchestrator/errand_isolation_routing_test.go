@@ -102,7 +102,11 @@ func TestErrandNeverClaimsGeneratedTaskTitle(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "parent", "")
-	seedErrandSession(t, repo, "t1", "parent", "errand", models.TaskSessionStateRunning)
+	require.NoError(t, repo.CreateErrand(ctx, &models.Errand{
+		ID: "errand", TaskID: "t1", ParentSessionID: "parent", Title: "Audit", AgentProfileID: "profile",
+		FirstTurnID: "errand-turn", SubmissionID: "prompt:errand", Lifecycle: models.ErrandLifecycleQueued,
+		ResultState: models.ErrandResultNone,
+	}))
 	require.NoError(t, repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyAgentTitlePending, true))
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 

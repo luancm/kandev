@@ -15,14 +15,10 @@ import (
 // admission arbitration are exercised by the production-adapter integration.
 func (s *fakeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Errand, commit func(ErrandTeardownTarget) error) error {
 	target := ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID}
-	_, err := s.store.GetTaskSession(ctx, row.ID)
-	switch {
-	case errors.Is(err, models.ErrTaskSessionNotFound):
-		target.FirstTurnID, target.ReservedSubmissionID = row.FirstTurnID, row.SubmissionID
-	case err != nil:
-		return err
-	default:
+	if row.Lifecycle == models.ErrandLifecycleLaunched {
 		target.SessionIncarnation, target.ExecutionID, target.NoTurn = "test-incarnation", row.ID, true
+	} else {
+		target.FirstTurnID, target.ReservedSubmissionID = row.FirstTurnID, row.SubmissionID
 	}
 	if s.target != nil {
 		target = *s.target
@@ -39,7 +35,11 @@ func (s *fakeStopper) CancelErrandWithTarget(ctx context.Context, row *models.Er
 }
 
 func (s *fakeStopper) RetryErrandTeardown(ctx context.Context, intent ErrandTeardownIntent) (TeardownOutcome, error) {
-	row, err := s.store.GetErrand(ctx, intent.Target.SessionID)
+	errandID := intent.Target.ErrandID
+	if errandID == "" {
+		errandID = intent.Target.SessionID
+	}
+	row, err := s.store.GetErrand(ctx, errandID)
 	if err != nil {
 		return "", err
 	}
@@ -54,7 +54,7 @@ func (s *fakeStopper) RetryErrandTeardown(ctx context.Context, intent ErrandTear
 		reason = "agent completed"
 	}
 	if intent.Target.ExecutionID != "" && row.TeardownIntent.State == models.ErrandTeardownIntentPending {
-		if err := s.stopRuntime(ctx, intent.Target.SessionID, reason); err != nil {
+		if err := s.stopRuntime(ctx, errandID, reason); err != nil {
 			return "", err
 		}
 	}
@@ -113,11 +113,11 @@ func TestTeardownRequiresDependencies(t *testing.T) {
 	}
 }
 
-func (s teardownProjectionFailureStore) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+func (s teardownProjectionFailureStore) ReadErrandStatuses(ctx context.Context, taskID, id string) (map[string]models.ErrandBrowserObservation, error) {
 	if id == s.broken {
 		return nil, s.fault
 	}
-	return s.Store.GetTaskSession(ctx, id)
+	return s.Store.ReadErrandStatuses(ctx, taskID, id)
 }
 
 func TestStopAllDoesNotCountTeardownRetriesAsNewCancellations(t *testing.T) {
@@ -189,8 +189,7 @@ func TestTeardownSweepBoundsAttemptsAndRotatesPastFailures(t *testing.T) {
 		row := &models.Errand{ID: id, TaskID: testTask, ParentSessionID: testParent, FirstTurnID: "first-" + id,
 			SubmissionID: "submission-" + id, Lifecycle: models.ErrandLifecycleLaunched, ResultState: models.ErrandResultNone}
 		require.NoError(t, h.store.CreateErrand(t.Context(), row))
-		h.store.addSession(&models.TaskSession{ID: id, TaskID: testTask, Role: models.SessionRoleErrand,
-			ParentSessionID: testParent, State: models.TaskSessionStateRunning})
+		h.store.setErrandWorking(id, true)
 		_, err := h.service.Cancel(t.Context(), cancelRequest(row, models.ErrandCancelSourceUser))
 		require.Error(t, err)
 	}
@@ -213,7 +212,7 @@ func TestTeardownSweepBoundsAttemptsAndRotatesPastFailures(t *testing.T) {
 func TestCancelOfDoneErrandWithoutPendingTeardownIsNoOp(t *testing.T) {
 	h := newHarness(t)
 	row := h.mustStart("done").Errand
-	h.store.setSessionState(row.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(row.ID, false)
 	_, _, err := h.service.update(t.Context(), row.ID, func(row *models.Errand) bool {
 		row.AwaitingResult, row.LastOutcome = false, models.ErrandOutcomeDone
 		return true

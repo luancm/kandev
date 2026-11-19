@@ -157,8 +157,8 @@ func TestStartQueuesWhenTheCeilingRefusesAndWritesNoSession(t *testing.T) {
 	if result.Status != models.ErrandStatusQueued || result.Errand.Lifecycle != models.ErrandLifecycleQueued {
 		t.Fatalf("result = %s/%s, want a queued errand", result.Status, result.Errand.Lifecycle)
 	}
-	if _, err := h.store.GetTaskSession(context.Background(), result.Errand.ID); err == nil {
-		t.Fatal("a queued errand created a session row")
+	if h.store.hasErrandAllocation(result.Errand.ID) {
+		t.Fatal("a queued Errand acquired a runtime allocation")
 	}
 }
 
@@ -231,11 +231,11 @@ func TestStartRetainsUnknownLaunchForRecovery(t *testing.T) {
 
 type launchProjectionFaultStore struct{ Store }
 
-func (s launchProjectionFaultStore) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+func (s launchProjectionFaultStore) ReadErrandStatuses(ctx context.Context, taskID, id string) (map[string]models.ErrandBrowserObservation, error) {
 	if row, err := s.GetErrand(ctx, id); err == nil && row.Lifecycle == models.ErrandLifecycleLaunched {
 		return nil, errors.New("injected projection read failure after admission commit")
 	}
-	return s.Store.GetTaskSession(ctx, id)
+	return s.Store.ReadErrandStatuses(ctx, taskID, id)
 }
 
 func committedStartCount() int64 {

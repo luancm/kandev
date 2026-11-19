@@ -22,7 +22,8 @@ type memoryStore struct {
 	mu         sync.Mutex
 	errands    map[string]*models.Errand
 	sessions   map[string]*models.TaskSession
-	pending    map[string]models.TaskPendingAction
+	permission map[string]bool
+	working    map[string]bool
 	updates    int
 	admissions map[models.ErrandParentAdmission]models.ErrandAdmissionState
 	aborted    map[string]bool
@@ -54,7 +55,8 @@ func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		errands:    map[string]*models.Errand{},
 		sessions:   map[string]*models.TaskSession{},
-		pending:    map[string]models.TaskPendingAction{},
+		permission: map[string]bool{},
+		working:    map[string]bool{},
 		admissions: map[models.ErrandParentAdmission]models.ErrandAdmissionState{},
 		aborted:    map[string]bool{},
 		claims:     map[string][]models.ErrandResultClaim{},
@@ -191,7 +193,7 @@ func (s *memoryStore) CountLiveErrandsByTask(_ context.Context, taskID string) (
 	defer s.mu.Unlock()
 	live := 0
 	for _, row := range s.errands {
-		if row.TaskID == taskID && IsLive(ProjectStatus(row, s.sessions[row.ID], false)) {
+		if row.TaskID == taskID && IsLive(s.observeStatus(row).Status) {
 			live++
 		}
 	}
@@ -202,6 +204,8 @@ func (s *memoryStore) DeleteErrand(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.errands, id)
+	delete(s.working, id)
+	delete(s.permission, id)
 	return nil
 }
 
@@ -250,16 +254,49 @@ func (s *memoryStore) GetTask(_ context.Context, id string) (*models.Task, error
 	return nil, nil
 }
 
-func (s *memoryStore) GetPendingActionsBySessionIDs(_ context.Context, ids []string) (map[string]models.TaskPendingAction, error) {
+func (s *memoryStore) setErrandWorking(id string, working bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	result := map[string]models.TaskPendingAction{}
-	for _, id := range ids {
-		if action, ok := s.pending[id]; ok {
-			result[id] = action
+	s.working[id] = working
+}
+
+func (s *memoryStore) hasErrandAllocation(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, found := s.working[id]
+	return found
+}
+
+func (s *memoryStore) ReadErrandStatuses(_ context.Context, taskID, errandID string) (map[string]models.ErrandBrowserObservation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	statuses := make(map[string]models.ErrandBrowserObservation)
+	for _, row := range s.errands {
+		if row.TaskID == taskID && (errandID == "" || row.ID == errandID) {
+			statuses[row.ID] = s.observeStatus(row)
 		}
 	}
-	return result, nil
+	return statuses, nil
+}
+
+func (s *memoryStore) observeStatus(row *models.Errand) models.ErrandBrowserObservation {
+	observation := models.ErrandBrowserObservation{ID: row.ID}
+	switch {
+	case row.Lifecycle == models.ErrandLifecycleCancelled:
+		observation.Status = models.ErrandStatusCancelled
+	case row.Lifecycle == models.ErrandLifecycleQueued:
+		observation.Status = models.ErrandStatusQueued
+	case s.working[row.ID] && s.permission[row.ID]:
+		observation.Status = models.ErrandStatusNeedsAttention
+		observation.AttentionReason = models.ErrandAttentionPermission
+	case s.working[row.ID]:
+		observation.Status = models.ErrandStatusRunning
+	case row.LastOutcome == models.ErrandOutcomeDone:
+		observation.Status = models.ErrandStatusDone
+	default:
+		observation.Status = models.ErrandStatusFailed
+	}
+	return observation
 }
 
 type fakeLauncher struct {
@@ -296,10 +333,7 @@ func (l *fakeLauncher) LaunchErrand(ctx context.Context, request LaunchRequest) 
 	if row.Lifecycle == models.ErrandLifecycleCancelled {
 		return LaunchResult{Disposition: LaunchBlocked}, context.Canceled
 	}
-	l.store.addSession(&models.TaskSession{
-		ID: request.ErrandID, TaskID: request.TaskID, Role: models.SessionRoleErrand,
-		ParentSessionID: request.ParentSessionID, State: models.TaskSessionStateRunning,
-	})
+	l.store.setErrandWorking(request.ErrandID, true)
 	return LaunchResult{Disposition: LaunchAdmitted, SessionID: request.ErrandID, TurnID: request.TurnID, SubmissionID: request.SubmissionID}, nil
 }
 
@@ -506,8 +540,4 @@ func (*memoryStore) SealErrandTurnSettlement(context.Context, string, *models.Ag
 }
 func (*memoryStore) CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error {
 	panic("terminal settlement requires the SQLite fixture")
-}
-
-func (s *memoryStore) ErrandRecoveryAttention(context.Context, string) (bool, error) {
-	return false, nil
 }

@@ -40,8 +40,6 @@ func TestLifecycleRecoveryReadsOwnersByGroup(t *testing.T) {
 		row.ID, row.FirstTurnID, row.SubmissionID = fmt.Sprint("history-", i), fmt.Sprint("turn-", i), fmt.Sprint("submission-", i)
 		row.Lifecycle, row.AwaitingResult, row.LastOutcome = models.ErrandLifecycleLaunched, false, models.ErrandOutcomeDone
 		row.ResultState, row.ResultKind, row.ResultText = models.ErrandResultDelivered, models.ErrandResultOutput, "saved history"
-		h.store.addSession(&models.TaskSession{ID: row.ID, TaskID: testTask, ParentSessionID: testParent,
-			Role: models.SessionRoleErrand, State: models.TaskSessionStateWaitingForInput})
 		require.NoError(t, h.store.CreateErrand(t.Context(), &row))
 	}
 	reads := &lifecycleReadCounter{Store: h.store}

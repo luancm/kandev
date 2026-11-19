@@ -15,15 +15,27 @@ type attentionStore struct {
 	readError  error
 }
 
-func (s attentionStore) ErrandRecoveryAttention(context.Context, string) (bool, error) {
-	return s.unresolved, s.readError
+func (s attentionStore) ReadErrandStatuses(ctx context.Context, taskID, id string) (map[string]models.ErrandBrowserObservation, error) {
+	if s.readError != nil {
+		return nil, s.readError
+	}
+	statuses, err := s.Store.ReadErrandStatuses(ctx, taskID, id)
+	if err != nil || !s.unresolved {
+		return statuses, err
+	}
+	for key, status := range statuses {
+		status.Status = models.ErrandStatusNeedsAttention
+		status.AttentionReason = models.ErrandAttentionRecoveryUnresolved
+		statuses[key] = status
+	}
+	return statuses, nil
 }
 
 // AC-TASKS-ERRANDS-002.4: both service paths consume the repository observation.
 func TestRecoveryAttentionProjection(t *testing.T) {
 	h := newHarness(t)
 	row := h.mustStart("recovered work").Errand
-	h.store.setSessionState(row.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(row.ID, false)
 	h.service.store = attentionStore{Store: h.store, unresolved: true}
 	status, err := h.service.Project(t.Context(), row)
 	require.NoError(t, err)
@@ -46,43 +58,17 @@ func TestRecoveryAttentionProjection(t *testing.T) {
 func TestRecoveryAttentionReasonInParentBlock(t *testing.T) {
 	h := newHarness(t)
 	row := h.mustStart("uncertain work").Errand
-	h.store.setSessionState(row.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(row.ID, false)
 	h.service.store = attentionStore{Store: h.store, unresolved: true}
 	composed, err := h.service.ComposeParentTurn(t.Context(), testParent, models.ErrandDeliveryTurnContext)
 	require.NoError(t, err)
 	require.Contains(t, composed.Block, "recovery_unresolved")
 }
 
-func TestRecoveryAttentionPrecedence(t *testing.T) {
-	cases := []struct {
-		name       string
-		lifecycle  models.ErrandLifecycle
-		state      models.TaskSessionState
-		permission bool
-		want       models.ErrandStatus
-		reason     models.ErrandAttentionReason
-	}{
-		{"cancelled", models.ErrandLifecycleCancelled, models.TaskSessionStateRunning, true, models.ErrandStatusCancelled, ""},
-		{"queued", models.ErrandLifecycleQueued, models.TaskSessionStateWaitingForInput, false, models.ErrandStatusQueued, ""},
-		{"failed", models.ErrandLifecycleLaunched, models.TaskSessionStateFailed, false, models.ErrandStatusFailed, ""},
-		{"active permission", models.ErrandLifecycleLaunched, models.TaskSessionStateRunning, true, models.ErrandStatusNeedsAttention, models.ErrandAttentionPermission},
-		{"active work", models.ErrandLifecycleLaunched, models.TaskSessionStateRunning, false, models.ErrandStatusRunning, ""},
-		{"idle recovery", models.ErrandLifecycleLaunched, models.TaskSessionStateWaitingForInput, false, models.ErrandStatusNeedsAttention, models.ErrandAttentionRecoveryUnresolved},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			recovery := RecoveryAttention{Unresolved: true}
-			status := ProjectStatus(&models.Errand{Lifecycle: tc.lifecycle, LastOutcome: models.ErrandOutcomeDone}, &models.TaskSession{State: tc.state}, tc.permission, recovery)
-			require.Equal(t, tc.want, status)
-			require.Equal(t, tc.reason, attentionReason(status, tc.permission, recovery))
-		})
-	}
-}
-
 func TestRecoveryAttentionOutstandingWithoutAwaitingFlag(t *testing.T) {
 	h := newHarness(t)
 	row := h.mustStart("uncertain user follow-up").Errand
-	h.store.setSessionState(row.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(row.ID, false)
 	_, _, err := h.service.update(t.Context(), row.ID, func(e *models.Errand) bool {
 		e.AwaitingResult = false
 		e.LastOutcome = models.ErrandOutcomeDone

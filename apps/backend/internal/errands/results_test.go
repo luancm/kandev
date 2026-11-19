@@ -125,12 +125,12 @@ type blockedTurnReader struct {
 }
 
 type cancellationObservedStore struct {
-	Store
+	*sqlite.Repository
 	cancelled chan struct{}
 }
 
 func (s *cancellationObservedStore) UpdateErrand(ctx context.Context, row *models.Errand) error {
-	err := s.Store.UpdateErrand(ctx, row)
+	err := s.Repository.UpdateErrand(ctx, row)
 	if err == nil && row.Lifecycle == models.ErrandLifecycleCancelled {
 		select {
 		case s.cancelled <- struct{}{}:
@@ -190,23 +190,19 @@ func TestLateSettlementPreservesUserCancellationNotice(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, repo, errand, effect := newTerminalFixture(t)
-			completeTerminalTurn(t, repo, effect, "late answer", "")
-			observer := &cancellationObservedStore{Store: repo, cancelled: make(chan struct{}, 1)}
+			h, repo, errand := newOwnedSettlementRaceFixture(t, tc.outcome)
+			observer := &cancellationObservedStore{Repository: repo, cancelled: make(chan struct{}, 1)}
 			h.service.store = observer
 			reader := &blockedTurnReader{
 				readStarted: make(chan struct{}, 1),
 				readRelease: make(chan struct{}),
-				reader:      terminalTranscript{repo},
+				reader:      ownedSettlementTranscript{repo: repo},
 			}
 			h.service.SetTurnReader(reader)
 
 			settled := make(chan error, 1)
 			go func() {
-				settled <- h.service.OnErrandTurnSettled(t.Context(), TurnSettlement{
-					SessionID: errand.ID, TurnID: errand.FirstTurnID, SubmissionID: errand.SubmissionID, Outcome: tc.outcome,
-					FailureSummary: "late failure",
-				})
+				settled <- h.service.reconcileOwnedErrandResult(t.Context(), repo, errand)
 			}()
 			select {
 			case <-reader.readStarted:

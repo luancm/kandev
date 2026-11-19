@@ -8,10 +8,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-type errandStatusReader interface {
-	ReadErrandStatuses(context.Context, string, string) (map[string]models.ErrandBrowserObservation, error)
-}
-
 func observeErrand(row *models.Errand, observation models.ErrandBrowserObservation) Snapshot {
 	return Snapshot{
 		Errand: row, Status: observation.Status, AttentionReason: observation.AttentionReason,
@@ -41,52 +37,11 @@ func (s *Service) Lookup(ctx context.Context, errandID string) (*models.Errand, 
 }
 
 func (s *Service) list(ctx context.Context, taskID string) ([]Snapshot, error) {
-	errands, err := s.store.ListErrandsByTask(ctx, taskID)
+	rows, err := s.store.ListErrandsByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list errands: %w", err)
 	}
-	if reader, ok := s.store.(errandStatusReader); ok {
-		return s.listObserved(ctx, reader, taskID, errands)
-	}
-	sessions := make(map[string]*models.TaskSession, len(errands))
-	var working []string
-	for _, errand := range errands {
-		if errand.Lifecycle != models.ErrandLifecycleLaunched {
-			continue
-		}
-		session, err := s.store.GetTaskSession(ctx, errand.ID)
-		if err != nil && !isMissingSession(err) {
-			return nil, fmt.Errorf("load errand session %s: %w", errand.ID, err)
-		}
-		if session == nil {
-			continue
-		}
-		sessions[errand.ID] = session
-		if isWorking(session) {
-			working = append(working, session.ID)
-		}
-	}
-	pending := map[string]models.TaskPendingAction{}
-	if len(working) > 0 {
-		pending, err = s.store.GetPendingActionsBySessionIDs(ctx, working)
-		if err != nil {
-			return nil, fmt.Errorf("load pending actions: %w", err)
-		}
-	}
-	snapshots := make([]Snapshot, 0, len(errands))
-	for _, errand := range errands {
-		permission := pending[errand.ID] == models.TaskPendingActionPermission
-		snapshot, err := s.projectObserved(ctx, errand, sessions[errand.ID], permission)
-		if err != nil {
-			return nil, err
-		}
-		snapshots = append(snapshots, snapshot)
-	}
-	return snapshots, nil
-}
-
-func (s *Service) listObserved(ctx context.Context, reader errandStatusReader, taskID string, rows []*models.Errand) ([]Snapshot, error) {
-	statuses, err := reader.ReadErrandStatuses(ctx, taskID, "")
+	statuses, err := s.store.ReadErrandStatuses(ctx, taskID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -97,17 +52,4 @@ func (s *Service) listObserved(ctx context.Context, reader errandStatusReader, t
 		}
 	}
 	return snapshots, nil
-}
-
-func (s *Service) projectObserved(ctx context.Context, row *models.Errand, session *models.TaskSession, permission bool) (Snapshot, error) {
-	recovery := RecoveryAttention{}
-	if row.Lifecycle == models.ErrandLifecycleLaunched && session != nil && !isWorking(session) && session.State != models.TaskSessionStateFailed {
-		unresolved, err := s.store.ErrandRecoveryAttention(ctx, row.ID)
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("load errand recovery attention: %w", err)
-		}
-		recovery.Unresolved = unresolved
-	}
-	status := ProjectStatus(row, session, permission, recovery)
-	return Snapshot{Errand: row, Status: status, AttentionReason: attentionReason(status, permission, recovery)}, nil
 }

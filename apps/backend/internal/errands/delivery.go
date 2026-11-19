@@ -62,7 +62,7 @@ func (s *Service) ParentErrandState(ctx context.Context, parentSessionID string)
 		if err != nil {
 			return false, false, err
 		}
-		if IsOutstanding(row, RecoveryAttention{Unresolved: snapshot.AttentionReason == models.ErrandAttentionRecoveryUnresolved}) {
+		if IsOutstanding(row) || snapshot.AttentionReason == models.ErrandAttentionRecoveryUnresolved {
 			return true, true, nil
 		}
 	}

@@ -3,7 +3,6 @@ package errands
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -142,32 +141,15 @@ func (s *Service) Project(ctx context.Context, errand *models.Errand) (models.Er
 }
 
 func (s *Service) ProjectSnapshot(ctx context.Context, errand *models.Errand) (Snapshot, error) {
-	if reader, ok := s.store.(errandStatusReader); ok {
-		statuses, err := reader.ReadErrandStatuses(ctx, errand.TaskID, errand.ID)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if observation, found := statuses[errand.ID]; found {
-			return observeErrand(errand, observation), nil
-		}
+	statuses, err := s.store.ReadErrandStatuses(ctx, errand.TaskID, errand.ID)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	var session *models.TaskSession
-	if errand.Lifecycle == models.ErrandLifecycleLaunched {
-		loaded, err := s.store.GetTaskSession(ctx, errand.ID)
-		if err != nil && !isMissingSession(err) {
-			return Snapshot{}, fmt.Errorf("load errand session %s: %w", errand.ID, err)
-		}
-		session = loaded
+	observation, found := statuses[errand.ID]
+	if !found {
+		return Snapshot{}, models.ErrErrandNotFound
 	}
-	permission := false
-	if session != nil && isWorking(session) {
-		actions, err := s.store.GetPendingActionsBySessionIDs(ctx, []string{session.ID})
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("load pending action for errand %s: %w", errand.ID, err)
-		}
-		permission = actions[session.ID] == models.TaskPendingActionPermission
-	}
-	return s.projectObserved(ctx, errand, session, permission)
+	return observeErrand(errand, observation), nil
 }
 
 // publish emits errand.updated for a durable change. The status is projected

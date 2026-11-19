@@ -21,14 +21,14 @@ func TestListProjectsEveryErrandInCreationOrder(t *testing.T) {
 	running := h.mustStart("running").Errand
 	h.launcher.behave = func(int, LaunchRequest) error { return ErrCeilingRefused }
 	queued := h.mustStart("queued").Errand
-	h.store.setSessionState(done.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(done.ID, false)
 	if _, _, err := h.service.update(context.Background(), done.ID, func(e *models.Errand) bool {
 		e.LastOutcome = models.ErrandOutcomeDone
 		return true
 	}); err != nil {
 		t.Fatalf("settle: %v", err)
 	}
-	h.store.pending[running.ID] = models.TaskPendingActionPermission
+	h.store.permission[running.ID] = true
 
 	snapshots, err := h.service.List(context.Background(), testTask)
 	if err != nil {

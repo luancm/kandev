@@ -12,10 +12,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Store is the errand persistence plus the read-only session lookups that
-// status projection needs. *sqlite.Repository satisfies it.
+// Store owns Errand persistence and reads the ordinary parent.
 type Store interface {
-	ErrandRecoveryAttention(context.Context, string) (bool, error)
+	ReadErrandStatuses(ctx context.Context, taskID, errandID string) (map[string]models.ErrandBrowserObservation, error)
 	ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
 	SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
 	CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error
@@ -42,7 +41,6 @@ type Store interface {
 	UpdateErrand(ctx context.Context, errand *models.Errand) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
-	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 }
 
 // ParentStateReader computes parent waiting state without loading child sessions.

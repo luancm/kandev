@@ -63,7 +63,7 @@ func pendingResultHarness(t *testing.T, text string) (*harness, string) {
 	h.service.SetTurnReader(&fakeTurns{views: map[string]TurnView{
 		errand.FirstTurnID: {LastAgentText: text, EarliestUserSender: testParent, Completed: true},
 	}})
-	h.store.setSessionState(errand.ID, models.TaskSessionStateWaitingForInput)
+	h.store.setErrandWorking(errand.ID, false)
 	row, _, err := h.service.update(t.Context(), errand.ID, func(e *models.Errand) bool {
 		e.LatestSettledTurnID, e.ResultTurnID = e.FirstTurnID, e.FirstTurnID
 		e.ResultState, e.ResultKind, e.ResultText = models.ErrandResultPending, models.ErrandResultOutput, text

@@ -7,16 +7,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 func isMissingSession(err error) bool {
 	return errors.Is(err, models.ErrTaskSessionNotFound)
-}
-
-func isWorking(session *models.TaskSession) bool {
-	return sessionstate.IsWorking(session.State)
 }
 
 // maxUpdateAttempts bounds compare-and-set retries of one errand mutation.

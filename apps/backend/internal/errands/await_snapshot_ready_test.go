@@ -30,7 +30,7 @@ func (s *resumedClaimStore) ClaimResults(ctx context.Context, task, parent strin
 		if err := s.UpdateErrand(ctx, row); err != nil {
 			return nil, err
 		}
-		s.memory.setSessionState(s.id, models.TaskSessionStateRunning)
+		s.memory.setErrandWorking(s.id, true)
 		close(s.changed)
 	}
 	return s.Store.ClaimResults(ctx, task, parent, route, token, candidates, at, inventory)
@@ -66,7 +66,7 @@ func TestAwaitStaleSnapshotRechecksReadiness(t *testing.T) {
 		if err := h.store.UpdateErrand(ctx, row); err != nil {
 			t.Fatal(err)
 		}
-		h.store.setSessionState(id, models.TaskSessionStateWaitingForInput)
+		h.store.setErrandWorking(id, false)
 		h.service.wakeAwaits(testParent)
 		result := <-done
 		if err := <-errors; err != nil || len(result.Errands) != 1 || result.Errands[0].Result != "successor result" {

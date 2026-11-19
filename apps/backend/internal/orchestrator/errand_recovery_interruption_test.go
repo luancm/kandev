@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/db"
-	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
@@ -72,7 +71,9 @@ func TestErrandRestartAbandonmentSettlesExactInterruptedTurn(t *testing.T) {
 				require.False(t, after.AwaitingResult)
 				session, err := f.repo.GetTaskSession(t.Context(), row.ID)
 				require.NoError(t, err)
-				require.Equal(t, models.ErrandStatusFailed, errands.ProjectStatus(after, session, false))
+				observed, err := f.repo.ReadErrandStatuses(t.Context(), row.TaskID, row.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ErrandStatusFailed, observed[row.ID].Status)
 				// @covers AC-TASKS-ERRANDS-002.7
 				session.AgentProfileID = "native-profile"
 				session.DownstreamACPSessionID = "retained-native"
