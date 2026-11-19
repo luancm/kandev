@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,6 +21,38 @@ func TestOwnedErrandContinuationRequiresConfirmedClose(t *testing.T) {
 
 func TestPostgresOwnedErrandContinuationRequiresConfirmedClose(t *testing.T) {
 	exerciseOwnedErrandContinuation(t, newPostgresErrandRepo(t))
+}
+
+func TestDeletedOwnedErrandDoesNotBlockTerminalRecovery(t *testing.T) {
+	exerciseDeletedOwnedErrandTerminalRecovery(t, newRepoForSessionTests(t))
+}
+
+func TestPostgresDeletedOwnedErrandDoesNotBlockTerminalRecovery(t *testing.T) {
+	exerciseDeletedOwnedErrandTerminalRecovery(t, newPostgresErrandRepo(t))
+}
+
+func exerciseDeletedOwnedErrandTerminalRecovery(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := t.Context()
+	row := seedOwnedErrandCompletion(t, repo)
+	_, err := repo.TransitionErrandTeardownIntent(ctx, row.ID, row.TeardownIntent.ID, row.Version, models.ErrandTeardownIntentCompleted)
+	require.NoError(t, err)
+
+	pending, err := repo.ListPendingAgentDeliverySettlements(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, pending, 1, "settlement remains available while the Errand exists")
+	effect := pending[0]
+	require.Equal(t, models.ErrandExecutionIdentity(row.ID), effect.SessionID)
+	require.NoError(t, repo.DeleteTask(ctx, row.TaskID))
+	_, err = repo.GetAgentDeliveryEffect(ctx, effect.EffectKey)
+	require.NoError(t, err, "journal retirement can run after the task is gone")
+
+	pending, err = repo.ListPendingAgentDeliverySettlements(ctx, "")
+	require.NoError(t, err)
+	assert.Empty(t, pending, "startup must skip retired owners")
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, effect.StreamID, effect.Sequence, models.DeliverySubmissionCompleted, errandScenarioBase)
+	assert.NoError(t, err, "an effect listed before deletion can still reach settlement")
+	assert.False(t, settled)
 }
 
 func TestOwnedErrandContinuationRespectsTaskCleanupBarrier(t *testing.T) {

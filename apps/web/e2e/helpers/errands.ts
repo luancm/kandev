@@ -230,7 +230,12 @@ export async function expectOwnedErrandContinuationRetry(
     }
   }
   let turnId: string | undefined;
-  await expect.poll(async () => (turnId = await submit())).toEqual(expect.any(String));
+  await expect
+    .poll(async () => (turnId = await submit()), {
+      message: "Continuation is admitted after the preceding owned runtime closes",
+      timeout: 30_000,
+    })
+    .toEqual(expect.any(String));
   expect(await submit()).toBe(turnId);
 }
 

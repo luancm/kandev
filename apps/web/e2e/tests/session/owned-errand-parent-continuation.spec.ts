@@ -1,5 +1,11 @@
 import { expect, test } from "../../fixtures/test-base";
-import { listErrands, startErrands, waitDelivered, waitParentIdle } from "../../helpers/errands";
+import {
+  listErrands,
+  startErrands,
+  waitDelivered,
+  waitNewParentTurnSettled,
+  waitParentIdle,
+} from "../../helpers/errands";
 
 test("the ordinary parent sends an owned Errand a new instruction and receives its result", async ({
   apiClient: api,
@@ -13,8 +19,10 @@ test("the ordinary parent sends an owned Errand a new instruction and receives i
       count: 1,
     });
     const errandId = errands[0].errand_id;
+    const priorTurns = (await api.listSessionTurns(parentId)).turns.map(({ id }) => id);
     await gates[0].release();
     await waitDelivered(api, taskId, [errandId]);
+    await waitNewParentTurnSettled(api, parentId, priorTurns);
     await waitParentIdle(api, taskId, parentId);
 
     const marker = "ERRAND_PARENT_FOLLOW_UP";

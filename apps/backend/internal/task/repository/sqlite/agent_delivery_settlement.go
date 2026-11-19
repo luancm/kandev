@@ -379,8 +379,12 @@ func (r *Repository) ListPendingAgentDeliverySettlements(
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
 		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
-		FROM agent_delivery_effects
+		FROM agent_delivery_effects terminal
 		WHERE effect_type = ? AND state != ? AND (? = '' OR session_id = ?)
+		  AND (SUBSTR(terminal.session_id, 1, 7) <> 'errand:' OR EXISTS (
+			SELECT 1 FROM task_session_errands owner
+			WHERE owner.id = SUBSTR(terminal.session_id, 8)
+		  ))
 		ORDER BY created_at, stream_id, sequence`),
 		models.DeliveryTerminalEffectType, models.DeliveryEffectCompleted, sessionID, sessionID)
 	if err != nil {

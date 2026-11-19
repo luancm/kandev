@@ -231,6 +231,7 @@ export async function exerciseOwnedErrandShellOutput({
     });
     const { conversation } = await openOwnedErrandConversation(page, taskId, parentId, errandId, {
       phone,
+      finished: true,
     });
     const disclosure = conversation.getByRole("button", { name: "Show command output" });
     await expect(disclosure).toBeVisible();

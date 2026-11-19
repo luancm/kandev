@@ -189,7 +189,7 @@ func seedFinishedErrand(t *testing.T, ctx context.Context, repo *tasksqlite.Repo
 		Title:          fmt.Sprintf("Retained review %04d: deterministic delivered Errand result", index),
 		Objective:      strings.Repeat("Review the finished Errand output and retain its parent identity. ", 5),
 		AgentProfileID: seed.AgentProfileID, FirstTurnID: id + "-turn", SubmissionID: id + "-submission",
-		Lifecycle: models.ErrandLifecycleLaunched, AwaitingResult: true,
+		Lifecycle: models.ErrandLifecycleLaunched, ResultState: models.ErrandResultNone, AwaitingResult: true,
 		CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
 	require.NoError(t, repo.CreateErrand(ctx, row))

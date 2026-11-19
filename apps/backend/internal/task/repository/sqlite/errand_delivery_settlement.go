@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,11 +13,8 @@ import (
 )
 
 func (r *Repository) settleErrandDeliveryTerminal(ctx context.Context, tx *sqlx.Tx, errandID, streamID string, sequence int64, outcome models.DeliverySubmissionState, at time.Time) (bool, error) {
-	var taskID string
-	if err := tx.GetContext(ctx, &taskID, tx.Rebind(`SELECT task_id FROM task_session_errands WHERE id=?`), errandID); err != nil {
-		return false, err
-	}
-	if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+	ownerExists, err := r.lockErrandTerminalOwner(ctx, tx, errandID)
+	if err != nil || !ownerExists {
 		return false, err
 	}
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{models.ErrandExecutionIdentity(errandID)}, []string{streamID}); err != nil {
@@ -58,6 +56,19 @@ func (r *Repository) settleErrandDeliveryTerminal(ctx context.Context, tx *sqlx.
 		return false, err
 	}
 	return true, nil
+}
+
+func (r *Repository) lockErrandTerminalOwner(ctx context.Context, tx *sqlx.Tx, errandID string) (bool, error) {
+	var taskID string
+	err := tx.GetContext(ctx, &taskID, tx.Rebind(`SELECT task_id FROM task_session_errands WHERE id=?`), errandID)
+	if err == nil {
+		err = r.lockTaskRowInTx(ctx, tx, taskID)
+	}
+	// Storage retirement can outlive the task and its Errand owner.
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrTaskNotFound) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func closeErrandTerminalTurnTx(ctx context.Context, tx *sqlx.Tx, proof errandPromptProof, at time.Time) error {
