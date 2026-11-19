@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,8 +31,8 @@ type fakeErrandService struct {
 	cancelStatus   models.ErrandStatus
 	outstanding    bool
 	outstandingErr error
-	listed         []errands.Snapshot
 	listErr        error
+	listCalls      int
 }
 
 func (f *fakeErrandService) Start(_ context.Context, req errands.StartRequest) (*errands.StartResult, error) {
@@ -82,7 +81,8 @@ func (f *fakeErrandService) ParentOutstanding(_ context.Context, _ string) (bool
 }
 
 func (f *fakeErrandService) List(_ context.Context, _ string) ([]errands.Snapshot, error) {
-	return f.listed, f.listErr
+	f.listCalls++
+	return nil, f.listErr
 }
 
 // newErrandMCPFixture seeds a task with a primary session and returns the
@@ -97,26 +97,10 @@ func newErrandMCPFixture(t *testing.T, enabled bool) (*Handlers, *fakeErrandServ
 	return h, fake, task, primary, repo
 }
 
-// seedErrandSession inserts an errand session under the parent session.
-func seedErrandSession(t *testing.T, repo seedRepo, task *models.Task, parent *models.TaskSession, id string) *models.TaskSession {
-	t.Helper()
-	session := &models.TaskSession{
-		ID:              id,
-		TaskID:          task.ID,
-		AgentProfileID:  "profile-1",
-		Role:            models.SessionRoleErrand,
-		ParentSessionID: parent.ID,
-		State:           models.TaskSessionStateRunning,
-		StartedAt:       time.Now(),
-	}
-	require.NoError(t, repo.CreateTaskSession(context.Background(), session))
-	return session
-}
-
-func errandSenderArgs(task *models.Task, session *models.TaskSession, extra map[string]interface{}) map[string]interface{} {
+func errandSenderArgs(task *models.Task, sessionID string, extra map[string]interface{}) map[string]interface{} {
 	payload := map[string]interface{}{
 		"sender_task_id":    task.ID,
-		"sender_session_id": session.ID,
+		"sender_session_id": sessionID,
 	}
 	for key, value := range extra {
 		payload[key] = value
@@ -137,7 +121,7 @@ func errandErrorReason(t *testing.T, resp *ws.Message) string {
 
 func TestStartErrandRefusesWhenFeatureDisabled(t *testing.T) {
 	h, fake, task, primary, _ := newErrandMCPFixture(t, false)
-	msg := makeWSMessage(t, ws.ActionMCPStartErrand, errandSenderArgs(task, primary, map[string]interface{}{
+	msg := makeWSMessage(t, ws.ActionMCPStartErrand, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"task_id": task.ID, "title": "Survey", "prompt": "Look around",
 	}))
 
@@ -151,7 +135,7 @@ func TestStartErrandRefusesWhenFeatureDisabled(t *testing.T) {
 func TestStartErrandRefusesWhenNoErrandsService(t *testing.T) {
 	h, _, task, primary, _ := newErrandMCPFixture(t, true)
 	h.errands = nil
-	msg := makeWSMessage(t, ws.ActionMCPStartErrand, errandSenderArgs(task, primary, map[string]interface{}{
+	msg := makeWSMessage(t, ws.ActionMCPStartErrand, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"task_id": task.ID, "title": "Survey", "prompt": "Look around",
 	}))
 
@@ -162,7 +146,7 @@ func TestStartErrandRefusesWhenNoErrandsService(t *testing.T) {
 
 func TestStartErrandForwardsVerifiedParentSession(t *testing.T) {
 	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
-	msg := makeWSMessage(t, ws.ActionMCPStartErrand, errandSenderArgs(task, primary, map[string]interface{}{
+	msg := makeWSMessage(t, ws.ActionMCPStartErrand, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"task_id": task.ID, "title": "Survey", "prompt": "Look around", "agent_profile": "Claude",
 	}))
 
@@ -185,17 +169,16 @@ func TestStartErrandForwardsVerifiedParentSession(t *testing.T) {
 	assert.Equal(t, "Claude", body["agent_profile_name"])
 }
 
-func TestStartErrandRefusesErrandOrUnverifiedSender(t *testing.T) {
-	h, fake, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
+func TestStartErrandRefusesOwnedErrandOrUnverifiedSender(t *testing.T) {
+	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
 	args := map[string]interface{}{"task_id": task.ID, "title": "Survey", "prompt": "Look around"}
 
 	resp, err := h.handleStartErrand(context.Background(), makeWSMessage(t, ws.ActionMCPStartErrand,
-		errandSenderArgs(task, errandSession, args)))
+		errandSenderArgs(task, "", args)))
 	require.NoError(t, err)
 	assert.Equal(t, string(errands.ReasonNotSupported), errandErrorReason(t, resp))
 
-	forged := errandSenderArgs(task, primary, args)
+	forged := errandSenderArgs(task, primary.ID, args)
 	forged["sender_task_id"] = "some-other-task"
 	resp, err = h.handleStartErrand(context.Background(), makeWSMessage(t, ws.ActionMCPStartErrand, forged))
 	require.NoError(t, err)
@@ -212,7 +195,7 @@ func TestAwaitErrandsForwardsParentAndReturnsView(t *testing.T) {
 			{ErrandID: "errand-2", Status: "done", DeliveredVia: "turn"},
 		},
 	}
-	msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, primary, map[string]interface{}{
+	msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"errand_ids": []string{"errand-1", "errand-2"}, "mode": "all", "max_wait_seconds": 30, "await_token": "token-1",
 	}))
 
@@ -240,10 +223,9 @@ func TestAwaitErrandsForwardsParentAndReturnsView(t *testing.T) {
 	assert.NotContains(t, body.Errands[1], "result")
 }
 
-func TestAwaitErrandsRefusesErrandSender(t *testing.T) {
-	h, fake, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
-	msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, errandSession, map[string]interface{}{
+func TestAwaitErrandsRefusesOwnedErrandSender(t *testing.T) {
+	h, fake, task, _, _ := newErrandMCPFixture(t, true)
+	msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, "", map[string]interface{}{
 		"errand_ids": []string{"errand-1"}, "mode": "any",
 	}))
 
@@ -255,7 +237,7 @@ func TestAwaitErrandsRefusesErrandSender(t *testing.T) {
 
 func TestAwaitErrandsReleaseReturnsClaimWithToken(t *testing.T) {
 	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
-	msg := makeWSMessage(t, ws.ActionMCPAwaitErrandsRelease, errandSenderArgs(task, primary, map[string]interface{}{
+	msg := makeWSMessage(t, ws.ActionMCPAwaitErrandsRelease, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"await_token": "token-1",
 	}))
 
@@ -270,7 +252,7 @@ func TestAwaitErrandsReleaseReturnsClaimWithToken(t *testing.T) {
 func TestCancelErrandUsesParentSourceAndReturnsStatus(t *testing.T) {
 	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
 	fake.cancelStatus = models.ErrandStatusCancelled
-	msg := makeWSMessage(t, ws.ActionMCPCancelErrand, errandSenderArgs(task, primary, map[string]interface{}{
+	msg := makeWSMessage(t, ws.ActionMCPCancelErrand, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"errand_id": "errand-1",
 	}))
 
@@ -290,10 +272,9 @@ func TestCancelErrandUsesParentSourceAndReturnsStatus(t *testing.T) {
 	assert.Equal(t, "cancelled", body["status"])
 }
 
-func TestCancelErrandRefusesErrandSenderAndDisabledToggle(t *testing.T) {
-	h, fake, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
-	msg := makeWSMessage(t, ws.ActionMCPCancelErrand, errandSenderArgs(task, errandSession, map[string]interface{}{
+func TestCancelErrandRefusesOwnedErrandSenderAndDisabledToggle(t *testing.T) {
+	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
+	msg := makeWSMessage(t, ws.ActionMCPCancelErrand, errandSenderArgs(task, "", map[string]interface{}{
 		"errand_id": "errand-1",
 	}))
 	resp, err := h.handleCancelErrand(context.Background(), msg)
@@ -301,42 +282,13 @@ func TestCancelErrandRefusesErrandSenderAndDisabledToggle(t *testing.T) {
 	assert.Equal(t, string(errands.ReasonNotPermitted), errandErrorReason(t, resp))
 
 	h.errandsEnabled = false
-	msg = makeWSMessage(t, ws.ActionMCPCancelErrand, errandSenderArgs(task, primary, map[string]interface{}{
+	msg = makeWSMessage(t, ws.ActionMCPCancelErrand, errandSenderArgs(task, primary.ID, map[string]interface{}{
 		"errand_id": "errand-1",
 	}))
 	resp, err = h.handleCancelErrand(context.Background(), msg)
 	require.NoError(t, err)
 	assert.Equal(t, string(errands.ReasonFeatureDisabled), errandErrorReason(t, resp))
 	assert.Equal(t, models.ErrandCancelSource(""), fake.cancelReq.Source)
-}
-
-func TestErrandCallerRefusalOnlyForErrandSessions(t *testing.T) {
-	h, _, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
-	ctx := context.Background()
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{})
-
-	refusal := h.errandCallerRefusal(ctx, msg, errandSession.ID, "errand sessions cannot move tasks")
-	require.NotNil(t, refusal)
-	assert.Equal(t, string(errands.ReasonNotPermitted), errandErrorReason(t, refusal))
-
-	assert.Nil(t, h.errandCallerRefusal(ctx, msg, primary.ID, "unused"))
-	assert.Nil(t, h.errandCallerRefusal(ctx, msg, "", "unused"))
-	assert.Nil(t, h.errandCallerRefusal(ctx, msg, "missing-session", "unused"))
-}
-
-func TestErrandMessageRefusalRequiresParentSender(t *testing.T) {
-	h, _, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
-	ctx := context.Background()
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{})
-
-	assert.Nil(t, h.errandMessageRefusal(ctx, msg, primary.ID, errandSession.ID), "the parent may message its errand")
-	assert.Nil(t, h.errandMessageRefusal(ctx, msg, primary.ID, primary.ID), "an ordinary target is not gated")
-
-	refusal := h.errandMessageRefusal(ctx, msg, "other-session", errandSession.ID)
-	require.NotNil(t, refusal)
-	assert.Equal(t, string(errands.ReasonSenderNotParent), errandErrorReason(t, refusal))
 }
 
 func TestErrandOutstandingRefusalBlocksStepCompletion(t *testing.T) {
@@ -359,91 +311,26 @@ func TestErrandOutstandingRefusalBlocksStepCompletion(t *testing.T) {
 	assertWSError(t, refusal, ws.ErrorCodeInternalError)
 }
 
-func TestListTaskSessionsReportsErrandRoleAndStatus(t *testing.T) {
-	h, fake, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
-	fake.listed = []errands.Snapshot{{
-		Errand:          &models.Errand{ID: errandSession.ID},
-		Status:          models.ErrandStatusNeedsAttention,
-		AttentionReason: models.ErrandAttentionRecoveryUnresolved,
-	}}
-
-	resp, err := h.handleListTaskSessions(context.Background(), makeWSMessage(t, ws.ActionMCPListTaskSessions,
-		map[string]interface{}{"task_id": task.ID}))
+func TestListOrdinaryTaskSessionsDoesNotLoadErrandStatus(t *testing.T) {
+	h, fake, task, primary, _ := newErrandMCPFixture(t, true)
+	fake.listErr = errors.New("errand status unavailable")
+	msg := makeWSMessage(t, ws.ActionMCPListTaskSessions, map[string]interface{}{"task_id": task.ID})
+	resp, err := h.handleListTaskSessions(t.Context(), msg)
 	require.NoError(t, err)
 	entries := sessionEntries(t, listSessionsPayload(t, resp))
-
-	byID := map[string]map[string]interface{}{}
-	for _, entry := range entries {
-		byID[entry["session_id"].(string)] = entry
-	}
-	errandEntry := byID[errandSession.ID]
-	assert.Equal(t, "errand", errandEntry["role"])
-	assert.Equal(t, primary.ID, errandEntry["parent_session_id"])
-	assert.Equal(t, "needs_attention", errandEntry["errand_status"])
-	assert.Equal(t, "recovery_unresolved", errandEntry["attention_reason"])
-	assert.NotContains(t, byID[primary.ID], "role")
-	assert.NotContains(t, byID[primary.ID], "errand_status")
+	require.Len(t, entries, 1)
+	require.Equal(t, primary.ID, entries[0]["session_id"])
+	require.Zero(t, fake.listCalls)
 }
 
-func TestListTaskSessionsOmitsErrandStatusWhenReadFails(t *testing.T) {
-	h, fake, task, primary, repo := newErrandMCPFixture(t, true)
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-1")
-	fake.listErr = errors.New("store down")
-
-	resp, err := h.handleListTaskSessions(context.Background(), makeWSMessage(t, ws.ActionMCPListTaskSessions,
-		map[string]interface{}{"task_id": task.ID}))
-	require.NoError(t, err)
-	entries := sessionEntries(t, listSessionsPayload(t, resp))
-	require.Len(t, entries, 2)
-	for _, entry := range entries {
-		if entry["session_id"] == errandSession.ID {
-			assert.NotContains(t, entry, "errand_status")
-			assert.Equal(t, "errand", entry["role"])
-		}
-	}
-}
-
-func TestMessageTaskGuardsErrandSenderAndNonParentSender(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	task, primary, _ := seedTaskWithSessions(t, svc, repo, 0)
-	h, _ := newMessageTaskHandler(t, svc, repo)
-	ctx := context.Background()
-	errandSession := seedErrandSession(t, repo, task, primary, "errand-sess-msg")
-	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-sibling", TaskID: task.ID, AgentProfileID: "profile-1",
-		State: models.TaskSessionStateRunning, StartedAt: time.Now(),
-	}))
-
-	fromErrand := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID, "session_id": primary.ID, "prompt": "hello",
-		"sender_task_id": task.ID, "sender_session_id": errandSession.ID,
-	})
-	resp, err := h.handleMessageTask(ctx, fromErrand)
-	require.NoError(t, err)
-	assert.Equal(t, string(errands.ReasonNotPermitted), errandErrorReason(t, resp))
-
-	toErrand := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": task.ID, "session_id": errandSession.ID, "prompt": "hello",
-		"sender_task_id": task.ID, "sender_session_id": "sess-sibling",
-	})
-	resp, err = h.handleMessageTask(ctx, toErrand)
-	require.NoError(t, err)
-	assert.Equal(t, string(errands.ReasonSenderNotParent), errandErrorReason(t, resp))
-}
-
-func TestWrapMessageForErrandTargetStatesResultContract(t *testing.T) {
+func TestWrapErrandParentMessageStatesResultContract(t *testing.T) {
 	task := &models.Task{ID: "task-1", Title: "Parent task"}
-	errandSession := &models.TaskSession{ID: "errand-sess-1", Role: models.SessionRoleErrand}
-
-	wrapped, meta := wrapMessageForTarget("Check the logs", task, errandSession, "parent-sess", "", true)
+	wrapped := wrapErrandParentMessage("Check the logs", task, "parent-sess", "")
 	assert.Contains(t, wrapped, "Your result is your final message in this turn")
 	assert.NotContains(t, wrapped, "To reply")
 	assert.Contains(t, wrapped, "Check the logs")
-	assert.NotNil(t, meta)
 
-	ordinary := &models.TaskSession{ID: "sess-2"}
-	wrapped, _ = wrapMessageForTarget("Check the logs", task, ordinary, "parent-sess", "", true)
+	wrapped, _ = wrapAgentMessage("Check the logs", task, "parent-sess", "", true)
 	assert.Contains(t, wrapped, "To reply")
 	assert.NotContains(t, wrapped, "Your result is your final message")
 }

@@ -26,7 +26,7 @@ type ownedErrandMessenger interface {
 	ContinueFromParent(context.Context, errands.ContinuationRequest) (string, error)
 }
 
-// The legacy argument names the exact Errand only after normal pinned session lookup.
+// Resolve the explicit Errand ID after ordinary pinned session lookup.
 func (h *Handlers) tryOwnedErrandMessage(ctx context.Context, msg *ws.Message, req messageTaskRequest, senderTask *models.Task, targetRefusal *ws.Message) (*ws.Message, error) {
 	messenger, ok := h.errands.(ownedErrandMessenger)
 	if !ok || req.SessionID == "" {
@@ -60,7 +60,7 @@ func isOwnedErrandMessageParent(ctx context.Context, row *models.Errand, parent 
 	execution, ok := streams.MCPExecutionContextFromContext(ctx)
 	return parent != nil && parent.ID == row.ParentSessionID && parent.TaskID == row.TaskID &&
 		ok && execution.TaskID == row.TaskID && execution.SessionID == parent.ID &&
-		!parent.IsPassthrough && !models.IsErrandSession(parent) && !isConfigSession(parent)
+		!parent.IsPassthrough && !isConfigSession(parent)
 }
 
 func (h *Handlers) sendOwnedErrandMessage(ctx context.Context, msg *ws.Message, req messageTaskRequest, senderTask *models.Task, parent *models.TaskSession, messenger ownedErrandMessenger) (*ws.Message, error) {
@@ -71,7 +71,7 @@ func (h *Handlers) sendOwnedErrandMessage(ctx context.Context, msg *ws.Message, 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "errand instructions require a settled conversation", nil)
 	}
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
-	wrapped, _ := wrapErrandParentMessage(prompt, senderTask, parent.ID, parent.Name)
+	wrapped := wrapErrandParentMessage(prompt, senderTask, parent.ID, parent.Name)
 	ctx = errands.WithParentPromptOrigin(ctx, errands.ParentPromptOrigin{SenderSessionID: parent.ID})
 	turnID, err := messenger.ContinueFromParent(ctx, errands.ContinuationRequest{
 		TaskID: req.TaskID, ErrandID: req.SessionID, ClientMessageID: msg.ID, Content: wrapped,

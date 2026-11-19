@@ -18,7 +18,6 @@ type ErrandMCPService interface {
 	AbortOwnedAwait(context.Context, models.ErrandAwaitIdentity) error
 	Cancel(ctx context.Context, req errands.CancelRequest) (*errands.Snapshot, error)
 	ParentOutstanding(ctx context.Context, parentSessionID string) (bool, error)
-	List(ctx context.Context, taskID string) ([]errands.Snapshot, error)
 }
 
 // SetErrands wires the errands service and its release toggle. While the
@@ -90,7 +89,7 @@ func (h *Handlers) handleStartErrand(ctx context.Context, msg *ws.Message) (*ws.
 		return refusal, nil
 	}
 	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
-	if parent == nil || parent.IsPassthrough || models.IsErrandSession(parent) || isConfigSession(parent) {
+	if parent == nil || parent.IsPassthrough || isConfigSession(parent) {
 		return errandRefusal(msg, errands.ReasonNotSupported, "start_errand_kandev needs an ordinary agent session on this task"), nil
 	}
 	if refusal := h.errandTaskRefusal(ctx, msg, parent.TaskID); refusal != nil {
@@ -135,7 +134,7 @@ func (h *Handlers) handleAwaitErrands(ctx context.Context, msg *ws.Message) (*ws
 		return refusal, nil
 	}
 	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
-	if parent == nil || models.IsErrandSession(parent) {
+	if parent == nil {
 		return errandRefusal(msg, errands.ReasonNotPermitted, "await_errands_kandev needs a parent session"), nil
 	}
 	owner, err := awaitCallerIdentity(ctx, parent, req.AwaitToken, false)
@@ -180,7 +179,7 @@ func (h *Handlers) handleAwaitErrandsRelease(ctx context.Context, msg *ws.Messag
 		return errandRefusal(msg, errands.ReasonNotPermitted, "errand service is unavailable"), nil
 	}
 	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
-	if parent == nil || models.IsErrandSession(parent) {
+	if parent == nil {
 		return errandRefusal(msg, errands.ReasonNotPermitted, "only a parent session can release an await"), nil
 	}
 	owner, err := awaitCallerIdentity(ctx, parent, req.AwaitToken, true)
@@ -203,7 +202,7 @@ func (h *Handlers) handleCancelErrand(ctx context.Context, msg *ws.Message) (*ws
 		return refusal, nil
 	}
 	parent := h.verifiedSession(ctx, req.SenderTaskID, req.SenderSessionID)
-	if parent == nil || models.IsErrandSession(parent) {
+	if parent == nil {
 		return errandRefusal(msg, errands.ReasonNotPermitted, "cancel_errand_kandev needs a parent session"), nil
 	}
 	snapshot, err := h.errands.Cancel(ctx, errands.CancelRequest{
@@ -256,33 +255,6 @@ func (h *Handlers) errandTaskRefusal(ctx context.Context, msg *ws.Message, taskI
 		return errandRefusal(msg, errands.ReasonNotSupported, "errands are not available for this task")
 	}
 	return nil
-}
-
-// errandCallerRefusal refuses a mutation whose verified sender is an errand.
-// Only the session row's role is read: a stale ID can at worst refuse, never
-// grant, so the check needs no task match.
-func (h *Handlers) errandCallerRefusal(ctx context.Context, msg *ws.Message, senderSessionID, message string) *ws.Message {
-	if senderSessionID == "" || h.taskSvc == nil {
-		return nil
-	}
-	session, err := h.taskSvc.GetTaskSession(ctx, senderSessionID)
-	if err != nil || !models.IsErrandSession(session) {
-		return nil
-	}
-	return errandRefusal(msg, errands.ReasonNotPermitted, message)
-}
-
-// errandMessageRefusal refuses a message to an errand from any sender other
-// than its parent session.
-func (h *Handlers) errandMessageRefusal(ctx context.Context, msg *ws.Message, senderSessionID, targetSessionID string) *ws.Message {
-	if targetSessionID == "" || h.taskSvc == nil {
-		return nil
-	}
-	target, err := h.taskSvc.GetTaskSession(ctx, targetSessionID)
-	if err != nil || !models.IsErrandSession(target) || target.ParentSessionID == senderSessionID {
-		return nil
-	}
-	return errandRefusal(msg, errands.ReasonSenderNotParent, "only the errand's parent session can message this errand")
 }
 
 // errandOutstandingRefusal refuses a parent's step completion while its

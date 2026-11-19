@@ -34,7 +34,7 @@ func TestAwaitRequiresAuthenticatedLaunchedParentOwner(t *testing.T) {
 			if field == "submission-owner" {
 				ctx = mcporigin.WithAwaitInvocation(ctx, models.ErrandAwaitIdentity{TaskID: task.ID, ParentSessionID: parent.ID, Token: "token", ParentIncarnationID: "foreign", HarnessGeneration: 2})
 			}
-			msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, parent, map[string]interface{}{"errand_ids": []string{"child"}, "mode": "all", "await_token": "token", "parent_incarnation_id": "forged", "harness_generation": 99}))
+			msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, parent.ID, map[string]interface{}{"errand_ids": []string{"child"}, "mode": "all", "await_token": "token", "parent_incarnation_id": "forged", "harness_generation": 99}))
 			response, err := h.handleAwaitErrands(ctx, msg)
 			require.NoError(t, err)
 			require.Equal(t, ws.MessageTypeError, response.Type)
@@ -66,7 +66,7 @@ func TestAwaitOfferFailureOrCancellationSelectsError(t *testing.T) {
 				service.cancel = cancel
 			}
 			h.errands = service
-			msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, parent, map[string]interface{}{"errand_ids": []string{"child"}, "mode": "all", "await_token": "token"}))
+			msg := makeWSMessage(t, ws.ActionMCPAwaitErrands, errandSenderArgs(task, parent.ID, map[string]interface{}{"errand_ids": []string{"child"}, "mode": "all", "await_token": "token"}))
 			response, err := h.handleAwaitErrands(ctx, msg)
 			require.NoError(t, err)
 			require.Equal(t, ws.MessageTypeError, response.Type)
@@ -79,7 +79,7 @@ func TestAwaitAbortRetainedOwnerSurvivesDisabledAndNewGeneration(t *testing.T) {
 	h, fake, task, parent, _ := newErrandMCPFixture(t, false)
 	original := models.ErrandAwaitIdentity{TaskID: task.ID, ParentSessionID: parent.ID, Token: "token", ParentIncarnationID: "prior", HarnessGeneration: 1, SubmissionID: "original"}
 	ctx := mcporigin.WithTrustedInternalCall(mcporigin.WithAwaitInvocation(awaitTestContext(task.ID, parent.ID), original))
-	msg := makeWSMessage(t, ws.ActionMCPAwaitErrandsRelease, errandSenderArgs(task, parent, map[string]interface{}{"await_token": "token"}))
+	msg := makeWSMessage(t, ws.ActionMCPAwaitErrandsRelease, errandSenderArgs(task, parent.ID, map[string]interface{}{"await_token": "token"}))
 	response, err := h.handleAwaitErrandsRelease(ctx, msg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, response.Type)

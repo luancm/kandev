@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -19,21 +18,15 @@ import (
 // needs identity, role and state — not container IDs, worktree paths, or
 // profile snapshots.
 type taskSessionListEntry struct {
-	AttentionReason models.ErrandAttentionReason `json:"attention_reason,omitempty"`
-	SessionID       string                       `json:"session_id"`
-	Name            string                       `json:"name,omitempty"`
-	State           models.TaskSessionState      `json:"state"`
-	IsPrimary       bool                         `json:"is_primary"`
-	IsCurrent       bool                         `json:"is_current"`
-	AgentProfileID  string                       `json:"agent_profile_id,omitempty"`
-	StartedAt       time.Time                    `json:"started_at"`
-	CompletedAt     *time.Time                   `json:"completed_at,omitempty"`
-	UpdatedAt       time.Time                    `json:"updated_at"`
-	// Role is "errand" for an errand session; ParentSessionID names the parent
-	// that started it. ErrandStatus is the errand's projected status.
-	Role            models.SessionRole  `json:"role,omitempty"`
-	ParentSessionID string              `json:"parent_session_id,omitempty"`
-	ErrandStatus    models.ErrandStatus `json:"errand_status,omitempty"`
+	SessionID      string                  `json:"session_id"`
+	Name           string                  `json:"name,omitempty"`
+	State          models.TaskSessionState `json:"state"`
+	IsPrimary      bool                    `json:"is_primary"`
+	IsCurrent      bool                    `json:"is_current"`
+	AgentProfileID string                  `json:"agent_profile_id,omitempty"`
+	StartedAt      time.Time               `json:"started_at"`
+	CompletedAt    *time.Time              `json:"completed_at,omitempty"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
 type listTaskSessionsRequest struct {
@@ -84,23 +77,18 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
 
-	errandStatuses := h.errandStatusBySession(ctx, req.TaskID)
 	entries := make([]taskSessionListEntry, 0, len(sessions))
 	for _, session := range sessions {
 		entries = append(entries, taskSessionListEntry{
-			SessionID:       session.ID,
-			Name:            session.Name,
-			State:           session.State,
-			IsPrimary:       session.IsPrimary,
-			IsCurrent:       req.CurrentSessionID != "" && session.ID == req.CurrentSessionID,
-			AgentProfileID:  session.AgentProfileID,
-			StartedAt:       session.StartedAt,
-			CompletedAt:     session.CompletedAt,
-			UpdatedAt:       session.UpdatedAt,
-			Role:            session.Role,
-			ParentSessionID: session.ParentSessionID,
-			ErrandStatus:    errandStatuses[session.ID].Status,
-			AttentionReason: errandStatuses[session.ID].AttentionReason,
+			SessionID:      session.ID,
+			Name:           session.Name,
+			State:          session.State,
+			IsPrimary:      session.IsPrimary,
+			IsCurrent:      req.CurrentSessionID != "" && session.ID == req.CurrentSessionID,
+			AgentProfileID: session.AgentProfileID,
+			StartedAt:      session.StartedAt,
+			CompletedAt:    session.CompletedAt,
+			UpdatedAt:      session.UpdatedAt,
 		})
 	}
 
@@ -109,26 +97,4 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 		"sessions": entries,
 		keyTotal:   len(entries),
 	})
-}
-
-// errandStatusBySession maps each errand session of the task to its projected
-// errand status. An errand's session ID is its errand ID. A failed read leaves
-// the map empty, so the session list is still returned without the annotation.
-func (h *Handlers) errandStatusBySession(ctx context.Context, taskID string) map[string]errands.Snapshot {
-	statuses := map[string]errands.Snapshot{}
-	if h.errands == nil {
-		return statuses
-	}
-	snapshots, err := h.errands.List(ctx, taskID)
-	if err != nil {
-		h.logger.Warn("failed to read errand status for session list",
-			zap.String("task_id", taskID), zap.Error(err))
-		return statuses
-	}
-	for _, snapshot := range snapshots {
-		if snapshot.Errand != nil {
-			statuses[snapshot.Errand.ID] = snapshot
-		}
-	}
-	return statuses
 }

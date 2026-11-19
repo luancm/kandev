@@ -119,7 +119,7 @@ func (h *Handlers) newestLiveSession(ctx context.Context, taskID string) (*model
 		return nil, err
 	}
 	for _, session := range sessions {
-		if session != nil && !models.IsErrandSession(session) && !isTerminalMessageTargetState(session.State) {
+		if session != nil && !isTerminalMessageTargetState(session.State) {
 			return session, nil
 		}
 	}
@@ -136,7 +136,7 @@ func (h *Handlers) newestCompletedSession(ctx context.Context, taskID string) (*
 		return nil, err
 	}
 	for _, session := range sessions {
-		if session != nil && !models.IsErrandSession(session) && session.State == models.TaskSessionStateCompleted {
+		if session != nil && session.State == models.TaskSessionStateCompleted {
 			return session, nil
 		}
 	}

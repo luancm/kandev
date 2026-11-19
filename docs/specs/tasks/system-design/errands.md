@@ -137,11 +137,10 @@ kanban surface with the new `CapabilityErrands`:
 
 Inherited MCP servers add no Kandev tools, since `AC-TASKS-ERRANDS-009.2`
 restricts only the Kandev surface.
-`list_task_sessions_kandev` entries (`taskSessionListEntry`) gain `role`,
-`parent_session_id`, and `errand_status`. Failures follow
-[Error codes](#error-codes). The workspace mapping now inline in
-`handleSpawnSession` moves to one shared helper used by both handlers, with
-unchanged spawn output.
+`list_task_sessions_kandev` lists ordinary sessions and their state. Start and
+await return Errand IDs. To continue a settled Errand, its authenticated parent
+passes the Errand ID as the explicit `session_id` argument to
+`message_task_kandev`. Failures follow [Error codes](#error-codes).
 
 ### Error codes
 

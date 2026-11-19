@@ -13,22 +13,20 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-func addErrandSession(
-	t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, parentID string,
-	state models.TaskSessionState, age sessionAge,
-) *models.TaskSession {
+func addOwnedErrand(t *testing.T, repo *sqliterepo.Repository, taskID, errandID, parentID string, awaitingResult bool, age sessionAge) {
 	t.Helper()
-	ctx := context.Background()
-	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: sessionID, TaskID: taskID, Role: models.SessionRoleErrand, ParentSessionID: parentID,
-		AgentProfileID: "agent-profile-2", State: models.TaskSessionStateCreated, StartedAt: age.startedAt(),
-	}))
-	if state != models.TaskSessionStateCreated {
-		require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, state, ""))
+	row := &models.Errand{
+		ID: errandID, TaskID: taskID, ParentSessionID: parentID,
+		Title: "Inspect", Objective: "Inspect the workspace", AgentProfileID: "agent-profile-2",
+		FirstTurnID: errandID + "-turn", SubmissionID: errandID + "-submission",
+		Lifecycle: models.ErrandLifecycleLaunched, ResultState: models.ErrandResultNone,
+		CreatedAt: age.startedAt(), AwaitingResult: awaitingResult,
 	}
-	loaded, err := repo.GetTaskSession(ctx, sessionID)
-	require.NoError(t, err)
-	return loaded
+	if !awaitingResult {
+		row.LastOutcome = models.ErrandOutcomeDone
+		row.LatestSettledTurnID = row.FirstTurnID
+	}
+	require.NoError(t, repo.CreateErrand(t.Context(), row))
 }
 
 func resolveTargetWithoutSessionID(t *testing.T, h *Handlers, taskID string) (*models.TaskSession, bool) {
@@ -45,7 +43,7 @@ func TestResolveMessageTargetSession_ErrandIsNeverTheLiveFallback(t *testing.T) 
 	svc, repo := newTestTaskService(t)
 	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning, 1)
-	addErrandSession(t, repo, target.ID, "sess-errand", live.ID, models.TaskSessionStateRunning, 2)
+	addOwnedErrand(t, repo, target.ID, "owned-errand", live.ID, true, 2)
 	cancelSession(t, repo, primary.ID)
 	h, _ := newMessageTaskHandler(t, svc, repo)
 
@@ -58,7 +56,7 @@ func TestResolveMessageTargetSession_ErrandIsNeverTheLiveFallback(t *testing.T) 
 func TestResolveMessageTargetSession_ErrandAloneLeavesTheTerminalPrimary(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	addErrandSession(t, repo, target.ID, "sess-errand", primary.ID, models.TaskSessionStateRunning, 1)
+	addOwnedErrand(t, repo, target.ID, "owned-errand", primary.ID, true, 1)
 	cancelSession(t, repo, primary.ID)
 	h, _ := newMessageTaskHandler(t, svc, repo)
 
@@ -77,7 +75,7 @@ func TestResolveMessageTargetSession_CompletedFallbackSkipsErrand(t *testing.T) 
 	})
 	require.NoError(t, err)
 	ordinary := addSession(t, repo, targetResult.Task.ID, "sess-completed", models.TaskSessionStateCompleted, 1)
-	addErrandSession(t, repo, targetResult.Task.ID, "sess-errand-completed", ordinary.ID, models.TaskSessionStateCompleted, 2)
+	addOwnedErrand(t, repo, targetResult.Task.ID, "owned-errand-completed", ordinary.ID, false, 2)
 	h, _ := newMessageTaskHandler(t, svc, repo)
 
 	session, pinned := resolveTargetWithoutSessionID(t, h, targetResult.Task.ID)
@@ -86,17 +84,17 @@ func TestResolveMessageTargetSession_CompletedFallbackSkipsErrand(t *testing.T) 
 }
 
 // @covers AC-TASKS-ERRANDS-005.3
-func TestResolveMessageTargetSession_ExplicitErrandSessionIDStillResolves(t *testing.T) {
+func TestResolveMessageTargetSession_ExplicitOwnedErrandUsesSeparateRoute(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	errand := addErrandSession(t, repo, target.ID, "sess-errand", primary.ID, models.TaskSessionStateWaitingForInput, 1)
+	const errandID = "owned-errand"
+	addOwnedErrand(t, repo, target.ID, errandID, primary.ID, false, 1)
 	h, _ := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
-		"task_id": target.ID, "session_id": errand.ID, "prompt": "follow up",
+		"task_id": target.ID, "session_id": errandID, "prompt": "follow up",
 	})
 
-	session, pinned, errResp := h.resolveMessageTargetSession(context.Background(), msg, target.ID, errand.ID)
-	require.Nil(t, errResp)
-	assert.Equal(t, errand.ID, session.ID)
-	assert.True(t, pinned)
+	session, _, refusal := h.resolveMessageTargetSession(t.Context(), msg, target.ID, errandID)
+	require.Nil(t, session)
+	assertWSError(t, refusal, ws.ErrorCodeNotFound)
 }

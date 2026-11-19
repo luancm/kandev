@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/errands"
 	"reflect"
 	"strings"
 	"time"
@@ -948,9 +947,6 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		message := mcpCreateTaskAdmissionErrorMessage(err)
 		h.logMCPCreateAdmissionRejection(ctx, code, message)
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
-	}
-	if refusal := h.errandCallerRefusal(ctx, msg, req.SourceSessionID, "errand sessions cannot create tasks"); refusal != nil {
-		return refusal, nil
 	}
 
 	// Resolve repositories and default workspace/workflow from parent if needed.
@@ -2708,9 +2704,6 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if errMsg != nil {
 		return errMsg, err
 	}
-	if refusal := h.errandCallerRefusal(ctx, msg, req.SessionID, "errand sessions cannot complete workflow steps"); refusal != nil {
-		return refusal, nil
-	}
 	if refusal := h.errandOutstandingRefusal(ctx, msg, req.SessionID); refusal != nil {
 		return refusal, nil
 	}
@@ -3005,13 +2998,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			fmt.Sprintf("delivery_mode must be %q or %q", deliveryModeQueued, deliveryModeInterrupt), nil)
 	}
 
-	if refusal := h.errandCallerRefusal(ctx, msg, req.SenderSessionID, "errand sessions cannot message other sessions"); refusal != nil {
-		return refusal, nil
-	}
-	if refusal := h.errandMessageRefusal(ctx, msg, req.SenderSessionID, req.SessionID); refusal != nil {
-		return refusal, nil
-	}
-
 	// Sender lookup is global, not workspace-scoped: cross-workspace agent
 	// messaging is intentionally allowed (badge URL handles cross-workspace
 	// nav). Task IDs are UUIDs, so this is not exploitable in practice — and
@@ -3065,7 +3051,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
-	wrappedPrompt, senderMeta := wrapMessageForTarget(prompt, senderTask, session, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
+	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
 	if req.ReplyToQuestionID != "" {
 		senderMeta[models.MetaKeyParentQuestionID] = req.ReplyToQuestionID
 		senderMeta[models.MetaKeyParentQuestionResponse] = req.Prompt
@@ -3115,7 +3101,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	// pinnedTarget, not `req.SessionID != ""`: a fallback chosen because the
 	// primary is terminal is pinned too, or the idle dispatch path re-resolves
 	// it straight back to that terminal primary.
-	dispatchCtx = h.withErrandParentPrompt(dispatchCtx, req.SenderTaskID, req.SenderSessionID, senderMeta)
 	result, err := h.dispatchTaskMessage(dispatchCtx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, pinnedTarget)
 	if err != nil {
 		if parentReply != nil {
@@ -3123,9 +3108,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 				h.logger.Error("failed to restore parent question after answer dispatch failure",
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
-		}
-		if response, handled := errands.WSError(msg.ID, msg.Action, err); handled {
-			return response, nil
 		}
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
@@ -4117,9 +4099,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 	if err != nil {
 		// The start admission owns cleanup for any turn it created. The handler
 		// removes only its message so it cannot abandon another launch's turn.
-		if !retainErrandParentPrompt(ctx, session, err) {
-			h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
-		}
+		h.deleteRecordedUserMessageWithoutTurnRollback(ctx, recorded)
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
 			releasePeerMessageStartAdmission(admission)
 			return h.queueAfterUnownedPeerStart(ctx, taskID, session, identity, prompt, metadata, interruptIfBusy)
@@ -4199,9 +4179,7 @@ func (h *Handlers) promptPreparedTaskMessage(
 				zap.String("task_id", taskID), zap.String("session_id", session.ID), zap.Error(queueErr))
 			err = queueErr
 		}
-		if !retainErrandParentPrompt(ctx, session, err) {
-			h.deleteRecordedUserMessage(ctx, recorded)
-		}
+		h.deleteRecordedUserMessage(ctx, recorded)
 		return taskMessageDispatchResult{}, err
 	}
 	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
