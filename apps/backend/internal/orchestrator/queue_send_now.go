@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -647,6 +648,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 	deliveryAttempted := false
 	keepErrandClaim := false
 	var errandToken string
+	var errandInput *sendNowErrandInput
 	defer func() {
 		s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(ctx), errandToken, keepErrandClaim)
 	}()
@@ -655,6 +657,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		if inputErr != nil {
 			return false, inputErr
 		}
+		errandInput = input
 		ctx = context.WithValue(ctx, sendNowErrandInputKey{}, input)
 	}
 	attachments := queuedMessageAttachmentsToV1(claim.Dispatch.Attachments)
@@ -855,6 +858,16 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		deliveryPayloadHash:                   deliveryPayloadHash,
 		deliveryClaimUpdater:                  s.sendNowDeliveryClaimUpdater(claim),
 		cacheEffectivePromptForTransientRetry: true,
+	}
+	if errandInput != nil {
+		fallbackStartOptions.prepareInitialPrompt = func(_ context.Context, prompt string) (string, bool, error) {
+			// Session startup drops unrecognized system blocks during MCP wrapping.
+			// Restore the exact server-composed block without claiming results again.
+			if block := errandInput.composedBlock; block != "" && !strings.Contains(prompt, block) {
+				prompt = joinErrandBlock(block, prompt)
+			}
+			return prompt, false, nil
+		}
 	}
 	waitForFallbackAdmission := s.configureSendNowInitialAdmission(ctx, claim, &fallbackStartOptions)
 	var fallbackStarted atomic.Bool

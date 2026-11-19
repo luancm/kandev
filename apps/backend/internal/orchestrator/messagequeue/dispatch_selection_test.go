@@ -30,8 +30,8 @@ func TestErrandDispatchSelectionRetainsBypassedSourcesBeforeReservation(t *testi
 				held := insertTestEntry(t, repo, identity.SessionID, identity.TaskID, "full retained notice", QueuedByServer, nil, map[string]interface{}{"held": true})
 				ordinary := insertTestEntry(t, repo, identity.SessionID, identity.TaskID, "ordinary first", QueuedByUser, nil, nil)
 				second := insertTestEntry(t, repo, identity.SessionID, identity.TaskID, "ordinary second", QueuedByUser, nil, nil)
-				service.SetDispatchSourcePolicy(func(_ context.Context, entry *QueuedMessage) DispatchSourceDecision {
-					return DispatchSourceDecision{Allowed: entry.Metadata["held"] != true}
+				service.SetDispatchSourcePolicy(func(_ context.Context, entry *QueuedMessage) bool {
+					return entry.Metadata["held"] != true
 				})
 				require.NoError(t, service.SetAutoRunForSession(t.Context(), identity, false))
 				_, exists, autoRun, err := service.ReserveQueuedWithAutoRunForSession(t.Context(), identity)
@@ -75,12 +75,12 @@ func TestErrandDispatchSelectionRechecksExactSourceInsideReservation(t *testing.
 				source := insertTestEntry(t, repo, "session-1", "task-1", "validated content", owner, nil, nil)
 				next := insertTestEntry(t, repo, "session-1", "task-1", "ordinary input", QueuedByUser, nil, nil)
 				mutated := false
-				service.SetDispatchSourcePolicy(func(ctx context.Context, entry *QueuedMessage) DispatchSourceDecision {
+				service.SetDispatchSourcePolicy(func(ctx context.Context, entry *QueuedMessage) bool {
 					if entry.ID == source.ID && !mutated {
 						mutated = true
 						require.NoError(t, repo.UpdateContent(ctx, "session-1", source.ID, "changed after validation", nil, owner))
 					}
-					return DispatchSourceDecision{Allowed: true}
+					return true
 				})
 				_, exists, autoRun := service.ReserveQueuedWithAutoRun(t.Context(), "session-1")
 				require.False(t, exists, "changed selection must be revalidated before advancing FIFO")

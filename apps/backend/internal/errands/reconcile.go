@@ -86,15 +86,6 @@ func (s *Service) releaseUndeliveredClaims(ctx context.Context, owners *lifecycl
 		if !owners.permits(row) || !isDeliveredParentClaim(row) {
 			continue
 		}
-		claim := models.ErrandResultClaim{ErrandID: row.ID, ResultRevision: row.ResultRevision,
-			ParentAdmissionGeneration: row.ParentAdmissionGeneration, Token: row.DeliveryToken, Route: row.DeliveredRoute}
-		owned, err := s.store.HasErrandPreparedOwnership(ctx, row.TaskID, row.ParentSessionID, claim)
-		if err != nil {
-			return fmt.Errorf("check prepared source ownership: %w", err)
-		}
-		if owned {
-			continue
-		}
 		found, err := s.receipts.HasDeliveryToken(ctx, row.ParentSessionID, row.DeliveryToken)
 		if err != nil {
 			return fmt.Errorf("check delivery token: %w", err)

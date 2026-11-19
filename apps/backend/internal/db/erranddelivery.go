@@ -6,8 +6,8 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
-// LockErrandDelivery serializes a task's inventory, claims and prepared queue
-// admission. Existing hierarchy/task admission locks precede this guard;
+// LockErrandDelivery serializes a task's Errand inventory and delivery claims.
+// Existing hierarchy/task admission locks precede this guard;
 // session/stream locks follow it. No external I/O may run under this lock.
 func LockErrandDelivery(ctx context.Context, tx ContextExecer, driver, taskID string) error {
 	if dialect.IsPostgres(driver) {

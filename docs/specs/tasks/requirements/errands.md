@@ -82,10 +82,9 @@ An errand is delegated work with its own transcript, profile, and follow-up inpu
 - **AC-TASKS-ERRANDS-003.4:** When a new parent-initiated turn starts while an
   earlier result is undelivered, the earlier result shall be superseded and
   never delivered.
-- **AC-TASKS-ERRANDS-003.5:** When the user cancels or deletes an errand while
-  it is outstanding, the parent shall receive a cancellation notice as a
-  result. A cancellation requested by the parent or caused by a cascade shall
-  produce no result.
+- **AC-TASKS-ERRANDS-003.5:** When the user stops an outstanding errand,
+  the parent shall receive a cancellation notice as a result. Cancelling
+  through the parent tool or a cascade shall produce no result.
 
 - **AC-TASKS-ERRANDS-003.6:** Recovery with exact owner-termination and
   reconciled-admission proof shall settle an interrupted parent delegation once,

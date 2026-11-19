@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -116,55 +115,4 @@ func (s *Service) SweepDelivery(ctx context.Context) (err error) {
 		return nil
 	}
 	return s.deliverForPendingParents(ctx)
-}
-
-// PreserveCancellationNotice cancels an errand whose session is being deleted
-// and admits its cancellation notice to the parent before the row is removed.
-// A parent with no outstanding work gets nothing. A refused admission returns
-// an error so the caller keeps the row and the notice is not lost. It runs
-// only while the feature is enabled; disabled retained sessions are cancelled
-// without preserving a result for a later turn.
-func (s *Service) PreserveCancellationNotice(ctx context.Context, errandID string) error {
-	row, _, err := s.cancelRow(ctx, errandID, models.ErrandCancelSourceUser)
-	if err != nil {
-		return err
-	}
-	if !s.featureEnabled() {
-		if row.ResultState == models.ErrandResultPending {
-			return s.discardPending(ctx, row.ID)
-		}
-		return nil
-	}
-	if row.ResultState != models.ErrandResultPending {
-		return nil
-	}
-	if s.deliverer == nil {
-		return errors.New("prepared errand delivery is unavailable")
-	}
-	now := row.UpdatedAt
-	if row.SettledAt != nil {
-		now = *row.SettledAt
-	}
-	block := renderStatusBlock([]composedErrand{{errand: row, status: models.ErrandStatusCancelled}},
-		map[string]*models.Errand{row.ID: row}, now)
-	token := uuid.NewSHA1(uuid.NameSpaceOID, []byte(row.TaskID+"\x00"+row.ParentSessionID+"\x00"+row.ID+"\x00"+row.ResultRevision)).String()
-	metadata := map[string]interface{}{
-		DeliveryEnvelopeMetadataKey: DeliveryEnvelope{
-			Token: token, Route: models.ErrandDeliveryNotification,
-			Items: []DeliveryItem{{
-				ErrandID:   row.ID,
-				Title:      row.Title,
-				Status:     models.ErrandStatusCancelled,
-				Preview:    previewText(row.ResultText),
-				DurationMS: deliveryDurationMillis(row),
-			}},
-		},
-		DeliveryTokenMetadataKey: token,
-	}
-	if err := s.deliverer.AdmitPrepared(ctx, row.ParentSessionID, block, metadata); err != nil {
-		return fmt.Errorf("admit cancellation notice: %w", err)
-	}
-	countDelivery(models.ErrandDeliveryNotification)
-	s.logger.Info("errand.delivered", s.errandFields(row, "route", string(models.ErrandDeliveryNotification))...)
-	return nil
 }

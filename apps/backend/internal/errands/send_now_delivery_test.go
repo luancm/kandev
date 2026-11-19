@@ -8,6 +8,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSendNowDeliveryRejectsPrototypePreparedNotice(t *testing.T) {
+	encoded := `{
+		"version": 1, "task_id": "task", "session_id": "parent", "session_incarnation_id": "incarnation",
+		"operation_generation": 0, "queue_generation": 0, "source_ids": ["prepared-notice"],
+		"sources": [{
+			"id": "prepared-notice", "queue_generation": 0, "kind": "prepared", "queued_by": "server",
+			"provenance": "errands", "content": "", "prepared_block": "cancelled"
+		}],
+		"receipts": [{
+			"source_id": "prepared-notice",
+			"envelope": {"token": "notice", "route": "notification", "items": [{
+				"errand_id": "deleted-errand", "title": "Removed Errand", "status": "cancelled"
+			}]},
+			"claims": [{
+				"ErrandID": "deleted-errand", "ResultRevision": "deleted-result",
+				"ParentAdmissionGeneration": 0, "Token": "notice", "Route": "notification"
+			}]
+		}],
+		"effective_prompt": "cancelled"
+	}`
+	var raw map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(encoded), &raw))
+	_, present, err := DecodeSendNowDelivery(map[string]interface{}{SendNowDeliveryMetadataKey: raw})
+	require.True(t, present)
+	require.ErrorIs(t, err, ErrInvalidSendNowDelivery)
+}
+
 // @covers AC-TASKS-ERRANDS-004.9 AC-TASKS-ERRANDS-004.11
 func TestSendNowDeliveryRoundTrip(t *testing.T) {
 	want := sendNowDeliveryFixture()
@@ -71,13 +98,8 @@ func TestSendNowDeliveryRejectsIncompleteOrContradictoryIdentity(t *testing.T) {
 		}},
 		{"user marker is not provenance", func(m map[string]interface{}) { sendNowFixtureSource(m, 1)["queued_by"] = "user" }},
 		{"unknown provenance", func(m map[string]interface{}) { sendNowFixtureSource(m, 1)["provenance"] = "user-claimed" }},
-		{"mixed prepared and ordinary content", func(m map[string]interface{}) { sendNowFixtureSource(m, 1)["content"] = "ordinary" }},
-		{"missing full prepared block", func(m map[string]interface{}) { delete(sendNowFixtureSource(m, 1), "prepared_block") }},
-		{"unrepresented prepared block", func(m map[string]interface{}) { sendNowFixtureSource(m, 1)["prepared_block"] = "absent block" }},
+		{"notification carrying ordinary content", func(m map[string]interface{}) { sendNowFixtureSource(m, 1)["content"] = "ordinary" }},
 		{"missing effective prompt", func(m map[string]interface{}) { delete(m, "effective_prompt") }},
-		{"missing prepared receipt", func(m map[string]interface{}) { m["receipts"] = m["receipts"].([]interface{})[1:] }},
-		{"unknown source receipt", func(m map[string]interface{}) { sendNowFixtureReceipt(m, 0)["source_id"] = "foreign" }},
-		{"ordinary source receipt", func(m map[string]interface{}) { sendNowFixtureReceipt(m, 0)["source_id"] = "user" }},
 		{"missing claim revision", func(m map[string]interface{}) { delete(sendNowFixtureClaim(m), "ResultRevision") }},
 		{"missing admission generation", func(m map[string]interface{}) { delete(sendNowFixtureClaim(m), "ParentAdmissionGeneration") }},
 		{"negative admission generation", func(m map[string]interface{}) { sendNowFixtureClaim(m)["ParentAdmissionGeneration"] = -1 }},
@@ -98,9 +120,9 @@ func TestSendNowDeliveryRejectsIncompleteOrContradictoryIdentity(t *testing.T) {
 		}},
 		{"same result under different token", func(m map[string]interface{}) {
 			claim := sendNowFixtureReceipt(m, 1)["claims"].([]interface{})[0].(map[string]interface{})
-			claim["ErrandID"], claim["ResultRevision"] = "deleted-A", "revision-A"
+			claim["ErrandID"], claim["ResultRevision"] = "result-A", "revision-A"
 			envelope := sendNowFixtureReceipt(m, 1)["envelope"].(map[string]interface{})
-			envelope["items"].([]interface{})[0].(map[string]interface{})["errand_id"] = "deleted-A"
+			envelope["items"].([]interface{})[0].(map[string]interface{})["errand_id"] = "result-A"
 		}},
 		{"missing claims", func(m map[string]interface{}) { delete(sendNowFixtureReceipt(m, 0), "claims") }},
 		{"unsupported route", func(m map[string]interface{}) {
@@ -175,11 +197,7 @@ func TestSendNowDeliveryRequiresExplicitPromptButAllowsEmptyOrdinaryInput(t *tes
 			require.Equal(t, SendNowDelivery{}, got)
 		})
 	}
-	prepared := sendNowDeliveryFixture()
-	prepared.EffectivePrompt = ""
-	_, _, err := DecodeSendNowDelivery(map[string]interface{}{SendNowDeliveryMetadataKey: prepared})
-	// An explicit empty prompt cannot omit a prepared block.
-	require.ErrorIs(t, err, ErrInvalidSendNowDelivery)
+
 }
 
 func sendNowDeliveryFixture() SendNowDelivery {
@@ -189,22 +207,21 @@ func sendNowDeliveryFixture() SendNowDelivery {
 		SourceIDs: []string{"user", "source-A", "source-B", "signal"},
 		Sources: []SendNowDeliverySource{
 			{ID: "user", Kind: SendNowSourceOrdinary, QueuedBy: "user", Content: "  ordinary lookalike-token\n "},
-			{ID: "source-A", Kind: SendNowSourcePrepared, QueuedBy: "server", Provenance: SendNowErrandProvenance, PreparedBlock: "full result A"},
-			{ID: "source-B", Kind: SendNowSourcePrepared, QueuedBy: "server", Provenance: SendNowErrandProvenance, PreparedBlock: "full result B"},
+			{ID: "source-A", Kind: SendNowSourceNotification, QueuedBy: "server", Provenance: SendNowErrandProvenance},
+			{ID: "source-B", Kind: SendNowSourceOrdinary, QueuedBy: "user", Content: "second instruction"},
 			{ID: "signal", Kind: SendNowSourceNotification, QueuedBy: "server", Provenance: SendNowErrandProvenance},
 		},
 		Receipts: []SendNowDeliveryReceipt{
-			sendNowDeliveryReceipt("source-A", "token-A", "deleted-A", "revision-A", models.ErrandDeliveryNotification),
-			sendNowDeliveryReceipt("source-B", "token-B", "deleted-B", "revision-B", models.ErrandDeliveryNotification),
-			sendNowDeliveryReceipt("", "token-live", "live-result", "revision-live", models.ErrandDeliveryTurnContext),
+			sendNowDeliveryReceipt("token-A", "result-A", "revision-A", models.ErrandDeliveryNotification),
+			sendNowDeliveryReceipt("token-B", "result-B", "revision-B", models.ErrandDeliveryNotification),
+			sendNowDeliveryReceipt("token-live", "live-result", "revision-live", models.ErrandDeliveryTurnContext),
 		},
-		EffectivePrompt: "  ordinary lookalike-token\n \n\nfull result A\n\nfull result B\n\nnewly composed result",
+		EffectivePrompt: "  ordinary lookalike-token\n \n\nsecond instruction\n\nnewly composed result",
 	}
 }
 
-func sendNowDeliveryReceipt(source, token, id, revision string, route models.ErrandDeliveryRoute) SendNowDeliveryReceipt {
+func sendNowDeliveryReceipt(token, id, revision string, route models.ErrandDeliveryRoute) SendNowDeliveryReceipt {
 	return SendNowDeliveryReceipt{
-		SourceID: source,
 		Envelope: DeliveryEnvelope{Token: token, Route: route,
 			Items: []DeliveryItem{{ErrandID: id, Title: id, Status: models.ErrandStatusCancelled, Preview: "preview"}}},
 		Claims: []models.ErrandResultClaim{{ErrandID: id, ResultRevision: revision, ParentAdmissionGeneration: 0, Token: token, Route: route}},

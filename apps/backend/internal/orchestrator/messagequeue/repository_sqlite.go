@@ -3361,7 +3361,6 @@ func (r *sqliteRepository) reserveHeadTx(
 		if blocked {
 			return nil, true, nil
 		}
-		applyDispatchSourceMetadata(ctx, msg)
 		if err := r.captureReservationGenerationsTx(ctx, tx, msg); err != nil {
 			return nil, true, err
 		}
@@ -4208,10 +4207,7 @@ func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 		return err
 	}
 
-	sources, err := normalizedRestoredSendNowSources(ctx, claim)
-	if err != nil {
-		return err
-	}
+	sources := claim.Sources
 	for _, source := range sources {
 		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
 			continue
@@ -4643,7 +4639,7 @@ func (r *sqliteRepository) restoreSQLiteSendNowSource(
 	if !source.IsDurableDelivery() || !entry.message.IsReservedInFlight() {
 		return nil
 	}
-	metadataJSON, err := marshalMetadata(restoredSendNowMetadata(ctx, source.ID, restoreSendNowMetadata(entry.message.Metadata, source.Metadata)))
+	metadataJSON, err := marshalMetadata(restoreSendNowMetadata(entry.message.Metadata, source.Metadata))
 	if err != nil {
 		return err
 	}

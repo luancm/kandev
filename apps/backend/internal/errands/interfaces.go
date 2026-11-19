@@ -16,7 +16,6 @@ import (
 // status projection needs. *sqlite.Repository satisfies it.
 type Store interface {
 	ErrandRecoveryAttention(context.Context, string) (bool, error)
-	HasErrandPreparedOwnership(context.Context, string, string, models.ErrandResultClaim) (bool, error)
 	ReserveErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
 	SealErrandTurnSettlement(context.Context, string, *models.AgentDeliveryEffect) error
 	CommitHistoricalErrandTurnReceipt(context.Context, string, *models.AgentDeliveryEffect) error
@@ -164,8 +163,7 @@ type TeardownIntentStore interface {
 }
 
 // ParentDeliverer admits errand notifications onto a parent's queue. It is
-// optional: a Service without one leaves results pending. DeliverPending and
-// AdmitPrepared must not call back into the service.
+// optional: when it is unavailable, results stay pending.
 type ParentDeliverer interface {
 	// NotificationBlocked reports that a parent turn is running or any queue
 	// entry, a notification included, is already waiting.
@@ -173,9 +171,6 @@ type ParentDeliverer interface {
 	// DeliverPending admits one empty server notification. A refusal, including
 	// a full queue, leaves results pending.
 	DeliverPending(ctx context.Context, parentSessionID string)
-	// AdmitPrepared admits one notification whose content is already the
-	// status block, used when the errand row will not survive until dispatch.
-	AdmitPrepared(ctx context.Context, parentSessionID, content string, metadata map[string]interface{}) error
 }
 
 // MCPSnapshot captures session additions and exclusions at errand admission.

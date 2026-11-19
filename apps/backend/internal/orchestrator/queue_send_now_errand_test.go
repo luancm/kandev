@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -96,22 +95,17 @@ func (f *sendNowErrandFixture) executeWithAutoRunPaused(t *testing.T) {
 	f.svc.executeSendNowClaim(claim)
 }
 
-func preparedSendNowMetadata(token, id string) map[string]interface{} {
-	return map[string]interface{}{
-		errandDeliveryKey:              errands.DeliveryEnvelope{Token: token, Route: models.ErrandDeliveryNotification, Items: []errands.DeliveryItem{{ErrandID: id, Title: id, Status: models.ErrandStatusCancelled, Preview: "preview " + id}}},
-		ErrandDeliveryTokenMetadataKey: token,
-	}
-}
-
 // @covers AC-TASKS-ERRANDS-004.7 AC-TASKS-ERRANDS-004.9 AC-TASKS-ERRANDS-004.11
 func TestSendNowMixedErrandSourcesPreserveOrdinaryInputAndIdentity(t *testing.T) {
 	for _, userFirst := range []bool{true, false} {
-		name := "prepared_first"
+		name := "notification_first"
 		if userFirst {
 			name = "user_first"
 		}
 		t.Run(name, func(t *testing.T) {
 			f := newSendNowErrandFixture(t)
+			first, second := f.result(t, "result-A"), f.result(t, "result-B")
+			f.realComposer(t)
 			var sources []string
 			addUser := func() {
 				sources = append(sources, f.queue(t, "  original user text\n ", messagequeue.QueuedByUser, nil).ID)
@@ -119,22 +113,21 @@ func TestSendNowMixedErrandSourcesPreserveOrdinaryInputAndIdentity(t *testing.T)
 			if userFirst {
 				addUser()
 			}
-			sources = append(sources, f.prepared(t, "token-A", "deleted-A", "complete prepared result A").ID)
-			sources = append(sources, f.prepared(t, "token-B", "deleted-B", "complete prepared result B").ID)
+			sources = append(sources, f.notification(t).ID)
 			if !userFirst {
 				addUser()
 			}
 			n, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 			require.NoError(t, err)
-			require.Equal(t, 3, n)
+			require.Equal(t, 2, n)
 			var prompt string
 			select {
 			case prompt = <-f.payload:
 			case <-time.After(10 * time.Second):
 				t.Fatal("provider was not reached")
 			}
-			require.Equal(t, 1, strings.Count(prompt, "complete prepared result A"))
-			require.Equal(t, 1, strings.Count(prompt, "complete prepared result B"))
+			require.Equal(t, 1, strings.Count(prompt, first.ResultText))
+			require.Equal(t, 1, strings.Count(prompt, second.ResultText))
 			require.Contains(t, prompt, "  original user text\n ")
 			messages, err := f.svc.repo.ListMessages(t.Context(), "session-1")
 			require.NoError(t, err)
@@ -144,11 +137,12 @@ func TestSendNowMixedErrandSourcesPreserveOrdinaryInputAndIdentity(t *testing.T)
 			pending, err := f.svc.messageQueue.ListPendingSendNowClaims(t.Context())
 			require.NoError(t, err)
 			require.Len(t, pending, 1)
-			encoded, err := json.Marshal(pending[0].Claim.Dispatch.Metadata)
+			snapshot, present, err := errands.DecodeSendNowDelivery(pending[0].Claim.Dispatch.Metadata)
 			require.NoError(t, err)
-			require.Contains(t, string(encoded), `"effective_prompt":`)
-			require.Contains(t, string(encoded), "token-A")
-			require.Contains(t, string(encoded), "token-B")
+			require.True(t, present)
+			require.Equal(t, prompt, snapshot.EffectivePrompt)
+			require.Len(t, snapshot.Receipts, 1)
+			require.Len(t, snapshot.Receipts[0].Claims, 2)
 			require.Equal(t, pending[0].Claim.Dispatch.Metadata["errand_send_now"], message.Metadata["errand_send_now"])
 		})
 	}
@@ -168,7 +162,7 @@ func waitSendNowErrandWorkers(t *testing.T, svc *Service) {
 // @covers AC-TASKS-ERRANDS-004.10 AC-TASKS-ERRANDS-004.12
 func TestSendNowStaleNotificationOnlyStartsNoTurn(t *testing.T) {
 	f := newSendNowErrandFixture(t)
-	f.queue(t, "", messagequeue.QueuedByServer, map[string]interface{}{errandNotificationKey: true})
+	f.notification(t)
 	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 	require.NoError(t, err)
 	waitSendNowErrandWorkers(t, f.svc)
@@ -184,7 +178,7 @@ func TestSendNowStaleNotificationOnlyStartsNoTurn(t *testing.T) {
 
 func TestSendNowMixedStaleNotificationPreservesOrdinaryInput(t *testing.T) {
 	f := newSendNowErrandFixture(t)
-	f.queue(t, "", messagequeue.QueuedByServer, map[string]interface{}{errandNotificationKey: true})
+	f.notification(t)
 	f.queue(t, "original ordinary instruction", messagequeue.QueuedByUser, nil)
 	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 	require.NoError(t, err)
@@ -193,44 +187,6 @@ func TestSendNowMixedStaleNotificationPreservesOrdinaryInput(t *testing.T) {
 		require.Contains(t, p, "original ordinary instruction")
 	case <-time.After(10 * time.Second):
 		t.Fatal("mixed stale notification lost ordinary input")
-	}
-}
-
-func TestSendNowErrandContradictoryLegacyNotificationPreservesSource(t *testing.T) {
-	for _, fullBlock := range []bool{false, true} {
-		t.Run(fmt.Sprintf("full_block=%t", fullBlock), func(t *testing.T) {
-			f := newSendNowErrandFixture(t)
-			f.manager.promptAgentFunc = nil
-			row := f.result(t, "legacy-result")
-			metadata := preparedSendNowMetadata("legacy-token", row.ID)
-			metadata[errandNotificationKey] = true
-			block := ""
-			if fullBlock {
-				block = "complete legacy prepared output"
-			}
-			source := f.queue(t, block, messagequeue.QueuedByServer, metadata)
-			claim := f.claimForExecution(t)
-			f.svc.SetErrandsEnabled(func() bool { return true })
-			f.svc.executeSendNowClaim(claim)
-			f.manager.mu.Lock()
-			prompts := append([]string(nil), f.manager.capturedPrompts...)
-			f.manager.mu.Unlock()
-			_, queue := f.reopen(t)
-			status := queue.GetStatus(t.Context(), "session-1")
-			if fullBlock {
-				require.Equal(t, []string{block}, prompts, "proved legacy prepared output must remain dispatchable")
-				require.Empty(t, status.Entries)
-			} else {
-				require.Empty(t, prompts)
-				require.Len(t, status.Entries, 1, "missing prepared output must be retained, not consumed as stale")
-				require.Equal(t, source.ID, status.Entries[0].ID)
-				want, err := json.Marshal(source.Metadata)
-				require.NoError(t, err)
-				got, err := json.Marshal(status.Entries[0].Metadata)
-				require.NoError(t, err)
-				require.JSONEq(t, string(want), string(got))
-			}
-		})
 	}
 }
 
@@ -259,13 +215,13 @@ func (f *sendNowErrandFixture) result(t *testing.T, id string) *models.Errand {
 	return row
 }
 
-func (f *sendNowErrandFixture) prepared(t *testing.T, token, id, block string) *messagequeue.QueuedMessage {
+func (f *sendNowErrandFixture) notification(t *testing.T) *messagequeue.QueuedMessage {
 	t.Helper()
-	f.result(t, id)
-	require.NoError(t, NewErrandParentDeliverer(f.svc).AdmitPrepared(t.Context(), "session-1", block, preparedSendNowMetadata(token, id)))
-	status := f.svc.messageQueue.GetStatus(t.Context(), "session-1")
-	entry := status.Entries[len(status.Entries)-1]
-	require.NoError(t, f.repo.DeleteErrand(t.Context(), id))
+	NewErrandParentDeliverer(f.svc).DeliverPending(t.Context(), "session-1")
+	entries := f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries
+	require.NotEmpty(t, entries)
+	entry := entries[len(entries)-1]
+	require.True(t, isErrandNotificationPlaceholder(&entry))
 	return &entry
 }
 
@@ -307,7 +263,7 @@ func (f *sendNowErrandFixture) reopen(t *testing.T) (*sqliterepo.Repository, *me
 // @covers AC-TASKS-ERRANDS-004.7 AC-TASKS-ERRANDS-004.9 AC-TASKS-ERRANDS-004.11
 func TestSendNowMixedErrandReceiptSnapshotSurvivesReopen(t *testing.T) {
 	f := newSendNowErrandFixture(t)
-	prepared := f.prepared(t, "prepared-token", "deleted", "complete prepared block\nwith full output beyond preview")
+	notification := f.notification(t)
 	live := f.result(t, "live")
 	f.realComposer(t)
 	reference := v1.EntityReference{Version: v1.EntityReferenceVersion, Ref: entityrefs.CanonicalRef("kandev", "task", "ws1", "other"), Provider: "kandev", Kind: "task", ID: "other", Title: "Related task", URL: "/t/other", Scope: "ws1"}
@@ -322,7 +278,6 @@ func TestSendNowMixedErrandReceiptSnapshotSurvivesReopen(t *testing.T) {
 	require.Contains(t, prompt, original)
 	require.Contains(t, prompt, "exact handoff")
 	require.Contains(t, prompt, reference.Ref)
-	require.Equal(t, 1, strings.Count(prompt, prepared.Content))
 	require.Equal(t, 1, strings.Count(prompt, live.ResultText))
 	reopened, queue := f.reopen(t)
 	pending, err := queue.ListPendingSendNowClaims(t.Context())
@@ -333,15 +288,13 @@ func TestSendNowMixedErrandReceiptSnapshotSurvivesReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, present)
 	require.Equal(t, prompt, snapshot.EffectivePrompt)
-	require.Equal(t, []string{prepared.ID, user.ID}, snapshot.SourceIDs)
-	require.Len(t, snapshot.Receipts, 2)
-	require.Equal(t, "prepared-token", snapshot.Receipts[0].Envelope.Token)
-	require.Equal(t, prepared.ID, snapshot.Receipts[0].SourceID)
-	require.Equal(t, live.ResultRevision, snapshot.Receipts[1].Claims[0].ResultRevision)
-	require.Equal(t, live.ParentAdmissionGeneration, snapshot.Receipts[1].Claims[0].ParentAdmissionGeneration)
-	require.Equal(t, snapshot.Receipts[1].Envelope.Token, snapshot.Receipts[1].Claims[0].Token)
-	require.Equal(t, models.ErrandDeliveryNotification, snapshot.Receipts[1].Claims[0].Route)
-	require.Equal(t, prepared.Content, snapshot.Sources[0].PreparedBlock)
+	require.Equal(t, []string{notification.ID, user.ID}, snapshot.SourceIDs)
+	require.Len(t, snapshot.Receipts, 1)
+	require.Equal(t, live.ResultRevision, snapshot.Receipts[0].Claims[0].ResultRevision)
+	require.Equal(t, live.ParentAdmissionGeneration, snapshot.Receipts[0].Claims[0].ParentAdmissionGeneration)
+	require.Equal(t, snapshot.Receipts[0].Envelope.Token, snapshot.Receipts[0].Claims[0].Token)
+	require.Equal(t, models.ErrandDeliveryNotification, snapshot.Receipts[0].Claims[0].Route)
+	require.Equal(t, errands.SendNowSourceNotification, snapshot.Sources[0].Kind)
 	require.Equal(t, original, snapshot.Sources[1].Content)
 	require.Equal(t, user.Attachments, claim.Sources[1].Attachments)
 	require.Equal(t, user.PlanMode, claim.Sources[1].PlanMode)
@@ -369,7 +322,7 @@ func TestSendNowErrandTranscriptUsesSameSourceIDsForEarlyAndLateSnapshot(t *test
 	require.NoError(t, err)
 	comment := admitted.Message
 	require.True(t, comment.IsDurablePlanComment())
-	prepared := f.prepared(t, "prepared-token", "deleted", "full prepared result")
+	notification := f.notification(t)
 	live := f.result(t, "live")
 	f.realComposer(t)
 	_, err = f.svc.SendQueuedNowForSession(t.Context(), identity, QueueSendNowScopeAll, "")
@@ -382,15 +335,18 @@ func TestSendNowErrandTranscriptUsesSameSourceIDsForEarlyAndLateSnapshot(t *test
 	messages, err := reopened.ListMessages(t.Context(), "session-1")
 	require.NoError(t, err)
 	require.Len(t, messages, 1, "early creation and late update must share one row")
-	require.Equal(t, queuedTranscriptMessageID(&pending[0].Claim.Dispatch, []string{comment.ID, prepared.ID}), messages[0].ID)
+	require.Equal(t, queuedTranscriptMessageID(&pending[0].Claim.Dispatch, []string{comment.ID, notification.ID}), messages[0].ID)
 	snapshot, present, err := errands.DecodeSendNowDelivery(messages[0].Metadata)
 	require.NoError(t, err)
 	require.True(t, present)
 	require.Equal(t, prompt, snapshot.EffectivePrompt)
-	require.Equal(t, live.ResultRevision, snapshot.Receipts[1].Claims[0].ResultRevision)
-	for _, source := range pending[0].Claim.Sources {
-		require.Equal(t, true, source.Metadata[metaKeyUserMessageRecorded])
-	}
+	require.Equal(t, live.ResultRevision, snapshot.Receipts[0].Claims[0].ResultRevision)
+	sources := pending[0].Claim.Sources
+	require.Len(t, sources, 2)
+	require.Equal(t, comment.ID, sources[0].ID)
+	require.Equal(t, true, sources[0].Metadata[metaKeyUserMessageRecorded])
+	require.Equal(t, notification.ID, sources[1].ID)
+	require.NotContains(t, sources[1].Metadata, metaKeyUserMessageRecorded)
 }
 
 // The manager models runtime canonicalization and calls the real admission callback.
@@ -407,7 +363,9 @@ func TestSendNowErrandPersistsCanonicalProviderPrompt(t *testing.T) {
 	manager := &canonicalSendNowManager{mockAgentManager: f.manager}
 	f.svc.agentManager = manager
 	f.svc.executor = withTestExecutorActor(executor.NewExecutor(manager, f.repo, testLogger(), executor.ExecutorConfig{}))
-	f.prepared(t, "prepared-token", "deleted", "full prepared notice")
+	f.result(t, "live")
+	f.realComposer(t)
+	f.notification(t)
 	f.queue(t, "original ordinary input", messagequeue.QueuedByUser, nil)
 	_, err := f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
 	require.NoError(t, err)
@@ -447,7 +405,7 @@ func TestSendNowErrandClaimsSurviveRestartAndRefusal(t *testing.T) {
 	for _, outcome := range []string{"refused", "accepted", "uncertain"} {
 		t.Run(outcome, func(t *testing.T) {
 			f := newSendNowErrandFixture(t)
-			prepared := f.prepared(t, "prepared-token", "deleted", "full prepared notice")
+			notification := f.notification(t)
 			user := f.queue(t, "  original instruction\n ", messagequeue.QueuedByUser, nil)
 			live := f.result(t, "live")
 			f.realComposer(t)
@@ -463,8 +421,8 @@ func TestSendNowErrandClaimsSurviveRestartAndRefusal(t *testing.T) {
 			require.NoError(t, err)
 			if outcome == "refused" {
 				require.Len(t, status.Entries, 2)
-				require.Equal(t, []string{prepared.ID, user.ID}, []string{status.Entries[0].ID, status.Entries[1].ID})
-				require.Equal(t, prepared.Content, status.Entries[0].Content)
+				require.Equal(t, []string{notification.ID, user.ID}, []string{status.Entries[0].ID, status.Entries[1].ID})
+				require.Equal(t, notification.Content, status.Entries[0].Content)
 				require.Equal(t, user.Content, status.Entries[1].Content)
 				require.Empty(t, pending)
 				require.Equal(t, models.ErrandResultPending, row.ResultState)
@@ -476,8 +434,8 @@ func TestSendNowErrandClaimsSurviveRestartAndRefusal(t *testing.T) {
 				require.Len(t, pending, 1, "uncertainty must retain the durable owner")
 				snapshot, _, err := errands.DecodeSendNowDelivery(pending[0].Claim.Dispatch.Metadata)
 				require.NoError(t, err)
-				require.Len(t, snapshot.Receipts, 2)
-				require.Equal(t, live.ResultRevision, snapshot.Receipts[1].Claims[0].ResultRevision)
+				require.Len(t, snapshot.Receipts, 1)
+				require.Equal(t, live.ResultRevision, snapshot.Receipts[0].Claims[0].ResultRevision)
 			}
 		})
 	}
@@ -495,7 +453,7 @@ func TestSendNowErrandPlanCommentRestoresExactReservationAfterReopen(t *testing.
 		ClientQueueID: "plan-comment-client", TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: identity.SessionIncarnationID,
 		Content: "original plan comment", UserID: messagequeue.QueuedByUser, PlanCommentRefs: []models.TaskPlanCommentRef{{ID: "comment", Version: 1}}, RequirePrimarySession: true})
 	require.NoError(t, err)
-	prepared := f.prepared(t, "prepared-token", "deleted", "full prepared output")
+	notification := f.notification(t)
 	selection := f.svc.messageQueue.GetStatus(t.Context(), "session-1").Entries
 	_, err = f.svc.messageQueue.ClaimSendNowForSession(t.Context(), identity, selection)
 	require.NoError(t, err)
@@ -508,8 +466,8 @@ func TestSendNowErrandPlanCommentRestoresExactReservationAfterReopen(t *testing.
 	require.Len(t, status.Entries, 2)
 	require.Equal(t, admitted.Message.ID, status.Entries[0].ID)
 	require.Equal(t, admitted.Message.Content, status.Entries[0].Content)
-	require.Equal(t, prepared.ID, status.Entries[1].ID)
-	require.Equal(t, prepared.Content, status.Entries[1].Content)
+	require.Equal(t, notification.ID, status.Entries[1].ID)
+	require.Equal(t, notification.Content, status.Entries[1].Content)
 }
 
 func TestSendNowStaleNotificationWithOnlyLiveStatusStartsNoTurn(t *testing.T) {
@@ -565,39 +523,4 @@ func TestSendNowErrandAttachmentOnlyInputPreservesEmptyPrompt(t *testing.T) {
 	received := <-attachments
 	require.Len(t, received, 1)
 	require.Equal(t, "diagram.png", received[0].Name)
-}
-
-func TestSendNowErrandAmbiguousLegacySourcesRetained(t *testing.T) {
-	for _, shape := range []string{"malformed_envelope", "scalar_without_envelope", "contradictory_token"} {
-		t.Run(shape, func(t *testing.T) {
-			f := newSendNowErrandFixture(t)
-			f.manager.promptAgentFunc = nil
-			row := f.result(t, "legacy-result")
-			metadata := preparedSendNowMetadata("legacy-token", row.ID)
-			metadata[errandNotificationKey] = true
-			content := ""
-			switch shape {
-			case "malformed_envelope":
-				metadata[errandDeliveryKey] = "invalid"
-			case "scalar_without_envelope":
-				delete(metadata, errandDeliveryKey)
-			case "contradictory_token":
-				metadata[ErrandDeliveryTokenMetadataKey] = "unrelated-token"
-				content = "full prepared legacy block"
-			}
-			source := f.queue(t, content, messagequeue.QueuedByServer, metadata)
-			claim := f.claimForExecution(t)
-			f.svc.SetErrandsEnabled(func() bool { return true })
-			f.svc.executeSendNowClaim(claim)
-			f.manager.mu.Lock()
-			prompts := append([]string(nil), f.manager.capturedPrompts...)
-			f.manager.mu.Unlock()
-			require.Empty(t, prompts, "ambiguous prepared source cannot enter provider I/O")
-			_, queue := f.reopen(t)
-			status := queue.GetStatus(t.Context(), "session-1")
-			require.Len(t, status.Entries, 1, "ambiguous legacy source must remain recoverable")
-			require.Equal(t, source.ID, status.Entries[0].ID)
-			require.Equal(t, content, status.Entries[0].Content)
-		})
-	}
 }

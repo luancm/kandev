@@ -180,9 +180,8 @@ The gateway authorizes Errand requests through their owning task. Cancellation r
 Each result-bearing parent user message persists an `errand_delivery`
 object: `token`, `route`, and `items` (`errand_id`, `title`, `status`,
 `preview`, at most 280 characters). Direct prompts, queued prompts,
-notifications, and preserved deletion notices use the same snapshot in
-storage and live events. Keep `errand_delivery_token` for recovery readback.
-Cards use this immutable snapshot after reload or errand deletion.
+and notifications use the same snapshot in storage and live events. Keep `errand_delivery_token` for recovery readback.
+Cards render the immutable result snapshot after reload.
 
 Historical result timing follows [the elapsed-time contract](errand-result-duration.md).
 
@@ -242,13 +241,12 @@ Outstanding means queued, `awaiting_result=true` or `result_state=pending`. Star
 ### Cancellation
 
 - Parent `cancel_errand_kandev` calls `Service.Cancel` with source `parent`: stop reason `errand_cancelled`, cancelled lifecycle, no result.
-- User Stop (`errand.cancel` or generic session stop) uses source `user` and additionally captures a cancellation result when outstanding. Stop all calls `CancelAll` under per-task serialization, then checks delivery once per parent.
-- Child deletion preserves an outstanding cancellation notice before deleting the errand row.
-- Parent stop/failure/deletion cascades cancellation and discards pending results. Task archive/deletion cancels or removes children through existing archive/delete hooks.
+- User Stop (`errand.cancel`) uses source `user` and additionally captures a cancellation result when outstanding. Stop all calls `CancelAll` under per-task serialization, then checks delivery once per parent.
+- Parent stop, failure, or deletion cascades cancellation and discards pending results. Task archive queues cancellation. Task and workspace deletion use the task cleanup barrier before stopping Errand runtimes synchronously, then recheck exact stop evidence under the task row lock before removing the records. Ephemeral cleanup retains tasks whose Errand stop is unconfirmed.
 - Parent turn cancellation (`CancelAgent`/`CancelTurn`) ends awaits without claims, leaves children running and defers outstanding workflow.
 - Errand turn cancellation settles only the exact observed turn: parent-origin interruption fails its result and clears awaiting-result; user-origin interruption restores the prior outcome. Stale callbacks cannot settle a successor.
 
-[Exact teardown](errand-recovery-and-delivery.md#teardown-and-lifecycle-recovery) and [prepared deletion notices](errand-recovery-and-delivery.md#prepared-deletion-notice-queue-is-the-row-independent-authority) own durable, version-guarded idempotence. Deletion while disabled queues no new notice; retained role isolation survives.
+[Exact teardown](errand-recovery-and-delivery.md#teardown-and-lifecycle-recovery) owns durable, version-guarded idempotence. Task cleanup also stops retained Errands while the feature flag is off.
 
 ## Workflow-detached predicate
 

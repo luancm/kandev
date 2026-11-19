@@ -26,7 +26,6 @@ type SendNowSourceKind string
 const (
 	SendNowSourceOrdinary     SendNowSourceKind = "ordinary"
 	SendNowSourceNotification SendNowSourceKind = "notification"
-	SendNowSourcePrepared     SendNowSourceKind = "prepared"
 )
 
 // SendNowDelivery is the internal immutable dispatch snapshot stored in claim and transcript metadata.
@@ -45,7 +44,7 @@ type SendNowDelivery struct {
 	EffectivePrompt      string                   `json:"effective_prompt"`
 }
 
-// SendNowDeliverySource retains source order and provenance without folding prepared blocks into ordinary input.
+// SendNowDeliverySource retains source order, input, and notification provenance.
 // The durable queue claim also retains the complete original source, including attachments and mode semantics.
 type SendNowDeliverySource struct {
 	ID              string            `json:"id"`
@@ -54,13 +53,10 @@ type SendNowDeliverySource struct {
 	QueuedBy        string            `json:"queued_by"`
 	Provenance      string            `json:"provenance,omitempty"`
 	Content         string            `json:"content"`
-	PreparedBlock   string            `json:"prepared_block,omitempty"`
 }
 
 // SendNowDeliveryReceipt owns exact result claims and their immutable display snapshot.
-// SourceID binds a row-independent prepared notice; empty identifies results composed at dispatch.
 type SendNowDeliveryReceipt struct {
-	SourceID string                     `json:"source_id,omitempty"`
 	Envelope DeliveryEnvelope           `json:"envelope"`
 	Claims   []models.ErrandResultClaim `json:"claims"`
 }
@@ -112,32 +108,18 @@ func (d SendNowDelivery) validate() error {
 	if !d.validIdentity() {
 		return invalidSendNowDelivery("dispatch identity")
 	}
-	sources, err := d.validateSources()
-	if err != nil {
+	if err := d.validateSources(); err != nil {
 		return err
 	}
 	tokens := make(map[string]bool, len(d.Receipts))
-	prepared := make(map[string]bool)
 	claims := make(map[models.ErrandResultClaim]bool)
 	for _, receipt := range d.Receipts {
 		if tokens[receipt.Envelope.Token] {
 			return invalidSendNowDelivery("duplicate receipt token")
 		}
 		tokens[receipt.Envelope.Token] = true
-		if receipt.SourceID != "" {
-			if sources[receipt.SourceID].Kind != SendNowSourcePrepared || prepared[receipt.SourceID] ||
-				receipt.Envelope.Route != models.ErrandDeliveryNotification {
-				return invalidSendNowDelivery("prepared receipt source")
-			}
-			prepared[receipt.SourceID] = true
-		}
 		if err := validateSendNowReceipt(receipt, claims); err != nil {
 			return err
-		}
-	}
-	for id, source := range sources {
-		if source.Kind == SendNowSourcePrepared && !prepared[id] {
-			return invalidSendNowDelivery("missing prepared receipt")
 		}
 	}
 	return nil
@@ -148,32 +130,29 @@ func (d SendNowDelivery) validIdentity() bool {
 		d.QueueGeneration >= 0 && d.OperationGeneration == d.QueueGeneration
 }
 
-func (d SendNowDelivery) validateSources() (map[string]SendNowDeliverySource, error) {
+func (d SendNowDelivery) validateSources() error {
 	if len(d.Sources) == 0 || len(d.Sources) != len(d.SourceIDs) {
-		return nil, invalidSendNowDelivery("source set")
+		return invalidSendNowDelivery("source set")
 	}
-	sources := make(map[string]SendNowDeliverySource, len(d.Sources))
+	sources := make(map[string]struct{}, len(d.Sources))
 	hasOrdinary := false
 	for i, source := range d.Sources {
 		if source.ID == "" || source.ID != d.SourceIDs[i] || source.QueueGeneration < 0 {
-			return nil, invalidSendNowDelivery("source identity")
+			return invalidSendNowDelivery("source identity")
 		}
 		if _, exists := sources[source.ID]; exists {
-			return nil, invalidSendNowDelivery("duplicate source")
+			return invalidSendNowDelivery("duplicate source")
 		}
 		if err := validateSendNowSource(source); err != nil {
-			return nil, err
-		}
-		if source.Kind == SendNowSourcePrepared && !strings.Contains(d.EffectivePrompt, source.PreparedBlock) {
-			return nil, invalidSendNowDelivery("prepared block absent from dispatch")
+			return err
 		}
 		hasOrdinary = hasOrdinary || source.Kind == SendNowSourceOrdinary
-		sources[source.ID] = source
+		sources[source.ID] = struct{}{}
 	}
 	if !hasOrdinary && strings.TrimSpace(d.EffectivePrompt) == "" {
-		return nil, invalidSendNowDelivery("empty dispatch without ordinary input")
+		return invalidSendNowDelivery("empty dispatch without ordinary input")
 	}
-	return sources, nil
+	return nil
 }
 
 func validateSendNowSource(source SendNowDeliverySource) error {
@@ -181,7 +160,7 @@ func validateSendNowSource(source SendNowDeliverySource) error {
 		return invalidSendNowDelivery("source owner")
 	}
 	if source.Kind == SendNowSourceOrdinary {
-		if source.Provenance != "" || source.PreparedBlock != "" {
+		if source.Provenance != "" {
 			return invalidSendNowDelivery("ordinary source provenance")
 		}
 		return nil
@@ -189,16 +168,7 @@ func validateSendNowSource(source SendNowDeliverySource) error {
 	if source.QueuedBy != "server" || source.Provenance != SendNowErrandProvenance || source.Content != "" {
 		return invalidSendNowDelivery("server source provenance")
 	}
-	switch source.Kind {
-	case SendNowSourceNotification:
-		if source.PreparedBlock != "" {
-			return invalidSendNowDelivery("notification has prepared content")
-		}
-	case SendNowSourcePrepared:
-		if strings.TrimSpace(source.PreparedBlock) == "" {
-			return invalidSendNowDelivery("missing prepared block")
-		}
-	default:
+	if source.Kind != SendNowSourceNotification {
 		return invalidSendNowDelivery("source kind")
 	}
 	return nil

@@ -16,17 +16,14 @@ import (
 const errandSourceMetadataKey = "errand_source"
 
 type sendNowErrandSource struct {
-	QueueGeneration *int64                             `json:"queue_generation,omitempty"`
-	Identity        *messagequeue.QueueSessionIdentity `json:"identity,omitempty"`
-	Provenance      string                             `json:"provenance"`
-	Kind            errands.SendNowSourceKind          `json:"kind"`
-	PreparedBlock   string                             `json:"prepared_block,omitempty"`
-	Receipt         *errands.SendNowDeliveryReceipt    `json:"receipt,omitempty"`
+	Provenance string                    `json:"provenance"`
+	Kind       errands.SendNowSourceKind `json:"kind"`
 }
 
 type sendNowErrandInput struct {
 	claim           *messagequeue.SendNowClaim
 	snapshot        errands.SendNowDelivery
+	composedBlock   string
 	hasOrdinary     bool
 	hasNotification bool
 }
@@ -60,15 +57,12 @@ func (s *Service) prepareSendNowErrandInput(ctx context.Context, claim *messageq
 		if !captured {
 			return nil, messagequeue.ErrSendNowClaimChanged
 		}
-		part, receipt, err := s.selectedSendNowSource(ctx, source, generation)
+		part, err := s.selectedSendNowSource(ctx, source, generation)
 		if err != nil {
 			return nil, err
 		}
 		input.snapshot.SourceIDs = append(input.snapshot.SourceIDs, source.ID)
 		input.snapshot.Sources = append(input.snapshot.Sources, part)
-		if receipt != nil {
-			input.snapshot.Receipts = append(input.snapshot.Receipts, *receipt)
-		}
 		if part.Kind != errands.SendNowSourceOrdinary {
 			input.hasNotification = true
 		}
@@ -87,70 +81,23 @@ func (s *Service) prepareSendNowErrandInput(ctx context.Context, claim *messageq
 	return input, nil
 }
 
-func (s *Service) selectedSendNowSource(ctx context.Context, source *messagequeue.QueuedMessage, generation int64) (errands.SendNowDeliverySource, *errands.SendNowDeliveryReceipt, error) {
-	if !s.errandQueueSourceSelection(ctx, source).Allowed {
-		return errands.SendNowDeliverySource{}, nil, errands.ErrInvalidSendNowDelivery
+func (s *Service) selectedSendNowSource(ctx context.Context, source *messagequeue.QueuedMessage, generation int64) (errands.SendNowDeliverySource, error) {
+	if !s.errandQueueSourceSelection(ctx, source) {
+		return errands.SendNowDeliverySource{}, errands.ErrInvalidSendNowDelivery
 	}
-	return s.sendNowSource(ctx, source, generation)
+	part := errands.SendNowDeliverySource{ID: source.ID, QueueGeneration: generation,
+		Kind: errands.SendNowSourceOrdinary, QueuedBy: source.QueuedBy, Content: source.Content}
+	if queuedErrandServerSource(source) {
+		part.Kind = errands.SendNowSourceNotification
+		part.Provenance = errands.SendNowErrandProvenance
+	}
+	return part, nil
 }
 
 func sendNowSourceHasInput(source *messagequeue.QueuedMessage) bool {
 	return source.Content != "" || len(source.Attachments) > 0 || source.PlanMode ||
 		len(entityrefs.NormalizePersisted(source.Metadata[messagequeue.MetadataEntityReferences])) > 0 ||
 		stepHandoffFromQueuedMetadata(source.Metadata) != ""
-}
-
-func (s *Service) sendNowSource(ctx context.Context, source *messagequeue.QueuedMessage, generation int64) (errands.SendNowDeliverySource, *errands.SendNowDeliveryReceipt, error) {
-	part := errands.SendNowDeliverySource{ID: source.ID, QueueGeneration: generation,
-		Kind: errands.SendNowSourceOrdinary, QueuedBy: source.QueuedBy, Content: source.Content}
-	if source.QueuedBy != messagequeue.QueuedByServer {
-		return part, nil, nil
-	}
-	stamp, present, err := decodeSendNowErrandSource(source.Metadata)
-	if err != nil {
-		return part, nil, err
-	}
-	if !present {
-		stamp, err = s.legacySendNowErrandSource(ctx, source)
-		if err != nil {
-			return part, nil, err
-		}
-		if stamp.Kind == "" {
-			return part, nil, nil
-		}
-	}
-	if stamp.Kind == errands.SendNowSourcePrepared && source.Content != stamp.PreparedBlock {
-		return part, nil, errands.ErrInvalidSendNowDelivery
-	}
-	if stamp.Kind == errands.SendNowSourceNotification && source.Content != "" {
-		return part, nil, errands.ErrInvalidSendNowDelivery
-	}
-	part.Kind, part.Provenance, part.Content = stamp.Kind, stamp.Provenance, ""
-	part.PreparedBlock = stamp.PreparedBlock
-	if stamp.Receipt == nil {
-		return part, nil, nil
-	}
-	receipt := *stamp.Receipt
-	if receipt.SourceID != "" && receipt.SourceID != source.ID {
-		return part, nil, errands.ErrInvalidSendNowDelivery
-	}
-	receipt.SourceID = source.ID
-	return part, &receipt, nil
-}
-
-func (s *Service) legacySendNowErrandSource(ctx context.Context, source *messagequeue.QueuedMessage) (sendNowErrandSource, error) {
-	if _, present := source.Metadata[errandDeliveryKey]; present {
-		return s.capturePreparedErrandSource(ctx, source.TaskID, source.SessionID, source.Content, source.Metadata)
-	}
-	for _, key := range []string{ErrandDeliveryTokenMetadataKey, ErrandDeliverySubmissionMetadataKey} {
-		if _, present := source.Metadata[key]; present {
-			return sendNowErrandSource{}, errands.ErrInvalidSendNowDelivery
-		}
-	}
-	if isErrandNotificationEntry(source) && !sendNowSourceHasInput(source) {
-		return sendNowErrandSource{Provenance: errands.SendNowErrandProvenance, Kind: errands.SendNowSourceNotification}, nil
-	}
-	return sendNowErrandSource{}, nil
 }
 
 // The updater captures the exact claim; runtime admission may use a fresh context.
@@ -183,34 +130,20 @@ func (s *Service) sendNowDeliveryClaimUpdater(claim *messagequeue.SendNowClaim) 
 	}
 }
 
-func decodeSendNowErrandSource(metadata map[string]interface{}) (sendNowErrandSource, bool, error) {
+func hasErrandNotificationStamp(metadata map[string]interface{}) bool {
 	value, present := metadata[errandSourceMetadataKey]
 	if !present {
-		return sendNowErrandSource{}, false, nil
+		return false
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return sendNowErrandSource{}, true, errands.ErrInvalidSendNowDelivery
+		return false
 	}
 	var stamp sendNowErrandSource
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&stamp); err != nil || stamp.Provenance != errands.SendNowErrandProvenance {
-		return sendNowErrandSource{}, true, errands.ErrInvalidSendNowDelivery
-	}
-	switch stamp.Kind {
-	case errands.SendNowSourceNotification:
-		if stamp.PreparedBlock != "" || stamp.Receipt != nil {
-			return stamp, true, errands.ErrInvalidSendNowDelivery
-		}
-	case errands.SendNowSourcePrepared:
-		if stamp.PreparedBlock == "" || stamp.Receipt == nil || !preparedSourceGenerationsPresent(encoded) {
-			return stamp, true, errands.ErrInvalidSendNowDelivery
-		}
-	default:
-		return stamp, true, errands.ErrInvalidSendNowDelivery
-	}
-	return stamp, true, nil
+	return decoder.Decode(&stamp) == nil && stamp.Provenance == errands.SendNowErrandProvenance &&
+		stamp.Kind == errands.SendNowSourceNotification
 }
 
 func (s *Service) composeSendNowErrandTurn(ctx context.Context, input *sendNowErrandInput, prompt string) (string, string, error) {
@@ -233,6 +166,7 @@ func (s *Service) composeSendNowErrandTurn(ctx context.Context, input *sendNowEr
 			s.releaseErrandClaimUnlessAccepted(context.WithoutCancel(ctx), token, false)
 			return "", "", err
 		}
+		input.composedBlock = composition.Block
 		prompt = joinErrandBlock(composition.Block, prompt)
 	}
 	if !input.hasOrdinary && len(input.snapshot.Receipts) == 0 {
@@ -307,23 +241,4 @@ func (s *Service) sendNowHasErrandContext(claim *messagequeue.SendNowClaim) bool
 		}
 	}
 	return false
-}
-
-func preparedSourceGenerationsPresent(encoded []byte) bool {
-	var fields struct {
-		Receipt *struct {
-			Claims []struct {
-				Generation *int64 `json:"ParentAdmissionGeneration"`
-			} `json:"claims"`
-		} `json:"receipt"`
-	}
-	if err := json.Unmarshal(encoded, &fields); err != nil || fields.Receipt == nil {
-		return false
-	}
-	for _, claim := range fields.Receipt.Claims {
-		if claim.Generation == nil {
-			return false
-		}
-	}
-	return true
 }

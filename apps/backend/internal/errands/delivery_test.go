@@ -3,7 +3,6 @@ package errands
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -658,60 +657,6 @@ func TestOutstandingParentReportsOutstandingUntilTheResultIsDelivered(t *testing
 }
 
 // @covers AC-TASKS-ERRANDS-003.5
-func TestDeletedOutstandingErrandAdmitsItsCancellationNotice(t *testing.T) {
-	h := newHarness(t)
-	errand := h.mustStart("audit").Errand
-	if err := h.service.PreserveCancellationNotice(context.Background(), errand.ID); err != nil {
-		t.Fatalf("PreserveCancellationNotice: %v", err)
-	}
-	if len(h.deliverer.prepared) != 1 || !strings.Contains(h.deliverer.prepared[0], cancellationNotice) {
-		t.Fatalf("admitted = %v, want one cancellation notice", h.deliverer.prepared)
-	}
-	if err := h.store.DeleteErrand(context.Background(), errand.ID); err != nil {
-		t.Fatalf("DeleteErrand after notice admission: %v", err)
-	}
-	metadata := h.deliverer.preparedMetadata[0]
-	envelope, ok := metadata[DeliveryEnvelopeMetadataKey].(DeliveryEnvelope)
-	if !ok || envelope.Route != models.ErrandDeliveryNotification || len(envelope.Items) != 1 ||
-		envelope.Items[0].ErrandID != errand.ID || envelope.Items[0].Status != models.ErrandStatusCancelled {
-		t.Fatalf("cancellation notice snapshot = %#v, want the cancelled errand item", metadata[DeliveryEnvelopeMetadataKey])
-	}
-	if metadata[DeliveryTokenMetadataKey] != envelope.Token || envelope.Token == "" {
-		t.Fatalf("cancellation notice token = %#v envelope=%q, want a matching immutable token", metadata[DeliveryTokenMetadataKey], envelope.Token)
-	}
-}
-
-func TestDisabledErrandDeletionDoesNotQueueCancellationNotice(t *testing.T) {
-	h := newHarness(t)
-	err := h.mustStart("audit").Errand
-	h.service.SetEnabled(func() bool { return false })
-
-	if err := h.service.PreserveCancellationNotice(context.Background(), err.ID); err != nil {
-		t.Fatalf("PreserveCancellationNotice: %v", err)
-	}
-	if len(h.deliverer.prepared) != 0 || len(h.deliverer.delivered()) != 0 {
-		t.Fatalf("disabled deletion queued output: prepared=%v delivered=%v", h.deliverer.prepared, h.deliverer.delivered())
-	}
-	row, getErr := h.store.GetErrand(context.Background(), err.ID)
-	if getErr != nil {
-		t.Fatalf("GetErrand: %v", getErr)
-	}
-	if row.Lifecycle != models.ErrandLifecycleCancelled || row.ResultState != models.ErrandResultDiscarded || row.ResultText != "" {
-		t.Fatalf("disabled deletion left lifecycle=%q result=%q/%q, want cancelled with no queued result", row.Lifecycle, row.ResultState, row.ResultText)
-	}
-}
-
-// @covers AC-TASKS-ERRANDS-003.5
-func TestRefusedCancellationNoticeFailsTheDeleteInsteadOfLosingIt(t *testing.T) {
-	h := newHarness(t)
-	errand := h.mustStart("audit").Errand
-	h.deliverer.admitErr = errors.New("queue full")
-	if err := h.service.PreserveCancellationNotice(context.Background(), errand.ID); err == nil {
-		t.Fatal("PreserveCancellationNotice succeeded although the notice was refused")
-	}
-}
-
-// @covers AC-TASKS-ERRANDS-003.3
 func TestSendResultCapturesAUserTurnOnlyWhenTheRuleAllows(t *testing.T) {
 	h, repo, row, effect := newTerminalFixture(t)
 	completeTerminalTurn(t, repo, effect, "captured", "done")

@@ -202,9 +202,7 @@ func TestComposeErrandTurnWithdrawsWaitingNotification(t *testing.T) {
 	svc.SetTransientRetryMessageService(&transientRetryMessageServiceStub{messages: []*models.Message{{
 		ID: "message-withdraw", AuthorType: models.MessageAuthorUser, Content: "user prompt",
 	}}})
-	require.NoError(t, deliverer.AdmitPrepared(ctx, "s1", "", map[string]interface{}{
-		errandNotificationKey: true,
-	}))
+	deliverer.DeliverPending(ctx, "s1")
 	require.Equal(t, 1, svc.messageQueue.GetStatus(ctx, "s1").Count)
 
 	_, _, err := svc.composeErrandTurn(ctx, "s1", "user prompt", &promptTaskOptions{deliverySubmissionID: "message-withdraw"})

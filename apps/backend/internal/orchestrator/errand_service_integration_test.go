@@ -203,10 +203,6 @@ func (r *lifecycleDeliveryRecorder) DeliverPending(ctx context.Context, parent s
 	r.parents = append(r.parents, parent)
 	r.ParentDeliverer.DeliverPending(ctx, parent)
 }
-func (r *lifecycleDeliveryRecorder) AdmitPrepared(ctx context.Context, parent, content string, metadata map[string]interface{}) error {
-	r.parents = append(r.parents, parent)
-	return r.ParentDeliverer.AdmitPrepared(ctx, parent, content, metadata)
-}
 
 // Recovery is callable without starting either the orchestrator or its worker.
 func newLifecycleService(t *testing.T, f *errandLaunchFixture, store errands.Store) (*errands.Service, *lifecycleDeliveryRecorder) {

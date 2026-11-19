@@ -1010,13 +1010,11 @@ func (r *memoryRepository) reserveHeadLocked(
 			r.removeEntryLocked(sessionID, headIndex)
 			return r.reserveHeadLocked(ctx, sessionID, identity, retainOrdinary)
 		}
-		applyDispatchSourceMetadata(ctx, head)
 		out := reserveMemoryDelivery(head, identity)
 		r.captureReservationLocked(out)
 		return out
 	}
 	out := cloneQueuedMessage(head)
-	applyDispatchSourceMetadata(ctx, out)
 	r.captureReservationLocked(out)
 	r.removeEntryLocked(sessionID, headIndex)
 	return out
@@ -1591,17 +1589,14 @@ func (r *memoryRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 		return err
 	}
 
-	sources, err := normalizedRestoredSendNowSources(ctx, claim)
-	if err != nil {
-		return err
-	}
+	sources := claim.Sources
 	for _, source := range sources {
 		if sendNowSourceGenerationChanged(claim, source, r.generation[source.TaskID]) {
 			continue
 		}
 		if existing[source.ID] != nil {
 			if source.IsDurableDelivery() {
-				existing[source.ID].Metadata = restoredSendNowMetadata(ctx, source.ID, restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata))
+				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
 			}
 			continue
 		}

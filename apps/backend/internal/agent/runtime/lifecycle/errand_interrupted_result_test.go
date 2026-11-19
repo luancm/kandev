@@ -35,9 +35,6 @@ func (b *interruptionExternalBoundaries) NotificationBlocked(context.Context, st
 	return b.notifications > 0
 }
 func (b *interruptionExternalBoundaries) DeliverPending(context.Context, string) { b.notifications++ }
-func (b *interruptionExternalBoundaries) AdmitPrepared(context.Context, string, string, map[string]interface{}) error {
-	panic("unexpected prepared notification")
-}
 
 type interruptionTranscript struct {
 	errands.TurnReader

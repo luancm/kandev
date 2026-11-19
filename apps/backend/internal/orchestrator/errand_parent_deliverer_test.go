@@ -30,18 +30,13 @@ func TestErrandParentDelivererBlocksWhileQueueHoldsEntry(t *testing.T) {
 	require.False(t, deliverer.NotificationBlocked(ctx, "session-1"), "an idle parent with an empty queue is not blocked")
 	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, "session-1", false))
 
-	f.result(t, "prepared-1")
-	require.NoError(t, deliverer.AdmitPrepared(ctx, "session-1", "status block", preparedSendNowMetadata("prepared-token", "prepared-1")))
+	deliverer.DeliverPending(ctx, "session-1")
 	require.True(t, deliverer.NotificationBlocked(ctx, "session-1"), "a waiting entry blocks a second notification")
 
 	status := svc.messageQueue.GetStatus(ctx, "session-1")
 	require.Equal(t, 1, status.Count)
-	require.Equal(t, "status block", status.Entries[0].Content)
-	require.Equal(t, messagequeue.QueuedByServer, status.Entries[0].QueuedBy)
-	envelope, ok := decodeErrandDeliveryEnvelope(status.Entries[0].Metadata[errandDeliveryKey])
-	require.True(t, ok)
-	require.Equal(t, models.ErrandDeliveryNotification, envelope.Route)
-	require.Equal(t, "prepared-token", envelope.Token)
+	require.Empty(t, status.Entries[0].Content)
+	require.True(t, isErrandNotificationPlaceholder(&status.Entries[0]))
 }
 
 func TestErrandParentDelivererBlocksWhileTurnRuns(t *testing.T) {
@@ -66,7 +61,7 @@ func TestErrandParentDelivererRejectsUnknownParent(t *testing.T) {
 	ctx := context.Background()
 	_, deliverer := newErrandDelivererFixture(t)
 
-	require.Error(t, deliverer.AdmitPrepared(ctx, "missing", "block", nil))
+	require.Error(t, deliverer.admit(ctx, "missing"))
 }
 
 func TestErrandParentDelivererRequestsReadinessForAdmittedNotification(t *testing.T) {

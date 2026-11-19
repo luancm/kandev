@@ -21,7 +21,7 @@ func TestPostgresErrandClaimSnapshotSerializesInventoryWriters(t *testing.T) {
 
 func exerciseErrandInventoryWriters(t *testing.T, create func(*testing.T) *Repository) {
 	t.Helper()
-	for _, writer := range []string{"create", "replace", "cancel", "release", "abort", "delete", "session_delete", "task_delete", "workspace_delete", "workspace_simple", "ephemeral_profile", "ephemeral_expired", "prepared_queue"} {
+	for _, writer := range []string{"create", "replace", "cancel", "release", "abort", "delete", "session_delete", "task_delete", "workspace_delete", "workspace_simple", "ephemeral_profile", "ephemeral_expired", "server_queue"} {
 		t.Run(writer, func(t *testing.T) { exerciseErrandInventoryWriter(t, create(t), writer) })
 	}
 }
@@ -59,7 +59,7 @@ func exerciseErrandInventoryWriter(t *testing.T, repo *Repository, writer string
 	if dialect.IsPostgres(repo.db.DriverName()) {
 		guard = "SELECT pg_advisory_xact_lock"
 	}
-	if writer == "session_delete" || writer == "prepared_queue" {
+	if writer == "session_delete" || writer == "server_queue" {
 		guard = "UPDATE tasks SET updated_at"
 	}
 	if dialect.IsPostgres(repo.db.DriverName()) && deletesInventoryTask(writer) {
@@ -71,7 +71,7 @@ func exerciseErrandInventoryWriter(t *testing.T, repo *Repository, writer string
 	writerGate := newErrandSQLGate(guard, false)
 	other := independentErrandRepository(t, repo, writerGate)
 	var queue *messagequeue.Service
-	if writer == "prepared_queue" {
+	if writer == "server_queue" {
 		queueRepo, err := messagequeue.NewSQLiteRepository(other.db, other.ro)
 		if err != nil {
 			t.Fatal(err)
@@ -167,8 +167,7 @@ func runErrandInventoryWriter(ctx context.Context, repo *Repository, writer stri
 	default:
 		_, err := queue.QueueMessageWithMetadataForSession(ctx, messagequeue.QueueSessionIdentity{
 			TaskID: sibling.TaskID, SessionID: parent.ID, SessionIncarnationID: parent.QueueIncarnationID,
-		}, "complete prepared cancellation output", "", messagequeue.QueuedByServer, false, nil,
-			map[string]interface{}{"errand_delivery_token": "prepared-token"})
+		}, "server queue entry", "", messagequeue.QueuedByServer, false, nil, nil)
 		return err
 	}
 }

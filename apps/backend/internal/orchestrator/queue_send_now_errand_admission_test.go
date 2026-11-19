@@ -121,7 +121,9 @@ func TestSendNowErrandCanonicalAdmissionPayload(t *testing.T) {
 			t.Run(protocol+"/"+path, func(t *testing.T) {
 				f := newSendNowErrandFixture(t)
 				manager := installTask14CanonicalManager(t, f, protocol, path)
-				prepared := f.prepared(t, "prepared-token", "deleted", "complete prepared output")
+				live := f.result(t, "live")
+				f.realComposer(t)
+				notification := f.notification(t)
 				attachment := messagequeue.MessageAttachment{Type: "image", Name: "diagram.png", MimeType: "image/png", Data: "eA=="}
 				user, err := f.svc.messageQueue.QueueMessageWithMetadata(t.Context(), "session-1", "task-1", "pre-runtime ordinary input", "", messagequeue.QueuedByUser, false, []messagequeue.MessageAttachment{attachment}, nil)
 				require.NoError(t, err)
@@ -131,7 +133,7 @@ func TestSendNowErrandCanonicalAdmissionPayload(t *testing.T) {
 				input := <-manager.incoming
 				require.Equal(t, "post-runtime-prefix\n"+input.Text+"\npost-runtime-suffix", final)
 				require.Contains(t, input.Text, "pre-runtime ordinary input")
-				require.Contains(t, input.Text, prepared.Content)
+				require.Contains(t, input.Text, live.ResultText)
 				require.Equal(t, queuedMessageAttachmentsToV1(user.Attachments), input.Attachments)
 				reopened, queue := f.reopen(t)
 				pending, err := queue.ListPendingSendNowClaims(t.Context())
@@ -143,7 +145,7 @@ func TestSendNowErrandCanonicalAdmissionPayload(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, present)
 				require.Equal(t, final, snapshot.EffectivePrompt, "final runtime prompt must be durable before provider I/O")
-				require.Equal(t, []string{prepared.ID, user.ID}, snapshot.SourceIDs)
+				require.Equal(t, []string{notification.ID, user.ID}, snapshot.SourceIDs)
 				require.Equal(t, user.Attachments, claim.Sources[1].Attachments)
 				messages, err := reopened.ListMessages(t.Context(), "session-1")
 				require.NoError(t, err)
@@ -172,7 +174,9 @@ func TestSendNowErrandCanonicalPersistenceFailurePreventsProviderIO(t *testing.T
 					f := newSendNowErrandFixture(t)
 					installTask14CanonicalManager(t, f, protocol, path)
 					f.manager.promptAgentFunc = nil
-					prepared := f.prepared(t, "prepared-token", "deleted", "complete prepared output")
+					f.result(t, "live")
+					f.realComposer(t)
+					notification := f.notification(t)
 					user := f.queue(t, "pre-runtime ordinary input", messagequeue.QueuedByUser, nil)
 					_, err := f.svc.messageQueue.ListPendingSendNowClaims(t.Context())
 					require.NoError(t, err)
@@ -192,7 +196,7 @@ func TestSendNowErrandCanonicalPersistenceFailurePreventsProviderIO(t *testing.T
 					_, queue := f.reopen(t)
 					status := queue.GetStatus(t.Context(), "session-1")
 					require.Len(t, status.Entries, 2)
-					require.Equal(t, []string{prepared.ID, user.ID}, []string{status.Entries[0].ID, status.Entries[1].ID})
+					require.Equal(t, []string{notification.ID, user.ID}, []string{status.Entries[0].ID, status.Entries[1].ID})
 					submissions, err := f.repo.ListAgentDeliverySubmissions(t.Context(), "session-1")
 					require.NoError(t, err)
 					require.Empty(t, submissions)
@@ -293,7 +297,7 @@ func TestSendNowErrandProducerPreservesNonzeroGenerations(t *testing.T) {
 	row.ResultText, row.ResultTurnID, row.LatestSettledTurnID = "new output after accepted successors", "third", "third"
 	row.ResultState = models.ErrandResultPending
 	require.NoError(t, f.repo.UpdateErrand(t.Context(), row))
-	prepared := f.prepared(t, "prepared-token", "deleted", "full prepared result")
+	notification := f.notification(t)
 	user := f.queue(t, "ordinary input at advanced queue generation", messagequeue.QueuedByUser, nil)
 	f.realComposer(t)
 	_, err = f.svc.SendQueuedNow(t.Context(), "session-1", QueueSendNowScopeAll, "")
@@ -312,13 +316,13 @@ func TestSendNowErrandProducerPreservesNonzeroGenerations(t *testing.T) {
 	require.Equal(t, claim.OperationGeneration, snapshot.OperationGeneration)
 	require.Greater(t, snapshot.OperationGeneration, sessionGeneration)
 	require.Equal(t, snapshot.QueueGeneration, snapshot.OperationGeneration)
-	require.Equal(t, []string{prepared.ID, user.ID}, snapshot.SourceIDs)
+	require.Equal(t, []string{notification.ID, user.ID}, snapshot.SourceIDs)
 	for _, source := range snapshot.Sources {
 		require.Equal(t, sourceGeneration, source.QueueGeneration)
 	}
-	require.Len(t, snapshot.Receipts, 2)
-	require.Equal(t, row.ResultRevision, snapshot.Receipts[1].Claims[0].ResultRevision)
-	require.EqualValues(t, 2, snapshot.Receipts[1].Claims[0].ParentAdmissionGeneration)
+	require.Len(t, snapshot.Receipts, 1)
+	require.Equal(t, row.ResultRevision, snapshot.Receipts[0].Claims[0].ResultRevision)
+	require.EqualValues(t, 2, snapshot.Receipts[0].Claims[0].ParentAdmissionGeneration)
 }
 
 func TestSendNowErrandOrdinaryInputModes(t *testing.T) {
@@ -368,7 +372,7 @@ func TestSendNowErrandCanonicalAcceptedAndUncertainOwnership(t *testing.T) {
 						}
 						return &executor.PromptResult{}, nil
 					}
-					f.prepared(t, "prepared-token", "deleted", "complete prepared result")
+					f.notification(t)
 					f.queue(t, "ordinary input", messagequeue.QueuedByUser, nil)
 					live := f.result(t, "live")
 					f.realComposer(t)
@@ -385,8 +389,8 @@ func TestSendNowErrandCanonicalAcceptedAndUncertainOwnership(t *testing.T) {
 						snapshot, _, err := errands.DecodeSendNowDelivery(pending[0].Claim.Dispatch.Metadata)
 						require.NoError(t, err)
 						require.Equal(t, final, snapshot.EffectivePrompt)
-						require.Len(t, snapshot.Receipts, 2)
-						require.Equal(t, live.ResultRevision, snapshot.Receipts[1].Claims[0].ResultRevision)
+						require.Len(t, snapshot.Receipts, 1)
+						require.Equal(t, live.ResultRevision, snapshot.Receipts[0].Claims[0].ResultRevision)
 						block, err := f.svc.GetOpenSessionRecoveryBlock(t.Context(), "session-1")
 						require.NoError(t, err)
 						require.NotNil(t, block)

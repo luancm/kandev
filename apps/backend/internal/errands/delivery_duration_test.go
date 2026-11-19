@@ -61,21 +61,22 @@ func TestDeliveryDurationPreservesZeroAndOmitsUnknownOrInvalidTimestamps(t *test
 	}
 }
 
-func TestDeliveryDurationPreservedCancellationNoticeSnapshot(t *testing.T) {
+func TestDeliveryDurationCancellationResultSnapshot(t *testing.T) {
 	h := newHarness(t)
 	errands := h.mustStart("audit").Errand
 	created, err := h.store.GetErrand(t.Context(), errands.ID)
 	require.NoError(t, err)
-	require.NoError(t, h.service.PreserveCancellationNotice(t.Context(), created.ID))
+	_, err = h.service.Cancel(t.Context(), CancelRequest{ErrandID: created.ID, TaskID: created.TaskID, Source: models.ErrandCancelSourceUser})
+	require.NoError(t, err)
 
 	settled, err := h.store.GetErrand(t.Context(), created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, settled.SettledAt)
-	require.Len(t, h.deliverer.preparedMetadata, 1)
-	metadata := h.deliverer.preparedMetadata[0]
-	envelope, ok := metadata[DeliveryEnvelopeMetadataKey].(DeliveryEnvelope)
-	require.True(t, ok)
-	require.Len(t, envelope.Items, 1)
+	composition, err := h.service.ComposeParentTurn(t.Context(), created.ParentSessionID, models.ErrandDeliveryNotification)
+	require.NoError(t, err)
+	require.Len(t, composition.Items, 1)
+	envelope := DeliveryEnvelope{Token: composition.Token, Route: models.ErrandDeliveryNotification, Items: composition.Items}
+	metadata := map[string]interface{}{DeliveryEnvelopeMetadataKey: envelope}
 	want := float64(settled.SettledAt.Sub(settled.CreatedAt).Milliseconds())
 	requireDeliveryDuration(t, envelope.Items[0], want)
 
@@ -88,7 +89,7 @@ func TestDeliveryDurationPreservedCancellationNoticeSnapshot(t *testing.T) {
 	require.Equal(t, want, items[0].(map[string]interface{})["duration_ms"])
 }
 
-func TestDeliveryDurationSendNowCodecPreservesMeasuredZeroAndAbsentPreparedItems(t *testing.T) {
+func TestDeliveryDurationSendNowCodecPreservesMeasuredZeroAndAbsentDuration(t *testing.T) {
 	metadata := map[string]interface{}{SendNowDeliveryMetadataKey: sendNowDeliveryFixture()}
 	wire, err := json.Marshal(metadata)
 	require.NoError(t, err)

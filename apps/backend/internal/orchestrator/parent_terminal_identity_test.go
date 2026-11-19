@@ -778,10 +778,6 @@ func (d *parentTerminalIdentityObservedDeliverer) DeliverPending(ctx context.Con
 	d.afterAdmission(ctx, sessionID)
 }
 
-func (d *parentTerminalIdentityObservedDeliverer) AdmitPrepared(ctx context.Context, sessionID, content string, metadata map[string]interface{}) error {
-	return d.ParentDeliverer.AdmitPrepared(ctx, sessionID, content, metadata)
-}
-
 func parentTerminalIdentityNotificationMetric(t *testing.T) int64 {
 	t.Helper()
 	metric, ok := expvar.Get("errands_result_delivery_total").(*expvar.Map)

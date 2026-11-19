@@ -153,40 +153,6 @@ func TestReconcileLogsOnlyCommittedTransitions(t *testing.T) {
 	})
 }
 
-func TestCancellationNoticeLogsAndCountsOnlyAfterAdmission(t *testing.T) {
-	h := newHarness(t)
-	err := h.mustStart("audit").Errand
-	logs := observeErrandLogs(t, h)
-	countBefore := errandMetricValue("errands_result_delivery_total", "route=notification")
-	h.deliverer.admitErr = errors.New("parent queue is full")
-
-	if err := h.service.PreserveCancellationNotice(context.Background(), err.ID); err == nil {
-		t.Fatal("cancellation notice was admitted to a full queue")
-	}
-	if got := logs.FilterMessage("errand.delivered").Len(); got != 0 {
-		t.Fatalf("errand.delivered logs = %d after a refused admission, want none", got)
-	}
-	if got := errandMetricValue("errands_result_delivery_total", "route=notification"); got != countBefore {
-		t.Fatalf("notification delivery count = %d after a refusal, want %d", got, countBefore)
-	}
-
-	h.deliverer.admitErr = nil
-	if err := h.service.PreserveCancellationNotice(context.Background(), err.ID); err != nil {
-		t.Fatalf("retry cancellation notice admission: %v", err)
-	}
-	delivered := logs.FilterMessage("errand.delivered").All()
-	if len(delivered) != 1 {
-		t.Fatalf("errand.delivered logs = %d after accepted admission, want one", len(delivered))
-	}
-	assertErrandLogFields(t, delivered[0], map[string]string{
-		"task_id": testTask, "session_id": err.ID, "errand_id": err.ID,
-		"parent_session_id": testParent, "route": string(models.ErrandDeliveryNotification),
-	})
-	if got := errandMetricValue("errands_result_delivery_total", "route=notification"); got != countBefore+1 {
-		t.Fatalf("notification delivery count = %d after acceptance, want %d", got, countBefore+1)
-	}
-}
-
 func observeErrandLogs(t *testing.T, h *harness) *observer.ObservedLogs {
 	t.Helper()
 	core, logs := observer.New(zapcore.DebugLevel)

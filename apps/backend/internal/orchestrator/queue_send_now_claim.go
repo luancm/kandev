@@ -238,16 +238,11 @@ func (s *Service) restoreSendNowClaimWithRetry(
 	ctx context.Context,
 	claim *messagequeue.SendNowClaim,
 ) error {
-	updates, err := restoredPreparedSourceMetadata(claim)
-	if err != nil {
+	if err := validateRestoredErrandDelivery(claim); err != nil {
 		return err
 	}
 	return s.retrySendNowClaimMutation(ctx, func(recoveryCtx context.Context) error {
-		normalizedCtx, err := messagequeue.WithRestoredSourceMetadata(recoveryCtx, claim, updates)
-		if err != nil {
-			return err
-		}
-		return s.messageQueue.RestoreSendNowClaim(normalizedCtx, claim)
+		return s.messageQueue.RestoreSendNowClaim(recoveryCtx, claim)
 	})
 }
 
