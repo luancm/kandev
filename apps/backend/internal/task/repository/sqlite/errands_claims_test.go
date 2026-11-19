@@ -174,24 +174,11 @@ func exerciseErrandRevision(t *testing.T, repo *Repository) {
 		return revision
 	}
 	first := readRevision()
-	if err := repo.migrateErrandResultRevisions(context.Background()); err != nil {
+	if err := repo.initErrandsSchema(); err != nil {
 		t.Fatal(err)
 	}
 	if readRevision() != first {
-		t.Fatal("migration replay replaced revision")
-	}
-	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_session_errands SET result_revision = '' WHERE id = ?`), row.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.migrateErrandResultRevisions(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	first = readRevision()
-	if err := repo.migrateErrandResultRevisions(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if readRevision() != first {
-		t.Fatal("backfill was not stable")
+		t.Fatal("schema replay replaced revision")
 	}
 	row.AwaitingResult = true
 	if err := repo.UpdateErrand(context.Background(), row); err != nil {

@@ -15,23 +15,12 @@ type ownedErrandTeardownStore interface {
 	GetErrandExecutionDescriptor(context.Context, string) (*models.ErrandExecutionDescriptor, error)
 }
 
-func (a *ErrandAdapter) cancelIndependentErrand(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) (bool, error) {
-	if a.runtime == nil {
-		return false, nil
-	}
+func (a *ErrandAdapter) cancelOwnedErrand(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
 	guard, err := a.svc.lockCancelInFlightGuardWithContext(ctx, row.ID)
 	if err != nil {
-		return true, err
+		return err
 	}
 	defer guard.release()
-	legacy, err := a.hasLegacyErrandRuntime(ctx, row.ID, row.TaskID, row.ParentSessionID)
-	if err != nil || legacy {
-		return err != nil, err
-	}
-	return true, a.cancelOwnedErrand(ctx, row, commit)
-}
-
-func (a *ErrandAdapter) cancelOwnedErrand(ctx context.Context, row *models.Errand, commit func(errands.ErrandTeardownTarget) error) error {
 	store, ok := a.svc.repo.(ownedErrandTeardownStore)
 	if !ok {
 		return errors.New("errand teardown persistence is unavailable")

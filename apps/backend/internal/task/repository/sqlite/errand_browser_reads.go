@@ -16,12 +16,10 @@ import (
 )
 
 const (
-	errBrowserHistoryLimit      = 25
-	errBrowserCursorOrder       = "created_at_desc_id_asc"
-	errBrowserHistoryIndexName  = "idx_task_session_errands_browser_history_normalized_v3"
-	errBrowserHistoryPriorIndex = "idx_task_session_errands_browser_history_normalized_v2"
-	errBrowserHistoryOldIndex   = "idx_task_session_errands_browser_history_normalized"
-	errBrowserEpochOrderKey     = "1970-01-01 00:00:00.000000000"
+	errBrowserHistoryLimit     = 25
+	errBrowserCursorOrder      = "created_at_desc_id_asc"
+	errBrowserHistoryIndexName = "idx_task_session_errands_browser_history_normalized_v3"
+	errBrowserEpochOrderKey    = "1970-01-01 00:00:00.000000000"
 )
 
 // GetErrandBrowserSummary returns only live or otherwise-outstanding rows;

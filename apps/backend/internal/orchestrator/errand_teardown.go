@@ -65,8 +65,8 @@ func (a *ErrandAdapter) CancelErrandWithTarget(ctx context.Context, row *models.
 	if row == nil || row.ID == "" || commit == nil {
 		return models.ErrInvalidErrand
 	}
-	if handled, err := a.cancelIndependentErrand(ctx, row, commit); handled {
-		return err
+	if a.runtime != nil {
+		return a.cancelOwnedErrand(ctx, row, commit)
 	}
 	if handled, err := a.cancelPendingCompletion(ctx, row, commit); handled {
 		return err
@@ -88,12 +88,10 @@ func (o *errandTeardownOwner) cancel(ctx context.Context, store errandTeardownSt
 	if intent := current.TeardownIntent; intent != nil && intent.Purpose != models.ErrandTeardownPurposeCompletion {
 		return o.retry(ctx, store, *intent)
 	}
-	var target models.ErrandTeardownTarget
 	if current.Lifecycle == models.ErrandLifecycleCancelled {
-		target, err = o.captureLegacyTarget(ctx, current)
-	} else {
-		target, err = o.captureTarget(ctx, store, current)
+		return "", models.ErrInvalidErrand
 	}
+	target, err := o.captureTarget(ctx, store, current)
 	if err != nil {
 		return "", err
 	}
@@ -110,28 +108,13 @@ func (o *errandTeardownOwner) cancel(ctx context.Context, store errandTeardownSt
 	return o.retry(ctx, store, *committed.TeardownIntent)
 }
 
-// Legacy rows may recover only their immutable initial reservation, backed by
-// positive admission evidence. Today's active turn is never historical proof.
-func (o *errandTeardownOwner) captureLegacyTarget(ctx context.Context, row *models.Errand) (models.ErrandTeardownTarget, error) {
-	target := models.ErrandTeardownTarget{TaskID: row.TaskID, SessionID: row.ID,
-		FirstTurnID: row.FirstTurnID, ReservedSubmissionID: row.SubmissionID}
-	turn, err := o.svc.turnService.GetTurn(ctx, row.FirstTurnID)
-	if err != nil {
-		return target, err
-	}
-	if !teardownTurnMatches(row, turn) {
-		return target, newLegacyAdmissionEvidenceError("initial turn identity is missing or conflicting", turn, target, row.ParentSessionID)
-	}
-	if reason := legacyAdmissionEvidenceProblem(turn, target, row.ParentSessionID); reason != "" {
-		return target, newLegacyAdmissionEvidenceError(reason, turn, target, row.ParentSessionID)
-	}
-	return target, validateCapturedTeardownTarget(row, target)
-}
-
 // RetryErrandTeardown uses only the persisted target. Startup callers must first
 // finish authenticated runtime recovery so typed absence is authoritative.
 func (a *ErrandAdapter) RetryErrandTeardown(ctx context.Context, intent errands.ErrandTeardownIntent) (errands.TeardownOutcome, error) {
-	if intent.Target.ErrandID != "" && a.runtime != nil {
+	if a.runtime != nil {
+		if intent.Target.ErrandID == "" || intent.ID == "" {
+			return "", models.ErrInvalidErrand
+		}
 		return a.retryOwnedErrandTeardown(ctx, intent)
 	}
 	if intent.Target.SessionID == "" || intent.ID == "" {

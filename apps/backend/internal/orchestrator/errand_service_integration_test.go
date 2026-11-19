@@ -72,50 +72,49 @@ func startErrand(t *testing.T, service *errands.Service, f *errandLaunchFixture,
 }
 
 // @covers AC-TASKS-ERRANDS-001.1 AC-TASKS-ERRANDS-007.1
-func TestErrandServiceStartsAndCancelsAnErrandOnTheRealStack(t *testing.T) {
-	ctx := context.Background()
+func TestErrandServiceStartsAndCancelsAnOwnedErrandOnTheRealStack(t *testing.T) {
+	ctx := t.Context()
 	f := newErrandLaunchFixture(t)
-	service, recorder := newErrandServiceOnRealStack(t, f)
+	service, runtime, recorder := newOwnedErrandServiceOnRealStack(t, f)
 
 	result := startErrand(t, service, f, "audit")
 	require.Equal(t, models.ErrandStatusRunning, result.Status)
-	session, err := f.repo.GetTaskSession(ctx, result.Errand.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.SessionRoleErrand, session.Role)
-	require.False(t, session.IsPrimary)
 	require.Equal(t, []models.ErrandStatus{models.ErrandStatusQueued, models.ErrandStatusRunning}, recorder.seen())
+	before, _, err := f.repo.ListErrandMessages(ctx, result.Errand.ID, "", 10)
+	require.NoError(t, err)
+	require.Len(t, before, 1)
+	require.Empty(t, before[0].TaskSessionID)
 
-	snapshot, err := service.Cancel(ctx, errands.CancelRequest{
-		ErrandID: result.Errand.ID, TaskID: f.taskID, Source: models.ErrandCancelSourceUser,
-	})
+	request := errands.CancelRequest{ErrandID: result.Errand.ID, TaskID: f.taskID, Source: models.ErrandCancelSourceUser}
+	snapshot, err := service.Cancel(ctx, request)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandStatusCancelled, snapshot.Status)
-	require.Eventually(t, func() bool {
-		f.manager.mu.Lock()
-		defer f.manager.mu.Unlock()
-		return len(f.manager.stopAgentWithReasonArgs) > 0 &&
-			f.manager.stopAgentWithReasonArgs[0].Reason == errands.StopReasonErrandCancelled
-	}, 5*time.Second, 10*time.Millisecond, "the errand's runtime was stopped with the errand_cancelled reason")
+	select {
+	case reason := <-runtime.stopped:
+		require.Equal(t, errands.StopReasonErrandCancelled, reason)
+	default:
+		t.Fatal("the owned execution did not stop")
+	}
+	repeat, err := service.Cancel(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, models.ErrandStatusCancelled, repeat.Status)
+	require.Empty(t, runtime.stopped)
 
-	repeat, err := service.Cancel(ctx, errands.CancelRequest{
-		ErrandID: result.Errand.ID, TaskID: f.taskID, Source: models.ErrandCancelSourceUser,
-	})
+	after, _, err := f.repo.ListErrandMessages(ctx, result.Errand.ID, "", 10)
 	require.NoError(t, err)
-	require.Equal(t, models.ErrandStatusCancelled, repeat.Status, "a repeated cancel succeeds without change")
-	snapshots, err := service.List(ctx, f.taskID)
+	require.Equal(t, before, after)
+	sessions, err := f.repo.ListTaskSessions(ctx, f.taskID)
 	require.NoError(t, err)
-	require.Len(t, snapshots, 1)
-	require.Equal(t, models.ErrandStatusCancelled, snapshots[0].Status)
-	transcriptKept, err := f.repo.GetTaskSession(ctx, result.Errand.ID)
-	require.NoError(t, err)
-	require.Equal(t, result.Errand.ID, transcriptKept.ID, "cancelling keeps the errand session and its transcript")
+	require.Len(t, sessions, 1)
+	require.Equal(t, f.parent, sessions[0].ID)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, sessions[0].State)
 }
 
 // @covers AC-TASKS-ERRANDS-008.1
 func TestErrandServiceEnforcesTheLiveLimitAgainstTheRealRepository(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
-	service, _ := newErrandServiceOnRealStack(t, f)
+	service, _, _ := newOwnedErrandServiceOnRealStack(t, f)
 	for i := 0; i < errands.MaxLiveErrands; i++ {
 		startErrand(t, service, f, string(rune('a'+i)))
 	}
@@ -125,14 +124,17 @@ func TestErrandServiceEnforcesTheLiveLimitAgainstTheRealRepository(t *testing.T)
 	require.Equal(t, errands.ReasonLimitReached, reason)
 	sessions, err := f.repo.ListTaskSessions(ctx, f.taskID)
 	require.NoError(t, err)
-	require.Len(t, sessions, 1+errands.MaxLiveErrands, "the refused start created no session")
+	require.Len(t, sessions, 1)
+	rows, err := f.repo.ListErrandsByTask(ctx, f.taskID)
+	require.NoError(t, err)
+	require.Len(t, rows, errands.MaxLiveErrands)
 }
 
 // @covers AC-TASKS-ERRANDS-008.2
 func TestErrandServiceQueuesAtTheCeilingAndTheSweepStartsItWhenCapacityFrees(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
-	service, _ := newErrandServiceOnRealStack(t, f)
+	service, _, _ := newOwnedErrandServiceOnRealStack(t, f)
 	f.svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 	require.True(t, f.svc.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: "occupier", sessionID: "occupier-session", origin: launchOriginAutomatic, seam: "test-setup",
@@ -154,16 +156,18 @@ func TestErrandServiceQueuesAtTheCeilingAndTheSweepStartsItWhenCapacityFrees(t *
 	row, err = f.repo.GetErrand(ctx, queued.Errand.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ErrandLifecycleLaunched, row.Lifecycle)
-	session, err := f.repo.GetTaskSession(ctx, queued.Errand.ID)
+	descriptor, err := f.repo.GetErrandExecutionDescriptor(ctx, queued.Errand.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.SessionRoleErrand, session.Role)
+	require.NotEmpty(t, descriptor.ExecutionID)
+	_, err = f.repo.GetTaskSession(ctx, queued.Errand.ID)
+	require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
 }
 
 // @covers AC-TASKS-ERRANDS-007.2
 func TestStoppingTheParentCancelsItsErrandsThroughTheWorker(t *testing.T) {
 	ctx := context.Background()
 	f := newErrandLaunchFixture(t)
-	service, _ := newErrandServiceOnRealStack(t, f)
+	service, _, _ := newOwnedErrandServiceOnRealStack(t, f)
 	result := startErrand(t, service, f, "audit")
 
 	require.NoError(t, f.svc.StopSession(ctx, f.parent, "stopped by user", false))
@@ -172,24 +176,6 @@ func TestStoppingTheParentCancelsItsErrandsThroughTheWorker(t *testing.T) {
 		return err == nil && row.Lifecycle == models.ErrandLifecycleCancelled &&
 			row.CancelSource == models.ErrandCancelSourceCascade
 	}, 5*time.Second, 10*time.Millisecond)
-}
-
-// A user stop of the errand session through the generic stop path records a
-// user cancellation first, so the errand reads as cancelled, not failed.
-func TestGenericStopOfAnErrandSessionIsRecordedAsAUserCancellation(t *testing.T) {
-	ctx := context.Background()
-	f := newErrandLaunchFixture(t)
-	service, _ := newErrandServiceOnRealStack(t, f)
-	result := startErrand(t, service, f, "audit")
-
-	require.NoError(t, f.svc.StopSession(ctx, result.Errand.ID, "stopped by user", false))
-	row, err := f.repo.GetErrand(ctx, result.Errand.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.ErrandLifecycleCancelled, row.Lifecycle)
-	require.Equal(t, models.ErrandCancelSourceUser, row.CancelSource)
-	parent, err := f.repo.GetTaskSession(ctx, f.parent)
-	require.NoError(t, err)
-	require.NotEqual(t, models.TaskSessionStateCancelled, parent.State, "stopping an errand never stops its parent")
 }
 
 type lifecycleDeliveryRecorder struct {

@@ -21,7 +21,7 @@ func TestPostgresErrandClaimSnapshotSerializesInventoryWriters(t *testing.T) {
 
 func exerciseErrandInventoryWriters(t *testing.T, create func(*testing.T) *Repository) {
 	t.Helper()
-	for _, writer := range []string{"create", "migration", "replace", "cancel", "release", "abort", "delete", "session_delete", "task_delete", "workspace_delete", "workspace_simple", "ephemeral_profile", "ephemeral_expired", "prepared_queue"} {
+	for _, writer := range []string{"create", "replace", "cancel", "release", "abort", "delete", "session_delete", "task_delete", "workspace_delete", "workspace_simple", "ephemeral_profile", "ephemeral_expired", "prepared_queue"} {
 		t.Run(writer, func(t *testing.T) { exerciseErrandInventoryWriter(t, create(t), writer) })
 	}
 }
@@ -47,11 +47,6 @@ func exerciseErrandInventoryWriter(t *testing.T, repo *Repository, writer string
 	}
 	session := &models.TaskSession{ID: sibling.ID, TaskID: row.TaskID, Role: models.SessionRoleErrand, ParentSessionID: parent.ID, AgentProfileID: sibling.AgentProfileID}
 	createErrandScenarioSession(t, repo, session)
-	if writer == "migration" {
-		if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE task_session_errands SET result_text = 'legacy result', result_revision = '' WHERE id = ?`), sibling.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if writer == "ephemeral_profile" || writer == "ephemeral_expired" {
 		if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE tasks SET is_ephemeral = 1, updated_at = ? WHERE id = ?`), errandScenarioBase, row.TaskID); err != nil {
 			t.Fatal(err)
@@ -127,8 +122,6 @@ func exerciseErrandInventoryWriter(t *testing.T, repo *Repository, writer string
 
 func runErrandInventoryWriter(ctx context.Context, repo *Repository, writer string, sibling *models.Errand, session, parent *models.TaskSession, queue *messagequeue.Service) error {
 	switch writer {
-	case "migration":
-		return repo.backfillErrandResultRevisions(ctx)
 	case "create":
 		row := sampleErrand("new-sibling", sibling.TaskID, parent.ID, errandScenarioBase)
 		return repo.CreateErrand(ctx, row)

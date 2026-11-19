@@ -32,6 +32,7 @@ func TestCancelOwnedErrandRetainsTargetUntilRuntimeConfirmsStop(t *testing.T) {
 	ctx := t.Context()
 	f := newErrandLaunchFixture(t)
 	req := f.request()
+	f.svc.repo = ownedLaunchRepository{Repository: f.repo, errandID: req.ErrandID}
 	row, err := f.repo.GetErrand(ctx, req.ErrandID)
 	require.NoError(t, err)
 	descriptor, err := f.repo.ReserveErrandExecutionGeneration(ctx, req.ErrandID, 0)

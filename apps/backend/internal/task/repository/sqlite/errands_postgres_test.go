@@ -48,10 +48,6 @@ func TestPostgresErrandTeardownIntentRoundTrips(t *testing.T) {
 	assertErrandFields(t, got, row)
 }
 
-func TestPostgresErrandTeardownIntentMigrationReplays(t *testing.T) {
-	exerciseErrandTeardownIntentMigration(t, newPostgresErrandRepo(t))
-}
-
 func TestPostgresErrandTeardownIntentMalformedJSONAndExplicitEmpty(t *testing.T) {
 	exerciseErrandTeardownIntentMalformedJSONAndExplicitEmpty(t, newPostgresErrandRepo(t))
 }

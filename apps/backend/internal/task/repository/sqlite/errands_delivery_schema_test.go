@@ -3,10 +3,35 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestErrandSchemaInitializesCurrentColumns(t *testing.T) {
+	conn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "errands.db"))
+	require.NoError(t, err)
+	pool := sqlx.NewDb(conn, "sqlite3")
+	t.Cleanup(func() { require.NoError(t, pool.Close()) })
+	_, err = pool.ExecContext(t.Context(), `CREATE TABLE tasks (id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+	repo := &Repository{db: pool, migrate: db.NewRequiredMigrateLogger(pool, nil)}
+	require.NoError(t, repo.initErrandsSchema())
+
+	for _, column := range []string{"result_revision", "parent_admission_generation", "teardown_intent"} {
+		exists, err := db.ColumnExistsContext(t.Context(), pool, "task_session_errands", column)
+		require.NoError(t, err)
+		require.True(t, exists, "initial Errand schema must include %s", column)
+	}
+	exists, err := db.ColumnExistsContext(t.Context(), pool, "errand_result_claim", "snapshot")
+	require.NoError(t, err)
+	require.True(t, exists, "initial claim schema must include its immutable snapshot")
+}
 
 func TestErrandAdmissionGenerationIsRepositoryOwned(t *testing.T) {
 	exerciseErrandAdmissionGenerationOwnership(t, newRepoForSessionTests(t))
@@ -36,11 +61,11 @@ func exerciseErrandAdmissionGenerationOwnership(t *testing.T, repo *Repository) 
 	}
 }
 
-func TestErrandAdmissionStorageMigrationReplaysAndRetainsEvidence(t *testing.T) {
-	exerciseErrandDeliveryMigration(t, newRepoForSessionTests(t))
+func TestErrandAdmissionSchemaReplaysAndRetainsEvidence(t *testing.T) {
+	exerciseErrandDeliverySchemaReplay(t, newRepoForSessionTests(t))
 }
 
-func exerciseErrandDeliveryMigration(t *testing.T, repo *Repository) {
+func exerciseErrandDeliverySchemaReplay(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
 	store := admissionRepository(t, repo)
@@ -53,13 +78,13 @@ func exerciseErrandDeliveryMigration(t *testing.T, repo *Repository) {
 	if _, err := store.AbortAwait(ctx, row.TaskID, row.ParentSessionID, claim.Token); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.migrateErrandDelivery(); err != nil {
+	if err := repo.initErrandsSchema(); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.DecideErrandParentAdmission(ctx, a, models.ErrandAdmissionAccepted); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.migrateErrandDelivery(); err != nil {
+	if err := repo.initErrandsSchema(); err != nil {
 		t.Fatal(err)
 	}
 	assertAdmissionResult(t, repo, row.ID, 1, models.ErrandResultSuperseded)

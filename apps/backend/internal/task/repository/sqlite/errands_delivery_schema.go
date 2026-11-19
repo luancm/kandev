@@ -15,7 +15,8 @@ var errandDeliverySchema = []struct{ name, sql string }{
 		ON errand_parent_admission(errand_id) WHERE state IN ('reserved', 'unknown')`},
 	{"errand_result_claim.table", `CREATE TABLE IF NOT EXISTS errand_result_claim (
 		token TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-		parent_session_id TEXT NOT NULL, route TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`},
+		parent_session_id TEXT NOT NULL, route TEXT NOT NULL, created_at TIMESTAMP NOT NULL,
+		snapshot TEXT NOT NULL DEFAULT '')`},
 	{"errand_result_claim_item.table", `CREATE TABLE IF NOT EXISTS errand_result_claim_item (
 		token TEXT NOT NULL REFERENCES errand_result_claim(token) ON DELETE CASCADE,
 		errand_id TEXT NOT NULL, result_revision TEXT NOT NULL,
@@ -41,18 +42,11 @@ var errandDeliverySchema = []struct{ name, sql string }{
 		PRIMARY KEY (token, errand_id, result_revision))`},
 }
 
-func (r *Repository) migrateErrandDelivery() error {
-	if err := r.migrate.Apply("task_session_errands.parent_admission_generation", `ALTER TABLE task_session_errands
-		ADD COLUMN parent_admission_generation BIGINT NOT NULL DEFAULT 0`); err != nil {
-		return err
-	}
+func (r *Repository) initErrandDeliverySchema() error {
 	for _, statement := range errandDeliverySchema {
 		if err := r.migrate.Apply(statement.name, statement.sql); err != nil {
 			return fmt.Errorf("initialize errand delivery: %w", err)
 		}
-	}
-	if err := r.migrate.Apply("errand_result_claim.snapshot", `ALTER TABLE errand_result_claim ADD COLUMN snapshot TEXT NOT NULL DEFAULT ''`); err != nil {
-		return err
 	}
 	return nil
 }

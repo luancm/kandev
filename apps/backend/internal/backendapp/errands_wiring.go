@@ -74,13 +74,11 @@ func (c errandProfileCatalog) ValidateForTaskExecutor(ctx context.Context, taskI
 // errands and cancellation cascades run regardless of the release toggle, so
 // existing errands stay governed when it is off.
 func wireErrands(p routeParams, taskHandlers *taskhandlers.TaskHandlers) *errands.Service {
-	if p.orchestratorSvc == nil || p.taskRepo == nil {
+	if p.orchestratorSvc == nil || p.taskRepo == nil || p.lifecycleMgr == nil {
 		return nil
 	}
 	adapter := orchestrator.NewErrandAdapter(p.orchestratorSvc)
-	if p.lifecycleMgr != nil {
-		adapter.SetOwnedLaunchRuntime(runtimeapi.New(p.lifecycleMgr), p.taskSvc.GetWorkspaceInfoForSession)
-	}
+	adapter.SetOwnedLaunchRuntime(runtimeapi.New(p.lifecycleMgr), p.taskSvc.GetWorkspaceInfoForSession)
 	service, err := errands.New(errands.Dependencies{
 		Store:    p.taskRepo,
 		Launcher: adapter,

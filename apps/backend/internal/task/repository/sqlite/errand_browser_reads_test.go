@@ -240,44 +240,6 @@ func TestErrandBrowserHistoryOrderingMatchesActivityParserAcrossPages(t *testing
 	}
 }
 
-func TestErrandBrowserHistoryIndexReplacesPreNormalizationIndex(t *testing.T) {
-	exerciseErrandBrowserHistoryIndexReplacesPreNormalizationIndex(t, newRepoForSessionTests(t))
-}
-
-func TestPostgresErrandBrowserHistoryIndexReplacesPreNormalizationIndex(t *testing.T) {
-	exerciseErrandBrowserHistoryIndexReplacesPreNormalizationIndex(t, newPostgresErrandRepo(t))
-}
-
-func exerciseErrandBrowserHistoryIndexReplacesPreNormalizationIndex(t *testing.T, repo *Repository) {
-	t.Helper()
-	const oldIndex = "idx_task_session_errands_browser_history_normalized"
-	const priorIndex = "idx_task_session_errands_browser_history_normalized_v2"
-	const currentIndex = "idx_task_session_errands_browser_history_normalized_v3"
-	_, err := repo.db.ExecContext(t.Context(), `DROP INDEX IF EXISTS `+currentIndex)
-	require.NoError(t, err)
-	_, err = repo.db.ExecContext(t.Context(), `DROP INDEX IF EXISTS `+priorIndex)
-	require.NoError(t, err)
-	_, err = repo.db.ExecContext(t.Context(), `DROP INDEX IF EXISTS `+oldIndex)
-	require.NoError(t, err)
-	_, err = repo.db.ExecContext(t.Context(), `CREATE INDEX `+oldIndex+`
-		ON task_session_errands(task_id, parent_session_id, created_at DESC, id ASC)`)
-	require.NoError(t, err)
-	_, err = repo.db.ExecContext(t.Context(), `CREATE INDEX `+priorIndex+`
-		ON task_session_errands(task_id, parent_session_id, created_at DESC, id ASC)`)
-	require.NoError(t, err)
-
-	require.NoError(t, repo.initErrandsSchema())
-	oldExists, err := db.IndexExistsContext(t.Context(), repo.ro, oldIndex)
-	require.NoError(t, err)
-	require.False(t, oldExists, "the predecessor expression index must not survive a normalization change")
-	priorExists, err := db.IndexExistsContext(t.Context(), repo.ro, priorIndex)
-	require.NoError(t, err)
-	require.False(t, priorExists, "the previous normalization index must not survive a key change")
-	currentExists, err := db.IndexExistsContext(t.Context(), repo.ro, currentIndex)
-	require.NoError(t, err)
-	require.True(t, currentExists, "the current key expression needs its own index")
-}
-
 func markErrandFinished(item *models.Errand) {
 	item.Lifecycle = models.ErrandLifecycleLaunched
 	item.LastOutcome = models.ErrandOutcomeDone

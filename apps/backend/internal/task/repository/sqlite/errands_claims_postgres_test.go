@@ -70,6 +70,6 @@ func TestPostgresErrandAdmissionGenerationIsRepositoryOwned(t *testing.T) {
 	exerciseErrandAdmissionGenerationOwnership(t, newPostgresErrandRepo(t))
 }
 
-func TestPostgresErrandAdmissionStorageMigrationReplaysAndRetainsEvidence(t *testing.T) {
-	exerciseErrandDeliveryMigration(t, newPostgresErrandRepo(t))
+func TestPostgresErrandAdmissionSchemaReplaysAndRetainsEvidence(t *testing.T) {
+	exerciseErrandDeliverySchemaReplay(t, newPostgresErrandRepo(t))
 }

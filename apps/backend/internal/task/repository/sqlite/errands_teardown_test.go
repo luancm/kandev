@@ -30,10 +30,6 @@ func TestErrandTeardownIntentRoundTripsAndSurvivesReopen(t *testing.T) {
 	assertErrandFields(t, got, row)
 }
 
-func TestErrandTeardownIntentMigrationReplays(t *testing.T) {
-	exerciseErrandTeardownIntentMigration(t, newRepoForSessionTests(t))
-}
-
 func TestErrandTeardownIntentMalformedJSONAndExplicitEmpty(t *testing.T) {
 	exerciseErrandTeardownIntentMalformedJSONAndExplicitEmpty(t, newRepoForSessionTests(t))
 }
@@ -41,9 +37,9 @@ func TestErrandTeardownIntentMalformedJSONAndExplicitEmpty(t *testing.T) {
 func exerciseErrandTeardownIntentMalformedJSONAndExplicitEmpty(t *testing.T, repo *Repository) {
 	t.Helper()
 	row := createTeardownIntentErrand(t, repo, "malformed")
-	legacy, err := repo.GetErrand(t.Context(), row.ID)
-	if err != nil || legacy.TeardownIntent != nil {
-		t.Fatalf("empty legacy intent = %+v, err = %v", legacy, err)
+	stored, err := repo.GetErrand(t.Context(), row.ID)
+	if err != nil || stored.TeardownIntent != nil {
+		t.Fatalf("empty stored intent = %+v, err = %v", stored, err)
 	}
 	if err := setRawTeardownIntent(t, repo, row.ID, "{"); err != nil {
 		t.Fatalf("write malformed JSON: %v", err)
@@ -168,36 +164,6 @@ func exerciseErrandCancellationAndStopIntentCommitTogether(t *testing.T, repo *R
 	}
 }
 
-func exerciseErrandTeardownIntentMigration(t *testing.T, repo *Repository) {
-	t.Helper()
-	ctx := t.Context()
-	row := createTeardownIntentErrand(t, repo, "migration")
-	assertTeardownIntentColumn(t, repo)
-	if _, err := repo.db.ExecContext(ctx, `ALTER TABLE task_session_errands DROP COLUMN teardown_intent`); err != nil {
-		t.Fatalf("remove new column to construct pre-migration schema: %v", err)
-	}
-	upgraded, err := NewWithDB(repo.db, repo.ro, nil)
-	if err != nil {
-		t.Fatalf("upgrade existing errand table: %v", err)
-	}
-	assertTeardownIntentColumn(t, upgraded)
-	legacy, err := upgraded.GetErrand(ctx, row.ID)
-	if err != nil || legacy.TeardownIntent != nil {
-		t.Fatalf("legacy row after expansion = %+v, err = %v", legacy, err)
-	}
-	var encoded string
-	if err := upgraded.db.GetContext(ctx, &encoded, upgraded.db.Rebind(`SELECT teardown_intent FROM task_session_errands WHERE id = ?`), row.ID); err != nil || encoded != "" {
-		t.Fatalf("legacy teardown value = %q, err = %v, want explicit empty", encoded, err)
-	}
-	if _, err := NewWithDB(upgraded.db, upgraded.ro, nil); err != nil {
-		t.Fatalf("replay expanded schema: %v", err)
-	}
-	legacy, err = upgraded.GetErrand(ctx, row.ID)
-	if err != nil || legacy.TeardownIntent != nil {
-		t.Fatalf("legacy row after schema replay = %+v, err = %v", legacy, err)
-	}
-}
-
 func newFileErrandRepo(t *testing.T, path string) *Repository {
 	t.Helper()
 	connection, err := db.OpenSQLite(path)
@@ -240,14 +206,6 @@ func pendingSessionTeardownIntent(row *models.Errand) *models.ErrandTeardownInte
 			TaskID: row.TaskID, SessionID: row.ID, SessionIncarnation: "incarnation-" + row.ID,
 			ExecutionID: "execution-" + row.ID, TurnID: "turn-" + row.ID, SubmissionID: "submission-" + row.ID,
 		},
-	}
-}
-
-func assertTeardownIntentColumn(t *testing.T, repo *Repository) {
-	t.Helper()
-	exists, err := db.ColumnExistsContext(t.Context(), repo.db, "task_session_errands", "teardown_intent")
-	if err != nil || !exists {
-		t.Fatalf("task_session_errands.teardown_intent exists = %v, err = %v", exists, err)
 	}
 }
 
