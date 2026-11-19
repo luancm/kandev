@@ -1658,11 +1658,6 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task session", nil)
 		return nil, wsErr
 	}
-	if models.IsErrandSession(session) {
-		if refusal := h.errandContinuationRefusal(ctx, msg, sessionID); refusal != nil {
-			return nil, refusal
-		}
-	}
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)

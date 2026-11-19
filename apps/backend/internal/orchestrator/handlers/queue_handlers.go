@@ -613,9 +613,6 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		return denied, nil
 	}
-	if refusal := h.errandContinuationRefusal(ctx, msg, req.SessionID); refusal != nil {
-		return refusal, nil
-	}
 	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
 	}

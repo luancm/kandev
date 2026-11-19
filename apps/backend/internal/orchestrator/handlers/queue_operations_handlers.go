@@ -115,10 +115,6 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue drain is unavailable", nil)
 	}
 
-	if refusal := h.errandContinuationRefusal(ctx, msg, req.SessionID); refusal != nil {
-		return refusal, nil
-	}
-
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 	}
@@ -297,10 +293,6 @@ func (h *QueueHandlers) wsSendNow(ctx context.Context, msg *ws.Message) (*ws.Mes
 	}
 	if h.queueDispatcher == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue send-now is unavailable", nil)
-	}
-
-	if refusal := h.errandContinuationRefusal(ctx, msg, req.SessionID); refusal != nil {
-		return refusal, nil
 	}
 
 	identity := messagequeue.QueueSessionIdentity{

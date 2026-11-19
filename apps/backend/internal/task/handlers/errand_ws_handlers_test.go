@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/errands"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -177,6 +178,24 @@ func TestErrandContinuationRequiresTaskPromptAccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, response.Type)
 	require.Equal(t, []errands.ContinuationRequest{request}, received)
+}
+
+// @covers AC-TASKS-ERRANDS-002.8
+func TestErrandContinuationReportsUnresolvedRecovery(t *testing.T) {
+	h := errandHandlers(t, &fakeErrandService{}, true)
+	dispatcher := ws.NewDispatcher()
+	h.registerErrandWS(dispatcher)
+	request := errands.ContinuationRequest{TaskID: "task-b", ErrandID: "errand-1", ClientMessageID: "message-1", Content: "Follow up"}
+	h.SetErrandContinuation(func(_ context.Context, got errands.ContinuationRequest) (string, error) {
+		require.Equal(t, request, got)
+		return "", db.ErrErrandSettlementPending
+	})
+
+	response, err := dispatcher.Dispatch(errandCallerAs("user-b"), errandMessage(t, ws.ActionErrandContinue, request))
+	require.NoError(t, err)
+	payload := decodeError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, string(errands.ReasonRecoveryUnresolved), payload.Details["reason"])
 }
 
 // @covers AC-TASKS-ERRANDS-012.2

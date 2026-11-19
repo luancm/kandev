@@ -3063,15 +3063,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return errResp, nil
 	}
 
-	if models.IsErrandSession(session) {
-		if validator, ok := h.sessionLauncher.(interface {
-			ValidateErrandContinuation(context.Context, string) error
-		}); ok {
-			if err := validator.ValidateErrandContinuation(ctx, session.ID); err != nil {
-				return errandServiceError(msg, err), nil
-			}
-		}
-	}
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
 	wrappedPrompt, senderMeta := wrapMessageForTarget(prompt, senderTask, session, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)

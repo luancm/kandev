@@ -4023,10 +4023,6 @@ func (s *Service) loadResumeSessionCandidate(
 	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		return nil, fmt.Errorf("load runtime inventory for session: %w", err)
 	}
-	options, resumeErr := s.interruptedErrandResumeOptions(ctx, session, running, err, options)
-	if resumeErr != nil {
-		return nil, resumeErr
-	}
 	if resumeRequiresExecutorRecord(session, running, err, options, allowCompletedResume) {
 		// Passive resume requires retained inventory. Explicit recovery can
 		// reconstruct it through the executor's workspace admission path.
@@ -4704,15 +4700,11 @@ func (s *Service) attemptColdResume(
 		return false, errOfficeTaskResumeRequiresScheduler
 	}
 
-	resumeOptions, optionsErr := s.errandPromptResumeOptions(ctx, session)
-	if optionsErr != nil {
-		return false, optionsErr
-	}
 	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if lookupErr != nil && !errors.Is(lookupErr, models.ErrExecutorRunningNotFound) {
 		return false, fmt.Errorf("get executor running row: %w", lookupErr)
 	}
-	if running == nil && !resumeOptions.AllowCompletedSessionResume {
+	if running == nil {
 		return false, fmt.Errorf("%w (state: %s)", errSessionAwaitingRuntimeLaunch, session.State)
 	}
 
@@ -4737,7 +4729,7 @@ func (s *Service) attemptColdResume(
 	if err != nil {
 		return false, err
 	}
-	execution, launchErr := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, resumeOptions)
+	execution, launchErr := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, executor.ResumeOptions{RequireExecutorActor: true})
 	releaseCeilingDispatch()
 	if execution != nil && resumeAttempt != nil {
 		resumeAttempt.setExecutionID(execution.AgentExecutionID)

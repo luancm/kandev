@@ -20,10 +20,7 @@ func (s *Service) reconcileErrandTerminalDecisions(ctx context.Context, sessionI
 	if controller == nil {
 		return nil
 	}
-	if err := controller.ReconcileTerminalDecisions(ctx, sessionID); err != nil {
-		return err
-	}
-	return s.retireSettledErrandPrompt(ctx, sessionID)
+	return controller.ReconcileTerminalDecisions(ctx, sessionID)
 }
 
 func (s *Service) retryErrandCompletionBeforeAdmission(ctx context.Context, sessionID string) error {
